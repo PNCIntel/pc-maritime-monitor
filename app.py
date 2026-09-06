@@ -17,18 +17,22 @@ DATA = BASE / "data"
 st.markdown("""
 <style>
 :root {
-  --pc-navy:#07111f;
-  --pc-navy2:#0c1c30;
+  --pc-navy:#081425;
+  --pc-navy2:#10233a;
+  --pc-panel:#122941;
+  --pc-panel2:#16304b;
   --pc-gold:#c7a45a;
   --pc-cream:#f5f1e8;
-  --pc-muted:#9ca8b7;
+  --pc-muted:#bdd0e2;
+  --pc-text:#f3f7fb;
 }
-.stApp {background:#07111f; color:#eef2f6;}
-[data-testid="stSidebar"] {background:#0a1727; border-right:1px solid #26364b;}
-[data-testid="stSidebar"] * {color:#e8edf3;}
+.stApp {background:#081425; color:var(--pc-text);}
+[data-testid="stSidebar"] {background:#0c1b2d; border-right:1px solid #314760;}
+[data-testid="stSidebar"] * {color:#eef3f8;}
+.block-container {padding-top: 1.3rem;}
 .pc-masthead {
   border-top:3px solid var(--pc-gold);
-  border-bottom:1px solid #2a3b52;
+  border-bottom:1px solid #314760;
   padding:18px 4px 16px 4px;
   margin-bottom:14px;
 }
@@ -37,24 +41,38 @@ st.markdown("""
   font-weight:700; text-transform:uppercase;
 }
 .pc-title {font-size:2rem; font-weight:700; margin:.2rem 0 .1rem 0; color:#fff;}
-.pc-dek {color:#aeb9c7; max-width:950px; font-size:1rem;}
+.pc-dek {color:#d2dbe5; max-width:950px; font-size:1rem;}
 .pc-card {
-  background:#0c1c30; border:1px solid #26364b; border-top:2px solid var(--pc-gold);
+  background:var(--pc-panel); border:1px solid #35506d; border-top:2px solid var(--pc-gold);
   padding:16px 18px; border-radius:6px; min-height:115px;
 }
-.pc-card .label {font-size:.73rem; color:#aeb9c7; letter-spacing:.11em; text-transform:uppercase;}
+.pc-card .label {font-size:.73rem; color:#d0dae5; letter-spacing:.11em; text-transform:uppercase;}
 .pc-card .value {font-size:1.75rem; font-weight:700; color:#fff; margin-top:6px;}
-.pc-card .note {font-size:.82rem; color:#8fa0b3; margin-top:4px;}
+.pc-card .note {font-size:.82rem; color:#b6c5d4; margin-top:4px;}
 .pc-section {
-  color:#fff; border-bottom:1px solid #26364b; padding-bottom:7px; margin-top:18px;
+  color:#fff; border-bottom:1px solid #314760; padding-bottom:7px; margin-top:18px;
 }
 .pc-badge {
-  display:inline-block; padding:3px 8px; border:1px solid #40536c; border-radius:99px;
-  font-size:.72rem; margin-right:5px; color:#dbe3ec;
+  display:inline-block; padding:3px 8px; border:1px solid #536d88; border-radius:99px;
+  font-size:.72rem; margin-right:5px; color:#edf3f8;
 }
-a {color:#d2b66f !important;}
-div[data-testid="stMetric"] {background:#0c1c30; border:1px solid #26364b; padding:10px 14px; border-radius:6px;}
-div[data-testid="stMetricLabel"] {color:#9eacbc;}
+a {color:#e0c27b !important;}
+div[data-testid="stMetric"] {background:var(--pc-panel); border:1px solid #35506d; padding:10px 14px; border-radius:6px;}
+div[data-testid="stMetricLabel"] {color:#d1dce8;}
+div[data-testid="stMetricValue"] {color:#ffffff;}
+/* Inputs */
+.stSelectbox label, .stMultiSelect label, .stTextInput label, .stDateInput label {color:#dce6ef !important;}
+.stTextInput input, .stSelectbox [data-baseweb="select"], .stMultiSelect [data-baseweb="select"] {
+  background:#f4f7fa !important; color:#10233a !important; border-radius:6px !important;
+}
+/* Dataframe container */
+div[data-testid="stDataFrame"] {
+  background:#f7f9fb !important; border-radius:8px !important; border:1px solid #cbd5e1 !important;
+  padding:4px;
+}
+/* Tabs */
+button[data-baseweb="tab"] {color:#e8eef5 !important;}
+button[data-baseweb="tab"][aria-selected="true"] {color:#ffffff !important; border-bottom:2px solid var(--pc-gold) !important;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -71,8 +89,40 @@ def masthead(title, dek):
 def load(name):
     p = DATA / name
     df = pd.read_csv(p, low_memory=False, encoding="utf-8-sig")
-    # Normalize headers so uploads with BOMs or stray spaces do not break the app.
+    # Normalize headers so older snake_case datasets and newer editorial headers
+    # can be used interchangeably.
     df.columns = [str(c).replace("\ufeff", "").strip() for c in df.columns]
+
+    aliases = {
+        "id": "ID",
+        "date": "Date",
+        "region": "Region",
+        "country": "Country",
+        "port_location": "Port / Location",
+        "port_side_or_near_port": "Port-Side or Near-Port",
+        "incident_category": "Incident Category",
+        "incident_sub_type": "Incident Sub-Type",
+        "conflict_related": "Conflict-Related",
+        "vessel_asset": "Vessel / Asset",
+        "operator_authority": "Operator / Authority",
+        "event_summary": "Event Summary",
+        "fatalities": "Fatalities",
+        "injuries": "Injuries",
+        "containers_lost_damaged": "Containers Lost / Damaged",
+        "pollution_environmental_impact": "Pollution / Environmental Impact",
+        "port_operational_impact": "Port / Operational Impact",
+        "damage_loss_estimate": "Damage / Loss Estimate",
+        "cause_attribution": "Cause / Attribution",
+        "investigation_status": "Investigation / Status",
+        "severity": "Severity",
+        "confidence": "Confidence",
+        "primary_source": "Primary Source",
+        "secondary_source": "Secondary Source",
+        "notes_intelligence_relevance": "Notes / Intelligence Relevance",
+    }
+    rename = {c: aliases[c] for c in df.columns if c in aliases}
+    if rename:
+        df = df.rename(columns=rename)
     return df
 
 def sort_latest(df, preferred=("Date", "date", "Source Date", "Departure Date")):
@@ -178,11 +228,14 @@ if page == "Overview":
         st.write("Port/terminal incidents, operational impacts, infrastructure investment and procurement entry points.")
 
     st.markdown("### Recent port incidents")
-    cols=[c for c in ["Date","date","Country","Port / Location","Incident Category","Severity","Event Summary"] if c in ports.columns]
+    recent = sort_latest(ports).head(12).copy()
+    if "Date" in recent.columns:
+        recent["Date"] = pd.to_datetime(recent["Date"], errors="coerce").dt.strftime("%d %b %Y")
+    cols=[c for c in ["Date","Country","Port / Location","Incident Category","Severity","Event Summary"] if c in recent.columns]
     if cols:
-        st.dataframe(sort_latest(ports)[cols].head(12), use_container_width=True, hide_index=True)
+        st.dataframe(recent[cols], use_container_width=True, hide_index=True)
     else:
-        st.dataframe(sort_latest(ports).head(12), use_container_width=True, hide_index=True)
+        st.dataframe(recent, use_container_width=True, hide_index=True)
 
 # ---------------- Ask P&C ----------------
 elif page == "Ask P&C":
