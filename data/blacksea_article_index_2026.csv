@@ -1,0 +1,21 @@
+﻿Published,Title,Dataset Family,Period Covered,Source URL,Extraction Status
+2026-04-15,Database of Russian Attacks on Ukrainian Black Sea Ports in January–March 2026,Port attacks / conflict,Jan-Mar 2026,https://www.blackseanews.net/en/read/247386,Detailed vessel + attack extraction
+2026-03-23,Database of Russian Attacks on Ukrainian Black Sea Ports in January–February 2026,Port attacks / conflict,Jan-Feb 2026,https://www.blackseanews.net/en/read/245956,Indexed; superseded by Jan-Mar page
+2026-03-02,The Belgian Navy detained the sanctioned tanker ETHERA,Sanctions / vessel profile,2026 + historical voyages,https://www.blackseanews.net/en/read/241288,Detailed profile extraction
+2026-02-28,Russian Baltic Sea Ports Petroleum Products Imports to the EU Embargo: January 2026,Embargo violations / tanker voyages,Jan 2026,https://www.blackseanews.net/en/read/244892,Full table extracted
+2026-02-27,Russian Crude Oil Imports to the EU Embargo Through Russian Baltic Sea Ports: January 2026,Embargo violations / tanker voyages,Jan 2026,https://www.blackseanews.net/en/read/244886,Full table extracted
+2026-02-26,20 Tankers Exported Kazakh Oil from Novorossiysk in January 2026,CPC / tanker voyages,Jan 2026,https://www.blackseanews.net/en/read/244563,Full table extracted
+2026-02-26,Maritime Exports of Russian Crude Oil and Petroleum Products Through Baltic Sea Ports: January 2026,All exports / tanker voyages,Jan 2026,https://www.blackseanews.net/en/read/244807,Indexed; large master table not fully row-extracted
+2026-02-25,Russian Black Sea Crude Oil Imports to the EU Embargo: January 2026,Embargo violations / tanker voyages,Jan 2026,https://www.blackseanews.net/en/read/244561,Full table extracted
+2026-02-25,Russian Black Sea Ports Petroleum Products Imports to the EU Embargo: January 2026,Embargo violations / tanker voyages,Jan 2026,https://www.blackseanews.net/en/read/244562,Full table extracted
+2026-02-24,Maritime Exports of Russian Crude Oil and Petroleum Products Through Black Sea Ports: January 2026,All exports / tanker voyages,Jan 2026,https://www.blackseanews.net/en/read/244560,Indexed; large master table not fully row-extracted
+2026-02-16,Database of Russian Attacks on Black Sea Ports in January 2026,Port attacks / conflict,Jan 2026,https://www.blackseanews.net/en/read/243585,Detailed extraction / cross-check
+2026-02-06,25 Tankers Exported Kazakh Oil from Novorossiysk in December 2025,CPC / tanker voyages,Dec 2025,https://www.blackseanews.net/en/articles/databases-en,Indexed only
+2026-02-05,Russian Black Sea Ports Petroleum Products Imports to EU Embargo: December 2025,Embargo violations,Dec 2025,https://www.blackseanews.net/en/articles/databases-en,Indexed only
+2026-02-04,Russian Black Sea Crude Oil Imports to EU Embargo: December 2025,Embargo violations,Dec 2025,https://www.blackseanews.net/en/articles/databases-en,Indexed only
+2026-02-03,Maritime Exports of Russian Crude Oil and Petroleum Products Through Black Sea Ports: December 2025,All exports,Dec 2025,https://www.blackseanews.net/en/articles/databases-en,Indexed only
+2026-02-01,Database of Russian Attacks on Black Sea Ports Between January-December 2025,Port attacks / conflict,2025,https://www.blackseanews.net/en/articles/databases-en?page=2,Indexed only
+2026-01-30,Russian Baltic Sea Ports Petroleum Products Imports to EU Embargo: December 2025,Embargo violations,Dec 2025,https://www.blackseanews.net/en/articles/databases-en?page=2,Indexed only
+2026-01-27,Russian Crude Oil Imports to EU Embargo Through Baltic Sea Ports: December 2025,Embargo violations,Dec 2025,https://www.blackseanews.net/en/articles/databases-en?page=2,Indexed only
+2026-01-26,Maritime Exports of Russian Crude Oil and Petroleum Products Through Baltic Sea Ports: December 2025,All exports,Dec 2025,https://www.blackseanews.net/en/articles/databases-en?page=2,Indexed only
+2026-04-08,"Database of Ukrainian Attacks on Russian Ships in the Black and Azov Seas, March 2022-April 2026",Military vessel attacks,Mar 2022-Apr 2026,https://www.blackseanews.net/en/read/242584,2026 rows extracted
