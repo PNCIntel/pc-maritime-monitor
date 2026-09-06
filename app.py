@@ -70,7 +70,19 @@ def masthead(title, dek):
 @st.cache_data(show_spinner=False)
 def load(name):
     p = DATA / name
-    return pd.read_csv(p, low_memory=False)
+    df = pd.read_csv(p, low_memory=False, encoding="utf-8-sig")
+    # Normalize headers so uploads with BOMs or stray spaces do not break the app.
+    df.columns = [str(c).replace("\ufeff", "").strip() for c in df.columns]
+    return df
+
+def sort_latest(df, preferred=("Date", "date", "Source Date", "Departure Date")):
+    """Sort newest-first when a usable date column exists; otherwise return unchanged."""
+    for c in preferred:
+        if c in df.columns:
+            tmp = df.copy()
+            tmp[c] = pd.to_datetime(tmp[c], errors="coerce")
+            return tmp.sort_values(c, ascending=False, na_position="last")
+    return df
 
 def dates(df, *cols):
     x = df.copy()
@@ -166,8 +178,11 @@ if page == "Overview":
         st.write("Port/terminal incidents, operational impacts, infrastructure investment and procurement entry points.")
 
     st.markdown("### Recent port incidents")
-    cols=[c for c in ["Date","Country","Port / Location","Incident Category","Severity","Event Summary"] if c in ports.columns]
-    st.dataframe(ports.sort_values("Date", ascending=False)[cols].head(12), use_container_width=True, hide_index=True)
+    cols=[c for c in ["Date","date","Country","Port / Location","Incident Category","Severity","Event Summary"] if c in ports.columns]
+    if cols:
+        st.dataframe(sort_latest(ports)[cols].head(12), use_container_width=True, hide_index=True)
+    else:
+        st.dataframe(sort_latest(ports).head(12), use_container_width=True, hide_index=True)
 
 # ---------------- Ask P&C ----------------
 elif page == "Ask P&C":
@@ -258,7 +273,7 @@ elif page == "Maritime Attacks":
     with c2: x=filter_select(x,"Category","Category")
     with c3: x=filter_select(x,"Vessel Type","Vessel type")
     st.metric("Records",len(x))
-    st.dataframe(x.sort_values("Date",ascending=False), use_container_width=True, hide_index=True)
+    st.dataframe(sort_latest(x), use_container_width=True, hide_index=True)
 
 # ---------------- Piracy ----------------
 elif page == "Piracy & Armed Robbery":
@@ -269,7 +284,7 @@ elif page == "Piracy & Armed Robbery":
     with c2: x=filter_select(x,"Category","Category")
     with c3: x=filter_select(x,"Confidence","Confidence")
     st.metric("Piracy / armed-robbery records",len(x))
-    st.dataframe(x.sort_values("Date",ascending=False),use_container_width=True,hide_index=True)
+    st.dataframe(sort_latest(x),use_container_width=True,hide_index=True)
 
 # ---------------- UKMTO ----------------
 elif page == "UKMTO Warnings":
@@ -284,7 +299,7 @@ elif page == "UKMTO Warnings":
     if "Has Update" in x.columns: b.metric("With updates",int(x["Has Update"].astype(str).str.lower().eq("yes").sum()))
     if "UKMTO Classification" in x.columns: c.metric("Attacks",int(x["UKMTO Classification"].astype(str).str.lower().eq("attack").sum()))
     if "Port Relevance" in x.columns: d.metric("Port-side / near-port",int(x["Port Relevance"].astype(str).str.contains("port",case=False,na=False).sum()))
-    st.dataframe(x.sort_values("Date",ascending=False),use_container_width=True,hide_index=True)
+    st.dataframe(sort_latest(x),use_container_width=True,hide_index=True)
 
 # ---------------- Port Incidents ----------------
 elif page == "Port Incidents":
@@ -300,7 +315,7 @@ elif page == "Port Incidents":
     if "Conflict-Related" in x.columns: b.metric("Conflict-related",int(x["Conflict-Related"].astype(str).str.lower().eq("yes").sum()))
     if "Fatalities" in x.columns: c.metric("Fatalities",int(pd.to_numeric(x["Fatalities"],errors="coerce").fillna(0).sum()))
     if "Injuries" in x.columns: d.metric("Injuries",int(pd.to_numeric(x["Injuries"],errors="coerce").fillna(0).sum()))
-    st.dataframe(x.sort_values("Date",ascending=False),use_container_width=True,hide_index=True)
+    st.dataframe(sort_latest(x),use_container_width=True,hide_index=True)
 
 # ---------------- Port Investment ----------------
 elif page == "Port Investment":
@@ -325,9 +340,9 @@ elif page == "Black Sea":
         q=st.text_input("Search voyages",key="bsvq")
         st.dataframe(text_search(bs_voy,q),use_container_width=True,hide_index=True)
     with tab2:
-        st.dataframe(bs_conflict.sort_values("Date",ascending=False),use_container_width=True,hide_index=True)
+        st.dataframe(sort_latest(bs_conflict),use_container_width=True,hide_index=True)
     with tab3:
-        st.dataframe(bs_ports.sort_values("Date",ascending=False),use_container_width=True,hide_index=True)
+        st.dataframe(sort_latest(bs_ports),use_container_width=True,hide_index=True)
     with tab4:
         st.dataframe(bs_profiles,use_container_width=True,hide_index=True)
 
@@ -397,4 +412,4 @@ elif page == "ReCAAP Archive":
         m=x.dropna(subset=["latitude_decimal","longitude_decimal"])
         if len(m):
             st.map(m,latitude="latitude_decimal",longitude="longitude_decimal")
-    st.dataframe(x.sort_values("date",ascending=False),use_container_width=True,hide_index=True)
+    st.dataframe(sort_latest(x),use_container_width=True,hide_index=True)
