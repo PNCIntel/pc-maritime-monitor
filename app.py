@@ -600,11 +600,24 @@ def fmt_money(v):
         return f"${v:,.0f}"
     except: return "—"
 
-def filter_select(df, col, label):
-    if col not in df.columns: return df
-    vals = sorted([str(v) for v in df[col].dropna().unique() if str(v).strip()])
-    sel = st.multiselect(label, vals)
-    if sel: return df[df[col].astype(str).isin(sel)]
+def filter_select(df, col, label, key=None):
+    """Filter a dataframe with a Streamlit multiselect.
+
+    key is optional so existing calls remain backward-compatible while
+    allowing unique widget keys in repeated tabs/sections.
+    """
+    if col not in df.columns:
+        return df
+
+    vals = sorted([
+        str(v)
+        for v in df[col].dropna().unique()
+        if str(v).strip()
+    ])
+
+    sel = st.multiselect(label, vals, key=key)
+    if sel:
+        return df[df[col].astype(str).isin(sel)]
     return df
 
 def text_search(df, q):
