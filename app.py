@@ -21,7 +21,277 @@ def format_dates_for_display(df):
                 out.loc[mask, c] = formatted.loc[mask]
     return out
 
+
 import re
+
+# ---------------- Display layer ----------------
+# Keep internal model keys and source links in the data model, but do not expose
+# them in the analyst-facing Streamlit tables.
+
+def _friendly_relationship(value):
+    if pd.isna(value):
+        return value
+    text = str(value).strip()
+    if not text:
+        return text
+
+    special = {
+        "PART_OF": "Part of",
+        "OWNS": "Owns",
+        "OWNED_BY": "Owned by",
+        "CONTROLS": "Controls",
+        "CONTROLLED_BY": "Controlled by",
+        "OPERATES": "Operates",
+        "OPERATED_BY": "Operated by",
+        "HAS_DIVISION": "Has division",
+        "OWNS / GROUP COMPANY": "Owns / group company",
+        "OWNS / OPERATES": "Owns / operates",
+        "OWNS / CONTROLS": "Owns / controls",
+        "JOINT VENTURE PARTNER": "Joint venture partner",
+        "OPERATES THROUGH": "Operates through",
+        "INTEGRATED SUPPLY CHAIN INCLUDES": "Integrated supply chain includes",
+        "OWNS_70_PERCENT": "Owns 70%",
+        "CONTAINER_FEEDER_BUSINESS_INCLUDES": "Container feeder business includes",
+        "BOOKS_CARGO_CAPACITY_VIA": "Books cargo capacity via",
+    }
+    if text in special:
+        return special[text]
+
+    # Convert database-style relationship codes into readable language.
+    if "_" in text or (text.upper() == text and any(ch.isalpha() for ch in text)):
+        words = text.replace("_", " ").strip().lower()
+        words = re.sub(r"\s+", " ", words)
+        words = re.sub(r"\b(\d+) percent\b", r"\1%", words)
+        replacements = {
+            " jv ": " JV ",
+            " m&a ": " M&A ",
+            " uae ": " UAE ",
+            " us ": " US ",
+            " uk ": " UK ",
+        }
+        words = f" {words} "
+        for old, new in replacements.items():
+            words = words.replace(old, new)
+        words = words.strip()
+        return words[:1].upper() + words[1:] if words else words
+    return text
+
+
+def _looks_like_link_series(series):
+    try:
+        vals = series.dropna().astype(str).str.strip()
+        vals = vals[vals.ne("")]
+        if vals.empty:
+            return False
+        return vals.str.match(r"^(https?://|www\.)", case=False, na=False).mean() >= 0.5
+    except Exception:
+        return False
+
+
+def _friendly_header(name):
+    text = str(name).replace("_", " ").strip()
+    text = re.sub(r"\s+", " ", text)
+    # Preserve common intelligence / maritime acronyms.
+    acronyms = {"imo":"IMO", "mmsi":"MMSI", "dwt":"DWT", "teu":"TEU", "gt":"GT", "hq":"HQ", "ais":"AIS", "gnss":"GNSS", "jv":"JV", "url":"URL"}
+    if str(name) != text:  # only normalize schema-style headers
+        text = " ".join(acronyms.get(w.lower(), w.capitalize()) for w in text.split())
+    return text
+
+
+def _first_existing_name_map(df, id_candidates, name_candidates):
+    """Build an ID -> human-readable name map from the first usable column pair."""
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return {}
+    id_col = next((c for c in id_candidates if c in df.columns), None)
+    name_col = next((c for c in name_candidates if c in df.columns), None)
+    if not id_col or not name_col:
+        return {}
+    keys = df[id_col].astype(str).str.strip()
+    vals = df[name_col].astype(str).str.strip()
+    mask = keys.ne("") & vals.ne("") & keys.ne("nan") & vals.ne("nan")
+    return dict(zip(keys[mask], vals[mask]))
+
+
+def _display_lookup_maps():
+    """Return current runtime lookup maps used only for analyst-facing display."""
+    company = globals().get("COMPANY_NAME", {}) or _first_existing_name_map(
+        globals().get("companies"), ["Company ID"], ["Company", "Company Name", "Name"]
+    )
+    person = globals().get("PERSON_NAME", {}) or _first_existing_name_map(
+        globals().get("people"), ["Person ID"], ["Name", "Person", "Person Name"]
+    )
+    asset = _first_existing_name_map(
+        globals().get("model_assets"), ["Asset ID"],
+        ["Asset", "Asset Name", "Name", "Facility", "Port / Terminal", "Port"]
+    )
+    vessel = _first_existing_name_map(
+        globals().get("model_vessels"), ["Vessel ID"], ["Vessel Name", "Vessel", "Name"]
+    )
+    system = _first_existing_name_map(
+        globals().get("regional_systems"), ["System ID"], ["System", "System Name", "Name"]
+    )
+    investor = _first_existing_name_map(
+        globals().get("infrastructure_investors"), ["Investor ID", "Company ID"],
+        ["Investor", "Investor Name", "Company", "Name"]
+    )
+    zone = _first_existing_name_map(
+        globals().get("economic_zones"), ["Zone ID", "Asset ID"],
+        ["Zone", "Zone Name", "Asset", "Asset Name", "Name"]
+    )
+    hub = _first_existing_name_map(
+        globals().get("dry_ports_inland_hubs"), ["Hub ID", "Asset ID"],
+        ["Hub", "Hub Name", "Dry Port / Inland Hub", "Asset", "Asset Name", "Name"]
+    )
+    event = {}
+    for event_df_name in ("external_disruptions", "weather_labour_events", "model_events"):
+        event.update(_first_existing_name_map(
+            globals().get(event_df_name), ["External Event ID", "Event ID"],
+            ["Event", "Event Name", "Title", "Headline", "Name"]
+        ))
+
+    entity = {}
+    # More specific maps first; company names intentionally win for COMP_* keys.
+    for lookup in (asset, vessel, system, investor, zone, hub, event, person, company):
+        entity.update(lookup)
+
+    return {
+        "company": company,
+        "person": person,
+        "asset": asset,
+        "vessel": vessel,
+        "system": system,
+        "investor": investor,
+        "zone": zone,
+        "hub": hub,
+        "event": event,
+        "entity": entity,
+    }
+
+
+def _resolve_id_list(value, lookup):
+    """Resolve a scalar or delimited list of internal IDs into readable names."""
+    if pd.isna(value):
+        return value
+    text = str(value).strip()
+    if not text:
+        return text
+    if text in lookup:
+        return lookup[text]
+    # Some investment / partnership fields contain multiple IDs.
+    parts = [p.strip() for p in re.split(r"\s*[;,|]\s*", text) if p.strip()]
+    if len(parts) > 1:
+        return "; ".join(lookup.get(p, p) for p in parts)
+    return lookup.get(text, text)
+
+
+def prepare_display_dataframe(data):
+    if not isinstance(data, pd.DataFrame):
+        return data
+
+    out = data.copy()
+    maps = _display_lookup_maps()
+
+    # Resolve internal reference columns to analyst-readable names BEFORE keys are hidden.
+    # This preserves machine-readable IDs in the CSV/model while preventing COMP_*, ASSET_*,
+    # etc. from leaking into the user-facing application.
+    id_resolution = {
+        "Company ID": ("Company", maps["company"]),
+        "Owner Company ID": ("Owner", maps["company"]),
+        "Operator Company ID": ("Operator", maps["company"]),
+        "Buyer / Operator Company ID": ("Buyer / Operator", maps["company"]),
+        "Parent Company ID": ("Parent Company", maps["company"]),
+        "Platform / Division Company ID": ("Platform / Division", maps["company"]),
+        "Person ID": ("Person", maps["person"]),
+        "Asset ID": ("Asset", maps["asset"]),
+        "Source Asset ID": ("Source Asset", maps["asset"]),
+        "Target Asset ID": ("Target Asset", maps["asset"]),
+        "Vessel ID": ("Vessel", maps["vessel"]),
+        "System ID": ("System", maps["system"]),
+        "Investor ID": ("Investor", maps["investor"]),
+        "Zone ID": ("Zone", maps["zone"]),
+        "Hub ID": ("Hub", maps["hub"]),
+        "External Event ID": ("Event", maps["event"]),
+        "Subject Entity ID": ("Subject", maps["entity"]),
+        "Source Entity": ("Source", maps["entity"]),
+        "Target Entity": ("Target", maps["entity"]),
+        "Investor / Buyer IDs": ("Investor / Buyer", maps["company"] | maps["investor"]),
+        "Co-Investor / Partner IDs": ("Co-Investor / Partner", maps["company"] | maps["investor"]),
+    }
+
+    for raw_col, (display_col, lookup) in id_resolution.items():
+        if raw_col not in out.columns:
+            continue
+        resolved = out[raw_col].map(lambda v: _resolve_id_list(v, lookup))
+        # Do not overwrite a useful existing descriptive column. Fill blanks only.
+        if display_col in out.columns:
+            existing = out[display_col].astype("object")
+            blank = existing.isna() | existing.astype(str).str.strip().isin(["", "nan", "None"])
+            out.loc[blank, display_col] = resolved.loc[blank]
+        else:
+            # Put the readable field in roughly the same place as its hidden key.
+            insert_at = list(out.columns).index(raw_col)
+            out.insert(insert_at, display_col, resolved)
+
+    # Relationship types are analytical language, not database codes.
+    relationship_cols = [
+        c for c in out.columns
+        if any(k in str(c).lower() for k in ("relationship", "relation type"))
+    ]
+    for c in relationship_cols:
+        out[c] = out[c].map(_friendly_relationship)
+
+    # As a final safeguard, translate internal keys that may already sit in descriptive
+    # columns (for example Company="COMP_DPW" or Asset="ASSET_...").
+    semantic_maps = [
+        (("company", "owner", "operator", "parent", "buyer"), maps["company"]),
+        (("person", "leader", "executive"), maps["person"]),
+        (("vessel", "ship"), maps["vessel"]),
+        (("asset", "port", "terminal", "facility"), maps["asset"]),
+        (("investor", "partner"), maps["company"] | maps["investor"]),
+        (("zone",), maps["zone"]),
+        (("hub", "dry port"), maps["hub"]),
+        (("system",), maps["system"]),
+        (("source", "target", "subject"), maps["entity"]),
+    ]
+    for c in out.columns:
+        if out[c].dtype != "object":
+            continue
+        low = str(c).lower()
+        for tokens, lookup in semantic_maps:
+            if any(token in low for token in tokens):
+                out[c] = out[c].map(lambda v, lu=lookup: _resolve_id_list(v, lu))
+                break
+
+    # Hide internal keys and web links from displayed tables. They remain in CSVs.
+    drop_cols = []
+    for c in out.columns:
+        label = str(c).strip()
+        low = label.lower()
+        internal_id = (
+            low == "id"
+            or low.endswith(" id")
+            or low.endswith(" ids")
+            or low.endswith("_id")
+            or low.endswith("_ids")
+            or " id / " in low
+            or low.startswith("id ")
+        )
+        raw_entity_key = low in {"source entity", "target entity"}
+        link_col = any(token in low for token in ("url", "hyperlink", "web link", "source link"))
+        if internal_id or raw_entity_key or link_col or _looks_like_link_series(out[c]):
+            drop_cols.append(c)
+
+    if drop_cols:
+        out = out.drop(columns=drop_cols, errors="ignore")
+
+    # Make any remaining schema-style headers readable.
+    out = out.rename(columns={c: _friendly_header(c) for c in out.columns})
+    return format_dates_for_display(out)
+
+def display_dataframe(data, *args, **kwargs):
+    """Analyst-facing dataframe renderer: readable labels, no internal IDs/links."""
+    return st.dataframe(prepare_display_dataframe(data), *args, **kwargs)
+
 
 st.set_page_config(
     page_title="P&C Intelligence Platform",
@@ -251,7 +521,19 @@ def masthead(title, dek):
 
 @st.cache_data(show_spinner=False)
 def load(name):
+    # Support both legacy flat data/ layout and the newer categorized
+    # data/<folder>/... layout without changing every load() call.
     p = DATA / name
+    if not p.exists():
+        matches = list(DATA.rglob(name))
+        if len(matches) == 1:
+            p = matches[0]
+        elif len(matches) > 1:
+            # Prefer the shallowest path if a duplicate filename exists.
+            matches = sorted(matches, key=lambda x: (len(x.relative_to(DATA).parts), str(x)))
+            p = matches[0]
+        else:
+            raise FileNotFoundError(f"Required data file not found under {DATA}: {name}")
     df = pd.read_csv(p, low_memory=False, encoding="utf-8-sig")
     # Normalize headers so older snake_case datasets and newer editorial headers
     # can be used interchangeably.
@@ -731,7 +1013,7 @@ def render_evidence_table(df, expanded=True, preferred=("Date","date","Source Da
                 display_df.loc[mask, c] = parsed.loc[mask].dt.strftime("%d %b %Y")
 
     with st.expander("Evidence table", expanded=expanded):
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        display_dataframe(display_df, use_container_width=True, hide_index=True)
 
 def result_visual_summary(results):
     """Visual layer for Ask P&C based only on retrieved evidence."""
@@ -806,6 +1088,7 @@ infra_works = load("infrastructure_works.csv")
 strategic_events = dates(load("strategic_events.csv"), "Date")
 corridors = load("corridors.csv")
 model_relationships = load("relationships.csv")
+research_queue = load("research_queue.csv")
 model_sources = load("sources.csv")
 event_taxonomy = load("event_taxonomy.csv")
 event_observations = dates(load("event_observations.csv"), "Date")
@@ -873,7 +1156,13 @@ def entity_company_hits(company_id):
     rel = model_relationships.copy()
     if rel.empty:
         return rel
-    return rel[(rel["Source Entity"].astype(str)==company_id) | (rel["Target Entity"].astype(str)==company_id)]
+    rel = rel[(rel["Source Entity"].astype(str)==company_id) | (rel["Target Entity"].astype(str)==company_id)].copy()
+    rel["Source"] = rel["Source Entity"].astype(str).map(COMPANY_NAME).fillna(rel["Source Entity"].astype(str))
+    rel["Target"] = rel["Target Entity"].astype(str).map(COMPANY_NAME).fillna(rel["Target Entity"].astype(str))
+    if "Relationship" in rel.columns:
+        rel["Relationship"] = rel["Relationship"].map(_friendly_relationship)
+    preferred = ["Source", "Relationship", "Target", "As Of", "Confidence", "Notes"]
+    return rel[[c for c in preferred if c in rel.columns]]
 
 def normalize_pct_column(df, col):
     x = df.copy()
@@ -994,7 +1283,7 @@ if page == "Operating Picture":
     st.markdown("### Latest cross-domain events")
     latest = sort_latest(event_observations, preferred=("Date",)).head(20)
     cols = [c for c in ["Date","Event Family","Event Type","Mode","Country","Location","Subject Name","Operational Impact","Trade Impact","Severity","Confidence"] if c in latest.columns]
-    st.dataframe(format_dates_for_display(latest[cols]), use_container_width=True, hide_index=True)
+    display_dataframe(format_dates_for_display(latest[cols]), use_container_width=True, hide_index=True)
 
 
 # ---------------- Ask P&C ----------------
@@ -1201,7 +1490,7 @@ elif page == "Ask P&C":
                 "Dataset": [name for name, _ in results],
                 "Matched records": [len(df) for _, df in results],
             })
-            st.dataframe(evidence_summary, use_container_width=True, hide_index=True)
+            display_dataframe(evidence_summary, use_container_width=True, hide_index=True)
 
             evidence_chunks = []
             max_groups = 8 if mode != "Analytical question" else 10
@@ -1210,7 +1499,7 @@ elif page == "Ask P&C":
                 st.markdown(f"#### {name} — {len(df):,} relevant records")
                 show = df.drop(columns=[c for c in ["_pc_score","_pc_terms","_pc_imo"] if c in df.columns], errors="ignore")
                 cols = display_columns(show)
-                st.dataframe(format_dates_for_display(show[cols].head(75)), use_container_width=True, hide_index=True)
+                display_dataframe(format_dates_for_display(show[cols].head(75)), use_container_width=True, hide_index=True)
 
                 ai_show = show[cols].head(25)
                 evidence_chunks.append(
@@ -1336,47 +1625,60 @@ elif page == "Companies":
         if not lr.empty:
             lr["Person"] = lr["Person ID"].astype(str).map(PERSON_NAME)
             cols=[c for c in ["Person","Title","Scope","Status","Effective From","Effective To","Source ID"] if c in lr.columns]
-            st.dataframe(format_dates_for_display(lr[cols]), use_container_width=True, hide_index=True)
+            display_dataframe(format_dates_for_display(lr[cols]), use_container_width=True, hide_index=True)
         else: st.info("No leadership roles are captured yet for this entity.")
     with tabs[1]:
         rel = entity_company_hits(cid)
-        st.dataframe(rel, use_container_width=True, hide_index=True) if not rel.empty else st.info("No relationship edges captured yet.")
+        if not rel.empty:
+            display_dataframe(rel, use_container_width=True, hide_index=True)
+        else:
+            st.info("No relationship edges captured yet.")
     with tabs[2]:
         fp = fleet_portfolios[fleet_portfolios["Company ID"].astype(str)==cid]
         if not fp.empty:
             st.markdown("#### Fleet portfolios")
-            st.dataframe(fp, use_container_width=True, hide_index=True)
+            display_dataframe(fp, use_container_width=True, hide_index=True)
         if not owned_vessels.empty:
             st.markdown("#### Individual vessels")
             cols=[c for c in ["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Year Built","DWT","Capacity","Fuel / Propulsion","Status","Completeness Note"] if c in owned_vessels.columns]
-            st.dataframe(owned_vessels[cols],use_container_width=True,hide_index=True)
+            display_dataframe(owned_vessels[cols],use_container_width=True,hide_index=True)
         cov=fleet_coverage[fleet_coverage["Company ID"].astype(str)==cid]
         if not cov.empty:
             st.markdown("#### Coverage")
-            st.dataframe(cov,use_container_width=True,hide_index=True)
+            display_dataframe(cov,use_container_width=True,hide_index=True)
     with tabs[3]:
         aa=model_assets[model_assets["Company ID"].astype(str)==cid]
-        st.dataframe(aa,use_container_width=True,hide_index=True) if not aa.empty else st.info("No canonical asset records captured yet.")
+        if not aa.empty:
+            display_dataframe(aa, use_container_width=True, hide_index=True)
+        else:
+            st.info("No canonical asset records captured yet.")
     with tabs[4]:
         fo=fleet_orders[fleet_orders["Buyer / Operator Company ID"].astype(str)==cid]
         inv=model_investments[model_investments["Company ID"].astype(str)==cid]
         if not fo.empty:
             st.markdown("#### Fleet / build orders")
-            st.dataframe(format_dates_for_display(fo),use_container_width=True,hide_index=True)
+            display_dataframe(format_dates_for_display(fo),use_container_width=True,hide_index=True)
         if not inv.empty:
             st.markdown("#### Investment")
-            st.dataframe(format_dates_for_display(inv),use_container_width=True,hide_index=True)
+            display_dataframe(format_dates_for_display(inv),use_container_width=True,hide_index=True)
         if fo.empty and inv.empty: st.info("No order or investment records captured yet.")
     with tabs[5]:
         ev=event_observations[event_observations.fillna("").astype(str).agg(" | ".join,axis=1).str.contains(re.escape(selected_name),case=False,na=False)]
-        st.dataframe(format_dates_for_display(sort_latest(ev)),use_container_width=True,hide_index=True) if not ev.empty else st.info("No event observations directly reference this company name yet.")
+        if not ev.empty:
+            display_dataframe(
+                format_dates_for_display(sort_latest(ev)),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("No event observations directly reference this company name yet.")
     with tabs[6]:
         net = integrated_logistics_networks[
             (integrated_logistics_networks["Parent Company ID"].fillna("").astype(str)==cid) |
             (integrated_logistics_networks["Platform / Division Company ID"].fillna("").astype(str)==cid)
         ].copy()
         if not net.empty:
-            st.dataframe(net, use_container_width=True, hide_index=True)
+            display_dataframe(net, use_container_width=True, hide_index=True)
         else:
             st.info("No integrated-logistics network rows are captured yet for this entity.")
 
@@ -1425,42 +1727,42 @@ elif page == "Integrated Logistics":
         show["Parent"] = show["Parent Company ID"].map(COMPANY_NAME).fillna(show["Parent Company ID"])
         show["Platform"] = show["Platform / Division Company ID"].map(COMPANY_NAME).fillna(show["Platform / Division"])
         cols=[c for c in ["Parent","Platform","Network Role","Modes","Asset Model","Reported Scale","Key Hubs / Nodes","Geographic Footprint","External Customer Offering","Strategic / Market Signal","Status","As Of","Source ID"] if c in show.columns]
-        st.dataframe(format_dates_for_display(show[cols]),use_container_width=True,hide_index=True)
+        display_dataframe(format_dates_for_display(show[cols]),use_container_width=True,hide_index=True)
     with tab2:
         if not assets_x.empty:
             st.markdown("#### Canonical assets / hubs")
-            st.dataframe(assets_x,use_container_width=True,hide_index=True)
+            display_dataframe(assets_x,use_container_width=True,hide_index=True)
         lre_asset_ids=set(assets_x.get("Asset ID",pd.Series(dtype=str)).dropna().astype(str))
         lre_x=logistics_real_estate[logistics_real_estate["Asset ID"].fillna("").astype(str).isin(lre_asset_ids)].copy()
         if not lre_x.empty:
             st.markdown("#### Logistics real estate")
-            st.dataframe(lre_x,use_container_width=True,hide_index=True)
+            display_dataframe(lre_x,use_container_width=True,hide_index=True)
         conn_x=infrastructure_connections[infrastructure_connections["Source Asset ID"].fillna("").astype(str).isin(lre_asset_ids)].copy()
         if not conn_x.empty:
             st.markdown("#### Infrastructure connections")
-            st.dataframe(conn_x,use_container_width=True,hide_index=True)
+            display_dataframe(conn_x,use_container_width=True,hide_index=True)
         if assets_x.empty and lre_x.empty and conn_x.empty:
             st.info("No physical asset records are captured yet for this group.")
     with tab3:
         if not fleets_x.empty:
             st.markdown("#### Fleet / network portfolio")
-            st.dataframe(fleets_x,use_container_width=True,hide_index=True)
+            display_dataframe(fleets_x,use_container_width=True,hide_index=True)
         if not aircraft_x.empty:
             st.markdown("#### Aircraft")
-            st.dataframe(aircraft_x,use_container_width=True,hide_index=True)
+            display_dataframe(aircraft_x,use_container_width=True,hide_index=True)
         cov_x=fleet_coverage[fleet_coverage["Company ID"].fillna("").astype(str).isin(selected_ids)].copy()
         if not cov_x.empty:
             st.markdown("#### Coverage & gaps")
-            st.dataframe(cov_x,use_container_width=True,hide_index=True)
+            display_dataframe(cov_x,use_container_width=True,hide_index=True)
     with tab4:
         inv_x=model_investments[model_investments["Company ID"].fillna("").astype(str).isin(selected_ids)].copy()
         ev_x=strategic_events[strategic_events["Subject Entity ID"].fillna("").astype(str).isin(selected_ids)].copy()
         if not inv_x.empty:
             st.markdown("#### Investment / capex")
-            st.dataframe(format_dates_for_display(inv_x),use_container_width=True,hide_index=True)
+            display_dataframe(format_dates_for_display(inv_x),use_container_width=True,hide_index=True)
         if not ev_x.empty:
             st.markdown("#### Strategic events")
-            st.dataframe(format_dates_for_display(sort_latest(ev_x)),use_container_width=True,hide_index=True)
+            display_dataframe(format_dates_for_display(sort_latest(ev_x)),use_container_width=True,hide_index=True)
         if inv_x.empty and ev_x.empty:
             st.info("No investment or strategic-event rows are captured yet for this group.")
     with tab5:
@@ -1472,7 +1774,7 @@ elif page == "Integrated Logistics":
             rel_x["Source"] = rel_x["Source Entity"].map(COMPANY_NAME).fillna(rel_x["Source Entity"])
             rel_x["Target"] = rel_x["Target Entity"].map(COMPANY_NAME).fillna(rel_x["Target Entity"])
             cols=[c for c in ["Source","Relationship","Target","As Of","Confidence","Source ID"] if c in rel_x.columns]
-            st.dataframe(format_dates_for_display(rel_x[cols]),use_container_width=True,hide_index=True)
+            display_dataframe(format_dates_for_display(rel_x[cols]),use_container_width=True,hide_index=True)
         else:
             st.info("No corporate relationship edges are captured yet for this group.")
 
@@ -1488,7 +1790,7 @@ elif page == "Leadership":
     with c3: lr=filter_select(lr,"Scope","Scope")
     st.metric("Leadership roles",len(lr))
     cols=[c for c in ["Person","Company","Title","Scope","Status","Effective From","Effective To","Source ID"] if c in lr.columns]
-    st.dataframe(format_dates_for_display(lr[cols]),use_container_width=True,hide_index=True)
+    display_dataframe(format_dates_for_display(lr[cols]),use_container_width=True,hide_index=True)
 
 # ---------------- Vessels & Fleets ----------------
 elif page == "Vessels & Fleets":
@@ -1512,15 +1814,15 @@ elif page == "Vessels & Fleets":
     d.metric("Owners represented",x["Owner"].replace("nan",pd.NA).dropna().nunique())
     e.metric("Vessel types",x["Vessel Type"].nunique() if "Vessel Type" in x.columns else 0)
     cols=[c for c in ["Vessel Name","IMO","Owner","Operator","Vessel Type","Subtype / Class","Flag","Year Built","DWT","Capacity","Fuel / Propulsion","Status","Completeness Note"] if c in x.columns]
-    st.dataframe(x[cols],use_container_width=True,hide_index=True)
+    display_dataframe(x[cols],use_container_width=True,hide_index=True)
 
     st.markdown("### Fleet coverage")
     cov=fleet_coverage.copy(); cov["Company"]=cov["Company ID"].astype(str).map(COMPANY_NAME)
-    st.dataframe(cov,use_container_width=True,hide_index=True)
+    display_dataframe(cov,use_container_width=True,hide_index=True)
     with st.expander("IMO coverage by owner",expanded=False):
-        st.dataframe(imo_coverage,use_container_width=True,hide_index=True)
+        display_dataframe(imo_coverage,use_container_width=True,hide_index=True)
     with st.expander("Cross-regional fleet discovery / staging",expanded=False):
-        st.dataframe(global_vessel_staging,use_container_width=True,hide_index=True)
+        display_dataframe(global_vessel_staging,use_container_width=True,hide_index=True)
 
     vessel_options=x["Vessel Name"].dropna().astype(str).tolist()[:2000]
     if vessel_options:
@@ -1530,25 +1832,25 @@ elif page == "Vessels & Fleets":
             vi=vessel_identifiers[vessel_identifiers["Vessel ID"].astype(str)==vid].copy()
             if not vi.empty:
                 st.markdown("#### Vessel identifiers")
-                st.dataframe(vi,use_container_width=True,hide_index=True)
+                display_dataframe(vi,use_container_width=True,hide_index=True)
             iv=vessel_imo_verification[vessel_imo_verification["Vessel ID"].astype(str)==vid].copy()
             if not iv.empty:
                 st.markdown("#### IMO verification")
-                st.dataframe(iv[[c for c in ["Vessel Name","IMO","Verification Status","Confidence","Verified As Of","IMO Verification URL","Notes"] if c in iv.columns]],use_container_width=True,hide_index=True)
+                display_dataframe(iv[[c for c in ["Vessel Name","IMO","Verification Status","Confidence","Verified As Of","IMO Verification URL","Notes"] if c in iv.columns]],use_container_width=True,hide_index=True)
             ve=vessel_evidence[vessel_evidence["Vessel ID"].astype(str)==vid].copy()
             if not ve.empty:
                 st.markdown("#### Evidence & freshness")
-                st.dataframe(format_dates_for_display(ve),use_container_width=True,hide_index=True)
+                display_dataframe(format_dates_for_display(ve),use_container_width=True,hide_index=True)
             vr=vessel_relationships[vessel_relationships["Vessel ID"].astype(str)==vid].copy()
             if not vr.empty:
                 vr["Company"]=vr["Company ID"].astype(str).map(COMPANY_NAME)
-                st.markdown("#### Commercial relationships"); st.dataframe(vr,use_container_width=True,hide_index=True)
+                st.markdown("#### Commercial relationships"); display_dataframe(vr,use_container_width=True,hide_index=True)
             vb=vessel_build_records[vessel_build_records["Vessel ID"].astype(str)==vid]
             if not vb.empty:
-                st.markdown("#### Build record"); st.dataframe(format_dates_for_display(vb),use_container_width=True,hide_index=True)
+                st.markdown("#### Build record"); display_dataframe(format_dates_for_display(vb),use_container_width=True,hide_index=True)
             vc=vessel_contracts[vessel_contracts["Vessel ID"].astype(str)==vid]
             if not vc.empty:
-                st.markdown("#### Contracts / charter exposure"); st.dataframe(vc,use_container_width=True,hide_index=True)
+                st.markdown("#### Contracts / charter exposure"); display_dataframe(vc,use_container_width=True,hide_index=True)
 
 # ---------------- Vehicle Logistics ----------------
 elif page == "Vehicle Logistics":
@@ -1558,10 +1860,10 @@ elif page == "Vehicle Logistics":
     vx["Owner"]=vx["Owner Company ID"].astype(str).map(COMPANY_NAME).fillna(vx["Owner Company ID"].astype(str))
     vx["Operator"]=vx["Operator Company ID"].astype(str).map(COMPANY_NAME).fillna(vx["Operator Company ID"].astype(str))
     a,b,c=st.columns(3); a.metric("Individual vehicle/Ro-Ro vessels",len(vx)); b.metric("BYD dedicated fleet",int(vx["Vessel Name"].astype(str).str.startswith("BYD ").sum())); c.metric("Vehicle/Ro-Ro companies",pd.concat([vx["Owner"],vx["Operator"]]).replace("nan",pd.NA).dropna().nunique())
-    st.dataframe(vx[[c for c in ["Vessel Name","IMO","Owner","Operator","Vessel Type","Capacity","Year Built","Fuel / Propulsion","Status"] if c in vx.columns]],use_container_width=True,hide_index=True)
+    display_dataframe(vx[[c for c in ["Vessel Name","IMO","Owner","Operator","Vessel Type","Capacity","Year Built","Fuel / Propulsion","Status"] if c in vx.columns]],use_container_width=True,hide_index=True)
     st.markdown("### Vehicle-related orders / build records")
     vo=fleet_orders[fleet_orders["Asset / Vessel Type"].astype(str).str.contains("PCTC|RoCon|Ro-Ro|car",case=False,na=False,regex=True)]
-    st.dataframe(format_dates_for_display(vo),use_container_width=True,hide_index=True)
+    display_dataframe(format_dates_for_display(vo),use_container_width=True,hide_index=True)
 
 # ---------------- Ferry Systems ----------------
 elif page == "Ferry Systems":
@@ -1598,27 +1900,27 @@ elif page == "Ferry Systems":
 
     tabs=st.tabs(["Systems","Routes & Terminals","Vessels & IDs","Reliability & Disruptions","Fleet Status"])
     with tabs[0]:
-        st.dataframe(fs,use_container_width=True,hide_index=True)
+        display_dataframe(fs,use_container_width=True,hide_index=True)
     with tabs[1]:
         st.markdown("#### Ferry routes")
-        st.dataframe(fr,use_container_width=True,hide_index=True)
+        display_dataframe(fr,use_container_width=True,hide_index=True)
         st.markdown("#### Ferry terminals")
-        st.dataframe(ft,use_container_width=True,hide_index=True)
+        display_dataframe(ft,use_container_width=True,hide_index=True)
     with tabs[2]:
         st.markdown("#### Ferry vessel research staging")
-        st.dataframe(fv,use_container_width=True,hide_index=True)
+        display_dataframe(fv,use_container_width=True,hide_index=True)
         st.markdown("#### Canonical vessel identifier schema")
         id_cols=[c for c in ["Vessel Name","IMO","MMSI","USCG Official Number","Canadian Official Number","National Registry Number","Call Sign","Flag","Identifier Status"] if c in vessel_identifiers.columns]
-        st.dataframe(vessel_identifiers[id_cols].head(500),use_container_width=True,hide_index=True)
+        display_dataframe(vessel_identifiers[id_cols].head(500),use_container_width=True,hide_index=True)
     with tabs[3]:
         st.markdown("#### Sailing / service observations")
-        st.dataframe(format_dates_for_display(fo),use_container_width=True,hide_index=True)
+        display_dataframe(format_dates_for_display(fo),use_container_width=True,hide_index=True)
         st.markdown("#### Reliability / performance")
-        st.dataframe(format_dates_for_display(fp),use_container_width=True,hide_index=True)
+        display_dataframe(format_dates_for_display(fp),use_container_width=True,hide_index=True)
         with st.expander("Delay / cancellation cause taxonomy",expanded=False):
-            st.dataframe(ferry_disruption_taxonomy,use_container_width=True,hide_index=True)
+            display_dataframe(ferry_disruption_taxonomy,use_container_width=True,hide_index=True)
     with tabs[4]:
-        st.dataframe(format_dates_for_display(fstat),use_container_width=True,hide_index=True)
+        display_dataframe(format_dates_for_display(fstat),use_container_width=True,hide_index=True)
 
 # ---------------- Great Lakes System ----------------
 elif page == "Great Lakes System":
@@ -1657,13 +1959,13 @@ elif page == "Great Lakes System":
     tabs=st.tabs(["System","Companies","Ports","Locks & Channels","Cargo Corridors","Vessels","Cruise","Dependencies & Risks"])
 
     with tabs[0]:
-        st.dataframe(rs,use_container_width=True,hide_index=True)
+        display_dataframe(rs,use_container_width=True,hide_index=True)
         st.markdown("#### System links")
-        st.dataframe(sl,use_container_width=True,hide_index=True)
+        display_dataframe(sl,use_container_width=True,hide_index=True)
 
     with tabs[1]:
         st.markdown("#### Company footprints")
-        st.dataframe(cf,use_container_width=True,hide_index=True)
+        display_dataframe(cf,use_container_width=True,hide_index=True)
         st.caption("Cross-regional footprints are intentional: for example, CSL's Great Lakes division remains connected to CSL Australia/Asia and the wider CSL Group.")
 
     with tabs[2]:
@@ -1672,36 +1974,36 @@ elif page == "Great Lakes System":
         if q:
             mask=show.astype(str).apply(lambda col: col.str.contains(q,case=False,na=False)).any(axis=1)
             show=show[mask]
-        st.dataframe(show,use_container_width=True,hide_index=True)
+        display_dataframe(show,use_container_width=True,hide_index=True)
 
     with tabs[3]:
         st.markdown("#### Critical navigation nodes")
-        st.dataframe(sn,use_container_width=True,hide_index=True)
+        display_dataframe(sn,use_container_width=True,hide_index=True)
         st.markdown("#### Navigation disruption taxonomy")
-        st.dataframe(great_lakes_disruptions,use_container_width=True,hide_index=True)
+        display_dataframe(great_lakes_disruptions,use_container_width=True,hide_index=True)
 
     with tabs[4]:
-        st.dataframe(gc,use_container_width=True,hide_index=True)
+        display_dataframe(gc,use_container_width=True,hide_index=True)
 
     with tabs[5]:
-        st.dataframe(gv,use_container_width=True,hide_index=True)
+        display_dataframe(gv,use_container_width=True,hide_index=True)
         st.caption("Great Lakes vessel staging is promoted into the canonical Vessels table only after IMO / USCG / Canadian official identifiers are resolved. Historical regulator identities remain visibly marked until current operating status is refreshed.")
         with st.expander("Cross-regional vessel discovery",expanded=False):
-            st.dataframe(global_vessel_staging,use_container_width=True,hide_index=True)
+            display_dataframe(global_vessel_staging,use_container_width=True,hide_index=True)
 
     with tabs[6]:
-        st.dataframe(cr,use_container_width=True,hide_index=True)
+        display_dataframe(cr,use_container_width=True,hide_index=True)
 
     with tabs[7]:
         st.markdown("#### Explicit dependency edges")
-        st.dataframe(dep,use_container_width=True,hide_index=True)
+        display_dataframe(dep,use_container_width=True,hide_index=True)
         st.markdown("#### Research / collection priorities")
         rq_gl=research_queue[
             research_queue.astype(str).apply(
                 lambda col: col.str.contains("Great Lakes|CSL Group|CSL Canada|Algoma|Interlake|locks / canals / channels",case=False,na=False)
             ).any(axis=1)
         ].copy()
-        st.dataframe(rq_gl,use_container_width=True,hide_index=True)
+        display_dataframe(rq_gl,use_container_width=True,hide_index=True)
 
 # ---------------- Tanker Intelligence ----------------
 elif page == "Tanker Intelligence":
@@ -1741,24 +2043,24 @@ elif page == "Tanker Intelligence":
         if "Published Rank" in show.columns:
             show["Published Rank"]=pd.to_numeric(show["Published Rank"],errors="coerce")
             show=show.sort_values("Published Rank",na_position="last")
-        st.dataframe(show,use_container_width=True,hide_index=True)
+        display_dataframe(show,use_container_width=True,hide_index=True)
     with tabs[1]:
-        st.dataframe(tf,use_container_width=True,hide_index=True)
+        display_dataframe(tf,use_container_width=True,hide_index=True)
     with tabs[2]:
-        st.dataframe(vrx,use_container_width=True,hide_index=True)
+        display_dataframe(vrx,use_container_width=True,hide_index=True)
     with tabs[3]:
-        st.dataframe(tax,use_container_width=True,hide_index=True)
+        display_dataframe(tax,use_container_width=True,hide_index=True)
     with tabs[4]:
-        st.dataframe(vtx,use_container_width=True,hide_index=True)
+        display_dataframe(vtx,use_container_width=True,hide_index=True)
     with tabs[5]:
-        st.dataframe(tcx,use_container_width=True,hide_index=True)
+        display_dataframe(tcx,use_container_width=True,hide_index=True)
     with tabs[6]:
         tq=research_queue[
             research_queue.astype(str).apply(
                 lambda col: col.str.contains("VLCC|tanker|tradeability|sanctions / restrictions|vessel transactions|corridor exposure",case=False,na=False)
             ).any(axis=1)
         ].copy()
-        st.dataframe(tq,use_container_width=True,hide_index=True)
+        display_dataframe(tq,use_container_width=True,hide_index=True)
 
 # ---------------- Energy Shipping ----------------
 elif page == "Energy Shipping":
@@ -1774,32 +2076,104 @@ elif page == "Energy Shipping":
     a,b,c,d=st.columns(4); a.metric("Individual vessels",len(ev)); b.metric("Fleet summary rows",len(fp)); c.metric("Order / build rows",len(fo)); d.metric("Companies",len(ids))
     tabs=st.tabs(["Fleet","Orders","Contracts","Coverage"])
     with tabs[0]:
-        st.dataframe(fp,use_container_width=True,hide_index=True)
-        st.dataframe(ev[[c for c in ["Vessel Name","IMO","Owner","Operator","Vessel Type","DWT","Capacity","Fuel / Propulsion","Status"] if c in ev.columns]],use_container_width=True,hide_index=True)
-    with tabs[1]: st.dataframe(format_dates_for_display(fo),use_container_width=True,hide_index=True)
+        display_dataframe(fp,use_container_width=True,hide_index=True)
+        display_dataframe(ev[[c for c in ["Vessel Name","IMO","Owner","Operator","Vessel Type","DWT","Capacity","Fuel / Propulsion","Status"] if c in ev.columns]],use_container_width=True,hide_index=True)
+    with tabs[1]: display_dataframe(format_dates_for_display(fo),use_container_width=True,hide_index=True)
     with tabs[2]:
         vc=vessel_contracts[vessel_contracts["Company ID"].astype(str).isin(ids)]
-        st.dataframe(vc,use_container_width=True,hide_index=True)
+        display_dataframe(vc,use_container_width=True,hide_index=True)
     with tabs[3]:
         fc=fleet_coverage[fleet_coverage["Company ID"].astype(str).isin(ids)].copy(); fc["Company"]=fc["Company ID"].astype(str).map(COMPANY_NAME)
-        st.dataframe(fc,use_container_width=True,hide_index=True)
+        display_dataframe(fc,use_container_width=True,hide_index=True)
 
 # ---------------- Ports & Terminals ----------------
 elif page == "Ports & Terminals":
-    masthead("Ports, Terminals & Infrastructure", "Canonical port/operator records combined with terminal assets, investment and infrastructure works.")
-    p=model_ports.copy(); a=model_assets.copy()
-    c1,c2=st.columns(2)
-    with c1: p=filter_select(p,"Country","Country")
-    with c2: p=filter_select(p,"Operator","Operator")
-    st.metric("Port / facility records",len(p))
-    mp=map_points(p,location_cols=("Port / Facility",),country_col="Country",layer="Port / facility")
-    if not mp.empty: st.map(mp,latitude="lat",longitude="lon",use_container_width=True)
-    st.dataframe(p,use_container_width=True,hide_index=True)
-    st.markdown("### Infrastructure and investment")
-    t1,t2,t3=st.tabs(["Assets","Investments","Infrastructure works"])
-    with t1: st.dataframe(a,use_container_width=True,hide_index=True)
-    with t2: st.dataframe(format_dates_for_display(model_investments),use_container_width=True,hide_index=True)
-    with t3: st.dataframe(format_dates_for_display(infra_works),use_container_width=True,hide_index=True)
+    masthead(
+        "Ports, Terminals & Infrastructure",
+        "Global port and terminal intelligence, including the Great Lakes–St. Lawrence port system, linked assets, investment and infrastructure works."
+    )
+
+    p = model_ports.copy()
+    gp = great_lakes_ports.copy()
+    a = model_assets.copy()
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Canonical port / facility records", len(model_ports))
+    m2.metric("Great Lakes / St. Lawrence port seeds", len(great_lakes_ports))
+    m3.metric("Port datasets", 2)
+
+    st.caption(
+        "Great Lakes–St. Lawrence ports are surfaced here as part of the global port universe while remaining "
+        "available in the dedicated Great Lakes System view. Regional seed status is retained internally until "
+        "each record is fully reconciled with the canonical port table."
+    )
+
+    port_tab, gl_tab, infra_tab = st.tabs([
+        "Global Ports & Terminals",
+        "Great Lakes / St. Lawrence",
+        "Infrastructure & Investment",
+    ])
+
+    with port_tab:
+        c1, c2 = st.columns(2)
+        with c1:
+            p = filter_select(p, "Country", "Country")
+        with c2:
+            p = filter_select(p, "Operator", "Operator")
+
+        st.metric("Matching canonical records", len(p))
+        mp = map_points(
+            p,
+            location_cols=("Port / Facility",),
+            country_col="Country",
+            layer="Port / facility",
+        )
+        if not mp.empty:
+            st.map(mp, latitude="lat", longitude="lon", use_container_width=True)
+        display_dataframe(p, use_container_width=True, hide_index=True)
+
+    with gl_tab:
+        gl1, gl2, gl3 = st.columns(3)
+        with gl1:
+            if "Country" in gp.columns:
+                gp = filter_select(gp, "Country", "Country", key="ports_gl_country")
+        with gl2:
+            if "Waterway" in gp.columns:
+                gp = filter_select(gp, "Waterway", "Waterway", key="ports_gl_waterway")
+        with gl3:
+            if "Research Status" in gp.columns:
+                gp = filter_select(gp, "Research Status", "Research status", key="ports_gl_status")
+
+        gl_query = st.text_input(
+            "Search Great Lakes / St. Lawrence ports",
+            key="ports_gl_search",
+            placeholder="e.g. Cleveland, Lake Erie, Ontario, steel, cruise",
+        )
+        if gl_query:
+            mask = gp.astype(str).apply(
+                lambda col: col.str.contains(gl_query, case=False, na=False)
+            ).any(axis=1)
+            gp = gp[mask]
+
+        st.metric("Matching Great Lakes / St. Lawrence records", len(gp))
+        display_dataframe(gp, use_container_width=True, hide_index=True)
+
+    with infra_tab:
+        t1, t2, t3 = st.tabs(["Assets", "Investments", "Infrastructure works"])
+        with t1:
+            display_dataframe(a, use_container_width=True, hide_index=True)
+        with t2:
+            display_dataframe(
+                format_dates_for_display(model_investments),
+                use_container_width=True,
+                hide_index=True,
+            )
+        with t3:
+            display_dataframe(
+                format_dates_for_display(infra_works),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 # ---------------- Infrastructure & Inland Logistics ----------------
 elif page == "Infrastructure & Inland Logistics":
@@ -1857,13 +2231,13 @@ elif page == "Infrastructure & Inland Logistics":
             "Port / Terminal Exposure","Logistics Real Estate Exposure","Economic Zone / Inland Exposure",
             "Current Scale / Notes","Canonical Status","Research Priority","Verified As Of"
         ] if c in invu.columns]
-        st.dataframe(invu[cols] if cols else invu,use_container_width=True,hide_index=True)
+        display_dataframe(invu[cols] if cols else invu,use_container_width=True,hide_index=True)
 
     with tabs[1]:
         h=hold.copy()
         if "Status" in h.columns:
             h=sort_latest(h,("Effective From",))
-        st.dataframe(format_dates_for_display(h),use_container_width=True,hide_index=True)
+        display_dataframe(format_dates_for_display(h),use_container_width=True,hide_index=True)
 
     with tabs[2]:
         d=deals.copy()
@@ -1874,13 +2248,13 @@ elif page == "Infrastructure & Inland Logistics":
             "Target / Asset","Asset Class","Country / Region","Deal Type","Equity %","Reported Value","Currency",
             "Operating Control","Status","Regulatory / Political Status","Source URL"
         ] if c in d.columns]
-        st.dataframe(format_dates_for_display(sort_latest(d,("Completed / Effective Date","Announced Date"))[show_cols]),use_container_width=True,hide_index=True)
+        display_dataframe(format_dates_for_display(sort_latest(d,("Completed / Effective Date","Announced Date"))[show_cols]),use_container_width=True,hide_index=True)
 
     with tabs[3]:
-        st.dataframe(zones,use_container_width=True,hide_index=True)
+        display_dataframe(zones,use_container_width=True,hide_index=True)
 
     with tabs[4]:
-        st.dataframe(lre,use_container_width=True,hide_index=True)
+        display_dataframe(lre,use_container_width=True,hide_index=True)
 
     with tabs[5]:
         hc=hubs.copy()
@@ -1894,10 +2268,10 @@ elif page == "Infrastructure & Inland Logistics":
         with c3:
             if "Status" in hc.columns:
                 hc=filter_select(hc,"Status","Hub status")
-        st.dataframe(hc,use_container_width=True,hide_index=True)
+        display_dataframe(hc,use_container_width=True,hide_index=True)
 
     with tabs[6]:
-        st.dataframe(conns,use_container_width=True,hide_index=True)
+        display_dataframe(conns,use_container_width=True,hide_index=True)
 
 # ---------------- Shipyards & Orders ----------------
 elif page == "Shipyards & Orders":
@@ -1911,9 +2285,9 @@ elif page == "Shipyards & Orders":
     left,right=st.columns(2)
     with left: render_count_chart(fo,"Buyer / Operator","Orders by buyer/operator",top=12)
     with right: render_count_chart(fo,"Build Country","Orders by build country",top=12)
-    st.dataframe(format_dates_for_display(fo),use_container_width=True,hide_index=True)
+    display_dataframe(format_dates_for_display(fo),use_container_width=True,hide_index=True)
     st.markdown("### Shipyard registry")
-    st.dataframe(model_shipyards,use_container_width=True,hide_index=True)
+    display_dataframe(model_shipyards,use_container_width=True,hide_index=True)
 
 # ---------------- Events & Disruptions ----------------
 elif page == "Events & Disruptions":
@@ -1930,8 +2304,8 @@ elif page == "Events & Disruptions":
     render_monthly_chart([("Events",x,("Date",))],"Events over time")
     render_count_chart(x,"Event Family","Event families",top=15)
     cols=[c for c in ["Date","Event Family","Event Type","Mode","Country","Location","Subject Name","Actor / Attribution","Operational Impact","Trade Impact","Severity","Confidence","Source Dataset"] if c in x.columns]
-    st.dataframe(format_dates_for_display(sort_latest(x)[cols]),use_container_width=True,hide_index=True)
-    with st.expander("Cross-domain operational disruptions",expanded=False): st.dataframe(format_dates_for_display(external_disruptions),use_container_width=True,hide_index=True)
+    display_dataframe(format_dates_for_display(sort_latest(x)[cols]),use_container_width=True,hide_index=True)
+    with st.expander("Cross-domain operational disruptions",expanded=False): display_dataframe(format_dates_for_display(external_disruptions),use_container_width=True,hide_index=True)
 
 # ---------------- Weather & Labour ----------------
 elif page == "Weather & Labour":
@@ -1961,21 +2335,21 @@ elif page == "Weather & Labour":
         render_count_chart(x,"Event Family","Disruptions by family",top=10)
         render_monthly_chart([("Weather/Labour",x,("Date",))],"Disruptions over time")
         cols=[c for c in ["Date","Event Family","Event Type","Mode","Country / Countries","Location","Title","Status","Severity","Time Horizon","Operational Impact","Trade / Commercial Impact","Primary Source URL"] if c in x.columns]
-        st.dataframe(format_dates_for_display(sort_latest(x)[cols]),use_container_width=True,hide_index=True)
+        display_dataframe(format_dates_for_display(sort_latest(x)[cols]),use_container_width=True,hide_index=True)
     with tabs[1]:
-        st.dataframe(format_dates_for_display(disruption_watch),use_container_width=True,hide_index=True)
+        display_dataframe(format_dates_for_display(disruption_watch),use_container_width=True,hide_index=True)
     with tabs[2]:
         ids=set(x["External Event ID"].astype(str)) if "External Event ID" in x.columns else set()
         imp=event_impacts[event_impacts["External Event ID"].astype(str).isin(ids)].copy() if "External Event ID" in event_impacts.columns else event_impacts.iloc[0:0].copy()
-        st.dataframe(imp,use_container_width=True,hide_index=True)
+        display_dataframe(imp,use_container_width=True,hide_index=True)
 
 # ---------------- Corridors ----------------
 elif page == "Corridors":
     masthead("Trade Corridors & Chokepoints", "Strategic movement systems linked to companies, vessels, ports, historical events and current disruption.")
-    st.dataframe(corridors,use_container_width=True,hide_index=True)
+    display_dataframe(corridors,use_container_width=True,hide_index=True)
     st.markdown("### Strategic corridor history")
     se=strategic_events.copy()
-    st.dataframe(format_dates_for_display(sort_latest(se)),use_container_width=True,hide_index=True)
+    display_dataframe(format_dates_for_display(sort_latest(se)),use_container_width=True,hide_index=True)
 
 
 # ---------------- Maritime Attacks ----------------
@@ -2215,7 +2589,7 @@ elif page == "Naval & Shipbuilding":
             "Industrial / Strategic Relevance","Source URL","Secondary Source"
         ] if c in x.columns]
         with st.expander("Evidence table", expanded=True):
-            st.dataframe(format_dates_for_display(sort_latest(x, preferred=("2026 Event Date","Original Contract / Decision Date"))[show_cols]), use_container_width=True, hide_index=True)
+            display_dataframe(format_dates_for_display(sort_latest(x, preferred=("2026 Event Date","Original Contract / Decision Date"))[show_cols]), use_container_width=True, hide_index=True)
 
     with tab2:
         y = shipyard_moves.copy()
@@ -2255,16 +2629,16 @@ elif page == "Black Sea":
 
     tab0,tab1,tab2,tab3,tab4 = st.tabs(["Source index","Vessel voyages","Conflict vessels","Port attacks","Vessel profiles"])
     with tab0:
-        st.dataframe(format_dates_for_display(sort_latest(bs_articles, preferred=("Published",))), use_container_width=True, hide_index=True)
+        display_dataframe(format_dates_for_display(sort_latest(bs_articles, preferred=("Published",))), use_container_width=True, hide_index=True)
     with tab1:
         q = st.text_input("Search voyages",key="bsvq")
-        st.dataframe(format_dates_for_display(text_search(bs_voy,q)),use_container_width=True,hide_index=True)
+        display_dataframe(format_dates_for_display(text_search(bs_voy,q)),use_container_width=True,hide_index=True)
     with tab2:
-        st.dataframe(format_dates_for_display(sort_latest(bs_conflict)),use_container_width=True,hide_index=True)
+        display_dataframe(format_dates_for_display(sort_latest(bs_conflict)),use_container_width=True,hide_index=True)
     with tab3:
-        st.dataframe(format_dates_for_display(sort_latest(bs_ports)),use_container_width=True,hide_index=True)
+        display_dataframe(format_dates_for_display(sort_latest(bs_ports)),use_container_width=True,hide_index=True)
     with tab4:
-        st.dataframe(bs_profiles,use_container_width=True,hide_index=True)
+        display_dataframe(bs_profiles,use_container_width=True,hide_index=True)
 
 # ---------------- Vessel Intelligence ----------------
 elif page == "Vessel Intelligence":
@@ -2279,22 +2653,22 @@ elif page == "Vessel Intelligence":
         v5=text_search(imo_gulf,q)
         if len(v0):
             st.markdown("#### Canonical vessel model")
-            st.dataframe(v0,use_container_width=True,hide_index=True)
+            display_dataframe(v0,use_container_width=True,hide_index=True)
         if len(v1):
             st.markdown("#### Black Sea voyages")
-            st.dataframe(format_dates_for_display(v1),use_container_width=True,hide_index=True)
+            display_dataframe(format_dates_for_display(v1),use_container_width=True,hide_index=True)
         if len(v2):
             st.markdown("#### Vessel profiles")
-            st.dataframe(v2,use_container_width=True,hide_index=True)
+            display_dataframe(v2,use_container_width=True,hide_index=True)
         if len(v3):
             st.markdown("#### Sanctions / watchlists")
-            st.dataframe(v3,use_container_width=True,hide_index=True)
+            display_dataframe(v3,use_container_width=True,hide_index=True)
         if len(v4):
             st.markdown("#### CENTCOM maritime actions")
-            st.dataframe(format_dates_for_display(sort_latest(v4)),use_container_width=True,hide_index=True)
+            display_dataframe(format_dates_for_display(sort_latest(v4)),use_container_width=True,hide_index=True)
         if len(v5):
             st.markdown("#### IMO Gulf confirmed incidents")
-            st.dataframe(format_dates_for_display(sort_latest(v5)),use_container_width=True,hide_index=True)
+            display_dataframe(format_dates_for_display(sort_latest(v5)),use_container_width=True,hide_index=True)
         if not len(v0) and not len(v1) and not len(v2) and not len(v3) and not len(v4) and not len(v5):
             st.warning("No vessel match found.")
     else:
@@ -2312,7 +2686,7 @@ elif page == "Sanctions & Watchlists":
         c=colmap[source]
         x=x[x[c].notna() & (x[c].astype(str).str.strip()!="")]
     st.metric("Matched vessels",len(x))
-    st.dataframe(format_dates_for_display(x),use_container_width=True,hide_index=True)
+    display_dataframe(format_dates_for_display(x),use_container_width=True,hide_index=True)
     st.caption("Government listings and non-government analytical watchlists are not legally equivalent. UANI and similar fields should be treated as analytical/watchlist sources, not government sanctions.")
 
 # ---------------- IUU ----------------
@@ -2327,7 +2701,7 @@ elif page == "IUU Fishing Risk":
     st.metric("Indicator records",len(x))
     if "Score" in x.columns:
         st.metric("Average score",f"{pd.to_numeric(x['Score'],errors='coerce').mean():.2f}")
-    st.dataframe(format_dates_for_display(x),use_container_width=True,hide_index=True)
+    display_dataframe(format_dates_for_display(x),use_container_width=True,hide_index=True)
     st.caption("The uploaded IUU vessel list is retained in the repository as a raw .xls reference. It can be normalized into the vessel-search layer in a later update.")
 
 # ---------------- ReCAAP ----------------
@@ -2344,4 +2718,4 @@ elif page == "ReCAAP Archive":
         m=x.dropna(subset=["latitude_decimal","longitude_decimal"])
         if len(m):
             st.map(m,latitude="latitude_decimal",longitude="longitude_decimal")
-    st.dataframe(format_dates_for_display(sort_latest(x)),use_container_width=True,hide_index=True)
+    display_dataframe(format_dates_for_display(sort_latest(x)),use_container_width=True,hide_index=True)
