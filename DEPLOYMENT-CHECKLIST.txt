@@ -1,0 +1,39 @@
+POWER & CORRIDORS — STREAMLIT DEPLOYMENT CHECKLIST
+App v4.8 / Model v1.12
+
+REQUIRED AT REPOSITORY ROOT
+[ ] app.py
+[ ] requirements.txt
+[ ] data/ directory
+[ ] .streamlit/config.toml
+
+INCLUDED MODEL / DOCUMENTATION
+[ ] PC_Trade_System_Intelligence_Model_v1_12_MASTER.xlsx
+[ ] README-V4.8.txt
+[ ] manifest.json
+[ ] verify_deployment.py
+
+OPTIONAL AI SYNTHESIS
+[ ] In Streamlit App settings -> Secrets, add:
+    OPENAI_API_KEY = "..."
+    Do NOT commit .streamlit/secrets.toml to GitHub.
+
+STREAMLIT COMMUNITY CLOUD
+[ ] Repository selected
+[ ] Branch selected (normally main)
+[ ] Main file path: app.py
+[ ] Python 3.13 recommended
+[ ] Deploy / reboot app
+
+POST-DEPLOYMENT TESTS
+[ ] Operating Picture loads
+[ ] Ask P&C returns local evidence without an API key
+[ ] Companies page loads DHL, FedEx, Amazon and Aramex
+[ ] Integrated Logistics page loads group selector
+[ ] Infrastructure & Inland Logistics page loads
+[ ] Vessels & Fleets loads
+[ ] Weather & Labour loads
+[ ] No missing-file error is shown
+
+WEBSITE EMBED
+Existing Streamlit URL can continue to be embedded with ?embedded=true after deployment.
