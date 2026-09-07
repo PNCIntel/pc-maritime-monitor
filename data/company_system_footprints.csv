@@ -1,0 +1,14 @@
+﻿Footprint ID,Company ID,System ID,Role in System,Other Regional Footprints,Fleet / Scale Note,Cargo / Service Exposure,Strategic Relevance,Source ID,Notes
+GL_FOOT_0001,COMP_CSL_GROUP,SYS_GLSS,Parent group / global marine solutions,"Great Lakes/St. Lawrence plus Australia/Asia, Americas/Caribbean/Africa, Europe",99-vessel global fleet headline,Regional divisions; self-unloaders; transhippers; cement; MPP,High,SRC_0153,"CSL is deliberately modeled globally, not as a Great Lakes-only company."
+GL_FOOT_0002,COMP_CSL_CANADA,SYS_GLSS,Core Great Lakes/St. Lawrence operator,Great Lakes/St. Lawrence,17-vessel Great Lakes/St. Lawrence fleet on current global-fleet page,Iron ore; salt; grain; aggregates; dry bulk,High,SRC_0152,
+GL_FOOT_0003,COMP_CSL_AUSTRALIA,SYS_GLSS,Same parent group / external regional footprint,Australia and Asia,15-vessel Australia/Asia fleet on current global-fleet page,Dry bulk; cement; iron ore; transhipment,Medium,SRC_0153,Included to preserve cross-regional corporate relationships and allow group-wide asset exposure queries.
+GL_FOOT_0004,COMP_CSL_AMERICAS,SYS_GLSS,Same parent group / external regional footprint,Americas / Caribbean / Africa,,Self-unloaders; transhipment,Medium,SRC_0152,
+GL_FOOT_0005,COMP_ALGOMA,SYS_GLSS,Core Canadian laker operator,Great Lakes/St. Lawrence + international ocean self-unloaders,Current laker fleet plus 12 vessels on order/under construction at corporate level,Dry bulk; product tankers; cement / short sea via JVs,High,SRC_0155,
+GL_FOOT_0006,COMP_INTERLAKE,SYS_GLSS,Core U.S. laker operator,Great Lakes,11 commercial vessels in 2026,Iron ore / taconite; coal; limestone; salt and other bulk,High,SRC_0157,
+GL_FOOT_0007,COMP_GREAT_LAKES_FLEET,SYS_GLSS,Core U.S. laker operator,Great Lakes,,Iron ore; limestone; coal; specialty bulk,High,SRC_0158,Directly linked to CN rail network.
+GL_FOOT_0008,COMP_FEDNAV,SYS_GLSS,Seaway / ocean carrier,Great Lakes/St. Lawrence + global,130+ dry bulk carriers at group level,Dry bulk; ice-class / ocean trades,High,SRC_0159,
+GL_FOOT_0009,COMP_MCKEIL,SYS_GLSS,Regional marine services and cargo operator,Great Lakes/St. Lawrence + East Coast + Arctic,,Bulk; tanker; tug/barge; project cargo,High,SRC_0160,
+GL_FOOT_0010,COMP_MAINSTAY,SYS_GLSS,Great Lakes marine logistics group,Great Lakes,,Bulk; liquid bulk; ship repair; warehousing / logistics,High,SRC_0161,
+GL_FOOT_0011,COMP_ASC,SYS_GLSS,Great Lakes operator,Great Lakes,,Self-unloading bulk,High,SRC_0161,
+GL_FOOT_0012,COMP_GRN,SYS_GLSS,Great Lakes operator,Great Lakes,,Bulk shipping,High,SRC_0162,
+GL_FOOT_0013,COMP_ANDRIE,SYS_GLSS,Great Lakes liquid-bulk operator,Great Lakes,,Liquid bulk / tank barge,High,SRC_0161,

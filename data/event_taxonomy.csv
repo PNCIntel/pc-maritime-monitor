@@ -1,0 +1,16 @@
+﻿Event Family,Definition,Modes,Example
+Conflict / Security,"War, strikes, drone/missile attacks, military coercion",Maritime; ports; airports; energy; land,"Maritime attacks, Black Sea port attack"
+Maritime Crime,"Piracy, armed robbery, hijacking, suspicious approach",Maritime,ReCAAP / piracy
+Military / Enforcement,"Boarding, seizure, blockade enforcement, disabling strike",Maritime,CENTCOM vessel action
+Maritime Security Warning,Official warning or advisory without necessarily constituting a confirmed event,Maritime,UKMTO
+Port / Infrastructure Incident,"Fire, explosion, grounding, equipment failure, container loss, pollution",Port / Terminal,Port incident
+Weather,"Typhoon, hurricane, extreme wind, flood, storm surge, extreme heat/cold",Multimodal,Typhoon Dolphin
+Natural Hazard,"Earthquake, volcanic eruption, tsunami, landslide, glacial event",Multimodal,Anak Krakatau; Venezuela earthquakes
+Labour / Industrial Action,"Strike, walkout, work-to-rule, blockade by workers",Port; airport; rail; trucking; industrial,Northern Europe port strikes
+Protest / Labour,Demonstration or protest with operational or corridor effect,Land; industrial; urban logistics,Haiti worker protest
+Civil Unrest / Insecurity,"Gang violence, riots, political unrest, road blocks, violent protest",Multimodal,Haiti port / aviation disruption
+Cyber,"Cyberattack, ransomware, system outage",Multimodal / Corporate,Maersk NotPetya
+Transport Accident,"Aircraft, vessel, rail, truck accident disrupting trade movement",Multimodal,Miami cargo aircraft crash
+Infrastructure Failure,"Bridge, crane, power, channel, runway, rail or terminal system failure",Multimodal,Future
+Regulatory / Policy,"Flight ban, customs restriction, embargo, emergency closure",Multimodal,FAA Haiti restriction
+Supply Constraint,"Fuel, power, container, equipment or critical input shortage",Multimodal,Future bunker-fuel / capacity shock

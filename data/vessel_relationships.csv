@@ -1,0 +1,626 @@
+﻿Vessel Relationship ID,Vessel ID,Vessel Name,Company ID,Relationship Type,Effective From,Effective To,Confidence,Source ID,Notes
+VREL_000001,VESSEL_00016,Al Sadaf,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000002,VESSEL_00016,Al Sadaf,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000003,VESSEL_00017,Arada,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000004,VESSEL_00017,Arada,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000005,VESSEL_00018,Al Taweelah,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000006,VESSEL_00018,Al Taweelah,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000007,VESSEL_00019,Al Hamra,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000008,VESSEL_00019,Al Hamra,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000009,VESSEL_00020,Al Rahba,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000010,VESSEL_00020,Al Rahba,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000011,VESSEL_00021,Al Reef,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000012,VESSEL_00021,Al Reef,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000013,VESSEL_00022,Al Shelila,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000014,VESSEL_00022,Al Shelila,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000015,VESSEL_00023,Ish (FSU),COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000016,VESSEL_00023,Ish (FSU),COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000017,VESSEL_00024,Mraweh,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000018,VESSEL_00024,Mraweh,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000019,VESSEL_00025,Mubaraz,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000020,VESSEL_00025,Mubaraz,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000021,VESSEL_00026,Shahamah,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000022,VESSEL_00026,Shahamah,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000023,VESSEL_00027,Umm Al Ashtan,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000024,VESSEL_00027,Umm Al Ashtan,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000025,VESSEL_00028,Ruwais LNG H2711,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000026,VESSEL_00028,Ruwais LNG H2711,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000027,VESSEL_00029,Ruwais LNG H2712,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000028,VESSEL_00029,Ruwais LNG H2712,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000029,VESSEL_00030,Ruwais LNG H2713,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000030,VESSEL_00030,Ruwais LNG H2713,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000031,VESSEL_00031,Ruwais LNG H2714,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000032,VESSEL_00031,Ruwais LNG H2714,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000033,VESSEL_00032,Ruwais LNG H2598,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000034,VESSEL_00032,Ruwais LNG H2598,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000035,VESSEL_00033,Ruwais LNG H2599,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000036,VESSEL_00033,Ruwais LNG H2599,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000037,VESSEL_00034,Ruwais LNG H2600,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000038,VESSEL_00034,Ruwais LNG H2600,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000039,VESSEL_00035,Ruwais LNG H2601,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000040,VESSEL_00035,Ruwais LNG H2601,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000041,VESSEL_00036,Al Maryah,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000042,VESSEL_00036,Al Maryah,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000043,VESSEL_00037,AWS-Delma,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000044,VESSEL_00037,AWS-Delma,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000045,VESSEL_00038,AWS-Al Ain,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000046,VESSEL_00038,AWS-Al Ain,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000047,VESSEL_00039,AWS-Zakher,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000048,VESSEL_00039,AWS-Zakher,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000049,VESSEL_00040,AWS-Rabdan,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000050,VESSEL_00040,AWS-Rabdan,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000051,VESSEL_00041,AWS-Al Salam,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000052,VESSEL_00041,AWS-Al Salam,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000053,VESSEL_00042,AWS-Baynounah,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000054,VESSEL_00042,AWS-Baynounah,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000055,VESSEL_00043,Meera,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000056,VESSEL_00043,Meera,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000057,VESSEL_00044,Dana,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000058,VESSEL_00044,Dana,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000059,VESSEL_00045,Al Ghadeer,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000060,VESSEL_00045,Al Ghadeer,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000061,VESSEL_00046,Rimah,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000062,VESSEL_00046,Rimah,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000063,VESSEL_00047,Umm Al Lulu I,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000064,VESSEL_00047,Umm Al Lulu I,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000065,VESSEL_00048,Al Samha,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000066,VESSEL_00048,Al Samha,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000067,VESSEL_00049,Bani Yas,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000068,VESSEL_00049,Bani Yas,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000069,VESSEL_00050,Diyyinah I,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000070,VESSEL_00050,Diyyinah I,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000071,VESSEL_00051,Mezaira'a,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000072,VESSEL_00051,Mezaira'a,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000073,VESSEL_00052,Yamilah-III,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000074,VESSEL_00052,Yamilah-III,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000075,VESSEL_00053,Navig8 Honor,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000076,VESSEL_00053,Navig8 Honor,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000077,VESSEL_00054,Navig8 Martinez,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000078,VESSEL_00054,Navig8 Martinez,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000079,VESSEL_00055,Navig8 Messi,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000080,VESSEL_00055,Navig8 Messi,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000081,VESSEL_00056,Navig8 Montiel,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000082,VESSEL_00056,Navig8 Montiel,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000083,VESSEL_00057,Abu Dhabi-III,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000084,VESSEL_00057,Abu Dhabi-III,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000085,VESSEL_00058,Liwa V,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000086,VESSEL_00058,Liwa V,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000087,VESSEL_00059,Al Bateen,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000088,VESSEL_00059,Al Bateen,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000089,VESSEL_00060,Al Falah,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000090,VESSEL_00060,Al Falah,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000091,VESSEL_00061,Al Ruwais,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000092,VESSEL_00061,Al Ruwais,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000093,VESSEL_00062,Al Khtam,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000094,VESSEL_00062,Al Khtam,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000095,VESSEL_00063,Yong Jiang (Gas Yongjiang),COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000096,VESSEL_00063,Yong Jiang (Gas Yongjiang),COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000097,VESSEL_00064,Min Jiang,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000098,VESSEL_00064,Min Jiang,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000099,VESSEL_00065,Al Bayraq,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000100,VESSEL_00065,Al Bayraq,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000101,VESSEL_00066,Alhosn,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000102,VESSEL_00066,Alhosn,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000103,VESSEL_00067,Al Aryam,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000104,VESSEL_00067,Al Aryam,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000105,VESSEL_00068,Al Saad,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000106,VESSEL_00068,Al Saad,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000107,VESSEL_00069,Al Muzn,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000108,VESSEL_00069,Al Muzn,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000109,VESSEL_00070,Al Taair,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000110,VESSEL_00070,Al Taair,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000111,VESSEL_00071,Al Sila,COMP_AW_SHIPPING,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000112,VESSEL_00071,Al Sila,COMP_AW_SHIPPING,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000113,VESSEL_00072,Janana,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000114,VESSEL_00072,Janana,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000115,VESSEL_00073,ADNOC L&S molten sulphur newbuild,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000116,VESSEL_00073,ADNOC L&S molten sulphur newbuild,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000117,VESSEL_00074,Jarnain,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000118,VESSEL_00074,Jarnain,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000119,VESSEL_00075,Tarif,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000120,VESSEL_00075,Tarif,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000121,VESSEL_00076,Navig8 Precision,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000122,VESSEL_00076,Navig8 Precision,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000123,VESSEL_00077,Navig8 Prestige,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000124,VESSEL_00077,Navig8 Prestige,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000125,VESSEL_00078,Navig8 Perseverance,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000126,VESSEL_00078,Navig8 Perseverance,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000127,VESSEL_00079,Navig8 Passion,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000128,VESSEL_00079,Navig8 Passion,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000129,VESSEL_00080,Navig8 Promise,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000130,VESSEL_00080,Navig8 Promise,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000131,VESSEL_00081,Navig8 Prosperity,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000132,VESSEL_00081,Navig8 Prosperity,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000133,VESSEL_00082,Navig8 Pride LHJ,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000134,VESSEL_00082,Navig8 Pride LHJ,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000135,VESSEL_00083,Navig8 Wolf,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000136,VESSEL_00083,Navig8 Wolf,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000137,VESSEL_00084,Navig8 Providence,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000138,VESSEL_00084,Navig8 Providence,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000139,VESSEL_00085,Leicester,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000140,VESSEL_00085,Leicester,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000141,VESSEL_00086,Hili,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000142,VESSEL_00086,Hili,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000143,VESSEL_00087,Zakum,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000144,VESSEL_00087,Zakum,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000145,VESSEL_00088,Barakah,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000146,VESSEL_00088,Barakah,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000147,VESSEL_00089,Hafeet,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000148,VESSEL_00089,Hafeet,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000149,VESSEL_00090,Habshan,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000150,VESSEL_00090,Habshan,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000151,VESSEL_00091,Arzanah,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000152,VESSEL_00091,Arzanah,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000153,VESSEL_00092,Al Bahyah,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000154,VESSEL_00092,Al Bahyah,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000155,VESSEL_00093,Navig8 Universe,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000156,VESSEL_00093,Navig8 Universe,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000157,VESSEL_00094,Navig8 Constellation,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000158,VESSEL_00094,Navig8 Constellation,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000159,VESSEL_00095,Navig8 Grace,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000160,VESSEL_00095,Navig8 Grace,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000161,VESSEL_00096,Navig8 Gallantry,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000162,VESSEL_00096,Navig8 Gallantry,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000163,VESSEL_00097,Navig8 Guard,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000164,VESSEL_00097,Navig8 Guard,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000165,VESSEL_00098,Navig8 Guide,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000166,VESSEL_00098,Navig8 Guide,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000167,VESSEL_00099,Navig8 Goal,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000168,VESSEL_00099,Navig8 Goal,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000169,VESSEL_00100,Navig8 Gauntlet,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000170,VESSEL_00100,Navig8 Gauntlet,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000171,VESSEL_00101,Navig8 Gladiator,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000172,VESSEL_00101,Navig8 Gladiator,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000173,VESSEL_00102,Navig8 Gratitude,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000174,VESSEL_00102,Navig8 Gratitude,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000175,VESSEL_00103,Navig8 Excel,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000176,VESSEL_00103,Navig8 Excel,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000177,VESSEL_00104,Navig8 Exceed,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000178,VESSEL_00104,Navig8 Exceed,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000179,VESSEL_00105,Navig8 Express,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000180,VESSEL_00105,Navig8 Express,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000181,VESSEL_00106,Navig8 Excellence,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000182,VESSEL_00106,Navig8 Excellence,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000183,VESSEL_00107,Navig8 Estelle,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000184,VESSEL_00107,Navig8 Estelle,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000185,VESSEL_00108,Navig8 Executive,COMP_NAVIG8,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
+VREL_000186,VESSEL_00108,Navig8 Executive,COMP_NAVIG8,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
+VREL_000187,VESSEL_00109,BYD Explorer No.1,COMP_ZODIAC,OWNER,,,High,SRC_0091,Owner field from seeded vessel record.
+VREL_000188,VESSEL_00110,BYD Changzhou,COMP_ZODIAC,OWNER,,,High,SRC_0091,Owner field from seeded vessel record.
+VREL_000189,VESSEL_00111,BYD Hefei,COMP_BYD,OWNER,,,High,SRC_0091,Owner field from seeded vessel record.
+VREL_000190,VESSEL_00111,BYD Hefei,COMP_BYD,OPERATOR,,,High,SRC_0091,Operator field from seeded vessel record.
+VREL_000191,VESSEL_00112,BYD Zhengzhou,COMP_BYD,OWNER,,,High,SRC_0091,Owner field from seeded vessel record.
+VREL_000192,VESSEL_00112,BYD Zhengzhou,COMP_BYD,OPERATOR,,,High,SRC_0091,Operator field from seeded vessel record.
+VREL_000193,VESSEL_00113,BYD Shenzhen,COMP_BYD,OWNER,,,High,SRC_0092,Owner field from seeded vessel record.
+VREL_000194,VESSEL_00113,BYD Shenzhen,COMP_BYD,OPERATOR,,,High,SRC_0092,Operator field from seeded vessel record.
+VREL_000195,VESSEL_00114,BYD Xi'an,COMP_BYD,OWNER,,,High,SRC_0095,Owner field from seeded vessel record.
+VREL_000196,VESSEL_00114,BYD Xi'an,COMP_BYD,OPERATOR,,,High,SRC_0095,Operator field from seeded vessel record.
+VREL_000197,VESSEL_00115,BYD Changsha,COMP_BYD,OWNER,,,High,SRC_0093,Owner field from seeded vessel record.
+VREL_000198,VESSEL_00115,BYD Changsha,COMP_BYD,OPERATOR,,,High,SRC_0093,Operator field from seeded vessel record.
+VREL_000199,VESSEL_00116,BYD Jinan,COMP_BYD,OWNER,,,High,SRC_0094,Owner field from seeded vessel record.
+VREL_000200,VESSEL_00116,BYD Jinan,COMP_BYD,OPERATOR,,,High,SRC_0094,Operator field from seeded vessel record.
+VREL_000201,VESSEL_00117,SINOKOR NIIGATA,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000202,VESSEL_00117,SINOKOR NIIGATA,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000203,VESSEL_00118,MEREDITH VICTORY,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000204,VESSEL_00118,MEREDITH VICTORY,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000205,VESSEL_00119,KOOKYANG SINGAPORE,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000206,VESSEL_00119,KOOKYANG SINGAPORE,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000207,VESSEL_00120,GENEVA QUEEN,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000208,VESSEL_00120,GENEVA QUEEN,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000209,VESSEL_00121,Hakata Voyager,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000210,VESSEL_00121,Hakata Voyager,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000211,VESSEL_00122,Vostochny Voyager,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000212,VESSEL_00122,Vostochny Voyager,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000213,VESSEL_00123,HongKong Voyager,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000214,VESSEL_00123,HongKong Voyager,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000215,VESSEL_00124,Osaka Voyager,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000216,VESSEL_00124,Osaka Voyager,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000217,VESSEL_00125,NAGOYA TRADER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000218,VESSEL_00125,NAGOYA TRADER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000219,VESSEL_00126,SAWASDEE PACIFIC,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000220,VESSEL_00126,SAWASDEE PACIFIC,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000221,VESSEL_00127,SAWASDEE ATLANTIC,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000222,VESSEL_00127,SAWASDEE ATLANTIC,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000223,VESSEL_00128,SAWASDEE BALTIC,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000224,VESSEL_00128,SAWASDEE BALTIC,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000225,VESSEL_00129,SAWASDEE SUNRISE,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000226,VESSEL_00129,SAWASDEE SUNRISE,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000227,VESSEL_00130,HOCHIMINH VOYAGER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000228,VESSEL_00130,HOCHIMINH VOYAGER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000229,VESSEL_00131,JAKARTA VOYAGER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000230,VESSEL_00131,JAKARTA VOYAGER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000231,VESSEL_00132,SHANGHAI VOYAGER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000232,VESSEL_00132,SHANGHAI VOYAGER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000233,VESSEL_00133,NINGBO TRADER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000234,VESSEL_00133,NINGBO TRADER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000235,VESSEL_00134,YOKOHAMA TRADER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000236,VESSEL_00134,YOKOHAMA TRADER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000237,VESSEL_00135,SURABAYA VOYAGER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000238,VESSEL_00135,SURABAYA VOYAGER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000239,VESSEL_00136,KOBE TRADER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000240,VESSEL_00136,KOBE TRADER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000241,VESSEL_00137,CHENNAI VOYAGER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000242,VESSEL_00137,CHENNAI VOYAGER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000243,VESSEL_00138,SENDAI TRADER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000244,VESSEL_00138,SENDAI TRADER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000245,VESSEL_00139,QINGDAO TRADER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000246,VESSEL_00139,QINGDAO TRADER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000247,VESSEL_00140,YANGTZE TRADER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000248,VESSEL_00140,YANGTZE TRADER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000249,VESSEL_00141,NO.2 OCEAN PIONEER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000250,VESSEL_00141,NO.2 OCEAN PIONEER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000251,VESSEL_00142,OCEAN PIONEER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000252,VESSEL_00142,OCEAN PIONEER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000253,VESSEL_00143,SAWASDEE CHITTAGONG,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000254,VESSEL_00143,SAWASDEE CHITTAGONG,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000255,VESSEL_00144,SAWASDEE SHANGHAI,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000256,VESSEL_00144,SAWASDEE SHANGHAI,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000257,VESSEL_00145,SAWASDEE XIAMEN,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000258,VESSEL_00145,SAWASDEE XIAMEN,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000259,VESSEL_00146,SAWASDEE INCHEON,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000260,VESSEL_00146,SAWASDEE INCHEON,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000261,VESSEL_00147,SAWASDEE SIRIUS,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000262,VESSEL_00147,SAWASDEE SIRIUS,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000263,VESSEL_00148,SAWASDEE VEGA,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000264,VESSEL_00148,SAWASDEE VEGA,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000265,VESSEL_00149,SAWASDEE CAPELLA,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000266,VESSEL_00149,SAWASDEE CAPELLA,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000267,VESSEL_00150,SAWASDEE RIGEL,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000268,VESSEL_00150,SAWASDEE RIGEL,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000269,VESSEL_00151,SAWASDEE ALTAIR,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000270,VESSEL_00151,SAWASDEE ALTAIR,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000271,VESSEL_00152,SAWASDEE SPICA,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000272,VESSEL_00152,SAWASDEE SPICA,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000273,VESSEL_00153,SAWASDEE DENEB,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000274,VESSEL_00153,SAWASDEE DENEB,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000275,VESSEL_00154,YEOSU VOYAGER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000276,VESSEL_00154,YEOSU VOYAGER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000277,VESSEL_00155,INCHEON VOYAGER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000278,VESSEL_00155,INCHEON VOYAGER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000279,VESSEL_00156,ULSAN VOYAGER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000280,VESSEL_00156,ULSAN VOYAGER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000281,VESSEL_00157,SAWASDEE MIMOSA,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000282,VESSEL_00157,SAWASDEE MIMOSA,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000283,VESSEL_00158,TOYAMA TRADER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000284,VESSEL_00158,TOYAMA TRADER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000285,VESSEL_00159,KWANGYANG VOYAGER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000286,VESSEL_00159,KWANGYANG VOYAGER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000287,VESSEL_00160,AKITA TRADER,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000288,VESSEL_00160,AKITA TRADER,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000289,VESSEL_00161,MELBOURNE BRIDGE,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000290,VESSEL_00161,MELBOURNE BRIDGE,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000291,VESSEL_00162,SYDNEY BRIDGE,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000292,VESSEL_00162,SYDNEY BRIDGE,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000293,VESSEL_00163,MOJI EXPRESS,COMP_SINOKOR,OWNER,,,High,SRC_0102,Owner field from seeded vessel record.
+VREL_000294,VESSEL_00163,MOJI EXPRESS,COMP_SINOKOR,OPERATOR,,,High,SRC_0102,Operator field from seeded vessel record.
+VREL_000295,VESSEL_00164,Asia Excellence,COMP_CHEVRON,OWNER,,,High,SRC_0105,Owner field from seeded vessel record.
+VREL_000296,VESSEL_00164,Asia Excellence,COMP_CHEVRON_SHIPPING,OPERATOR,,,High,SRC_0105,Operator field from seeded vessel record.
+VREL_000297,VESSEL_00165,P. Long Beach,COMP_PERFORMANCE_SHIPPING,OWNER,,,High,SRC_0109,Owner field from seeded vessel record.
+VREL_000298,VESSEL_00165,P. Long Beach,COMP_PERFORMANCE_SHIPPING,OPERATOR,,,High,SRC_0109,Operator field from seeded vessel record.
+VREL_000299,VESSEL_00109,BYD Explorer No.1,COMP_BYD,CHARTERER,,,High,SRC_0091,Zodiac-owned PCTC leased/chartered to BYD.
+VREL_000300,VESSEL_00110,BYD Changzhou,COMP_BYD,CHARTERER,,,High,SRC_0091,Zodiac-owned PCTC leased/chartered to BYD.
+VREL_000301,VESSEL_00109,BYD Explorer No.1,COMP_BYD,CARGO_PRINCIPAL / DEDICATED_FLEET,,,High,SRC_0090,Dedicated BYD vehicle-export logistics fleet.
+VREL_000302,VESSEL_00110,BYD Changzhou,COMP_BYD,CARGO_PRINCIPAL / DEDICATED_FLEET,,,High,SRC_0090,Dedicated BYD vehicle-export logistics fleet.
+VREL_000303,VESSEL_00111,BYD Hefei,COMP_BYD,CARGO_PRINCIPAL / DEDICATED_FLEET,,,High,SRC_0090,Dedicated BYD vehicle-export logistics fleet.
+VREL_000304,VESSEL_00112,BYD Zhengzhou,COMP_BYD,CARGO_PRINCIPAL / DEDICATED_FLEET,,,High,SRC_0090,Dedicated BYD vehicle-export logistics fleet.
+VREL_000305,VESSEL_00113,BYD Shenzhen,COMP_BYD,CARGO_PRINCIPAL / DEDICATED_FLEET,,,High,SRC_0090,Dedicated BYD vehicle-export logistics fleet.
+VREL_000306,VESSEL_00114,BYD Xi'an,COMP_BYD,CARGO_PRINCIPAL / DEDICATED_FLEET,,,High,SRC_0090,Dedicated BYD vehicle-export logistics fleet.
+VREL_000307,VESSEL_00115,BYD Changsha,COMP_BYD,CARGO_PRINCIPAL / DEDICATED_FLEET,,,High,SRC_0090,Dedicated BYD vehicle-export logistics fleet.
+VREL_000308,VESSEL_00116,BYD Jinan,COMP_BYD,CARGO_PRINCIPAL / DEDICATED_FLEET,,,High,SRC_0090,Dedicated BYD vehicle-export logistics fleet.
+VREL_000309,VESSEL_00165,P. Long Beach,COMP_SEARIVER,TIME_CHARTERER,2025-12,~2027-12,High,SRC_0109,24 months +/-30 days at charterer's option.
+VREL_000310,VESSEL_00166,Largo Eagle,COMP_EXXON,CARGO_PRINCIPAL / SUB-CHARTER USER,2026-03,,Moderate,SRC_0110,Exxon booked cargo capacity via Vitol for U.S. Gulf-to-Australia fuel shipment.
+VREL_000311,VESSEL_00166,Largo Eagle,COMP_VITOL,CHARTER_CHAIN_INTERMEDIARY,2026-03,,Moderate,SRC_0110,Reuters reported vessels were under Vitol charter and effectively rented to Exxon.
+VREL_000312,VESSEL_00167,Nord Ventura,COMP_EXXON,CARGO_PRINCIPAL / SUB-CHARTER USER,2026-03,,Moderate,SRC_0110,Exxon booked cargo capacity via Vitol for U.S. Gulf-to-Australia fuel shipment.
+VREL_000313,VESSEL_00167,Nord Ventura,COMP_VITOL,CHARTER_CHAIN_INTERMEDIARY,2026-03,,Moderate,SRC_0110,Reuters reported vessels were under Vitol charter and effectively rented to Exxon.
+VREL_000314,VESSEL_00168,Rex Tillerson,COMP_QATARENERGY,FLEET_PROGRAM_SPONSOR / CARGO_PRINCIPAL,,,High,SRC_0086,First delivered vessel under QatarEnergy historic fleet expansion program; owner/operator to resolve.
+VREL_000315,VESSEL_00169,CAPT. KATTELMANN,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000316,VESSEL_00170,ATHENA,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,High,SRC_0189,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000317,VESSEL_00171,GFS GALAXY,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,High,SRC_0188,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000318,VESSEL_00172,GFS GENESIS,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000319,VESSEL_00173,GFS PRECIOUS,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000320,VESSEL_00174,GFS GISELLE,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000321,VESSEL_00175,GFS RUBY,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000322,VESSEL_00176,GFS PRESTIGE,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000323,VESSEL_00177,GFS PRIDE,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000324,VESSEL_00178,GFS RANNA,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000325,VESSEL_00179,GFS JADE,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000326,VESSEL_00180,GFS PERFECT,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000327,VESSEL_00181,GFS PEARL,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000328,VESSEL_00182,GFS JUNO,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000329,VESSEL_00183,GFS PRIME,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000330,VESSEL_00184,GFS SAPPHIRE,COMP_GFS_SHIP_MGMT,SHIP_MANAGER / PUBLISHED_MANAGED_FLEET,,,Moderate,SRC_0179,Vessel appears on GFS Ship Management's published fleet; role should be re-verified if ownership/management changes.
+VREL_000331,VESSEL_00171,GFS GALAXY,COMP_GFS,COMMERCIAL_OPERATOR,,2026-07-12,High,SRC_0184,Lloyd's List identified Global Feeder Shipping as operator at time of the Iranian attack.
+VREL_000332,VESSEL_00171,GFS GALAXY,COMP_ADPORTS,BENEFICIAL_OWNER / GROUP_CONTROL,,2026-07-12,High,SRC_0184,Lloyd's List identified AD Ports Group as beneficial owner; AD Ports held 81% of GFS by June 2026.
+VREL_000333,VESSEL_00177,GFS PRIDE,COMP_GFS,COMMERCIAL_OPERATOR,2020-09-21,,High,SRC_0186,Official GFS Ship Management release states JJS service was operated by Global Feeder Shipping.
+VREL_000334,VESSEL_00185,SIGYN W,COMP_CMA_CGM,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-08-26,2026-08-29,High,SRC_0191,Carrier schedule evidence: Rotterdam → Runavik. Does not establish legal ownership or technical management.
+VREL_000335,VESSEL_00186,KOI,COMP_CMA_CGM,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-08-27,2026-09-21,High,SRC_0191,Carrier schedule evidence: Busan → Houston. Does not establish legal ownership or technical management.
+VREL_000336,VESSEL_00187,CMA CGM AMBER,COMP_CMA_CGM,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-08-27,2026-08-29,High,SRC_0191,Carrier schedule evidence: Ningbo → Shanghai. Does not establish legal ownership or technical management.
+VREL_000337,VESSEL_00188,CMA CGM SORBONNE,COMP_CMA_CGM,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-08-26,2026-09-11,High,SRC_0191,Carrier schedule evidence: Malta Freeport → Port Klang. Does not establish legal ownership or technical management.
+VREL_000338,VESSEL_00189,CMA CGM MEKONG,COMP_CMA_CGM,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-08-26,2026-08-27,High,SRC_0191,Carrier schedule evidence: Rotterdam → Hamburg. Does not establish legal ownership or technical management.
+VREL_000339,VESSEL_00190,MSC UTMOST VIII,COMP_MSC,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0192,Carrier schedule evidence: Sines → Caucedo. Does not establish legal ownership or technical management.
+VREL_000340,VESSEL_00191,MSC TARA III,COMP_MSC,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0192,Carrier schedule evidence: Shanghai → Ningbo. Does not establish legal ownership or technical management.
+VREL_000341,VESSEL_00192,MSC KAYLA,COMP_MSC,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0192,Carrier schedule evidence: Antwerp → St Petersburg. Does not establish legal ownership or technical management.
+VREL_000342,VESSEL_00193,MSC JENNY II,COMP_MSC,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0192,Carrier schedule evidence: Gioia Tauro → Piraeus. Does not establish legal ownership or technical management.
+VREL_000343,VESSEL_00194,MSC SHANGHAI V,COMP_MSC,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0192,Carrier schedule evidence: Tekirdag → Piraeus. Does not establish legal ownership or technical management.
+VREL_000344,VESSEL_00195,MAERSK SANA,COMP_MAERSK,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0193,Carrier schedule evidence: Busan → Lazaro Cardenas. Does not establish legal ownership or technical management.
+VREL_000345,VESSEL_00196,MAERSK STOCKHOLM,COMP_MAERSK,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0193,Carrier schedule evidence: Tanjung Pelepas → Hong Kong. Does not establish legal ownership or technical management.
+VREL_000346,VESSEL_00197,ADRIAN MAERSK,COMP_MAERSK,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0193,Carrier schedule evidence: Port Said → Suez Canal. Does not establish legal ownership or technical management.
+VREL_000347,VESSEL_00198,BSG BONAIRE,COMP_MAERSK,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0193,Carrier schedule evidence: Algeciras → Livorno. Does not establish legal ownership or technical management.
+VREL_000348,VESSEL_00199,AS SIMONE,COMP_MAERSK,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0193,Carrier schedule evidence: Busan → Moji. Does not establish legal ownership or technical management.
+VREL_000349,VESSEL_00200,XIN FEI ZHOU,COMP_COSCO_LINES,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0194,Carrier schedule evidence: Xiamen → Hong Kong. Does not establish legal ownership or technical management.
+VREL_000350,VESSEL_00201,XIN TAI CANG,COMP_COSCO_LINES,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0194,Carrier schedule evidence: Singapore → Surabaya. Does not establish legal ownership or technical management.
+VREL_000351,VESSEL_00202,SEASMILE,COMP_COSCO_LINES,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0194,Carrier schedule evidence: Hong Kong → Yantian. Does not establish legal ownership or technical management.
+VREL_000352,VESSEL_00203,HANSA BREITENBURG,COMP_COSCO_LINES,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0194,Carrier schedule evidence: Nansha → Laem Chabang. Does not establish legal ownership or technical management.
+VREL_000353,VESSEL_00204,SMC COLUMBUS,COMP_COSCO_LINES,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0194,Carrier schedule evidence: Qingdao → Yokohama. Does not establish legal ownership or technical management.
+VREL_000354,VESSEL_00205,EVER FAR,COMP_EVERGREEN,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0195,Carrier schedule evidence: Ningbo → Yantian. Does not establish legal ownership or technical management.
+VREL_000355,VESSEL_00206,EVER BEFIT,COMP_EVERGREEN,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0195,Carrier schedule evidence: Taipei → Tokyo. Does not establish legal ownership or technical management.
+VREL_000356,VESSEL_00207,EVER LINKING,COMP_EVERGREEN,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0195,Carrier schedule evidence: Ningbo → Los Angeles. Does not establish legal ownership or technical management.
+VREL_000357,VESSEL_00208,EVER MEMO,COMP_EVERGREEN,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0195,Carrier schedule evidence: Laem Chabang → Vung Tau. Does not establish legal ownership or technical management.
+VREL_000358,VESSEL_00209,NORTHERN PRACTISE,COMP_EVERGREEN,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0195,Carrier schedule evidence: Singapore → Port Klang. Does not establish legal ownership or technical management.
+VREL_000359,VESSEL_00210,VALPARAISO EXPRESS,COMP_HAPAG_LLOYD,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0196,Carrier schedule evidence: Antwerp → Caucedo. Does not establish legal ownership or technical management.
+VREL_000360,VESSEL_00211,SALERNO EXPRESS,COMP_HAPAG_LLOYD,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0196,Carrier schedule evidence: Singapore → Mombasa. Does not establish legal ownership or technical management.
+VREL_000361,VESSEL_00212,CARTAGENA EXPRESS,COMP_HAPAG_LLOYD,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0196,Carrier schedule evidence: Rotterdam → London Gateway. Does not establish legal ownership or technical management.
+VREL_000362,VESSEL_00213,DAMIETTA EXPRESS,COMP_HAPAG_LLOYD,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0196,Carrier schedule evidence: Tanger Med → Singapore. Does not establish legal ownership or technical management.
+VREL_000363,VESSEL_00214,AL NASRIYAH,COMP_HAPAG_LLOYD,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0196,Carrier schedule evidence: Ningbo → Shanghai. Does not establish legal ownership or technical management.
+VREL_000364,VESSEL_00215,NYK FUJI,COMP_ONE,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0197,Carrier schedule evidence: Tokyo → Yokohama. Does not establish legal ownership or technical management.
+VREL_000365,VESSEL_00216,ONE SPHERE,COMP_ONE,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0197,Carrier schedule evidence: Busan → Manzanillo. Does not establish legal ownership or technical management.
+VREL_000366,VESSEL_00217,NYK VENUS,COMP_ONE,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0197,Carrier schedule evidence: Singapore → Laem Chabang. Does not establish legal ownership or technical management.
+VREL_000367,VESSEL_00218,ONE MODERN,COMP_ONE,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0197,Carrier schedule evidence: Busan → Vancouver. Does not establish legal ownership or technical management.
+VREL_000368,VESSEL_00219,ONE MILLAU,COMP_ONE,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0197,Carrier schedule evidence: Busan → Kaohsiung. Does not establish legal ownership or technical management.
+VREL_000369,VESSEL_00220,IBN AL ABBAR,COMP_YANG_MING,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0198,Carrier schedule evidence: Keelung → Taichung. Does not establish legal ownership or technical management.
+VREL_000370,VESSEL_00221,YM CAPACITY,COMP_YANG_MING,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0198,Carrier schedule evidence: Shanghai → Ningbo. Does not establish legal ownership or technical management.
+VREL_000371,VESSEL_00222,YM INCEPTION,COMP_YANG_MING,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0198,Carrier schedule evidence: Kaohsiung → Taichung. Does not establish legal ownership or technical management.
+VREL_000372,VESSEL_00223,YM EXCELLENCE,COMP_YANG_MING,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0198,Carrier schedule evidence: Shekou → Singapore. Does not establish legal ownership or technical management.
+VREL_000373,VESSEL_00224,YM IMMENSE,COMP_YANG_MING,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0198,Carrier schedule evidence: Laem Chabang → Ho Chi Minh City. Does not establish legal ownership or technical management.
+VREL_000374,VESSEL_00225,HMM VANCOUVER,COMP_HMM,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0199,Carrier schedule evidence: Ningbo → Shanghai. Does not establish legal ownership or technical management.
+VREL_000375,VESSEL_00226,HMM EMERALD,COMP_HMM,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0199,Carrier schedule evidence: Shanghai → Ningbo. Does not establish legal ownership or technical management.
+VREL_000376,VESSEL_00227,HMM HARMONY,COMP_HMM,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0199,Carrier schedule evidence: Ningbo → Ho Chi Minh City. Does not establish legal ownership or technical management.
+VREL_000377,VESSEL_00228,SKY RAINBOW,COMP_HMM,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0199,Carrier schedule evidence: Ho Chi Minh City → Incheon. Does not establish legal ownership or technical management.
+VREL_000378,VESSEL_00229,HMM SKY,COMP_HMM,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0199,Carrier schedule evidence: Busan → Shanghai. Does not establish legal ownership or technical management.
+VREL_000379,VESSEL_00230,KOTA SANTOS,COMP_PIL,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0200,Carrier schedule evidence: Nansha → Shekou. Does not establish legal ownership or technical management.
+VREL_000380,VESSEL_00231,KOTA SABAS,COMP_PIL,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0200,Carrier schedule evidence: Ningbo → Nansha. Does not establish legal ownership or technical management.
+VREL_000381,VESSEL_00232,KOTA GAYA,COMP_PIL,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0200,Carrier schedule evidence: Shanghai → Singapore. Does not establish legal ownership or technical management.
+VREL_000382,VESSEL_00233,SINAR PANGANDARAN,COMP_PIL,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0200,Carrier schedule evidence: Singapore → Kuantan. Does not establish legal ownership or technical management.
+VREL_000383,VESSEL_00234,KOTA SEMPENA,COMP_PIL,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0200,Carrier schedule evidence: Shanghai → Ningbo. Does not establish legal ownership or technical management.
+VREL_000384,VESSEL_00235,WAN HAI 283,COMP_WAN_HAI,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0201,Carrier schedule evidence: Kaohsiung → Taichung. Does not establish legal ownership or technical management.
+VREL_000385,VESSEL_00236,WAN HAI 358,COMP_WAN_HAI,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0201,Carrier schedule evidence: Hong Kong → Singapore. Does not establish legal ownership or technical management.
+VREL_000386,VESSEL_00237,WAN HAI 177,COMP_WAN_HAI,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0201,Carrier schedule evidence: Laem Chabang → Bangkok. Does not establish legal ownership or technical management.
+VREL_000387,VESSEL_00238,WAN HAI 333,COMP_WAN_HAI,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0201,Carrier schedule evidence: Laem Chabang → Shekou. Does not establish legal ownership or technical management.
+VREL_000388,VESSEL_00239,WAN HAI 101,COMP_WAN_HAI,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0201,Carrier schedule evidence: Port Klang → Penang. Does not establish legal ownership or technical management.
+VREL_000389,VESSEL_00240,ZIM EMERALD,COMP_ZIM,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0202,Carrier schedule evidence: Haifa → Da Chan Bay. Does not establish legal ownership or technical management.
+VREL_000390,VESSEL_00241,CARMEL I,COMP_ZIM,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0202,Carrier schedule evidence: New York → Norfolk. Does not establish legal ownership or technical management.
+VREL_000391,VESSEL_00242,MARLA BULL,COMP_ZIM,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0202,Carrier schedule evidence: Haifa → Koper. Does not establish legal ownership or technical management.
+VREL_000392,VESSEL_00243,ZIM CHINA,COMP_ZIM,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0202,Carrier schedule evidence: Haifa → Piraeus. Does not establish legal ownership or technical management.
+VREL_000393,VESSEL_00244,MTT SANDAKAN,COMP_ZIM,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0202,Carrier schedule evidence: Port Klang → Semarang. Does not establish legal ownership or technical management.
+VREL_000394,VESSEL_00245,MARBURG,COMP_UNIFEEDER,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0203,Carrier schedule evidence: Bremerhaven → Kiel Canal. Does not establish legal ownership or technical management.
+VREL_000395,VESSEL_00246,ELBSKY,COMP_UNIFEEDER,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0203,Carrier schedule evidence: Kiel Canal → Tallinn. Does not establish legal ownership or technical management.
+VREL_000396,VESSEL_00247,JUDITH,COMP_UNIFEEDER,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0203,Carrier schedule evidence: Hamburg → Kiel Canal. Does not establish legal ownership or technical management.
+VREL_000397,VESSEL_00248,ELBSUMMER,COMP_UNIFEEDER,SCHEDULED_BY / SERVICE_DEPLOYMENT,,,High,SRC_0203,Carrier schedule evidence: Kiel Canal → Klaipeda. Does not establish legal ownership or technical management.
+VREL_000398,VESSEL_00249,SAN PEDRO,COMP_SEALEAD,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-05,2026-09-07,High,SRC_0204,Carrier schedule evidence: Port Klang → Jakarta. Does not establish legal ownership or technical management.
+VREL_000399,VESSEL_00250,REN JIAN 8,COMP_SEALEAD,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-07,2026-09-15,High,SRC_0204,Carrier schedule evidence: Shanghai → Yokohama. Does not establish legal ownership or technical management.
+VREL_000400,VESSEL_00251,ZHONG GU YIN CHUAN,COMP_SEALEAD,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-07,2026-09-10,High,SRC_0204,Carrier schedule evidence: Ningbo → Nansha. Does not establish legal ownership or technical management.
+VREL_000401,VESSEL_00252,MARINA VOYAGER,COMP_SEALEAD,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-07,2026-09-12,High,SRC_0204,Carrier schedule evidence: Visakhapatnam → Tanjung Pelepas. Does not establish legal ownership or technical management.
+VREL_000402,VESSEL_00253,ESL SHEKOU,COMP_ESL,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-03,2026-09-07,High,SRC_0205,Carrier schedule evidence: Shanghai → Busan. Does not establish legal ownership or technical management.
+VREL_000403,VESSEL_00254,ESL WASL,COMP_ESL,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-05,2026-09-05,High,SRC_0205,Carrier schedule evidence: Nhava Sheva → Hazira. Does not establish legal ownership or technical management.
+VREL_000404,VESSEL_00255,ZHONG GU KUN MING,COMP_ESL,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-05,2026-09-10,High,SRC_0205,Carrier schedule evidence: Nhava Sheva → Salalah. Does not establish legal ownership or technical management.
+VREL_000405,VESSEL_00256,BRIGHT,COMP_ESL,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-06,2026-09-09,High,SRC_0205,Carrier schedule evidence: Dar es Salaam → Mombasa. Does not establish legal ownership or technical management.
+VREL_000406,VESSEL_00257,TROUPER,COMP_XPRESS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-08-27,2026-08-27,High,SRC_0206,Carrier schedule evidence: Las Palmas → Santa Cruz de Tenerife. Does not establish legal ownership or technical management.
+VREL_000407,VESSEL_00258,X PRESS ANGLESEY,COMP_XPRESS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-08-27,2026-08-30,High,SRC_0206,Carrier schedule evidence: Singapore → Laem Chabang. Does not establish legal ownership or technical management.
+VREL_000408,VESSEL_00259,SKY LIGHT,COMP_XPRESS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-08-27,2026-08-29,High,SRC_0206,Carrier schedule evidence: La Guaira → Cartagena. Does not establish legal ownership or technical management.
+VREL_000409,VESSEL_00260,GOLDEN STAR 1,COMP_XPRESS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-08-27,2026-08-28,High,SRC_0206,Carrier schedule evidence: Johor Port → Singapore. Does not establish legal ownership or technical management.
+VREL_000410,VESSEL_00261,SSF VALENCE,COMP_GFS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-05,2026-09-11,High,SRC_0207,Carrier schedule evidence: Port Said → Aqaba. Does not establish legal ownership or technical management.
+VREL_000411,VESSEL_00262,SM MANALI,COMP_GFS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-06,2026-09-09,High,SRC_0207,Carrier schedule evidence: Colombo → Visakhapatnam. Does not establish legal ownership or technical management.
+VREL_000412,VESSEL_00263,REMAH,COMP_GFS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-06,2026-09-07,High,SRC_0207,Carrier schedule evidence: Misurata → Khoms. Does not establish legal ownership or technical management.
+VREL_000413,VESSEL_00170,ATHENA,COMP_GFS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-06,2026-09-10,High,SRC_0207,Carrier schedule evidence: Port Said → Misurata. Does not establish legal ownership or technical management.
+VREL_000414,VESSEL_00264,MIRROR,COMP_GFS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-09-06,2026-09-10,High,SRC_0207,Carrier schedule evidence: Rotterdam → Helsinki. Does not establish legal ownership or technical management.
+VREL_000415,VESSEL_00265,HUA DA 610,COMP_SAFEEN_FEEDERS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-07-07,2026-08-06,High,SRC_0208,Carrier schedule evidence: Saint Petersburg → Qingdao. Does not establish legal ownership or technical management.
+VREL_000416,VESSEL_00266,AL BATEEN,COMP_SAFEEN_FEEDERS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-07-07,2026-07-14,High,SRC_0208,Carrier schedule evidence: Tanger Med → Nouakchott. Does not establish legal ownership or technical management.
+VREL_000417,VESSEL_00267,SAFEEN PRIZE,COMP_SAFEEN_FEEDERS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-07-07,2026-07-13,High,SRC_0208,Carrier schedule evidence: Jeddah → Salalah. Does not establish legal ownership or technical management.
+VREL_000418,VESSEL_00268,SSF DREAM,COMP_SAFEEN_FEEDERS,SCHEDULED_BY / SERVICE_DEPLOYMENT,2026-07-11,2026-07-15,High,SRC_0208,Carrier schedule evidence: Qingdao → Shanghai. Does not establish legal ownership or technical management.
+VREL_000419,VESSEL_00272,GFS RHEA,COMP_GFS,REGISTERED_OWNER / REGISTRY_ASSOCIATION,,,High,SRC_0210,ShipVault lists Global Feeder Shipping (GFS) as owner; keep commercial deployment and technical management as separate relationships.
+VREL_000420,VESSEL_00290,Tamarack,COMP_EUREKA_SHIPPING,OWNER / JV VEHICLE,2026-09-07,,High,SRC_0168,CSL identifies Eureka Shipping as owner.
+VREL_000421,VESSEL_00290,Tamarack,COMP_CSL_CANADA,MANAGER / OPERATOR,2026-09-07,,High,SRC_0168,Managed by CSL's Canadian division.
+VREL_000422,VESSEL_00312,Algoma East Coast,COMP_ALGOMA_TANKERS,COMMERCIAL / TECHNICAL OPERATOR,2026-09-07,,High,SRC_0171,Algoma-associated tanker operator.
+VREL_000423,VESSEL_00312,Algoma East Coast,COMP_ALGOMA,FLEET PROGRAM / GROUP EXPOSURE,2026-09-07,,High,SRC_0155,Included in Algoma's current tanker program.
+VREL_000424,VESSEL_00313,Algoma Acadian,COMP_ALGOMA_TANKERS,COMMERCIAL / TECHNICAL OPERATOR,2026-09-07,,High,SRC_0171,Algoma-associated tanker operator.
+VREL_000425,VESSEL_00313,Algoma Acadian,COMP_ALGOMA,FLEET PROGRAM / GROUP EXPOSURE,2026-09-07,,High,SRC_0155,Included in Algoma's current tanker program.
+VREL_000426,VESSEL_00001,UGR Al Samha,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000427,VESSEL_00001,UGR Al Samha,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000428,VESSEL_00002,UGR Zakher,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000429,VESSEL_00002,UGR Zakher,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000430,VESSEL_00003,UGR Al Reef,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000431,VESSEL_00003,UGR Al Reef,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000432,VESSEL_00004,Al Jubail,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000433,VESSEL_00004,Al Jubail,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000434,VESSEL_00005,Ramhan,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000435,VESSEL_00005,Ramhan,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000436,VESSEL_00006,UGR Arabian Gulf,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000437,VESSEL_00006,UGR Arabian Gulf,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000438,VESSEL_00007,Erk İzmir,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000439,VESSEL_00007,Erk İzmir,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000440,VESSEL_00008,Abu Samrah,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000441,VESSEL_00008,Abu Samrah,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000442,VESSEL_00009,UGR İstanbul,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000443,VESSEL_00009,UGR İstanbul,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000444,VESSEL_00010,Saffet Bey,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000445,VESSEL_00010,Saffet Bey,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000446,VESSEL_00011,Super Fast Baleares,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000447,VESSEL_00011,Super Fast Baleares,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000448,VESSEL_00012,Chang Sheng Hong,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000449,VESSEL_00012,Chang Sheng Hong,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000450,VESSEL_00013,JINANAH,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000451,VESSEL_00013,JINANAH,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000452,VESSEL_00014,SDERIA,COMP_UGR,OWNER,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000453,VESSEL_00014,SDERIA,COMP_UGR,OPERATOR,,,High,SRC_0060,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000454,VESSEL_00015,CMA CGM MONTE CRISTO,COMP_CMA_CGM,OWNER,,,High,SRC_0045,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000455,VESSEL_00015,CMA CGM MONTE CRISTO,COMP_CMA_CGM,OPERATOR,,,High,SRC_0045,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000456,VESSEL_00274,Baie Comeau,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000457,VESSEL_00274,Baie Comeau,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000458,VESSEL_00275,Baie St. Paul,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000459,VESSEL_00275,Baie St. Paul,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000460,VESSEL_00276,CSL Assiniboine,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000461,VESSEL_00276,CSL Assiniboine,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000462,VESSEL_00277,CSL Laurentien,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000463,VESSEL_00277,CSL Laurentien,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000464,VESSEL_00278,CSL Niagara,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000465,VESSEL_00278,CSL Niagara,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000466,VESSEL_00279,CSL Tadoussac,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000467,VESSEL_00279,CSL Tadoussac,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000468,VESSEL_00280,Frontenac,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000469,VESSEL_00280,Frontenac,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000470,VESSEL_00281,Nukumi,COMP_CSL_CANADA,OWNER,,,High,SRC_0169,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000471,VESSEL_00281,Nukumi,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0169,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000472,VESSEL_00282,Rt. Hon. Paul J. Martin,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000473,VESSEL_00282,Rt. Hon. Paul J. Martin,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000474,VESSEL_00283,Thunder Bay,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000475,VESSEL_00283,Thunder Bay,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000476,VESSEL_00284,Whitefish Bay,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000477,VESSEL_00284,Whitefish Bay,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000478,VESSEL_00285,CSL St-Laurent,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000479,VESSEL_00285,CSL St-Laurent,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000480,VESSEL_00286,CSL Welland,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000481,VESSEL_00286,CSL Welland,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000482,VESSEL_00287,Ferbec,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000483,VESSEL_00287,Ferbec,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000484,VESSEL_00288,Oakglen,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000485,VESSEL_00288,Oakglen,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000486,VESSEL_00289,Spruceglen,COMP_CSL_CANADA,OWNER,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000487,VESSEL_00289,Spruceglen,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0153,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000488,VESSEL_00290,Tamarack,COMP_EUREKA_SHIPPING,OWNER,,,High,SRC_0170,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000489,VESSEL_00290,Tamarack,COMP_CSL_CANADA,OPERATOR,,,High,SRC_0170,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000490,VESSEL_00291,Algoma Guardian,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000491,VESSEL_00291,Algoma Guardian,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000492,VESSEL_00292,Algoma Harvester,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000493,VESSEL_00292,Algoma Harvester,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000494,VESSEL_00293,Algoma Innovator,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000495,VESSEL_00293,Algoma Innovator,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000496,VESSEL_00294,Algoma Intrepid,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000497,VESSEL_00294,Algoma Intrepid,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000498,VESSEL_00295,Algoma Mariner,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000499,VESSEL_00295,Algoma Mariner,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000500,VESSEL_00296,Algoma Niagara,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000501,VESSEL_00296,Algoma Niagara,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000502,VESSEL_00297,Algoma Sault,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000503,VESSEL_00297,Algoma Sault,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000504,VESSEL_00298,Algoma Strongfield,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000505,VESSEL_00298,Algoma Strongfield,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000506,VESSEL_00299,Algoma Transport,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000507,VESSEL_00299,Algoma Transport,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000508,VESSEL_00300,Capt. Henry Jackman,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000509,VESSEL_00300,Capt. Henry Jackman,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000510,VESSEL_00301,G3 Marquis,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000511,VESSEL_00301,G3 Marquis,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000512,VESSEL_00302,John D Leitch,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000513,VESSEL_00302,John D Leitch,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000514,VESSEL_00303,Radcliffe R Latimer,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000515,VESSEL_00303,Radcliffe R Latimer,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000516,VESSEL_00304,Tim S Dool,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000517,VESSEL_00304,Tim S Dool,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000518,VESSEL_00305,Algonova,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000519,VESSEL_00305,Algonova,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000520,VESSEL_00306,Algoscotia,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000521,VESSEL_00306,Algoscotia,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000522,VESSEL_00307,Algosea,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000523,VESSEL_00307,Algosea,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000524,VESSEL_00308,Algoterra,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000525,VESSEL_00308,Algoterra,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000526,VESSEL_00309,Algotitan,COMP_ALGOMA,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000527,VESSEL_00309,Algotitan,COMP_ALGOMA,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000528,VESSEL_00310,Algoma Bear,COMP_ALGOMA,OWNER,,,High,SRC_0174,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000529,VESSEL_00310,Algoma Bear,COMP_ALGOMA,OPERATOR,,,High,SRC_0174,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000530,VESSEL_00311,Algoma Endeavour,COMP_ALGOMA,OWNER,,,High,SRC_0175,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000531,VESSEL_00311,Algoma Endeavour,COMP_ALGOMA,OPERATOR,,,High,SRC_0175,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000532,VESSEL_00312,Algoma East Coast,COMP_FUNDY_TANKERS,OWNER,,,High,SRC_0172,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000533,VESSEL_00312,Algoma East Coast,COMP_ALGOMA_TANKERS,OPERATOR,,,High,SRC_0172,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000534,VESSEL_00313,Algoma Acadian,COMP_FUNDY_TANKERS,OWNER,,,High,SRC_0173,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000535,VESSEL_00313,Algoma Acadian,COMP_ALGOMA_TANKERS,OPERATOR,,,High,SRC_0173,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000536,VESSEL_00314,Mark W. Barker,COMP_INTERLAKE,OWNER,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000537,VESSEL_00314,Mark W. Barker,COMP_INTERLAKE,OPERATOR,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000538,VESSEL_00315,Paul R. Tregurtha,COMP_INTERLAKE,OWNER,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000539,VESSEL_00315,Paul R. Tregurtha,COMP_INTERLAKE,OPERATOR,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000540,VESSEL_00316,James R. Barker,COMP_INTERLAKE,OWNER,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000541,VESSEL_00316,James R. Barker,COMP_INTERLAKE,OPERATOR,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000542,VESSEL_00317,Mesabi Miner,COMP_INTERLAKE,OWNER,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000543,VESSEL_00317,Mesabi Miner,COMP_INTERLAKE,OPERATOR,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000544,VESSEL_00318,Lee A. Tregurtha,COMP_INTERLAKE,OWNER,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000545,VESSEL_00318,Lee A. Tregurtha,COMP_INTERLAKE,OPERATOR,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000546,VESSEL_00319,Honorable James L. Oberstar,COMP_INTERLAKE,OWNER,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000547,VESSEL_00319,Honorable James L. Oberstar,COMP_INTERLAKE,OPERATOR,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000548,VESSEL_00320,Kaye E. Barker,COMP_INTERLAKE,OWNER,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000549,VESSEL_00320,Kaye E. Barker,COMP_INTERLAKE,OPERATOR,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000550,VESSEL_00321,Herbert C. Jackson,COMP_INTERLAKE,OWNER,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000551,VESSEL_00321,Herbert C. Jackson,COMP_INTERLAKE,OPERATOR,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000552,VESSEL_00322,Dorothy Ann,COMP_INTERLAKE,OWNER,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000553,VESSEL_00322,Dorothy Ann,COMP_INTERLAKE,OPERATOR,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000554,VESSEL_00323,Stewart J. Cort,COMP_INTERLAKE,OWNER,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000555,VESSEL_00323,Stewart J. Cort,COMP_INTERLAKE,OPERATOR,,,High,SRC_0156,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000556,VESSEL_00324,American Century,COMP_ASC,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000557,VESSEL_00324,American Century,COMP_ASC,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000558,VESSEL_00325,American Courage,COMP_ASC,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000559,VESSEL_00325,American Courage,COMP_ASC,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000560,VESSEL_00326,American Integrity,COMP_ASC,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000561,VESSEL_00326,American Integrity,COMP_ASC,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000562,VESSEL_00327,American Mariner,COMP_ASC,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000563,VESSEL_00327,American Mariner,COMP_ASC,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000564,VESSEL_00328,American Spirit,COMP_ASC,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000565,VESSEL_00328,American Spirit,COMP_ASC,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000566,VESSEL_00329,Burns Harbor,COMP_ASC,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000567,VESSEL_00329,Burns Harbor,COMP_ASC,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000568,VESSEL_00330,H. Lee White,COMP_ASC,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000569,VESSEL_00330,H. Lee White,COMP_ASC,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000570,VESSEL_00331,Indiana Harbor,COMP_ASC,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000571,VESSEL_00331,Indiana Harbor,COMP_ASC,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000572,VESSEL_00332,John J Boland,COMP_ASC,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000573,VESSEL_00332,John J Boland,COMP_ASC,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000574,VESSEL_00333,Sam Laud,COMP_ASC,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000575,VESSEL_00333,Sam Laud,COMP_ASC,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000576,VESSEL_00334,Walter J. McCarthy Jr.,COMP_ASC,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000577,VESSEL_00334,Walter J. McCarthy Jr.,COMP_ASC,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000578,VESSEL_00335,Calumet,COMP_GRN,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000579,VESSEL_00335,Calumet,COMP_GRN,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000580,VESSEL_00336,Defiance,COMP_GRN,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000581,VESSEL_00336,Defiance,COMP_GRN,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000582,VESSEL_00337,Manitowoc,COMP_GRN,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000583,VESSEL_00337,Manitowoc,COMP_GRN,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000584,VESSEL_00338,Menominee,COMP_GRN,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000585,VESSEL_00338,Menominee,COMP_GRN,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000586,VESSEL_00339,Victory,COMP_GRN,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000587,VESSEL_00339,Victory,COMP_GRN,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000588,VESSEL_00340,Olive L Moore,COMP_GRN,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000589,VESSEL_00340,Olive L Moore,COMP_GRN,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000590,VESSEL_00341,Ashtabula,COMP_GRN,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000591,VESSEL_00341,Ashtabula,COMP_GRN,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000592,VESSEL_00342,Cuyahoga,COMP_LOWER_LAKES,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000593,VESSEL_00342,Cuyahoga,COMP_LOWER_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000594,VESSEL_00343,Kaministiqua,COMP_LOWER_LAKES,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000595,VESSEL_00343,Kaministiqua,COMP_LOWER_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000596,VESSEL_00344,Manitoulin,COMP_LOWER_LAKES,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000597,VESSEL_00344,Manitoulin,COMP_LOWER_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000598,VESSEL_00345,Michipicoten,COMP_LOWER_LAKES,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000599,VESSEL_00345,Michipicoten,COMP_LOWER_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000600,VESSEL_00346,Robert S. Pierson,COMP_LOWER_LAKES,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000601,VESSEL_00346,Robert S. Pierson,COMP_LOWER_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000602,VESSEL_00347,Saginaw,COMP_LOWER_LAKES,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000603,VESSEL_00347,Saginaw,COMP_LOWER_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000604,VESSEL_00348,Arthur M. Anderson,COMP_GREAT_LAKES_FLEET,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000605,VESSEL_00348,Arthur M. Anderson,COMP_KEY_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000606,VESSEL_00349,Cason J. Callaway,COMP_GREAT_LAKES_FLEET,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000607,VESSEL_00349,Cason J. Callaway,COMP_KEY_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000608,VESSEL_00350,Edgar B. Speer,COMP_GREAT_LAKES_FLEET,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000609,VESSEL_00350,Edgar B. Speer,COMP_KEY_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000610,VESSEL_00351,Edwin H. Gott,COMP_GREAT_LAKES_FLEET,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000611,VESSEL_00351,Edwin H. Gott,COMP_KEY_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000612,VESSEL_00352,Great Republic,COMP_GREAT_LAKES_FLEET,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000613,VESSEL_00352,Great Republic,COMP_KEY_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000614,VESSEL_00353,John G. Munson,COMP_GREAT_LAKES_FLEET,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000615,VESSEL_00353,John G. Munson,COMP_KEY_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000616,VESSEL_00354,Philip R. Clarke,COMP_GREAT_LAKES_FLEET,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000617,VESSEL_00354,Philip R. Clarke,COMP_KEY_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000618,VESSEL_00355,Presque Isle,COMP_GREAT_LAKES_FLEET,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000619,VESSEL_00355,Presque Isle,COMP_KEY_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000620,VESSEL_00356,Roger Blough,COMP_GREAT_LAKES_FLEET,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000621,VESSEL_00356,Roger Blough,COMP_KEY_LAKES,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000622,VESSEL_00357,Badger,COMP_LAKE_MICHIGAN_CARFERRY,OWNER,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000623,VESSEL_00357,Badger,COMP_LAKE_MICHIGAN_CARFERRY,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000624,VESSEL_00358,Florence Spirit,COMP_MCKEIL,OWNER,,,High,SRC_0177,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000625,VESSEL_00358,Florence Spirit,COMP_MCKEIL,OPERATOR,,,High,SRC_0177,Generated from canonical vessel owner/operator field during v1.9 branch merge.

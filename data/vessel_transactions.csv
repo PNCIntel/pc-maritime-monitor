@@ -1,0 +1,2 @@
+﻿Transaction ID,Vessel ID,IMO,Vessel Name,Buyer Company ID,Seller Company ID,Transaction Type,Announced Date,Closed / Delivered Date,Price USD,Vessel Age at Sale,Status,Source ID,Source URL,Notes
+VTX_TEMPLATE,,,,,,Purchase / sale / sale-leaseback / fleet acquisition,,,,,Template,,,"Use this table to measure second-hand accumulation, divestment and fleet renewal without changing historical ownership relationships."

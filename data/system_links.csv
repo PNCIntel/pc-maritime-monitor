@@ -1,0 +1,6 @@
+﻿Link ID,System ID,From Node / Area,To Node / Area,Segment / Route,Mode,Vessel Classes,Seasonal,Infrastructure Dependencies,Criticality,Notes,Source ID
+GL_LINK_0001,SYS_GLSS,Atlantic / Montreal,Lake Ontario,St. Lawrence Seaway,Deep-draft maritime,Seawaymax / ocean-going,Yes,Montreal-Lake Ontario lock section,Critical,Atlantic ↔ Great Lakes entry corridor,SRC_0145
+GL_LINK_0002,SYS_GLSS,Lake Ontario,Lake Erie,Welland Canal,Canal / locks,Seawaymax,Yes,8 Canadian locks,Critical,Required to bypass Niagara Falls,SRC_0145
+GL_LINK_0003,SYS_GLSS,Lake Erie,Lake Huron,Detroit River / Lake St. Clair / St. Clair River,Connecting waterways,Lakers / Seawaymax,Yes,Narrow river / lake channels,High,Detroit-Windsor industrial route,SRC_0145
+GL_LINK_0004,SYS_GLSS,Lake Huron,Lake Superior,St. Marys River / Soo Locks,Lock / river,Lakers / Seawaymax,Yes,Soo Locks,Critical,Primary Lake Superior gateway,SRC_0148
+GL_LINK_0005,SYS_GLSS,Lake Huron,Lake Michigan,Straits of Mackinac,Natural strait,Lakers / regional / cruise,Yes,Straits of Mackinac,High,Lake Michigan connection,SRC_0145

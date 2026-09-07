@@ -1,0 +1,16 @@
+﻿GL Cause ID,Event Family,Event Type,Primary Location Type,Potential Trade / Operational Impact,Priority
+GL_DISR_01,Navigation Infrastructure,Lock outage / reduced lock availability,Soo / Welland / Seaway locks,Vessel queues; cargo delay; voyage cancellation / reroute,High
+GL_DISR_02,Navigation Infrastructure,Bridge restriction / malfunction,Welland / urban channels,Transit delay; height restriction; queue,Medium-High
+GL_DISR_03,Hydrographic,Shallow water / low water / draft restriction,Canals / ports / channels,Reduced cargo lift; delay; vessel restriction,High
+GL_DISR_04,Weather,Severe storm / high wind / waves / fog,Open Lakes / approaches,Delay; anchorage; casualty risk,High
+GL_DISR_05,Ice,Freeze-up / ice congestion / icebreaking constraint,Lakes / rivers / locks,Season delay; convoy / assistance; reduced speed,High
+GL_DISR_06,Vessel Casualty,Grounding / allision / collision,Ports / rivers / locks,Channel closure; pollution; cargo / passenger delay,High
+GL_DISR_07,Vessel Mechanical,Propulsion / steering / power failure,System-wide,Delay; tow / repair; cargo schedule impact,Medium-High
+GL_DISR_08,Cargo / Pollution,Cargo spill / fuel spill / loss overboard,Ports / channels / lakes,Closure; cleanup; environmental / regulatory impact,High
+GL_DISR_09,Labour,Port / Seaway / pilotage / rail / terminal labour action,Ports / locks / hinterland,Cargo backlog; reduced capacity; diversions,High
+GL_DISR_10,Pilotage / Regulatory,Pilot shortage / rule / inspection / customs delay,Seaway / cross-border segments,Transit delay; berth / schedule disruption,Medium
+GL_DISR_11,Port / Terminal,"Berth, loader, conveyor, crane or rail failure",Cargo terminals,Loading/unloading delay; vessel queue,Medium-High
+GL_DISR_12,Industrial Demand,Steel mill / mine / grain elevator outage,Origin or destination industry,Voyage cancellations; cargo-flow shift,Medium-High
+GL_DISR_13,Cruise / Passenger,Cruise vessel casualty / berth conflict / passenger disruption,Cruise ports / locks,Passenger disruption; commercial-vessel delay if navigation affected,Medium
+GL_DISR_14,Cyber / IT,"Port, lock, terminal, rail or carrier system outage",Digital / operational systems,"Scheduling, access or cargo-handling disruption",Medium-High
+GL_DISR_15,Seasonal Closure,Planned winter shutdown / opening delay,Seaway / Soo Locks,Structural seasonal capacity constraint,High

@@ -1,0 +1,50 @@
+﻿Fleet ID,Company ID,Mode,Measure,Count,Capacity / Scale,Notes,Source ID,As Of
+FLEET_0001,COMP_CMA_CGM,Container shipping,Owned vessels,400,,CMA CGM Q1 2026 reported MONTE CRISTO as the Group's 400th owned vessel.,SRC_0045,2026-03-31
+FLEET_0002,COMP_CMA_AIR,Air cargo,Freighter aircraft,8,,Q1 2026: fleet of eight aircraft operated under CMA CGM AIR CARGO and Air Belgium brands.,SRC_0045,2026-03-31
+FLEET_0003,COMP_MAERSK,Container shipping,Dual-fuel vessels operating,21,,Q1 2026 management review.,SRC_0047,2026-03-31
+FLEET_0004,COMP_MSC,Container shipping,Cargo vessels,1000,,MSC public key figures.,SRC_0050,2026-09-07
+FLEET_0005,COMP_MSC,Air cargo,Aircraft,7,,MSC public key figures.,SRC_0050,2026-09-07
+FLEET_0006,COMP_COSCO_GROUP,All shipping,Total vessels,1660,135000000 DWT,COSCO SHIPPING group fleet at end-2025.,SRC_0054,2025-12-31
+FLEET_0007,COMP_COSCO_LINES,Container shipping,Container vessels,456,~2.4m TEU,COSCO SHIPPING Lines fleet at end-May 2026.,SRC_0053,2026-05-31
+FLEET_0008,COMP_EVERGREEN,Container shipping,Operating fleet,208,1.627m TEU,Latest structured official fleet count captured from 2023 sustainability report; refresh queued.,SRC_0057,2023-12-31
+FLEET_0009,COMP_ADNOC_LS,All maritime / offshore,"Owned, chartered and operated vessels",900,900+,"Corporate fleet sheet aggregate across shipping, integrated logistics and services.",SRC_0066,2026-01
+FLEET_0010,COMP_ADNOC_LS,Shipping,Shipping fleet,112,112 vessels,Official fleet sheet shipping-fleet count; individual seed records remain incomplete.,SRC_0066,2026-01
+FLEET_0011,COMP_NAVIG8,Shipping,Fleet integrated through acquisition,32,32 vessels,ADNOC L&S integrated Navig8's 32-vessel fleet after acquisition; individual Navig8 seed captures remain partial.,SRC_0069,2025-2026
+FLEET_0012,COMP_ADNOC_LS,Crude oil,VLCC fleet after Aug 2026 acquisition,14,14 VLCC,Post-acquisition fleet count.,SRC_0069,2026-08-07
+FLEET_0013,COMP_ADNOC_LS,Gas shipping,VLGC fleet after Aug 2026 acquisition,12,12 VLGC,Post-acquisition fleet count.,SRC_0069,2026-08-07
+FLEET_0014,COMP_BAHRI,All shipping,Owned fleet,107,107 vessels,Owned fleet at end-June 2026.,SRC_0074,2026-06-30
+FLEET_0015,COMP_BAHRI,All shipping,Operated fleet,109,107 owned + 2 long-term leased,Bahri Q2 2026 operational total; three floating desalination barges are separate assets.,SRC_0074,2026-06-30
+FLEET_0016,COMP_BAHRI,Crude oil,VLCC fleet,50,50 VLCC,End-2025 class breakdown; Q2 2026 fleet total subsequently changed.,SRC_0077,2025-12-31
+FLEET_0017,COMP_BAHRI,Chemicals / products,Chemical & product tankers,33,33 vessels,End-2025 class breakdown.,SRC_0077,2025-12-31
+FLEET_0018,COMP_BAHRI,Dry bulk,Dry bulk carriers,13,13 vessels,End-2025 class breakdown.,SRC_0077,2025-12-31
+FLEET_0019,COMP_BAHRI,RoCon / multipurpose,RoCon and multipurpose vessels,8,8 vessels,End-2025 class breakdown.,SRC_0077,2025-12-31
+FLEET_0020,COMP_NAKILAT,Newbuild program,Newbuild orderbook,40,40 vessels,H1 2026 total orderbook across South Korea and China; first deliveries expected later 2026.,SRC_0079,2026-06-30
+FLEET_0021,COMP_MILAHA,Gas & petrochem,Wholly owned vessels,3,2 LNG vessels + 1 FSO,2025 annual-report baseline; Milaha also has equity exposure to Nakilat and six LNG carriers.,SRC_0082,2025-12-31
+FLEET_0022,COMP_QATARENERGY,LNG transportation,Existing LNG transport fleet,69,69 LNG vessels,Fleet utilized by QatarEnergy and venture partners; ownership is distributed across shipowners/JVs.,SRC_0085,2026-09-07
+FLEET_0023,COMP_QATARENERGY,LNG fleet expansion,Expansion program,128,"104 x 174,000 m3 + 24 x 271,000 m3 QC-Max","Fleet expansion is largely executed through shipowner long-term charter structures, not simple direct ownership.",SRC_0086,2025-11
+FLEET_0024,COMP_BYD,Vehicle shipping,Dedicated car-carrier fleet,8,8 PCTCs,Eight dedicated vehicle carriers by Aug 2026; two first vessels are Zodiac-owned and chartered to BYD.,SRC_0090,2026-08-10
+FLEET_0025,COMP_ZIM,Container shipping,Operated containerships,115,"707,000 TEU",Q2 2026 operated fleet.,SRC_0096,2026-06-30
+FLEET_0026,COMP_ZIM,Vehicle shipping,Operated car carriers,13,13 car carriers,Q2 2026 operated fleet; names / ownership / charter counterparties still to resolve.,SRC_0096,2026-06-30
+FLEET_0027,COMP_SINOKOR,All shipping,Operating fleet,66,66 vessels,English corporate site headline count.,SRC_0099,2026-09-07
+FLEET_0028,COMP_BP_SHIPPING,Oil / LNG / supply,International fleet baseline,48,48 vessels,End-2024 filing baseline; stale for current 2026 position and requires refresh.,SRC_0103,2024-12-31
+FLEET_0029,COMP_CHEVRON_SHIPPING,Energy shipping,Owned / bareboat-chartered fleet,,,Chevron confirms owned and bareboat-chartered fleet but does not publish a current total on the cited page.,SRC_0105,2026-09-07
+FLEET_0030,COMP_EXXON,Energy shipping,Charter / cargo-principal exposure,,,Model deliberately avoids inferring a static Exxon-owned fleet from cargo bookings or marine subsidiaries.,SRC_0107,2026-09-07
+FLEET_0031,COMP_CMA_CGM,Container shipping,Commercially scheduled fleet,844,844 vessels,Daily Linescape commercial schedule snapshot; separate from CMA CGM's 400-owned-vessel milestone reported in Q1 2026.,SRC_0182,2026-09-07
+FLEET_0032,COMP_GFS,Container feeder shipping,Commercial carrier fleet,36,36 vessels,Current Linescape carrier-fleet snapshot; commercial operation must be reconciled vessel by vessel against ownership and ship-management entities.,SRC_0181,2026-09-07
+FLEET_0033,COMP_GFS_SHIP_MGMT,Ship management,In-house / managed fleet,30,"30+ vessels; >120,000 TEU",Lower-bound count only: official company profile states more than 30 in-house vessels; published container fleet page names 16.,SRC_0180,2026-09-07
+FLEET_0034,COMP_DHL_EXPRESS,Air cargo,Dedicated air fleet,>275,>65 intercontinental; >210 regional,"Virtual-airline model: 19 partner airlines plus purchased capacity from ~300 commercial carriers; >2,400 daily flights.",SRC_0290,2026-09-07
+FLEET_0035,COMP_DHL_EXPRESS,Air network,Air hubs,23,3 global + 20 regional; >500 airports,"Network count, not owned real estate count.",SRC_0290,2026-09-07
+FLEET_0036,COMP_DHL_GLOBAL_FORWARDING,Multimodal forwarding,Terminals / storage facilities,>200,>115 countries,Asset-light air/ocean/overland/multimodal forwarding network.,SRC_0291,2026-09-07
+FLEET_0037,COMP_DHL_SUPPLY_CHAIN,Contract logistics,Warehousing / operational space,~17.5m sqm,"Owned + leased warehouses, excludes customer-owned facilities operated by DHL",Physical logistics footprint rather than vehicle fleet.,SRC_0292,2026-09-07
+FLEET_0038,COMP_DHL_ECOMMERCE,Parcel logistics,Parcel lockers,">53,000",>20 countries,Consumer access-node network.,SRC_0293,2026-09-07
+FLEET_0039,COMP_FEDERAL_EXPRESS,Air cargo,Aircraft,700,700 aircraft,FY2026 Federal Express global aircraft fleet.,SRC_0297,2026-09-07
+FLEET_0040,COMP_FEDERAL_EXPRESS,Ground logistics,Motorized vehicles,">180,000",">180,000 vehicles",FY2026 Federal Express global network.,SRC_0297,2026-09-07
+FLEET_0041,COMP_FEDERAL_EXPRESS,Express network,Drop-off locations,"~84,000","~84,000 locations",Includes FedEx Office and OnSite locations.,SRC_0297,2026-09-07
+FLEET_0042,COMP_FEDEX_FREIGHT,LTL freight,Shipping terminals,~355,>365 total locations,Independent FedEx Freight network after 1 Jun 2026 spin-off.,SRC_0299,2026-09-07
+FLEET_0043,COMP_FEDEX_FREIGHT,Road freight,Motorized vehicles,"~30,000","~17,000 tractors",Independent FedEx Freight road fleet.,SRC_0299,2026-09-07
+FLEET_0044,COMP_AMAZON_SUPPLY_CHAIN,Multimodal logistics,Network aircraft,100+,100+ aircraft,ASCS public network scale; aircraft are not assumed Amazon-operated/owned individually.,SRC_0302,2026-09-07
+FLEET_0045,COMP_AMAZON_FREIGHT,Road freight,Trailers,"80,000+","80,000+ trailers",Amazon Freight / ASCS network scale.,SRC_0303,2026-09-07
+FLEET_0046,COMP_AMAZON_FREIGHT,Intermodal,Intermodal containers,"24,000+","24,000+ containers",Rail/intermodal container pool.,SRC_0303,2026-09-07
+FLEET_0047,COMP_AMAZON_FREIGHT,Road freight ecosystem,Vetted carriers,"50,000+","50,000+ carriers",Carrier network; not Amazon-owned fleet.,SRC_0303,2026-09-07
+FLEET_0048,COMP_SUN_COUNTRY,Air cargo,Amazon-dedicated freighters,22,22 Boeing 737-800 cargo aircraft,Aircraft subleased directly from Amazon; Sun Country operates under ATSA.,SRC_0307,2026-09-07
+FLEET_0049,COMP_ARAMEX,Contract logistics,Managed warehouse space,"800,000 sqm",60+ facilities in 29 countries,Physical warehousing network; separate from express/freight shipment volume.,SRC_0310,2026-09-07

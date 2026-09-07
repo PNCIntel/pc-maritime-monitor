@@ -1,0 +1,7 @@
+﻿Dependency ID,System ID,Subject Type,Subject ID,Subject Name,Dependency Type,Node / Link ID,Dependency Node / Link,Criticality,Alternative / Redundancy,Time Horizon,Operational / Trade Consequence,Status,Source ID,Notes
+GL_DEP_0001,SYS_GLSS,Cargo Corridor,GL_COR_0001,Lake Superior iron ore / taconite,DEPENDS_ON,GL_NODE_0001,Soo Locks,Critical,No equivalent high-capacity water bypass within system,Hours-days for disruption; longer for outage,Steel production exposure,Seeded,SRC_0148,
+GL_DEP_0002,SYS_GLSS,Cargo Corridor,GL_COR_0002,Prairie / Midwest grain export,DEPENDS_ON,GL_NODE_0002,Welland Canal,High,Rail / Atlantic alternatives exist but change cost/capacity,Days-weeks,Export timing / elevator congestion,Seeded,SRC_0145,
+GL_DEP_0003,SYS_GLSS,Cruise Flow,GL_CR_0003,Viking Great Lakes itinerary,DEPENDS_ON,GL_NODE_0001,Soo Locks,High,Itinerary adjustment possible,Hours-days,Passenger schedule / port calls,Seeded,SRC_0166,
+GL_DEP_0004,SYS_GLSS,Company,COMP_CSL_CANADA,Canada Steamship Lines,OPERATES_WITHIN,GL_NODE_0002,Welland Canal / Seaway,High,Some domestic lake trades avoid full Seaway transit,Ongoing,Fleet utilization / customer delivery,Seeded,SRC_0152,
+GL_DEP_0005,SYS_GLSS,Company,COMP_INTERLAKE,Interlake Steamship,OPERATES_WITHIN,GL_NODE_0001,Soo Locks,High,Route-specific alternatives limited,Ongoing,Bulk delivery schedule,Seeded,SRC_0157,
+GL_DEP_0006,SYS_GLSS,Port,GL_PORT_0008,Duluth,CONNECTS_TO,GL_NODE_0001,Soo Locks,High,Rail alternatives exist for some cargoes,Days-weeks,Iron ore / grain / project cargo flows,Seeded,SRC_0151,

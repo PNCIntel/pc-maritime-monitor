@@ -1,0 +1,99 @@
+﻿Asset ID,Company ID,Asset,Asset Type,Location,Country,Role / Function,Primary Mode,Status,Ownership / Operating Interest,Source ID
+ASSET001,COMP_CMA_TERMINALS,Santos Brasil / Tecon Santos,Container terminal,Santos,Brazil,Largest container terminal in South America; CMA CGM acquired 100%,Container,Operating,100% control,SRC_0031
+ASSET002,COMP_CMA_TERMINALS,CMA Terminals Khalifa Port,Container terminal,Abu Dhabi,United Arab Emirates,Strategic Gulf hub,Container,Operating / expanding,JV with AD Ports Group,SRC_0031
+ASSET003,COMP_CMA_TERMINALS,Terminal 4 Jeddah Islamic Port,Container terminal,Jeddah,Saudi Arabia,New Saudi container platform,Container,Development,JV with RSGT,SRC_0004
+ASSET004,COMP_CEVA,Chicago Gateway,Air freight / logistics gateway,Chicago,United States,"700,000 sq ft facility near ORD; freight, FTZ and cold storage",Air cargo / logistics,Operating,,SRC_0025
+ASSET005,COMP_CEVA,Lakes Road Logistics Hub,Contract logistics hub,Perth,Australia,"37,000 sqm logistics centre",Warehousing / logistics,Operating,,SRC_0026
+ASSET006,COMP_CEVA,Dubai South eCommerce warehouse,Contract logistics hub,Dubai,United Arab Emirates,"23,000 sqm multi-user eCommerce facility",Warehousing / eCommerce,Operating,,SRC_0027
+ASSET007,COMP_CARGOLUX,Luxembourg Airport hub,Air cargo hub,Luxembourg,Luxembourg,Primary home base and European cargo hub,Air cargo,Operating,,SRC_0024
+ASSET008,COMP_CARGOLUX,Boeing 747 freighter fleet,Aircraft fleet,Global,Global,30 Boeing 747-400 and 747-8 purpose-built freighters,Air cargo fleet,Operating,,SRC_0023
+ASSET009,COMP_GULFTAINER,Khorfakkan Commercial Terminal,Container terminal,Khorfakkan,United Arab Emirates,East Coast transshipment gateway; 10m+ TEU future capacity target,Container,Operating / planned expansion,,SRC_0040
+ASSET010,COMP_GULFTAINER,Al Dhaid Multi-Modal Trade Corridor,Inland logistics hub,Al Dhaid,United Arab Emirates,150 ha inland ecosystem; planned 1.5m TEU capacity,Inland logistics,Development,,SRC_0041
+ASSET011,COMP_ADPORTS,Khalifa Port,Deep-water port,Abu Dhabi,United Arab Emirates,Core UAE container / industrial gateway,Port / container,Operating / expanding,AD Ports Group,SRC_0011
+ASSET012,COMP_ADPORTS,Fujairah Terminals,Port terminal,Fujairah,United Arab Emirates,East Coast industrial gateway linked to inland rail strategy,Port / general cargo,Operating,AD Ports Group,SRC_0016
+ASSET013,COMP_ADPORTS,ICAD rail-linked inland logistics network,Inland dry ports / cargo depots,Abu Dhabi,United Arab Emirates,Rail-linked inland network for industrial cargo,Inland logistics,Development / integration,AD Ports Group,SRC_0016
+ASSET014,COMP_DPW,Jebel Ali Port,Port / container terminal,Dubai,United Arab Emirates,Flagship global hub and JAFZA-linked gateway,Container / logistics,Operating,DP World,SRC_0034
+ASSET015,COMP_DPW,London Gateway,Port / logistics park,London Gateway,United Kingdom,UK deep-sea container gateway and logistics park,Container / logistics,Operating / expanding,DP World,SRC_0034
+ASSET016,COMP_DPW,Southampton Container Terminal,Container terminal,Southampton,United Kingdom,Major UK container gateway,Container,Operating,DP World,SRC_0034
+ASSET017,COMP_APMT,Lázaro Cárdenas terminal,Container terminal,Lázaro Cárdenas,Mexico,"Automated Pacific gateway; Phase II open, Phase III underway",Container,Operating / expanding,APM Terminals,SRC_0044
+ASSET018,COMP_APMT,Suape terminal,Container / general cargo terminal,Suape,Brazil,Fully electric terminal; opening targeted Q3 2026,Container / general cargo,Development,APM Terminals,SRC_0018
+ASSET019,COMP_FINCANTIERI,Muggiano Integrated Shipyard,Naval shipyard,La Spezia,Italy,U212 NFS submarine construction site,Defence shipbuilding,Operating,Fincantieri,SRC_0037
+ASSET020,COMP_APMT,Bahrain,Container terminal,Bahrain,Bahrain,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET021,COMP_APMT,Pointe-Noire,Container terminal,Pointe-Noire,Congo,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET022,COMP_APMT,Abidjan Côte d’Ivoire Terminal (CIT),Container terminal,Abidjan Côte d’Ivoire Terminal (CIT),Côte d'Ivoire,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET023,COMP_APMT,San Pedro,Container terminal,San Pedro,Côte d'Ivoire,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET024,COMP_APMT,Suez Canal Container Terminal (SCCT),Container terminal,Suez Canal Container Terminal (SCCT),Egypt,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET025,COMP_APMT,Tema,Container terminal,Tema,Ghana,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET026,COMP_APMT,Aqaba,Container terminal,Aqaba,Jordan,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET027,COMP_APMT,Monrovia,Container terminal,Monrovia,Liberia,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET028,COMP_APMT,MedPort Tangier,Container terminal,MedPort Tangier,Morocco,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET029,COMP_APMT,Tangier,Container terminal,Tangier,Morocco,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET030,COMP_APMT,Apapa,Container terminal,Apapa,Nigeria,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET031,COMP_APMT,Onne,Container terminal,Onne,Nigeria,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET032,COMP_APMT,Salalah,Container terminal,Salalah,Oman,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET033,COMP_APMT,Guangzhou,Container terminal,Guangzhou,China,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET034,COMP_APMT,Qingdao,Container terminal,Qingdao,China,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET035,COMP_APMT,Shanghai,Container terminal,Shanghai,China,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET036,COMP_APMT,Tianjin,Container terminal,Tianjin,China,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET037,COMP_APMT,Xiamen,Container terminal,Xiamen,China,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET038,COMP_APMT,Mumbai,Container terminal,Mumbai,India,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET039,COMP_APMT,Pipavav,Container terminal,Pipavav,India,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET040,COMP_APMT,Yokohama,Container terminal,Yokohama,Japan,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET041,COMP_APMT,Tanjung Pelepas,Container terminal,Tanjung Pelepas,Malaysia,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET042,COMP_APMT,Colombo,Container terminal,Colombo,Sri Lanka,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET043,COMP_APMT,Laem Chabang,Container terminal,Laem Chabang,Thailand,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET044,COMP_APMT,Cai Mep,Container terminal,Cai Mep,Vietnam,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET045,COMP_APMT,Rijeka Gateway,Container terminal,Rijeka Gateway,Croatia,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET046,COMP_APMT,Aarhus,Container terminal,Aarhus,Denmark,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET047,COMP_APMT,Kalundborg,Container terminal,Kalundborg,Denmark,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET048,COMP_APMT,Marseille Fos,Container terminal,Marseille Fos,France,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET049,COMP_APMT,Poti,Container terminal,Poti,Georgia,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET050,COMP_APMT,Bremerhaven,Container terminal,Bremerhaven,Germany,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET051,COMP_APMT,Vado Ligure,Container terminal,Vado Ligure,Italy,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET052,COMP_APMT,Rotterdam Maasvlakte II,Container terminal,Rotterdam Maasvlakte II,Netherlands,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET053,COMP_APMT,Algeciras,Container terminal,Algeciras,Spain,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET054,COMP_APMT,Barcelona,Container terminal,Barcelona,Spain,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET055,COMP_APMT,Gijón,Container terminal,Gijón,Spain,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET056,COMP_APMT,Valencia,Container terminal,Valencia,Spain,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET057,COMP_APMT,Gothenburg,Container terminal,Gothenburg,Sweden,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET058,COMP_APMT,Izmir,Container terminal,Izmir,Turkey,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET059,COMP_APMT,Buenos Aires,Container terminal,Buenos Aires,Argentina,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET060,COMP_APMT,Itapoá,Container terminal,Itapoá,Brazil,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET061,COMP_APMT,Pecém,Container terminal,Pecém,Brazil,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET062,COMP_APMT,Santos,Container terminal,Santos,Brazil,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET063,COMP_APMT,Suape,Container terminal,Suape,Brazil,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET064,COMP_APMT,Buenaventura,Container terminal,Buenaventura,Colombia,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET065,COMP_APMT,Moín,Container terminal,Moín,Costa Rica,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET066,COMP_APMT,Puerto Quetzal,Container terminal,Puerto Quetzal,Guatemala,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET067,COMP_APMT,Lázaro Cárdenas,Container terminal,Lázaro Cárdenas,Mexico,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET068,COMP_APMT,Progreso,Container terminal,Progreso,Mexico,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET069,COMP_APMT,Callao,Container terminal,Callao,Peru,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET070,COMP_APMT,"Los Angeles, CA",Container terminal,"Los Angeles, CA",United States,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET071,COMP_APMT,"Miami, FL",Container terminal,"Miami, FL",United States,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET072,COMP_APMT,"Mobile, AL",Container terminal,"Mobile, AL",United States,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET073,COMP_APMT,"Elizabeth, NJ",Container terminal,"Elizabeth, NJ",United States,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET074,COMP_UNITED_PORTS,United Ports LLC terminal portfolio,Port terminal portfolio,United States / Brazil / Spain / Taiwan / Vietnam,Global,Investment vehicle holding 9 CMA CGM-operated terminals,Maritime / Port,Operating,75% CMA CGM / 25% Stonepeak; CMA CGM operating control,SRC_0256
+ASSET075,COMP_GEELONGPORT,GeelongPort,Landlord port,"Geelong, Victoria",Australia,Diversified landlord port; road/rail/air/channel-connected trade gateway,Maritime / Port,Operating,70% Stonepeak / 30% CareSuper,SRC_0257
+ASSET076,COMP_ITS,International Transportation Service terminal portfolio,Container terminal portfolio,"Long Beach, CA / Tacoma, WA",United States,West Coast container terminal portfolio,Maritime / Port / Rail,Operating / expanding,Macquarie Asset Management portfolio company,SRC_0260
+ASSET077,COMP_MIRASTAR,KKR/Mirastar UK logistics portfolio - July 2026,Logistics real estate portfolio,Stafford / Crewe / Ellesmere Port / Wakefield,United Kingdom,Four fully-let prime logistics assets totaling 1.25m sq ft,Road / Logistics,Operating,Acquired by KKR and Mirastar from PLP,SRC_0263
+ASSET078,COMP_STONEPEAK,Fort Worth rail-served logistics asset,Logistics real estate / intermodal,"Alliance submarket, Fort Worth, Texas",United States,"860,100 sq ft rail-served logistics facility near BNSF Alliance terminal and cargo airport",Rail / Road / Air Cargo,Operating,Stonepeak-owned investment,SRC_0285
+ASSET079,COMP_PROXITY,Proxity pan-European logistics portfolio,Logistics real estate platform,Continental Europe / Nordics / Ireland,Europe,"Approx. 500 logistics properties and developments, >7m sqm lettable area",Road / Logistics,Operating / expanding,Assets owned by Blackstone-managed real estate funds,SRC_0264
+ASSET080,COMP_PLIVE,PLIVE seed logistics portfolio,Logistics real estate portfolio,France / Germany / Netherlands / Sweden / United Kingdom,Europe,EUR1bn seed portfolio for pan-European logistics JV,Road / Logistics,Operating / expanding,70% La Caisse / 30% Prologis,SRC_0268
+ASSET081,COMP_TBILISI_DRY_PORT,Tbilisi Intermodal Hub / Tbilisi Dry Port,Dry port / inland intermodal hub,Tbilisi,Georgia,"Inland extension of Batumi/Poti; rail-road transfer, customs, warehousing and container yards",Rail / Road,Operating / expanding,60% AD Ports Group; other JV partners Wilhelmsen Port Services Georgia and Inveco LLC,SRC_0278
+ASSET082,COMP_ADPORTS,Al Faya Dry Port,Dry port / inland logistics terminal,Al Faya / Dubai border area,United Arab Emirates,Bonded inland cargo transit terminal linking Khalifa Port to UAE inland destinations,Road / Logistics,Operating,AD Ports Group ecosystem; anchored by CMA CGM; UN/LOCODE AEALF,SRC_0280
+ASSET083,COMP_ETIHAD_RAIL,Al Ghail Dry Port rail terminal,Dry port / rail terminal,"Al Ghail, Ras Al Khaimah",United Arab Emirates,Rail terminal for aggregates and inland freight linking northern Emirates to Abu Dhabi/Dubai industrial zones,Rail / Road,Operating,Etihad Rail Freight-operated terminal,SRC_0272
+ASSET084,COMP_CENTREPORT,CentrePort Canada,Inland port / Foreign Trade Zone,"Winnipeg / Rosser, Manitoba",Canada,"20,000-acre trimodal inland port combining rail, truck, air cargo and industrial land",Rail / Road / Air Cargo,Operating / expanding,CentrePort Canada development ecosystem,SRC_0271
+ASSET085,COMP_JAFZA,Jebel Ali Free Zone (JAFZA),Free zone / industrial-logistics zone,"Jebel Ali, Dubai",United Arab Emirates,"57 sq km customs-bonded industrial, logistics and trade hub adjacent to Jebel Ali Port",Port / Road / Logistics,Operating,Part of DP World UAE,SRC_0273
+ASSET086,COMP_JAFZA,JAFZA Logistics Park,Logistics real estate / warehousing park,"Jebel Ali Free Zone, Dubai",United Arab Emirates,"Grade-A dry/pharma, temperature-controlled warehousing and offices",Road / Port / Logistics,Operating / expanding,DP World / JAFZA logistics real estate,SRC_0274
+ASSET087,COMP_KEZAD,KEZAD economic-zones ecosystem,Economic zones / industrial real estate,Abu Dhabi,United Arab Emirates,"Integrated economic cities, free-zone land, warehousing and industrial/logistics facilities",Port / Rail / Road / Logistics,Operating / expanding,Part of AD Ports Group Economic Cities & Free Zones,SRC_0275
+ASSET088,COMP_KEZAD,KEZAD East Port Said Economic Zone,Economic zone / industrial-logistics park,East Port Said,Egypt,20 km2 industrial and logistics park under 50-year renewable usufruct,Port / Road / Logistics,Development,AD Ports Group / Suez Canal Economic Zone framework,SRC_0281
+ASSET089,COMP_GULFTAINER,Al Dhaid Multi-Modal Trade Corridor,Inland logistics hub / dry-port-style corridor,"Al Dhaid, Sharjah",United Arab Emirates,150 ha planned multimodal inland cargo hub and corridor extension for Khorfakkan/GCC,Road / Logistics,Development,Gulftainer-led development,SRC_0041
+ASSET090,COMP_DHL_EXPRESS,DHL Express Leipzig Global Hub,Air cargo / express hub,Leipzig/Halle Airport,Germany,Largest of DHL's three global hubs; >50 destinations; ~75 aircraft per workday,Air Cargo / Road,Operating,DHL Express hub operation,SRC_0294
+ASSET091,COMP_DHL_EXPRESS,DHL Express Hong Kong Central Asia Hub,Air cargo / express hub,Hong Kong International Airport,"Hong Kong, China",One of DHL's three global hubs; Asia network gateway,Air Cargo,Operating,DHL Express hub operation,SRC_0295
+ASSET092,COMP_DHL_SUPPLY_CHAIN,DHL Supply Chain Halle Logistics Center,Warehouse / distribution center,Halle / Leipzig region,Germany,"34,000 sqm logistics center with 55,000 pallet spaces near LEJ",Road / Air Cargo / Logistics,Operating / expanding,DHL Supply Chain operation,SRC_0316
+ASSET093,COMP_DHL_SUPPLY_CHAIN,DHL Supply Chain SILZ Regional Hub,Warehouse / regional distribution hub,"Special Integrated Logistics Zone, Riyadh",Saudi Arabia,"78,000 sqm site with 53,000 sqm multi-user warehouse; bonded-airport adjacency",Road / Air Cargo / Logistics,Development,26-year land lease; DHL Supply Chain development,SRC_0296
+ASSET094,COMP_FEDERAL_EXPRESS,FedEx Memphis World Hub,Air cargo / express sorting hub,"Memphis International Airport, Tennessee",United States,Primary/worldwide FedEx hub and major sorting facility,Air Cargo / Road,Operating,FedEx hub operation; airport leasehold,SRC_0297
+ASSET095,COMP_FEDERAL_EXPRESS,FedEx Indianapolis National Hub,Air cargo / express sorting hub,"Indianapolis International Airport, Indiana",United States,National air hub and sorting facility,Air Cargo / Road,Operating,FedEx hub operation; airport facility,SRC_0297
+ASSET096,COMP_FEDERAL_EXPRESS,FedEx Delhi Integrated Air Cargo Hub,Integrated air cargo hub,"GMR Cargo City, Delhi IGI Airport",India,"230,000 sq ft automated gateway plus pickup-and-delivery operation",Air Cargo / Road,Development,FedEx planned investment / operating hub,SRC_0300
+ASSET097,COMP_AMAZON_AIR,Amazon Air CVG Hub,Air cargo / sortation hub,Cincinnati/Northern Kentucky International Airport,United States,"600-acre flagship Amazon Air hub; 800,000 sq ft facility; >3 dozen daily flights",Air Cargo / Road,Operating,Amazon Air hub operation,SRC_0305
+ASSET098,COMP_ARAMEX,Aramex Healthcare Warehouse - Dubai Logistics City,Healthcare warehouse / cold-chain facility,Dubai Logistics City / DWC Free Zone,United Arab Emirates,"~5,500 sqm ambient + ~100 sqm cold-chain; 6,750 ambient pallet positions + 140 cold-chain pallets",Road / Air Cargo / Logistics,Operating,Aramex-operated warehouse in DWC Free Zone,SRC_0315

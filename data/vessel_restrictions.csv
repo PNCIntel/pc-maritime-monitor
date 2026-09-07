@@ -1,0 +1,2 @@
+﻿Restriction ID,Vessel ID,IMO,Vessel Name,Authority / Regime,Restriction Type,Status,Effective Date,End Date,Direct / Indirect,Basis,Source ID,Source URL,Last Verified,Notes
+VR_TEMPLATE,,,,OFAC / EU / UK / UN / PGSA / Port State / Other,Sanction / blacklist / port ban / detention / insurance / flag / class,Template,,,,Do not infer tradeability from company nationality alone.,,,2026-09-07,"Populate one row per vessel, authority and time-bounded restriction."

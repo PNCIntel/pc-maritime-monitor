@@ -1,0 +1,16 @@
+﻿Source Dataset,Rows,Model Role,Primary Family / Layer,Treatment
+maritime_attacks_2026.csv,67,Event observation,Conflict / Security,Keep source row; resolve duplicates against IMO/UKMTO/P&C
+piracy_2026.csv,21,Event observation,Maritime Crime,Keep source row; resolve duplicates against ReCAAP/UKMTO
+ukmto_warnings_2026.csv,103,Warning observation,Maritime Security Warning,Warnings may map to confirmed events or remain advisory-only
+centcom_maritime_actions_2026.csv,15,Event observation,Military / Enforcement,Link vessel IMO to vessel entity
+imo_gulf_confirmed_2026.csv,25,Event observation,Conflict / Security,Preserve IMO description separately from assessed actor
+port_incidents_2026.csv,44,Event observation,Port / Infrastructure Incident,Link port/terminal/operator entities
+recaap_incidents_2024_2026.csv,277,Event observation,Maritime Crime,Retain precise coordinates where supplied
+blacksea_conflict_vessels_2026.csv,17,Event observation,Conflict / Security,Link IMO to vessel entity
+blacksea_port_attacks_2026.csv,8,Event observation,Conflict / Security,Link port entity / infrastructure
+external_disruptions_v2.csv,26,Event observation,Weather / Labour / Protest / Civil / Natural / Accident,Expanded first-pass operational-disruption feed; includes v1 seed rows plus 17 new weather/labour/protest events
+port_investments_2026.csv,Not event feed,Investment,Commercial / Infrastructure,Remain in investment model
+naval_shipbuilding_2026.csv,Not event feed,Fleet order / industrial event,Defence / Shipbuilding,Remain in fleet-order and shipyard model
+blacksea_voyages_2026.csv,Not event feed,Movement observation,Vessel movement,Future movement layer
+vessel_watchlists.csv,Not event feed,Compliance observation,Sanctions / Watchlist,Future compliance layer
+iuu_fishing_index_2019_2025.csv,Not event feed,Risk indicator,IUU / maritime governance,Future risk-indicator layer

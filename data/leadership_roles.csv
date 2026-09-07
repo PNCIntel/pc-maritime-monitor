@@ -1,0 +1,42 @@
+﻿Role ID,Person ID,Company ID,Title,Scope,Status,Effective From,Effective To,Source ID
+ROLE_0001,PERSON_0001,COMP_CMA_CGM,Chairman & Chief Executive Officer,Group,Current,,,SRC_0030
+ROLE_0002,PERSON_0002,COMP_CEVA,Chief Executive Officer,Global,Current,2026-07-01,,SRC_0029
+ROLE_0003,PERSON_0003,COMP_APMT,Chief Executive Officer,Global,Current,2022-07-01,,SRC_0017
+ROLE_0004,PERSON_0004,COMP_APMT,Chief Financial Officer,Global,Current,2025-01-01,,SRC_0001
+ROLE_0005,PERSON_0005,COMP_DPW,Group Chief Executive Officer,Global,Current,2026-02-13,,SRC_0033
+ROLE_0006,PERSON_0006,COMP_DPW,CEO & Managing Director,GCC,Current,2026-02-01,,SRC_0032
+ROLE_0007,PERSON_0007,COMP_ADPORTS,Managing Director & Group CEO,Global,Current,,,SRC_0013
+ROLE_0008,PERSON_0008,COMP_ADPORTS,CEO,Logistics Cluster,Current,2025-12-01,,SRC_0014
+ROLE_0009,PERSON_0009,COMP_GULFTAINER,Group Chief Executive Officer,Global,Current,,,SRC_0039
+ROLE_0010,PERSON_0010,COMP_GULFTAINER,Global Chief Operating Officer,Ports & Terminals,Current,,,SRC_0039
+ROLE_0011,PERSON_0011,COMP_CARGOLUX,President & Chief Executive Officer,Global,Current,,,SRC_0022
+ROLE_0012,PERSON_0012,COMP_CARGOLUX,Executive Vice President Sales & Marketing,Global,Current,,,SRC_0022
+ROLE_0013,PERSON_0013,COMP_CARGOLUX,Executive Vice President & Chief Financial Officer,Global,Current,,,SRC_0022
+ROLE_0014,PERSON_0014,COMP_FINCANTIERI,Chief Executive Officer & Managing Director,Global,Current,,,SRC_0035
+ROLE_0015,PERSON_0015,COMP_MSC,Chief Executive Officer,Global cargo businesses,Current,2020-12-01,,SRC_0051
+ROLE_0016,PERSON_0016,COMP_ADNOC_LS,Chairperson,Board,Current,,,SRC_0067
+ROLE_0017,PERSON_0017,COMP_ADNOC_LS,Chief Executive Officer,Global,Current,2018-04-01,,SRC_0067
+ROLE_0018,PERSON_0018,COMP_BAHRI,CEO & Board Member,Global,Current,,,SRC_0075
+ROLE_0019,PERSON_0019,COMP_BAHRI,"President, Bahri Oil",Oil shipping,Current,,,SRC_0075
+ROLE_0020,PERSON_0020,COMP_BAHRI,"President, Bahri Chemicals",Chemicals / product tankers,Current,,,SRC_0075
+ROLE_0021,PERSON_0021,COMP_BAHRI,"President, Bahri Ship Management",Fleet / ship management,Current,,,SRC_0075
+ROLE_0022,PERSON_0022,COMP_BAHRI,"President, Bahri Marine Services",Marine services,Current,,,SRC_0075
+ROLE_0023,PERSON_0023,COMP_NAKILAT,Chief Executive Officer,Global,Current,,,SRC_0079
+ROLE_0024,PERSON_0024,COMP_MILAHA,Group Chief Executive Officer,Global,Current,,,SRC_0082
+ROLE_0025,PERSON_0025,COMP_MILAHA,Executive VP Maritime & Logistics,Maritime & Logistics,Current,,,SRC_0083
+ROLE_0026,PERSON_0026,COMP_QATARENERGY,President & Chief Executive Officer,Global,Current,2014-01-01,,SRC_0087
+ROLE_0027,PERSON_0027,COMP_BYD,Chairman,Global,Current,,,SRC_0089
+ROLE_0028,PERSON_0028,COMP_ZIM,President & Chief Executive Officer,Global,Departing / notice period,,,SRC_0098
+ROLE_0029,PERSON_0029,COMP_SINOKOR,Representative Director,Global,Current,,,SRC_0101
+ROLE_0030,PERSON_0030,COMP_SINOKOR,Representative Director,Global,Current,,,SRC_0101
+ROLE_0031,PERSON_0031,COMP_BP,Chief Executive Officer,Global,Current,2024-01-17,,SRC_0104
+ROLE_0032,PERSON_0032,COMP_CHEVRON,Chairman of the Board & Chief Executive Officer,Global,Current,2018-01-01,,SRC_0106
+ROLE_0033,PERSON_0033,COMP_EXXON,Chairman & Chief Executive Officer,Global,Current,,,SRC_0108
+ROLE_0034,PERSON_0034,COMP_DHL_AG,Chief Executive Officer,Global,Current,2023-05-01,,SRC_0312
+ROLE_0035,PERSON_0035,COMP_DHL_EXPRESS,CEO DHL Express,Global,Current,,,SRC_0312
+ROLE_0036,PERSON_0036,COMP_DHL_SUPPLY_CHAIN,CEO DHL Supply Chain,Global,Current,,,SRC_0312
+ROLE_0037,PERSON_0037,COMP_DHL_GLOBAL_FORWARDING,Board Member / Global Forwarding,Global,Current,,,SRC_0312
+ROLE_0038,PERSON_0038,COMP_DHL_ECOMMERCE,Board Member / eCommerce,Global,Current,,,SRC_0312
+ROLE_0039,PERSON_0039,COMP_FEDEX_CORP,President & Chief Executive Officer,Global,Current,2022-06-01,,SRC_0314
+ROLE_0040,PERSON_0040,COMP_AMAZON,President & Chief Executive Officer,Global,Current,,,SRC_0313
+ROLE_0041,PERSON_0041,COMP_ARAMEX,Group Chief Executive Officer,Global,Current,2026-05-01,,SRC_0311

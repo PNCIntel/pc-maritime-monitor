@@ -1,0 +1,2 @@
+﻿Assessment ID,Vessel ID,IMO,As Of,Sanctions Flag,Other Restriction Flag,Flag Validity,Class Status,Insurance / P&I Status,Tradeability,Confidence,Restriction IDs,Source IDs,Analyst Note
+TA_TEMPLATE,,,2026-09-07,Unknown,Unknown,Unknown,Unknown,Unknown,Uncertain,Template,,,"Tradeability is an assessment layer. Sanctions status, flag validity, class, insurance and other restrictions remain separate evidence fields."

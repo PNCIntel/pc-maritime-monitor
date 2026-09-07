@@ -1,0 +1,42 @@
+﻿Person ID,Name,Nationality,Location,Status,Source ID,As Of
+PERSON_0001,Rodolphe Saadé,,,Active,SRC_0030,2026-09-07
+PERSON_0002,Patrick Moebel,,,Active,SRC_0029,2026-09-07
+PERSON_0003,Keith Svendsen,,,Active,SRC_0017,2026-09-07
+PERSON_0004,Peter Wikström,,,Active,SRC_0001,2026-09-07
+PERSON_0005,Yuvraj Narayan,,,Active,SRC_0033,2026-09-07
+PERSON_0006,Ahmad Yousef Al-Hassan,,,Active,SRC_0032,2026-09-07
+PERSON_0007,Captain Mohamed Juma Al Shamisi,,,Active,SRC_0013,2026-09-07
+PERSON_0008,Jochen Thewes,,,Active,SRC_0014,2026-09-07
+PERSON_0009,Farid Belbouab,,,Active,SRC_0039,2026-09-07
+PERSON_0010,Simon Farhat,,,Active,SRC_0039,2026-09-07
+PERSON_0011,Richard Forson,,,Active,SRC_0022,2026-09-07
+PERSON_0012,Domenico Ceci,,,Active,SRC_0022,2026-09-07
+PERSON_0013,Maxim Straus,,,Active,SRC_0022,2026-09-07
+PERSON_0014,Pierroberto Folgiero,,,Active,SRC_0035,2026-09-07
+PERSON_0015,Soren Toft,,,Active,SRC_0051,2026-09-07
+PERSON_0016,H.E. Dr. Sultan Ahmed Al Jaber,,,Active,SRC_0067,2026-09-07
+PERSON_0017,Captain Abdulkareem Al Masabi,,,Active,SRC_0067,2026-09-07
+PERSON_0018,Eng. Ahmed Ali Alsubaey,,,Active,SRC_0075,2026-09-07
+PERSON_0019,Hisham Al Nughaimish,,,Active,SRC_0075,2026-09-07
+PERSON_0020,Faisal Al Husseini,,,Active,SRC_0075,2026-09-07
+PERSON_0021,Khalid Alhammad,,,Active,SRC_0075,2026-09-07
+PERSON_0022,Mohit Sibal,,,Active,SRC_0075,2026-09-07
+PERSON_0023,Eng. Abdullah Al-Sulaiti,,,Active,SRC_0079,2026-09-07
+PERSON_0024,Fahad Saad Al-Qahtani,,,Active,SRC_0082,2026-09-07
+PERSON_0025,Kris Brusselmans,,,Active,SRC_0083,2026-09-07
+PERSON_0026,Saad Sherida Al-Kaabi,,,Active,SRC_0087,2026-09-07
+PERSON_0027,Wang Chuanfu,,,Active,SRC_0089,2026-09-07
+PERSON_0028,Eli Glickman,,,Active,SRC_0098,2026-09-07
+PERSON_0029,Tae-Soon Chung,,,Active,SRC_0101,2026-09-07
+PERSON_0030,Chang-Won Kum,,,Active,SRC_0101,2026-09-07
+PERSON_0031,Murray Auchincloss,,,Active,SRC_0104,2026-09-07
+PERSON_0032,Mike Wirth,,,Active,SRC_0106,2026-09-07
+PERSON_0033,Darren Woods,,,Active,SRC_0108,2026-09-07
+PERSON_0034,Tobias Meyer,German,"Bonn, Germany",Active,SRC_0312,2026-09-07
+PERSON_0035,John Pearson,,,Active,SRC_0312,2026-09-07
+PERSON_0036,Hendrik Venter,,,Active,SRC_0312,2026-09-07
+PERSON_0037,Oscar de Bok,,,Active,SRC_0312,2026-09-07
+PERSON_0038,Pablo Ciano,,,Active,SRC_0312,2026-09-07
+PERSON_0039,Raj Subramaniam,,"Memphis, United States",Active,SRC_0314,2026-09-07
+PERSON_0040,Andy Jassy,,,Active,SRC_0313,2026-09-07
+PERSON_0041,Amadou Diallo,,"Dubai, United Arab Emirates",Active,SRC_0311,2026-09-07

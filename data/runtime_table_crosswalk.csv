@@ -1,0 +1,93 @@
+﻿Runtime File,Runtime Layer,Workbook Sheet / Model Layer,Status,Primary Key / Join,Vessel ID Remap Applied,Source-ID Branch,Notes
+aircraft.csv,Canonical / structured runtime table,Aircraft,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+assets.csv,Canonical / structured runtime table,Assets,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+blacksea_article_index_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+blacksea_conflict_vessels_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+blacksea_port_attacks_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+blacksea_vessel_profiles.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+blacksea_voyages_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+centcom_maritime_actions_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+companies.csv,Canonical / structured runtime table,Companies,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+company_system_footprints.csv,Canonical / structured runtime table,Company System Footprints,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+corridors.csv,Canonical / structured runtime table,Corridors,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+data_dictionary.csv,Canonical / structured runtime table,Data Dictionary,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+entity_registry.csv,Canonical / structured runtime table,Entity Registry,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+event_entity_links.csv,Canonical / structured runtime table,Event Entity Links,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+event_impacts.csv,Canonical / structured runtime table,Event Impacts,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+event_ingestion_map.csv,Canonical / structured runtime table,Event Ingestion Map,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+event_observations.csv,Canonical / structured runtime table,Event Observations,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+event_taxonomy.csv,Canonical / structured runtime table,Event Taxonomy,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+external_disruptions.csv,Canonical / structured runtime table,External Disruptions,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+ferry_disruption_taxonomy.csv,Canonical / structured runtime table,Ferry Disruption Taxonomy,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+ferry_fleet_status.csv,Canonical / structured runtime table,Ferry Fleet Status,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+ferry_performance.csv,Canonical / structured runtime table,Ferry Performance,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+ferry_routes.csv,Canonical / structured runtime table,Ferry Routes,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+ferry_service_observations.csv,Canonical / structured runtime table,Ferry Service Observations,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+ferry_systems.csv,Canonical / structured runtime table,Ferry Systems,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+ferry_terminals.csv,Canonical / structured runtime table,Ferry Terminals,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+ferry_vessel_staging.csv,Canonical / structured runtime table,Ferry Vessel Staging,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+fleet_coverage.csv,Canonical / structured runtime table,Fleet Coverage,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+fleet_orders.csv,Canonical / structured runtime table,Fleet Orders,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+fleet_portfolios.csv,Canonical / structured runtime table,Fleet Portfolios,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+global_vessel_staging.csv,Canonical / structured runtime table,Global Vessel Staging,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+great_lakes_cargo_corridors.csv,Canonical / structured runtime table,Great Lakes Cargo Corridors,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+great_lakes_cruise.csv,Canonical / structured runtime table,Great Lakes Cruise,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+great_lakes_disruptions.csv,Canonical / structured runtime table,Great Lakes Disruptions,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+great_lakes_ports.csv,Canonical / structured runtime table,Great Lakes Ports,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+great_lakes_vessel_staging.csv,Canonical / structured runtime table,Great Lakes Vessel Staging,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+imo_coverage.csv,Canonical / structured runtime table,IMO Coverage,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+imo_gulf_confirmed_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+infrastructure_works.csv,Canonical / structured runtime table,Infrastructure Works,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+investments.csv,Canonical / structured runtime table,Investments,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+iuu_fishing_index_2019_2025.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+leadership_roles.csv,Canonical / structured runtime table,Leadership Roles,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+maritime_attacks_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+naval_shipbuilding_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+people.csv,Canonical / structured runtime table,People,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+piracy_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+port_incidents_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+port_investments_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+ports.csv,Canonical / structured runtime table,Ports,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+recaap_incidents_2024_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+regional_systems.csv,Canonical / structured runtime table,Regional Systems,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+relationships.csv,Canonical / structured runtime table,Relationships,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+research_queue.csv,Canonical / structured runtime table,Research Queue,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+shipyard_industrial_moves_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+shipyards.csv,Canonical / structured runtime table,Shipyards,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+sources.csv,Canonical / structured runtime table,Sources,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+strategic_events.csv,Canonical / structured runtime table,Strategic Events,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+streamlit_map.csv,Runtime support table,Runtime layer,Retained,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+system_dependencies.csv,Canonical / structured runtime table,System Dependencies,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+system_links.csv,Canonical / structured runtime table,System Links,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+system_nodes.csv,Canonical / structured runtime table,System Nodes,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+ukmto_warnings_2026.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+vessel_build_records.csv,Canonical / structured runtime table,Vessel Build Records,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+vessel_contracts.csv,Canonical / structured runtime table,Vessel Contracts,Matched in v1.9,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+vessel_evidence.csv,Canonical / structured runtime table,Vessel Evidence,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+vessel_identifiers.csv,Canonical / structured runtime table,Vessel Identifiers,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+vessel_imo_verification.csv,Canonical / structured runtime table,Vessel IMO Verification,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+vessel_relationships.csv,Canonical / structured runtime table,Vessel Relationships,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+vessel_watchlists.csv,Raw operational/source feed,External runtime feed → Event Observations / specialist page,Runtime only / ingestion source,,N/A,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+vessels.csv,Canonical / structured runtime table,Vessels,Matched in v1.9,,Yes,App SRC_0001–SRC_0178 preserved,Uploaded v4.4 reconciled with newer carrier/tanker branch.
+fleet_research_universe.csv,New v1.9 runtime table,Fleet Research Universe,Added,See Data Dictionary,N/A,Newer-branch sources remapped to SRC_0179+,Part of unified GitHub/Streamlit model.
+carrier_deployment_seeds.csv,New v1.9 runtime table,Carrier Deployment Seeds,Added,See Data Dictionary,N/A,Newer-branch sources remapped to SRC_0179+,Part of unified GitHub/Streamlit model.
+carrier_fleet_targets.csv,New v1.9 runtime table,Derived runtime fleet coverage,Added,See Data Dictionary,N/A,Newer-branch sources remapped to SRC_0179+,Part of unified GitHub/Streamlit model.
+carrier_fleet_master.csv,New v1.9 runtime table,Derived runtime carrier-vessel relationships,Added,See Data Dictionary,N/A,Newer-branch sources remapped to SRC_0179+,Part of unified GitHub/Streamlit model.
+carrier_fleet_update_log.csv,New v1.9 runtime table,Runtime audit log,Added,See Data Dictionary,N/A,Newer-branch sources remapped to SRC_0179+,Part of unified GitHub/Streamlit model.
+fleet_ranking_snapshots.csv,New v1.9 runtime table,Fleet Ranking Snapshots,Added,See Data Dictionary,N/A,Newer-branch sources remapped to SRC_0179+,Part of unified GitHub/Streamlit model.
+tanker_fleet_universe.csv,New v1.9 runtime table,Tanker Fleet Universe,Added,See Data Dictionary,N/A,Newer-branch sources remapped to SRC_0179+,Part of unified GitHub/Streamlit model.
+vessel_restrictions.csv,New v1.9 runtime table,Vessel Restrictions,Added,See Data Dictionary,N/A,Newer-branch sources remapped to SRC_0179+,Part of unified GitHub/Streamlit model.
+tradeability_assessments.csv,New v1.9 runtime table,Tradeability Assessments,Added,See Data Dictionary,N/A,Newer-branch sources remapped to SRC_0179+,Part of unified GitHub/Streamlit model.
+vessel_transactions.csv,New v1.9 runtime table,Vessel Transactions,Added,See Data Dictionary,N/A,Newer-branch sources remapped to SRC_0179+,Part of unified GitHub/Streamlit model.
+tanker_corridor_exposure.csv,New v1.9 runtime table,Tanker Corridor Exposure,Added,See Data Dictionary,N/A,Newer-branch sources remapped to SRC_0179+,Part of unified GitHub/Streamlit model.
+weather_labour_events.csv,Focused operational event table,Weather Labour Events,Added in v1.10,External Event ID,N/A,Unified source namespace,25 first-pass weather/natural/labour/protest/civil events.
+disruption_watch.csv,Forward monitoring table,Disruption Watch,Added in v1.10,Watch ID,N/A,Unified source namespace,Threatened or authorised action stays outside Event Observations until disruption occurs.
+external_disruptions.csv,Canonical cross-domain event feed,External Disruptions,Expanded in v1.10,External Event ID,N/A,Unified source namespace,Now 26 cross-domain events; replaces the 9-row seed as the active runtime feed.
+infrastructure_investors.csv,Capital / investor universe,Infrastructure Investors,Added in v1.11,Investor ID / Company ID,N/A,Unified source namespace,Direct port/infrastructure investors plus logistics-real-estate and research universe.
+infrastructure_holdings.csv,Ownership / economic interest table,Infrastructure Holdings,Added in v1.11,Holding ID + investor + target,N/A,Unified source namespace,Time-bounded stakes and portfolio interests; ownership and operating control kept separate.
+infrastructure_deals.csv,Transaction table,Infrastructure Deals,Added in v1.11,Deal ID,N/A,Unified source namespace,"Completed, proposed, failed and partial-disposition infrastructure/logistics deals."
+economic_zones.csv,Economic zone / free-zone table,Economic Zones,Added in v1.11,Zone ID + Asset ID,N/A,Unified source namespace,"Free zones, economic cities and industrial/logistics zones."
+logistics_real_estate.csv,Logistics real-estate table,Logistics Real Estate,Added in v1.11,LRE ID + Asset ID,N/A,Unified source namespace,"Warehouses, logistics parks and transport-linked real-estate portfolios."
+dry_ports_inland_hubs.csv,Dry port / inland-port table,Dry Ports Inland Hubs,Added in v1.11,Hub ID + Asset ID,N/A,Unified source namespace,"Dry ports, inland ports, rail terminals and inland cargo hubs."
+infrastructure_connections.csv,Infrastructure graph-edge table,Infrastructure Connections,Added in v1.11,Connection ID + Source Asset ID,N/A,Unified source namespace,Port-zone-rail-road-airport-corridor connectivity.
+integrated_logistics_networks.csv,Integrated logistics network table,Integrated Logistics Networks,Added in v1.12,Network ID + Parent/Platform Company ID,N/A,Unified source namespace,"Cross-modal company/platform layer for DHL, FedEx, Amazon and Aramex/ADQ ecosystems."

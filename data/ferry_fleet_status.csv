@@ -1,0 +1,7 @@
+﻿Status ID,As Of,System ID,Vessel Name,Canonical Vessel ID,Fleet Status,Assignment / Location,Source URL,Notes
+FERRY_STATUS_0001,2026-05-14,FERRY_SYS_0003,MV Lituya,,In Service,Ketchikan - Annette Bay,https://dot.alaska.gov/amhs/fleet/fleet_status.shtml,AMHS current fleet status.
+FERRY_STATUS_0002,2026-05-14,FERRY_SYS_0003,MV LeConte,,In Service,Southeast communities,https://dot.alaska.gov/amhs/fleet/fleet_status.shtml,AMHS current fleet status.
+FERRY_STATUS_0003,2026-05-14,FERRY_SYS_0003,MV Kennicott,,In Overhaul,Vigor Shipyard Ketchikan,https://dot.alaska.gov/amhs/fleet/fleet_status.shtml,AMHS current fleet status.
+FERRY_STATUS_0004,2026-05-14,FERRY_SYS_0003,MV Tustumena,,In Service,Homer / Seldovia / Kodiak,https://dot.alaska.gov/amhs/fleet/fleet_status.shtml,AMHS current fleet status.
+FERRY_STATUS_0005,2026-08-16,FERRY_SYS_0012,Wanggami,,Commissioning,South Australia,https://www.sealink.com.au/kangaroo-island/news/important-update-on-the-timing-for-new-kifs/,First new Kangaroo Island ferry undergoing commissioning / service-preparation process.
+FERRY_STATUS_0006,2026-08-16,FERRY_SYS_0012,Ruwi,,Sea trials / delivery delayed,Builder / delivery voyage pending,https://www.sealink.com.au/kangaroo-island/news/important-update-on-the-timing-for-new-kifs/,Commissioning incident delayed delivery and new-service transition.

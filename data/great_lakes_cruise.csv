@@ -1,0 +1,11 @@
+﻿Cruise Record ID,Company ID,Vessel Name,Canonical Vessel ID,Operating Area,Representative Ports / Infrastructure,Vessel / Service Type,Season,Status,Source ID,Notes
+GL_CR_0001,COMP_PEARL_SEAS,Pearl Mist,,Great Lakes / Georgian Bay / St. Lawrence,Toronto; Milwaukee; regional ports,Small ship cruise,2026,Operating,SRC_0165,Pearl Seas began its 2026 Great Lakes season May 22.
+GL_CR_0002,COMP_ST_LAWRENCE_CRUISE,Canadian Empress,,St. Lawrence / Great Lakes,St. Lawrence / Great Lakes ports,Small ship cruise,2026,Operating,SRC_0163,
+GL_CR_0003,COMP_VIKING,Octantis,,Great Lakes expedition,Toronto; Duluth; Thunder Bay; Cleveland; Detroit; Soo Locks and others,Expedition cruise,2026,Operating,SRC_0163,Viking itinerary traverses Soo Locks and all five Great Lakes.
+GL_CR_0004,COMP_VIKING,Polaris,,Great Lakes expedition,Great Lakes / St. Lawrence ports,Expedition cruise,2026,Operating,SRC_0163,
+GL_CR_0005,COMP_PONANT,Le Bellot,,Great Lakes / St. Lawrence,Regional ports,Expedition cruise,2026,Operating,SRC_0163,
+GL_CR_0006,COMP_PONANT,Le Champlain,,Great Lakes / St. Lawrence,Regional ports,Expedition cruise,2026,Operating,SRC_0163,
+GL_CR_0007,COMP_HAPAG_LLOYD_CRUISES,Hanseatic Inspiration,,Great Lakes / St. Lawrence,Regional ports,Expedition cruise,2026,Operating,SRC_0163,
+GL_CR_0008,COMP_VICTORY_CRUISE,Victory I,,All Five Great Lakes / St. Lawrence,Toronto; Chicago; Montreal; regional ports,Small ship cruise,2026,Operating,SRC_0164,
+GL_CR_0009,COMP_VICTORY_CRUISE,Victory II,,All Five Great Lakes / St. Lawrence,Toronto; Chicago; Thunder Bay; Quebec City; regional ports,Small ship cruise,2026,Operating,SRC_0164,
+GL_CR_0010,COMP_AMERICAN_CRUISE,American Patriot,,Great Lakes,U.S. Great Lakes ports,Small ship cruise,2026,Operating / market entry,SRC_0163,American Cruise Lines entered Great Lakes market in 2026.

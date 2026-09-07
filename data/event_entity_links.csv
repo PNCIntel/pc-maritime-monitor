@@ -1,0 +1,9 @@
+﻿Event Link ID,Observation ID,Canonical Event ID,Entity ID,Entity Type,Link Type,Match Basis,Confidence,Source Dataset,Notes
+ELINK_000001,OBS_000029,,VESSEL_00088,Vessel,AFFECTS / SUBJECT,Vessel name exact-normalized,High,maritime_attacks_2026,Observation subject: BARAKAH
+ELINK_000002,OBS_000044,,VESSEL_00092,Vessel,AFFECTS / SUBJECT,Vessel name exact-normalized,High,maritime_attacks_2026,Observation subject: AL BAHYAH
+ELINK_000003,OBS_000052,,VESSEL_00055,Vessel,AFFECTS / SUBJECT,Vessel name exact-normalized,High,maritime_attacks_2026,Observation subject: NAVIG8MESSI
+ELINK_000004,OBS_000053,,VESSEL_00075,Vessel,AFFECTS / SUBJECT,Vessel name exact-normalized,High,maritime_attacks_2026,Observation subject: TARIF
+ELINK_000005,OBS_000213,,VESSEL_00055,Vessel,AFFECTS / SUBJECT,Vessel name exact-normalized,High,imo_gulf_confirmed_2026,Observation subject: NAVIG8 MESSI
+ELINK_000006,OBS_000223,,VESSEL_00092,Vessel,AFFECTS / SUBJECT,Vessel name exact-normalized,High,imo_gulf_confirmed_2026,Observation subject: AL BAHYAH
+ELINK_000007,OBS_000041,EVENT_0005,VESSEL_00171,Vessel,AFFECTS / SUBJECT,IMO 9401271 exact match,High,maritime_attacks_2026,Existing observation resolved to newly added canonical GFS Galaxy vessel.
+ELINK_000008,OBS_000226,EVENT_0005,VESSEL_00171,Vessel,AFFECTS / SUBJECT,IMO 9401271 exact match,High,imo_gulf_confirmed_2026,IMO-confirmed observation resolved to newly added canonical GFS Galaxy vessel.

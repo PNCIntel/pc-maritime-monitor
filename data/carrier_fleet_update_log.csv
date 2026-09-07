@@ -1,0 +1,5 @@
+﻿version,date,carrier,previous_records,new_records_added,records_enriched,current_records,fleet_universe_count,capture_pct,notes
+v1.7,2026-09-07,CMA CGM,16,50,0,66,844,7.82,Larger IMO-resolved pass; service-universe relationship remains separate from ownership.
+v1.7,2026-09-07,MSC,8,13,0,21,980,2.14,Larger IMO-resolved pass; service-universe relationship remains separate from ownership.
+v1.7,2026-09-07,Maersk,8,15,0,23,672,3.42,Larger IMO-resolved pass; service-universe relationship remains separate from ownership.
+v1.7,2026-09-07,Hapag-Lloyd,8,13,0,21,478,4.39,Larger IMO-resolved pass; service-universe relationship remains separate from ownership.

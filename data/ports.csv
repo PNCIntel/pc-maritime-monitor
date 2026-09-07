@@ -1,0 +1,57 @@
+﻿Port ID,Port / Facility,Country,Latitude,Longitude,Operator Company ID,Operator,Facility Type,Key Role,Coverage Note,Source ID
+UKP001,Ayr,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP002,Barrow,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP003,Barry,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP004,Cardiff,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP005,Fleetwood,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP006,Garston,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP007,Goole,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP008,Grimsby,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP009,Hams Hall Terminal,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP010,Hull,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP011,Immingham,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP012,Ipswich,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP013,King's Lynn,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP014,Lowestoft,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP015,Newport,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP016,Plymouth,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP017,Port Talbot,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP018,Silloth,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP019,Southampton,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP020,Swansea,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP021,Teignmouth,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP022,Troon,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
+UKP023,Port of Liverpool,United Kingdom,,,COMP_PEEL,Peel Ports Group,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0043
+UKP024,London Medway / Sheerness,United Kingdom,,,COMP_PEEL,Peel Ports Group,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0043
+UKP025,London Medway / Chatham,United Kingdom,,,COMP_PEEL,Peel Ports Group,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0043
+UKP026,Heysham,United Kingdom,,,COMP_PEEL,Peel Ports Group,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0043
+UKP027,Great Yarmouth / Port of East Anglia,United Kingdom,,,COMP_PEEL,Peel Ports Group,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0043
+UKP028,Clydeport,United Kingdom,,,COMP_PEEL,Peel Ports Group,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0043
+UKP029,Manchester Ship Canal,United Kingdom,,,COMP_PEEL,Peel Ports Group,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0043
+UKP030,Humber Bulk Terminal,United Kingdom,,,COMP_PEEL,Peel Ports Group,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0043
+UKP031,Tilbury,United Kingdom,,,COMP_FORTH,Forth Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0006
+UKP032,Grangemouth,United Kingdom,,,COMP_FORTH,Forth Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0006
+UKP033,Dundee,United Kingdom,,,COMP_FORTH,Forth Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0006
+UKP034,Leith,United Kingdom,,,COMP_FORTH,Forth Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0006
+UKP035,Rosyth,United Kingdom,,,COMP_FORTH,Forth Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0006
+UKP036,Methil,United Kingdom,,,COMP_FORTH,Forth Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0006
+UKP037,Burntisland,United Kingdom,,,COMP_FORTH,Forth Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0006
+UKP038,Kirkcaldy,United Kingdom,,,COMP_FORTH,Forth Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0006
+UKP039,Teesport,United Kingdom,,,COMP_PDPORTS,PD Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0042
+UKP040,Hartlepool,United Kingdom,,,COMP_PDPORTS,PD Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0042
+UKP041,Billingham,United Kingdom,,,COMP_PDPORTS,PD Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0042
+UKP042,Teesport Commerce Park,United Kingdom,,,COMP_PDPORTS,PD Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0042
+UKP043,Keadby,United Kingdom,,,COMP_PDPORTS,PD Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0042
+UKP044,Immingham,United Kingdom,,,COMP_PDPORTS,PD Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0042
+UKP045,Howden,United Kingdom,,,COMP_PDPORTS,PD Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0042
+UKP046,Groveport,United Kingdom,,,COMP_PDPORTS,PD Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0042
+UKP047,Thames,United Kingdom,,,COMP_PDPORTS,PD Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0042
+UKP048,Isle of Wight,United Kingdom,,,COMP_PDPORTS,PD Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0042
+UKP049,Felixstowe,United Kingdom,,,COMP_PDPORTS,PD Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0042
+UKP050,Port of Felixstowe,United Kingdom,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0008
+UKP051,Harwich International,United Kingdom,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0008
+UKP052,London Thamesport,United Kingdom,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0008
+UKP053,London Gateway,United Kingdom,,,COMP_DPW,DP World,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0034
+UKP054,Southampton Container Terminal,United Kingdom,,,COMP_DPW,DP World,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0034
+UKP055,Avonmouth Dock,United Kingdom,,,COMP_BRISTOL,The Bristol Port Company,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0021
+UKP056,Royal Portbury Dock,United Kingdom,,,COMP_BRISTOL,The Bristol Port Company,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0021

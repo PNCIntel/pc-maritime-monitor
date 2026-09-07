@@ -1,0 +1,27 @@
+﻿Shipyard ID,Shipyard,Country,Location,Primary Segment,Build Specialism,Status,Strategic Note,Source ID
+YARD_0001,New Times Shipbuilding Co. Ltd.,China,,Commercial shipbuilding,Container ships,Active,"Builder for Maersk eight-vessel 18,600 TEU order",SRC_0048
+YARD_0002,Muggiano Integrated Shipyard,Italy,La Spezia,Naval shipbuilding,Submarines,Active,Fincantieri U212 NFS construction site,SRC_0037
+YARD_0003,Jiangnan Shipyard,China,Shanghai,Commercial shipbuilding,"LNG, VLGC, VLEC and gas carriers",Active,Major ADNOC L&S / AW Shipping gas-carrier builder.,SRC_0068
+YARD_0004,Samsung Heavy Industries,South Korea,Geoje,Commercial shipbuilding,LNG carriers,Active,Builder in ADNOC L&S and Qatar LNG programs.,SRC_0072
+YARD_0005,Hanwha Ocean,South Korea,Geoje,Commercial / naval shipbuilding,LNG carriers; naval,Active,Builder in ADNOC L&S and Nakilat LNG programs.,SRC_0072
+YARD_0006,Hyundai Heavy Industries,South Korea,Ulsan,Commercial / naval shipbuilding,LNG carriers; merchant ships,Active,17 Nakilat LNG carriers in current newbuild program.,SRC_0080
+YARD_0007,HD Hyundai Samho Heavy Industries,South Korea,Samho,Commercial shipbuilding,"LNG, LPG/ammonia carriers",Active,Six Nakilat vessels in current newbuild program.,SRC_0080
+YARD_0008,Hudong-Zhonghua Shipbuilding,China,Shanghai,Commercial shipbuilding,QC-Max / LNG carriers,Active,Nine Nakilat QC-Max LNG vessels in current program.,SRC_0080
+YARD_0009,Jingling Shipyard,China,,Commercial shipbuilding,RoCon / Ro-Ro,Active,Name recorded exactly as published in Bahri's July 2026 release; normalize yard identity in later research.,SRC_0076
+YARD_0010,International Maritime Industries (IMI),Saudi Arabia,Ras Al-Khair,Commercial / offshore / naval shipbuilding,Ultramax dry bulk; offshore; ship repair,Active,Bahri affiliate and builder for six geared Ultramax vessels.,SRC_0077
+YARD_0011,China Merchants Jinling Shipyard (Jiangsu) Co Ltd,China,Jiangsu,Commercial shipbuilding,PCTC / Ro-Ro,Active,"BYD 9,200 CEU newbuild builder.",SRC_0092
+YARD_0012,China Merchants Heavy Industry (Jiangsu) Co Ltd,China,Jiangsu,Commercial shipbuilding,PCTC / Ro-Ro,Active,"BYD 9,200 CEU newbuild builder.",SRC_0093
+YARD_0013,Guangzhou Shipyard International,China,Guangzhou,Commercial shipbuilding,PCTC / Ro-Ro,Active,"BYD-owned 7,000 CEU PCTC builder.",SRC_0091
+YARD_0014,CIMC Raffles / Yantai Raffles,China,Yantai,Commercial / offshore shipbuilding,PCTC / offshore,Active,"Builder of Zodiac-owned 7,000 CEU PCTCs chartered to BYD.",SRC_0091
+YARD_0015,Zhoushan Changhong International Shipyard,China,Zhoushan,Commercial shipbuilding,Container ships,Active,"Builder for ten ZIM-chartered 11,500 TEU LNG dual-fuel vessels.",SRC_0097
+YARD_0016,Hyundai Mipo Dockyard,South Korea,Ulsan,Commercial shipbuilding,Feeder containerships; product carriers,Active,Historical/current SINOKOR builder.,SRC_0102
+YARD_0017,Jiangsu Zhenjiang Shipyard,China,Jiangsu,Commercial shipbuilding,Small containerships; specialized carriers,Active,Builder shown on SINOKOR vessel page and ADNOC molten-sulphur newbuild.,SRC_0102
+YARD_0018,Wenchong Shipyard,China,Guangzhou,Commercial shipbuilding,Feeder containerships,Active,SINOKOR vessel builder.,SRC_0102
+YARD_0019,Fujian Mawei Shipbuilding,China,Fujian,Commercial shipbuilding,Feeder containerships,Active,SINOKOR vessel builder.,SRC_0102
+YARD_0020,Taizhou Kouan Shipbuilding,China,Jiangsu,Commercial shipbuilding,Feeder containerships,Active,SINOKOR vessel builder.,SRC_0102
+YARD_0021,Volkswerft Stralsund,Germany,Stralsund,Commercial shipbuilding,Containerships,Active,Builder listed for Chennai Voyager.,SRC_0102
+YARD_0022,Murakami Hide Shipyard,Japan,,Commercial shipbuilding,Small containerships,Active,Builder listed for SINOKOR NIIGATA.,SRC_0102
+YARD_0023,Sungdong Shipbuilding & Marine Engineering,South Korea,,Commercial shipbuilding,Bulk carriers,Active,Builder listed for Geneva Queen.,SRC_0102
+YARD_0024,Kyokuyo Shipyard,Japan,,Commercial shipbuilding,Feeder containerships,Active,Builder listed for Nagoya Trader.,SRC_0102
+YARD_0025,Fukuoka Shipbuilding,Japan,Fukuoka,Commercial shipbuilding,Tankers,Active,Builder listed for Ocean Pioneer.,SRC_0102
+YARD_0026,Usuki Shipyard,Japan,Usuki,Commercial shipbuilding,Tankers,Active,Builder listed for No.2 Ocean Pioneer.,SRC_0102

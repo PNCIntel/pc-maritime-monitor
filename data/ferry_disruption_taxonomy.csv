@@ -1,0 +1,19 @@
+﻿Cause ID,Cause Family,Cause Detail / Examples,Control Type
+FERRY_CAUSE_01,Weather,Wind / storm / heavy sea,External
+FERRY_CAUSE_02,Tides / water level,Low tide / high tide / current / water level,External
+FERRY_CAUSE_03,Ice,Sea ice / lake ice / icebreaking restriction,External
+FERRY_CAUSE_04,Mechanical,Propulsion / steering / engine / electrical / machinery,Internal / asset
+FERRY_CAUSE_05,Crew,Crew shortage / credential / duty-time availability,Internal / workforce
+FERRY_CAUSE_06,Terminal mechanical,Ramp / transfer span / berth / bridge / apron failure,Infrastructure
+FERRY_CAUSE_07,Traffic / capacity,Vehicle queues / sold-out sailings / loading delay,Demand / operational
+FERRY_CAUSE_08,Schedule reset,Trip dropped to restore schedule after accumulated delay,Operational
+FERRY_CAUSE_09,Medical / rescue,Medical emergency / SAR / rescue operation,External / safety
+FERRY_CAUSE_10,Security / law enforcement,Police incident / security threat / terminal closure,External / security
+FERRY_CAUSE_11,Labour / industrial action,Strike / work stoppage / union action,Workforce
+FERRY_CAUSE_12,Port / harbour closure,Port authority closure / navigation restriction,Infrastructure / regulatory
+FERRY_CAUSE_13,Bridge / lock / channel,"Bridge, lock, dredged-channel or navigational-infrastructure disruption",Infrastructure
+FERRY_CAUSE_14,IT / cyber / ticketing,"Reservation, ticketing, dispatch, communications or cyber outage",Digital
+FERRY_CAUSE_15,Vessel casualty,Collision / allision / grounding / fire / flooding / cargo event,Safety / casualty
+FERRY_CAUSE_16,Fuel / bunkering,"Fuel supply, bunkering or tanker issue",Supply / operational
+FERRY_CAUSE_17,Natural hazard,Earthquake / tsunami / volcanic ash / landslide / wildfire impact,External / hazard
+FERRY_CAUSE_18,Other operational,Procedural / demand / loading-unloading / unavailable vehicle / miscellaneous,Operational

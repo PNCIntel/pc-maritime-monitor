@@ -1,0 +1,23 @@
+﻿Owner Company ID,Owner Name,Individual Vessel Records,With IMO,Without IMO,IMO Coverage %,Coverage Status,Verified As Of
+COMP_ADNOC_LS,ADNOC Logistics & Services,45,36,9,0.8,Partial,2026-09-07
+COMP_AW_SHIPPING,AW Shipping,19,9,10,0.47368421052631576,Partial,2026-09-07
+COMP_ALGOMA,Algoma Central Corporation,21,21,0,1,Complete,2026-09-07
+COMP_ASC,American Steamship Company,11,11,0,1,Complete,2026-09-07
+COMP_BYD,BYD Company / BYD Auto,6,6,0,1,Complete,2026-09-07
+COMP_CMA_CGM,CMA CGM Group,1,1,0,1,Complete,2026-09-07
+COMP_CSL_CANADA,Canada Steamship Lines,16,16,0,1,Complete,2026-09-07
+COMP_CHEVRON,Chevron Corporation,1,1,0,1,Complete,2026-09-07
+COMP_EUREKA_SHIPPING,Eureka Shipping,1,1,0,1,Complete,2026-09-07
+COMP_FUNDY_TANKERS,Fundy Tankers Ltd.,2,2,0,1,Complete,2026-09-07
+COMP_GFS,Global Feeder Shipping,1,1,0,1,Complete,2026-09-07
+COMP_GRN,Grand River Navigation,7,5,2,0.7142857142857143,Partial,2026-09-07
+COMP_GREAT_LAKES_FLEET,Great Lakes Fleet,9,9,0,1,Complete,2026-09-07
+COMP_LAKE_MICHIGAN_CARFERRY,Lake Michigan Carferry,1,1,0,1,Complete,2026-09-07
+COMP_LOWER_LAKES,Lower Lakes Towing,6,6,0,1,Complete,2026-09-07
+COMP_MCKEIL,McKeil Marine,1,1,0,1,Complete,2026-09-07
+COMP_NAVIG8,Navig8,29,29,0,1,Complete,2026-09-07
+COMP_PERFORMANCE_SHIPPING,Performance Shipping Inc.,1,1,0,1,Complete,2026-09-07
+COMP_SINOKOR,SINOKOR Merchant Marine,47,47,0,1,Complete,2026-09-07
+COMP_INTERLAKE,The Interlake Steamship Company,10,10,0,1,Complete,2026-09-07
+COMP_UGR,United Global Ro-Ro,14,14,0,1,Complete,2026-09-07
+COMP_ZODIAC,Zodiac Maritime,2,2,0,1,Complete,2026-09-07

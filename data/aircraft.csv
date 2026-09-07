@@ -1,0 +1,14 @@
+﻿Aircraft ID,Operator Company ID,Aircraft Type,Role,Count,Status,Payload,Registration,Hub,Owner / Lessor,Source ID
+AIRCRAFT_0001,COMP_CMA_AIR,Airbus A330-200F,Freighter,1,Operating,60t,,,,SRC_0046
+AIRCRAFT_0002,COMP_CMA_AIR,Boeing 777F,Freighter,4,Operating / by end-2025,102t,,,,SRC_0046
+AIRCRAFT_0003,COMP_FEDERAL_EXPRESS,Boeing 777F,Freighter / feeder,59,Operating,,,Global FedEx air network,56 owned / 3 leased,SRC_0297
+AIRCRAFT_0004,COMP_FEDERAL_EXPRESS,McDonnell Douglas MD-11,Freighter / feeder,29,Operating,,,Global FedEx air network,Owned,SRC_0297
+AIRCRAFT_0005,COMP_FEDERAL_EXPRESS,Boeing 767F,Freighter / feeder,152,Operating,,,Global FedEx air network,Owned,SRC_0297
+AIRCRAFT_0006,COMP_FEDERAL_EXPRESS,Airbus A300-600F,Freighter / feeder,57,Operating,,,Global FedEx air network,Owned,SRC_0297
+AIRCRAFT_0007,COMP_FEDERAL_EXPRESS,Boeing 757-200F,Freighter / feeder,86,Operating,,,Global FedEx air network,Owned,SRC_0297
+AIRCRAFT_0008,COMP_FEDERAL_EXPRESS,ATR 72-600F,Freighter / feeder,27,Operating,,,Global FedEx air network,Owned,SRC_0297
+AIRCRAFT_0009,COMP_FEDERAL_EXPRESS,ATR 72,Freighter / feeder,19,Operating,,,Global FedEx air network,Owned,SRC_0297
+AIRCRAFT_0010,COMP_FEDERAL_EXPRESS,ATR 42,Freighter / feeder,16,Operating,,,Global FedEx air network,Owned,SRC_0297
+AIRCRAFT_0011,COMP_FEDERAL_EXPRESS,Cessna 408 SkyCourier,Freighter / feeder,39,Operating,,,Global FedEx air network,Owned,SRC_0297
+AIRCRAFT_0012,COMP_FEDERAL_EXPRESS,Cessna 208B,Freighter / feeder,216,Operating,,,Global FedEx air network,Owned,SRC_0297
+AIRCRAFT_0013,COMP_SUN_COUNTRY,Boeing 737-800BCF,Amazon cargo freighter,22,Operating / Amazon-dedicated,,,Amazon Air network,Subleased directly from Amazon; operated by Sun Country,SRC_0307

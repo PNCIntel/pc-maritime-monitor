@@ -1,0 +1,753 @@
+﻿Entity ID,Entity Type,Canonical Name,Country,Parent Entity ID,Status
+PERSON_0001,Person,Rodolphe Saadé,,,Active
+PERSON_0002,Person,Patrick Moebel,,,Active
+PERSON_0003,Person,Keith Svendsen,,,Active
+PERSON_0004,Person,Peter Wikström,,,Active
+PERSON_0005,Person,Yuvraj Narayan,,,Active
+PERSON_0006,Person,Ahmad Yousef Al-Hassan,,,Active
+PERSON_0007,Person,Captain Mohamed Juma Al Shamisi,,,Active
+PERSON_0008,Person,Jochen Thewes,,,Active
+PERSON_0009,Person,Farid Belbouab,,,Active
+PERSON_0010,Person,Simon Farhat,,,Active
+PERSON_0011,Person,Richard Forson,,,Active
+PERSON_0012,Person,Domenico Ceci,,,Active
+PERSON_0013,Person,Maxim Straus,,,Active
+PERSON_0014,Person,Pierroberto Folgiero,,,Active
+PERSON_0015,Person,Soren Toft,,,Active
+UKP001,Port,Ayr,United Kingdom,COMP_ABP,Active
+UKP002,Port,Barrow,United Kingdom,COMP_ABP,Active
+UKP003,Port,Barry,United Kingdom,COMP_ABP,Active
+UKP004,Port,Cardiff,United Kingdom,COMP_ABP,Active
+UKP005,Port,Fleetwood,United Kingdom,COMP_ABP,Active
+UKP006,Port,Garston,United Kingdom,COMP_ABP,Active
+UKP007,Port,Goole,United Kingdom,COMP_ABP,Active
+UKP008,Port,Grimsby,United Kingdom,COMP_ABP,Active
+UKP009,Port,Hams Hall Terminal,United Kingdom,COMP_ABP,Active
+UKP010,Port,Hull,United Kingdom,COMP_ABP,Active
+UKP011,Port,Immingham,United Kingdom,COMP_ABP,Active
+UKP012,Port,Ipswich,United Kingdom,COMP_ABP,Active
+UKP013,Port,King's Lynn,United Kingdom,COMP_ABP,Active
+UKP014,Port,Lowestoft,United Kingdom,COMP_ABP,Active
+UKP015,Port,Newport,United Kingdom,COMP_ABP,Active
+UKP016,Port,Plymouth,United Kingdom,COMP_ABP,Active
+UKP017,Port,Port Talbot,United Kingdom,COMP_ABP,Active
+UKP018,Port,Silloth,United Kingdom,COMP_ABP,Active
+UKP019,Port,Southampton,United Kingdom,COMP_ABP,Active
+UKP020,Port,Swansea,United Kingdom,COMP_ABP,Active
+UKP021,Port,Teignmouth,United Kingdom,COMP_ABP,Active
+UKP022,Port,Troon,United Kingdom,COMP_ABP,Active
+UKP023,Port,Port of Liverpool,United Kingdom,COMP_PEEL,Active
+UKP024,Port,London Medway / Sheerness,United Kingdom,COMP_PEEL,Active
+UKP025,Port,London Medway / Chatham,United Kingdom,COMP_PEEL,Active
+UKP026,Port,Heysham,United Kingdom,COMP_PEEL,Active
+UKP027,Port,Great Yarmouth / Port of East Anglia,United Kingdom,COMP_PEEL,Active
+UKP028,Port,Clydeport,United Kingdom,COMP_PEEL,Active
+UKP029,Port,Manchester Ship Canal,United Kingdom,COMP_PEEL,Active
+UKP030,Port,Humber Bulk Terminal,United Kingdom,COMP_PEEL,Active
+UKP031,Port,Tilbury,United Kingdom,COMP_FORTH,Active
+UKP032,Port,Grangemouth,United Kingdom,COMP_FORTH,Active
+UKP033,Port,Dundee,United Kingdom,COMP_FORTH,Active
+UKP034,Port,Leith,United Kingdom,COMP_FORTH,Active
+UKP035,Port,Rosyth,United Kingdom,COMP_FORTH,Active
+UKP036,Port,Methil,United Kingdom,COMP_FORTH,Active
+UKP037,Port,Burntisland,United Kingdom,COMP_FORTH,Active
+UKP038,Port,Kirkcaldy,United Kingdom,COMP_FORTH,Active
+UKP039,Port,Teesport,United Kingdom,COMP_PDPORTS,Active
+UKP040,Port,Hartlepool,United Kingdom,COMP_PDPORTS,Active
+UKP041,Port,Billingham,United Kingdom,COMP_PDPORTS,Active
+UKP042,Port,Teesport Commerce Park,United Kingdom,COMP_PDPORTS,Active
+UKP043,Port,Keadby,United Kingdom,COMP_PDPORTS,Active
+UKP044,Port,Immingham,United Kingdom,COMP_PDPORTS,Active
+UKP045,Port,Howden,United Kingdom,COMP_PDPORTS,Active
+UKP046,Port,Groveport,United Kingdom,COMP_PDPORTS,Active
+UKP047,Port,Thames,United Kingdom,COMP_PDPORTS,Active
+UKP048,Port,Isle of Wight,United Kingdom,COMP_PDPORTS,Active
+UKP049,Port,Felixstowe,United Kingdom,COMP_PDPORTS,Active
+UKP050,Port,Port of Felixstowe,United Kingdom,COMP_HUTCHISON,Active
+UKP051,Port,Harwich International,United Kingdom,COMP_HUTCHISON,Active
+UKP052,Port,London Thamesport,United Kingdom,COMP_HUTCHISON,Active
+UKP053,Port,London Gateway,United Kingdom,COMP_DPW,Active
+UKP054,Port,Southampton Container Terminal,United Kingdom,COMP_DPW,Active
+UKP055,Port,Avonmouth Dock,United Kingdom,COMP_BRISTOL,Active
+UKP056,Port,Royal Portbury Dock,United Kingdom,COMP_BRISTOL,Active
+AIRCRAFT_0001,Aircraft,Airbus A330-200F,,COMP_CMA_AIR,Active
+AIRCRAFT_0002,Aircraft,Boeing 777F,,COMP_CMA_AIR,Active
+YARD_0001,Shipyard,New Times Shipbuilding Co. Ltd.,China,,Active
+YARD_0002,Shipyard,Muggiano Integrated Shipyard,Italy,,Active
+PERSON_0016,Person,H.E. Dr. Sultan Ahmed Al Jaber,,,Active
+PERSON_0017,Person,Captain Abdulkareem Al Masabi,,,Active
+PERSON_0018,Person,Eng. Ahmed Ali Alsubaey,,,Active
+PERSON_0019,Person,Hisham Al Nughaimish,,,Active
+PERSON_0020,Person,Faisal Al Husseini,,,Active
+PERSON_0021,Person,Khalid Alhammad,,,Active
+PERSON_0022,Person,Mohit Sibal,,,Active
+PERSON_0023,Person,Eng. Abdullah Al-Sulaiti,,,Active
+PERSON_0024,Person,Fahad Saad Al-Qahtani,,,Active
+PERSON_0025,Person,Kris Brusselmans,,,Active
+PERSON_0026,Person,Saad Sherida Al-Kaabi,,,Active
+PERSON_0027,Person,Wang Chuanfu,,,Active
+PERSON_0028,Person,Eli Glickman,,,Active
+PERSON_0029,Person,Tae-Soon Chung,,,Active
+PERSON_0030,Person,Chang-Won Kum,,,Active
+PERSON_0031,Person,Murray Auchincloss,,,Active
+PERSON_0032,Person,Mike Wirth,,,Active
+PERSON_0033,Person,Darren Woods,,,Active
+YARD_0003,Shipyard,Jiangnan Shipyard,China,,Active
+YARD_0004,Shipyard,Samsung Heavy Industries,South Korea,,Active
+YARD_0005,Shipyard,Hanwha Ocean,South Korea,,Active
+YARD_0006,Shipyard,Hyundai Heavy Industries,South Korea,,Active
+YARD_0007,Shipyard,HD Hyundai Samho Heavy Industries,South Korea,,Active
+YARD_0008,Shipyard,Hudong-Zhonghua Shipbuilding,China,,Active
+YARD_0009,Shipyard,Jingling Shipyard,China,,Active
+YARD_0010,Shipyard,International Maritime Industries (IMI),Saudi Arabia,,Active
+YARD_0011,Shipyard,China Merchants Jinling Shipyard (Jiangsu) Co Ltd,China,,Active
+YARD_0012,Shipyard,China Merchants Heavy Industry (Jiangsu) Co Ltd,China,,Active
+YARD_0013,Shipyard,Guangzhou Shipyard International,China,,Active
+YARD_0014,Shipyard,CIMC Raffles / Yantai Raffles,China,,Active
+YARD_0015,Shipyard,Zhoushan Changhong International Shipyard,China,,Active
+YARD_0016,Shipyard,Hyundai Mipo Dockyard,South Korea,,Active
+YARD_0017,Shipyard,Jiangsu Zhenjiang Shipyard,China,,Active
+YARD_0018,Shipyard,Wenchong Shipyard,China,,Active
+YARD_0019,Shipyard,Fujian Mawei Shipbuilding,China,,Active
+YARD_0020,Shipyard,Taizhou Kouan Shipbuilding,China,,Active
+YARD_0021,Shipyard,Volkswerft Stralsund,Germany,,Active
+YARD_0022,Shipyard,Murakami Hide Shipyard,Japan,,Active
+YARD_0023,Shipyard,Sungdong Shipbuilding & Marine Engineering,South Korea,,Active
+YARD_0024,Shipyard,Kyokuyo Shipyard,Japan,,Active
+YARD_0025,Shipyard,Fukuoka Shipbuilding,Japan,,Active
+YARD_0026,Shipyard,Usuki Shipyard,Japan,,Active
+VESSEL_00001,Vessel,UGR Al Samha,,COMP_UGR,Operating
+VESSEL_00002,Vessel,UGR Zakher,,COMP_UGR,Operating
+VESSEL_00003,Vessel,UGR Al Reef,,COMP_UGR,Operating
+VESSEL_00004,Vessel,Al Jubail,,COMP_UGR,Operating
+VESSEL_00005,Vessel,Ramhan,,COMP_UGR,Operating
+VESSEL_00006,Vessel,UGR Arabian Gulf,,COMP_UGR,Operating
+VESSEL_00007,Vessel,Erk İzmir,,COMP_UGR,Operating
+VESSEL_00008,Vessel,Abu Samrah,,COMP_UGR,Operating
+VESSEL_00009,Vessel,UGR İstanbul,,COMP_UGR,Operating
+VESSEL_00010,Vessel,Saffet Bey,,COMP_UGR,Operating
+VESSEL_00011,Vessel,Super Fast Baleares,,COMP_UGR,Operating
+VESSEL_00012,Vessel,Chang Sheng Hong,,COMP_UGR,Operating
+VESSEL_00013,Vessel,JINANAH,,COMP_UGR,Operating
+VESSEL_00014,Vessel,SDERIA,,COMP_UGR,Operating
+VESSEL_00015,Vessel,CMA CGM MONTE CRISTO,,COMP_CMA_CGM,Operating
+VESSEL_00016,Vessel,Al Sadaf,,COMP_ADNOC_LS,Operating
+VESSEL_00017,Vessel,Arada,,COMP_ADNOC_LS,Operating
+VESSEL_00018,Vessel,Al Taweelah,,COMP_ADNOC_LS,Operating
+VESSEL_00019,Vessel,Al Hamra,,COMP_ADNOC_LS,Operating
+VESSEL_00020,Vessel,Al Rahba,,COMP_ADNOC_LS,Operating
+VESSEL_00021,Vessel,Al Reef,,COMP_ADNOC_LS,Operating
+VESSEL_00022,Vessel,Al Shelila,,COMP_ADNOC_LS,Operating
+VESSEL_00023,Vessel,Ish (FSU),,COMP_ADNOC_LS,Operating / FSU
+VESSEL_00024,Vessel,Mraweh,,COMP_ADNOC_LS,Operating
+VESSEL_00025,Vessel,Mubaraz,,COMP_ADNOC_LS,Operating
+VESSEL_00026,Vessel,Shahamah,,COMP_ADNOC_LS,Operating
+VESSEL_00027,Vessel,Umm Al Ashtan,,COMP_ADNOC_LS,Operating
+VESSEL_00028,Vessel,Ruwais LNG H2711,,COMP_ADNOC_LS,On order / newbuild
+VESSEL_00029,Vessel,Ruwais LNG H2712,,COMP_ADNOC_LS,On order / newbuild
+VESSEL_00030,Vessel,Ruwais LNG H2713,,COMP_ADNOC_LS,On order / newbuild
+VESSEL_00031,Vessel,Ruwais LNG H2714,,COMP_ADNOC_LS,On order / newbuild
+VESSEL_00032,Vessel,Ruwais LNG H2598,,COMP_ADNOC_LS,On order / newbuild
+VESSEL_00033,Vessel,Ruwais LNG H2599,,COMP_ADNOC_LS,On order / newbuild
+VESSEL_00034,Vessel,Ruwais LNG H2600,,COMP_ADNOC_LS,On order / newbuild
+VESSEL_00035,Vessel,Ruwais LNG H2601,,COMP_ADNOC_LS,On order / newbuild
+VESSEL_00036,Vessel,Al Maryah,,COMP_ADNOC_LS,Operating
+VESSEL_00037,Vessel,AWS-Delma,,COMP_AW_SHIPPING,Operating
+VESSEL_00038,Vessel,AWS-Al Ain,,COMP_AW_SHIPPING,Operating
+VESSEL_00039,Vessel,AWS-Zakher,,COMP_AW_SHIPPING,Operating
+VESSEL_00040,Vessel,AWS-Rabdan,,COMP_AW_SHIPPING,Operating
+VESSEL_00041,Vessel,AWS-Al Salam,,COMP_AW_SHIPPING,Operating
+VESSEL_00042,Vessel,AWS-Baynounah,,COMP_AW_SHIPPING,Operating
+VESSEL_00043,Vessel,Meera,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00044,Vessel,Dana,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00045,Vessel,Al Ghadeer,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00046,Vessel,Rimah,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00047,Vessel,Umm Al Lulu I,,COMP_ADNOC_LS,Operating
+VESSEL_00048,Vessel,Al Samha,,COMP_ADNOC_LS,Operating
+VESSEL_00049,Vessel,Bani Yas,,COMP_ADNOC_LS,Operating
+VESSEL_00050,Vessel,Diyyinah I,,COMP_ADNOC_LS,Operating
+VESSEL_00051,Vessel,Mezaira'a,,COMP_ADNOC_LS,Operating
+VESSEL_00052,Vessel,Yamilah-III,,COMP_ADNOC_LS,Operating
+VESSEL_00053,Vessel,Navig8 Honor,,COMP_NAVIG8,Operating
+VESSEL_00054,Vessel,Navig8 Martinez,,COMP_NAVIG8,Operating
+VESSEL_00055,Vessel,Navig8 Messi,,COMP_NAVIG8,Operating
+VESSEL_00056,Vessel,Navig8 Montiel,,COMP_NAVIG8,Operating
+VESSEL_00057,Vessel,Abu Dhabi-III,,COMP_ADNOC_LS,Operating
+VESSEL_00058,Vessel,Liwa V,,COMP_ADNOC_LS,Operating
+VESSEL_00059,Vessel,Al Bateen,,COMP_ADNOC_LS,Operating
+VESSEL_00060,Vessel,Al Falah,,COMP_ADNOC_LS,Operating
+VESSEL_00061,Vessel,Al Ruwais,,COMP_ADNOC_LS,Operating
+VESSEL_00062,Vessel,Al Khtam,,COMP_ADNOC_LS,Operating
+VESSEL_00063,Vessel,Yong Jiang (Gas Yongjiang),,COMP_AW_SHIPPING,Delivered / operating
+VESSEL_00064,Vessel,Min Jiang,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00065,Vessel,Al Bayraq,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00066,Vessel,Alhosn,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00067,Vessel,Al Aryam,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00068,Vessel,Al Saad,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00069,Vessel,Al Muzn,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00070,Vessel,Al Taair,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00071,Vessel,Al Sila,,COMP_AW_SHIPPING,Newbuild / delivery program
+VESSEL_00072,Vessel,Janana,,COMP_ADNOC_LS,Operating
+VESSEL_00073,Vessel,ADNOC L&S molten sulphur newbuild,,COMP_ADNOC_LS,On order / newbuild
+VESSEL_00074,Vessel,Jarnain,,COMP_ADNOC_LS,Operating
+VESSEL_00075,Vessel,Tarif,,COMP_ADNOC_LS,Operating
+VESSEL_00076,Vessel,Navig8 Precision,,COMP_NAVIG8,Operating
+VESSEL_00077,Vessel,Navig8 Prestige,,COMP_NAVIG8,Operating
+VESSEL_00078,Vessel,Navig8 Perseverance,,COMP_NAVIG8,Operating
+VESSEL_00079,Vessel,Navig8 Passion,,COMP_NAVIG8,Operating
+VESSEL_00080,Vessel,Navig8 Promise,,COMP_NAVIG8,Operating
+VESSEL_00081,Vessel,Navig8 Prosperity,,COMP_NAVIG8,Operating
+VESSEL_00082,Vessel,Navig8 Pride LHJ,,COMP_NAVIG8,Operating
+VESSEL_00083,Vessel,Navig8 Wolf,,COMP_NAVIG8,Operating
+VESSEL_00084,Vessel,Navig8 Providence,,COMP_NAVIG8,Operating
+VESSEL_00085,Vessel,Leicester,,COMP_ADNOC_LS,Operating
+VESSEL_00086,Vessel,Hili,,COMP_ADNOC_LS,Operating
+VESSEL_00087,Vessel,Zakum,,COMP_ADNOC_LS,Operating
+VESSEL_00088,Vessel,Barakah,,COMP_ADNOC_LS,Operating
+VESSEL_00089,Vessel,Hafeet,,COMP_ADNOC_LS,Operating
+VESSEL_00090,Vessel,Habshan,,COMP_ADNOC_LS,Operating
+VESSEL_00091,Vessel,Arzanah,,COMP_ADNOC_LS,Operating
+VESSEL_00092,Vessel,Al Bahyah,,COMP_ADNOC_LS,Operating
+VESSEL_00093,Vessel,Navig8 Universe,,COMP_NAVIG8,Operating
+VESSEL_00094,Vessel,Navig8 Constellation,,COMP_NAVIG8,Operating
+VESSEL_00095,Vessel,Navig8 Grace,,COMP_NAVIG8,Operating
+VESSEL_00096,Vessel,Navig8 Gallantry,,COMP_NAVIG8,Operating
+VESSEL_00097,Vessel,Navig8 Guard,,COMP_NAVIG8,Operating
+VESSEL_00098,Vessel,Navig8 Guide,,COMP_NAVIG8,Operating
+VESSEL_00099,Vessel,Navig8 Goal,,COMP_NAVIG8,Operating
+VESSEL_00100,Vessel,Navig8 Gauntlet,,COMP_NAVIG8,Operating
+VESSEL_00101,Vessel,Navig8 Gladiator,,COMP_NAVIG8,Operating
+VESSEL_00102,Vessel,Navig8 Gratitude,,COMP_NAVIG8,Operating
+VESSEL_00103,Vessel,Navig8 Excel,,COMP_NAVIG8,Operating
+VESSEL_00104,Vessel,Navig8 Exceed,,COMP_NAVIG8,Operating
+VESSEL_00105,Vessel,Navig8 Express,,COMP_NAVIG8,Operating
+VESSEL_00106,Vessel,Navig8 Excellence,,COMP_NAVIG8,Operating
+VESSEL_00107,Vessel,Navig8 Estelle,,COMP_NAVIG8,Operating
+VESSEL_00108,Vessel,Navig8 Executive,,COMP_NAVIG8,Operating
+VESSEL_00109,Vessel,BYD Explorer No.1,,COMP_ZODIAC,Operating
+VESSEL_00110,Vessel,BYD Changzhou,,COMP_ZODIAC,Operating
+VESSEL_00111,Vessel,BYD Hefei,,COMP_BYD,Operating
+VESSEL_00112,Vessel,BYD Zhengzhou,,COMP_BYD,Operating
+VESSEL_00113,Vessel,BYD Shenzhen,,COMP_BYD,Operating
+VESSEL_00114,Vessel,BYD Xi'an,,COMP_BYD,Operating
+VESSEL_00115,Vessel,BYD Changsha,,COMP_BYD,Operating
+VESSEL_00116,Vessel,BYD Jinan,,COMP_BYD,Operating
+VESSEL_00117,Vessel,SINOKOR NIIGATA,Korea,COMP_SINOKOR,Operating
+VESSEL_00118,Vessel,MEREDITH VICTORY,Korea,COMP_SINOKOR,Operating
+VESSEL_00119,Vessel,KOOKYANG SINGAPORE,,COMP_SINOKOR,Operating
+VESSEL_00120,Vessel,GENEVA QUEEN,,COMP_SINOKOR,Operating
+VESSEL_00121,Vessel,Hakata Voyager,,COMP_SINOKOR,Operating
+VESSEL_00122,Vessel,Vostochny Voyager,,COMP_SINOKOR,Operating
+VESSEL_00123,Vessel,HongKong Voyager,,COMP_SINOKOR,Operating
+VESSEL_00124,Vessel,Osaka Voyager,,COMP_SINOKOR,Operating
+VESSEL_00125,Vessel,NAGOYA TRADER,,COMP_SINOKOR,Operating
+VESSEL_00126,Vessel,SAWASDEE PACIFIC,,COMP_SINOKOR,Operating
+VESSEL_00127,Vessel,SAWASDEE ATLANTIC,,COMP_SINOKOR,Operating
+VESSEL_00128,Vessel,SAWASDEE BALTIC,,COMP_SINOKOR,Operating
+VESSEL_00129,Vessel,SAWASDEE SUNRISE,,COMP_SINOKOR,Operating
+VESSEL_00130,Vessel,HOCHIMINH VOYAGER,,COMP_SINOKOR,Operating
+VESSEL_00131,Vessel,JAKARTA VOYAGER,,COMP_SINOKOR,Operating
+VESSEL_00132,Vessel,SHANGHAI VOYAGER,,COMP_SINOKOR,Operating
+VESSEL_00133,Vessel,NINGBO TRADER,,COMP_SINOKOR,Operating
+VESSEL_00134,Vessel,YOKOHAMA TRADER,,COMP_SINOKOR,Operating
+VESSEL_00135,Vessel,SURABAYA VOYAGER,,COMP_SINOKOR,Operating
+VESSEL_00136,Vessel,KOBE TRADER,,COMP_SINOKOR,Operating
+VESSEL_00137,Vessel,CHENNAI VOYAGER,Panama,COMP_SINOKOR,Operating
+VESSEL_00138,Vessel,SENDAI TRADER,Korea,COMP_SINOKOR,Operating
+VESSEL_00139,Vessel,QINGDAO TRADER,,COMP_SINOKOR,Operating
+VESSEL_00140,Vessel,YANGTZE TRADER,,COMP_SINOKOR,Operating
+VESSEL_00141,Vessel,NO.2 OCEAN PIONEER,,COMP_SINOKOR,Operating
+VESSEL_00142,Vessel,OCEAN PIONEER,,COMP_SINOKOR,Operating
+VESSEL_00143,Vessel,SAWASDEE CHITTAGONG,,COMP_SINOKOR,Operating
+VESSEL_00144,Vessel,SAWASDEE SHANGHAI,,COMP_SINOKOR,Operating
+VESSEL_00145,Vessel,SAWASDEE XIAMEN,,COMP_SINOKOR,Operating
+VESSEL_00146,Vessel,SAWASDEE INCHEON,,COMP_SINOKOR,Operating
+VESSEL_00147,Vessel,SAWASDEE SIRIUS,,COMP_SINOKOR,Operating
+VESSEL_00148,Vessel,SAWASDEE VEGA,,COMP_SINOKOR,Operating
+VESSEL_00149,Vessel,SAWASDEE CAPELLA,,COMP_SINOKOR,Operating
+VESSEL_00150,Vessel,SAWASDEE RIGEL,,COMP_SINOKOR,Operating
+VESSEL_00151,Vessel,SAWASDEE ALTAIR,,COMP_SINOKOR,Operating
+VESSEL_00152,Vessel,SAWASDEE SPICA,,COMP_SINOKOR,Operating
+VESSEL_00153,Vessel,SAWASDEE DENEB,,COMP_SINOKOR,Operating
+VESSEL_00154,Vessel,YEOSU VOYAGER,Panama,COMP_SINOKOR,Operating
+VESSEL_00155,Vessel,INCHEON VOYAGER,Panama,COMP_SINOKOR,Operating
+VESSEL_00156,Vessel,ULSAN VOYAGER,Panama,COMP_SINOKOR,Operating
+VESSEL_00157,Vessel,SAWASDEE MIMOSA,,COMP_SINOKOR,Operating
+VESSEL_00158,Vessel,TOYAMA TRADER,,COMP_SINOKOR,Operating
+VESSEL_00159,Vessel,KWANGYANG VOYAGER,Panama,COMP_SINOKOR,Operating
+VESSEL_00160,Vessel,AKITA TRADER,Liberia,COMP_SINOKOR,Operating
+VESSEL_00161,Vessel,MELBOURNE BRIDGE,Liberia,COMP_SINOKOR,Operating
+VESSEL_00162,Vessel,SYDNEY BRIDGE,,COMP_SINOKOR,Operating
+VESSEL_00163,Vessel,MOJI EXPRESS,,COMP_SINOKOR,Operating
+VESSEL_00164,Vessel,Asia Excellence,,COMP_CHEVRON,Operating
+VESSEL_00165,Vessel,P. Long Beach,,COMP_PERFORMANCE_SHIPPING,Operating / chartered
+VESSEL_00166,Vessel,Largo Eagle,,,Operating / cargo booking
+VESSEL_00167,Vessel,Nord Ventura,,,Operating / cargo booking
+VESSEL_00168,Vessel,Rex Tillerson,,,Operating / delivered 2024
+VESSEL_00169,Vessel,CAPT. KATTELMANN,Malta,,Operating
+VESSEL_00170,Vessel,ATHENA,St Vincent & Grenadines,,Operating
+VESSEL_00171,Vessel,GFS GALAXY,Cyprus,,Damaged / post-incident assessment
+VESSEL_00172,Vessel,GFS GENESIS,Singapore,,Operating
+VESSEL_00173,Vessel,GFS PRECIOUS,Singapore,,Operating
+VESSEL_00174,Vessel,GFS GISELLE,Singapore,,Operating
+VESSEL_00175,Vessel,GFS RUBY,Singapore,,Operating
+VESSEL_00176,Vessel,GFS PRESTIGE,Singapore,,Operating
+VESSEL_00177,Vessel,GFS PRIDE,Singapore,,Operating
+VESSEL_00178,Vessel,GFS RANNA,St Vincent & Grenadines,,Operating
+VESSEL_00179,Vessel,GFS JADE,St Vincent & Grenadines,,Operating
+VESSEL_00180,Vessel,GFS PERFECT,Singapore,,Operating
+VESSEL_00181,Vessel,GFS PEARL,Cyprus,,Operating
+VESSEL_00182,Vessel,GFS JUNO,St Vincent & Grenadines,,Operating
+VESSEL_00183,Vessel,GFS PRIME,Cyprus,,Operating
+VESSEL_00184,Vessel,GFS SAPPHIRE,Malta,,Operating
+VESSEL_00185,Vessel,SIGYN W,,,Operating / schedule-observed
+VESSEL_00186,Vessel,KOI,,,Operating / schedule-observed
+VESSEL_00187,Vessel,CMA CGM AMBER,,,Operating / schedule-observed
+VESSEL_00188,Vessel,CMA CGM SORBONNE,,,Operating / schedule-observed
+VESSEL_00189,Vessel,CMA CGM MEKONG,,,Operating / schedule-observed
+VESSEL_00190,Vessel,MSC UTMOST VIII,,,Operating / schedule-observed
+VESSEL_00191,Vessel,MSC TARA III,,,Operating / schedule-observed
+VESSEL_00192,Vessel,MSC KAYLA,,,Operating / schedule-observed
+VESSEL_00193,Vessel,MSC JENNY II,,,Operating / schedule-observed
+VESSEL_00194,Vessel,MSC SHANGHAI V,,,Operating / schedule-observed
+VESSEL_00195,Vessel,MAERSK SANA,,,Operating / schedule-observed
+VESSEL_00196,Vessel,MAERSK STOCKHOLM,,,Operating / schedule-observed
+VESSEL_00197,Vessel,ADRIAN MAERSK,,,Operating / schedule-observed
+VESSEL_00198,Vessel,BSG BONAIRE,,,Operating / schedule-observed
+VESSEL_00199,Vessel,AS SIMONE,,,Operating / schedule-observed
+VESSEL_00200,Vessel,XIN FEI ZHOU,,,Operating / schedule-observed
+VESSEL_00201,Vessel,XIN TAI CANG,,,Operating / schedule-observed
+VESSEL_00202,Vessel,SEASMILE,,,Operating / schedule-observed
+VESSEL_00203,Vessel,HANSA BREITENBURG,,,Operating / schedule-observed
+VESSEL_00204,Vessel,SMC COLUMBUS,,,Operating / schedule-observed
+VESSEL_00205,Vessel,EVER FAR,,,Operating / schedule-observed
+VESSEL_00206,Vessel,EVER BEFIT,,,Operating / schedule-observed
+VESSEL_00207,Vessel,EVER LINKING,,,Operating / schedule-observed
+VESSEL_00208,Vessel,EVER MEMO,,,Operating / schedule-observed
+VESSEL_00209,Vessel,NORTHERN PRACTISE,,,Operating / schedule-observed
+VESSEL_00210,Vessel,VALPARAISO EXPRESS,,,Operating / schedule-observed
+VESSEL_00211,Vessel,SALERNO EXPRESS,,,Operating / schedule-observed
+VESSEL_00212,Vessel,CARTAGENA EXPRESS,,,Operating / schedule-observed
+VESSEL_00213,Vessel,DAMIETTA EXPRESS,,,Operating / schedule-observed
+VESSEL_00214,Vessel,AL NASRIYAH,,,Operating / schedule-observed
+VESSEL_00215,Vessel,NYK FUJI,,,Operating / schedule-observed
+VESSEL_00216,Vessel,ONE SPHERE,,,Operating / schedule-observed
+VESSEL_00217,Vessel,NYK VENUS,,,Operating / schedule-observed
+VESSEL_00218,Vessel,ONE MODERN,,,Operating / schedule-observed
+VESSEL_00219,Vessel,ONE MILLAU,,,Operating / schedule-observed
+VESSEL_00220,Vessel,IBN AL ABBAR,,,Operating / schedule-observed
+VESSEL_00221,Vessel,YM CAPACITY,,,Operating / schedule-observed
+VESSEL_00222,Vessel,YM INCEPTION,,,Operating / schedule-observed
+VESSEL_00223,Vessel,YM EXCELLENCE,,,Operating / schedule-observed
+VESSEL_00224,Vessel,YM IMMENSE,,,Operating / schedule-observed
+VESSEL_00225,Vessel,HMM VANCOUVER,,,Operating / schedule-observed
+VESSEL_00226,Vessel,HMM EMERALD,,,Operating / schedule-observed
+VESSEL_00227,Vessel,HMM HARMONY,,,Operating / schedule-observed
+VESSEL_00228,Vessel,SKY RAINBOW,,,Operating / schedule-observed
+VESSEL_00229,Vessel,HMM SKY,,,Operating / schedule-observed
+VESSEL_00230,Vessel,KOTA SANTOS,,,Operating / schedule-observed
+VESSEL_00231,Vessel,KOTA SABAS,,,Operating / schedule-observed
+VESSEL_00232,Vessel,KOTA GAYA,,,Operating / schedule-observed
+VESSEL_00233,Vessel,SINAR PANGANDARAN,,,Operating / schedule-observed
+VESSEL_00234,Vessel,KOTA SEMPENA,,,Operating / schedule-observed
+VESSEL_00235,Vessel,WAN HAI 283,,,Operating / schedule-observed
+VESSEL_00236,Vessel,WAN HAI 358,,,Operating / schedule-observed
+VESSEL_00237,Vessel,WAN HAI 177,,,Operating / schedule-observed
+VESSEL_00238,Vessel,WAN HAI 333,,,Operating / schedule-observed
+VESSEL_00239,Vessel,WAN HAI 101,,,Operating / schedule-observed
+VESSEL_00240,Vessel,ZIM EMERALD,,,Operating / schedule-observed
+VESSEL_00241,Vessel,CARMEL I,,,Operating / schedule-observed
+VESSEL_00242,Vessel,MARLA BULL,,,Operating / schedule-observed
+VESSEL_00243,Vessel,ZIM CHINA,,,Operating / schedule-observed
+VESSEL_00244,Vessel,MTT SANDAKAN,,,Operating / schedule-observed
+VESSEL_00245,Vessel,MARBURG,,,Operating / schedule-observed
+VESSEL_00246,Vessel,ELBSKY,,,Operating / schedule-observed
+VESSEL_00247,Vessel,JUDITH,,,Operating / schedule-observed
+VESSEL_00248,Vessel,ELBSUMMER,,,Operating / schedule-observed
+VESSEL_00249,Vessel,SAN PEDRO,,,Operating / schedule-observed
+VESSEL_00250,Vessel,REN JIAN 8,,,Operating / schedule-observed
+VESSEL_00251,Vessel,ZHONG GU YIN CHUAN,,,Operating / schedule-observed
+VESSEL_00252,Vessel,MARINA VOYAGER,,,Operating / schedule-observed
+VESSEL_00253,Vessel,ESL SHEKOU,,,Operating / schedule-observed
+VESSEL_00254,Vessel,ESL WASL,,,Operating / schedule-observed
+VESSEL_00255,Vessel,ZHONG GU KUN MING,,,Operating / schedule-observed
+VESSEL_00256,Vessel,BRIGHT,,,Operating / schedule-observed
+VESSEL_00257,Vessel,TROUPER,,,Operating / schedule-observed
+VESSEL_00258,Vessel,X PRESS ANGLESEY,,,Operating / schedule-observed
+VESSEL_00259,Vessel,SKY LIGHT,,,Operating / schedule-observed
+VESSEL_00260,Vessel,GOLDEN STAR 1,,,Operating / schedule-observed
+VESSEL_00261,Vessel,SSF VALENCE,,,Operating / schedule-observed
+VESSEL_00262,Vessel,SM MANALI,,,Operating / schedule-observed
+VESSEL_00263,Vessel,REMAH,,,Operating / schedule-observed
+VESSEL_00264,Vessel,MIRROR,,,Operating / schedule-observed
+VESSEL_00265,Vessel,HUA DA 610,,,Operating / schedule-observed
+VESSEL_00266,Vessel,AL BATEEN,,,Operating / schedule-observed
+VESSEL_00267,Vessel,SAFEEN PRIZE,,,Operating / schedule-observed
+VESSEL_00268,Vessel,SSF DREAM,,,Operating / schedule-observed
+VESSEL_00269,Vessel,GFS LETO,,,Operating / registry-observed
+VESSEL_00270,Vessel,GFS LYSA,,,Operating / registry-observed
+VESSEL_00271,Vessel,GFS MARINE 01,,,Operating / registry-observed
+VESSEL_00272,Vessel,GFS RHEA,Cyprus,COMP_GFS,Operating / registry-observed
+VESSEL_00273,Vessel,GFS RHINE,,,Operating / registry-observed
+VESSEL_00274,Vessel,Baie Comeau,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00275,Vessel,Baie St. Paul,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00276,Vessel,CSL Assiniboine,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00277,Vessel,CSL Laurentien,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00278,Vessel,CSL Niagara,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00279,Vessel,CSL Tadoussac,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00280,Vessel,Frontenac,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00281,Vessel,Nukumi,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00282,Vessel,Rt. Hon. Paul J. Martin,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00283,Vessel,Thunder Bay,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00284,Vessel,Whitefish Bay,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00285,Vessel,CSL St-Laurent,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00286,Vessel,CSL Welland,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00287,Vessel,Ferbec,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00288,Vessel,Oakglen,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00289,Vessel,Spruceglen,Canada,COMP_CSL_CANADA,Operating
+VESSEL_00290,Vessel,Tamarack,Canada,COMP_EUREKA_SHIPPING,Operating
+VESSEL_00291,Vessel,Algoma Guardian,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00292,Vessel,Algoma Harvester,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00293,Vessel,Algoma Innovator,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00294,Vessel,Algoma Intrepid,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00295,Vessel,Algoma Mariner,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00296,Vessel,Algoma Niagara,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00297,Vessel,Algoma Sault,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00298,Vessel,Algoma Strongfield,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00299,Vessel,Algoma Transport,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00300,Vessel,Capt. Henry Jackman,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00301,Vessel,G3 Marquis,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00302,Vessel,John D Leitch,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00303,Vessel,Radcliffe R Latimer,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00304,Vessel,Tim S Dool,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00305,Vessel,Algonova,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00306,Vessel,Algoscotia,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00307,Vessel,Algosea,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00308,Vessel,Algoterra,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00309,Vessel,Algotitan,Canada,COMP_ALGOMA,2023 regulator-recorded; current status to verify
+VESSEL_00310,Vessel,Algoma Bear,Canada,COMP_ALGOMA,Operating
+VESSEL_00311,Vessel,Algoma Endeavour,Canada,COMP_ALGOMA,Operating
+VESSEL_00312,Vessel,Algoma East Coast,Canada,COMP_FUNDY_TANKERS,Operating
+VESSEL_00313,Vessel,Algoma Acadian,Canada,COMP_FUNDY_TANKERS,Operating
+VESSEL_00314,Vessel,Mark W. Barker,United States,COMP_INTERLAKE,Operating
+VESSEL_00315,Vessel,Paul R. Tregurtha,United States,COMP_INTERLAKE,Operating
+VESSEL_00316,Vessel,James R. Barker,United States,COMP_INTERLAKE,Operating
+VESSEL_00317,Vessel,Mesabi Miner,United States,COMP_INTERLAKE,Operating
+VESSEL_00318,Vessel,Lee A. Tregurtha,United States,COMP_INTERLAKE,Operating
+VESSEL_00319,Vessel,Honorable James L. Oberstar,United States,COMP_INTERLAKE,Operating
+VESSEL_00320,Vessel,Kaye E. Barker,United States,COMP_INTERLAKE,Operating
+VESSEL_00321,Vessel,Herbert C. Jackson,United States,COMP_INTERLAKE,Operating
+VESSEL_00322,Vessel,Dorothy Ann,United States,COMP_INTERLAKE,Operating
+VESSEL_00323,Vessel,Stewart J. Cort,United States,COMP_INTERLAKE,Operating
+VESSEL_00324,Vessel,American Century,United States,COMP_ASC,2023 regulator-recorded; current status to verify
+VESSEL_00325,Vessel,American Courage,United States,COMP_ASC,2023 regulator-recorded; current status to verify
+VESSEL_00326,Vessel,American Integrity,United States,COMP_ASC,2023 regulator-recorded; current status to verify
+VESSEL_00327,Vessel,American Mariner,United States,COMP_ASC,2023 regulator-recorded; current status to verify
+VESSEL_00328,Vessel,American Spirit,United States,COMP_ASC,2023 regulator-recorded; current status to verify
+VESSEL_00329,Vessel,Burns Harbor,United States,COMP_ASC,2023 regulator-recorded; current status to verify
+VESSEL_00330,Vessel,H. Lee White,United States,COMP_ASC,2023 regulator-recorded; current status to verify
+VESSEL_00331,Vessel,Indiana Harbor,United States,COMP_ASC,2023 regulator-recorded; current status to verify
+VESSEL_00332,Vessel,John J Boland,United States,COMP_ASC,2023 regulator-recorded; current status to verify
+VESSEL_00333,Vessel,Sam Laud,United States,COMP_ASC,2023 regulator-recorded; current status to verify
+VESSEL_00334,Vessel,Walter J. McCarthy Jr.,United States,COMP_ASC,2023 regulator-recorded; current status to verify
+VESSEL_00335,Vessel,Calumet,United States,COMP_GRN,2023 regulator-recorded; current status to verify
+VESSEL_00336,Vessel,Defiance,United States,COMP_GRN,2023 regulator-recorded; current status to verify
+VESSEL_00337,Vessel,Manitowoc,United States,COMP_GRN,2023 regulator-recorded; current status to verify
+VESSEL_00338,Vessel,Menominee,United States,COMP_GRN,2023 regulator-recorded; current status to verify
+VESSEL_00339,Vessel,Victory,United States,COMP_GRN,2023 regulator-recorded; current status to verify
+VESSEL_00340,Vessel,Olive L Moore,United States,COMP_GRN,2023 regulator-recorded; IMO unresolved
+VESSEL_00341,Vessel,Ashtabula,United States,COMP_GRN,2023 regulator-recorded; IMO unresolved
+VESSEL_00342,Vessel,Cuyahoga,Canada,COMP_LOWER_LAKES,2023 regulator-recorded; current status to verify
+VESSEL_00343,Vessel,Kaministiqua,Canada,COMP_LOWER_LAKES,2023 regulator-recorded; current status to verify
+VESSEL_00344,Vessel,Manitoulin,Canada,COMP_LOWER_LAKES,2023 regulator-recorded; current status to verify
+VESSEL_00345,Vessel,Michipicoten,Canada,COMP_LOWER_LAKES,2023 regulator-recorded; current status to verify
+VESSEL_00346,Vessel,Robert S. Pierson,Canada,COMP_LOWER_LAKES,2023 regulator-recorded; current status to verify
+VESSEL_00347,Vessel,Saginaw,Canada,COMP_LOWER_LAKES,2023 regulator-recorded; current status to verify
+VESSEL_00348,Vessel,Arthur M. Anderson,United States,COMP_GREAT_LAKES_FLEET,2023 regulator-recorded; current status to verify
+VESSEL_00349,Vessel,Cason J. Callaway,United States,COMP_GREAT_LAKES_FLEET,2023 regulator-recorded; current status to verify
+VESSEL_00350,Vessel,Edgar B. Speer,United States,COMP_GREAT_LAKES_FLEET,2023 regulator-recorded; current status to verify
+VESSEL_00351,Vessel,Edwin H. Gott,United States,COMP_GREAT_LAKES_FLEET,2023 regulator-recorded; current status to verify
+VESSEL_00352,Vessel,Great Republic,United States,COMP_GREAT_LAKES_FLEET,2023 regulator-recorded; current status to verify
+VESSEL_00353,Vessel,John G. Munson,United States,COMP_GREAT_LAKES_FLEET,2023 regulator-recorded; current status to verify
+VESSEL_00354,Vessel,Philip R. Clarke,United States,COMP_GREAT_LAKES_FLEET,2023 regulator-recorded; current status to verify
+VESSEL_00355,Vessel,Presque Isle,United States,COMP_GREAT_LAKES_FLEET,2023 regulator-recorded; current status to verify
+VESSEL_00356,Vessel,Roger Blough,United States,COMP_GREAT_LAKES_FLEET,2023 regulator-recorded; current status to verify
+VESSEL_00357,Vessel,Badger,United States,COMP_LAKE_MICHIGAN_CARFERRY,2023 regulator-recorded; current status to verify
+VESSEL_00358,Vessel,Florence Spirit,Canada,COMP_MCKEIL,Operating
+ASSET001,Asset,Santos Brasil / Tecon Santos,Brazil,COMP_CMA_TERMINALS,Operating
+ASSET002,Asset,CMA Terminals Khalifa Port,United Arab Emirates,COMP_CMA_TERMINALS,Operating / expanding
+ASSET003,Asset,Terminal 4 Jeddah Islamic Port,Saudi Arabia,COMP_CMA_TERMINALS,Development
+ASSET004,Asset,Chicago Gateway,United States,COMP_CEVA,Operating
+ASSET005,Asset,Lakes Road Logistics Hub,Australia,COMP_CEVA,Operating
+ASSET006,Asset,Dubai South eCommerce warehouse,United Arab Emirates,COMP_CEVA,Operating
+ASSET007,Asset,Luxembourg Airport hub,Luxembourg,COMP_CARGOLUX,Operating
+ASSET008,Asset,Boeing 747 freighter fleet,Global,COMP_CARGOLUX,Operating
+ASSET009,Asset,Khorfakkan Commercial Terminal,United Arab Emirates,COMP_GULFTAINER,Operating / planned expansion
+ASSET010,Asset,Al Dhaid Multi-Modal Trade Corridor,United Arab Emirates,COMP_GULFTAINER,Development
+ASSET011,Asset,Khalifa Port,United Arab Emirates,COMP_ADPORTS,Operating / expanding
+ASSET012,Asset,Fujairah Terminals,United Arab Emirates,COMP_ADPORTS,Operating
+ASSET013,Asset,ICAD rail-linked inland logistics network,United Arab Emirates,COMP_ADPORTS,Development / integration
+ASSET014,Asset,Jebel Ali Port,United Arab Emirates,COMP_DPW,Operating
+ASSET015,Asset,London Gateway,United Kingdom,COMP_DPW,Operating / expanding
+ASSET016,Asset,Southampton Container Terminal,United Kingdom,COMP_DPW,Operating
+ASSET017,Asset,Lázaro Cárdenas terminal,Mexico,COMP_APMT,Operating / expanding
+ASSET018,Asset,Suape terminal,Brazil,COMP_APMT,Development
+ASSET019,Asset,Muggiano Integrated Shipyard,Italy,COMP_FINCANTIERI,Operating
+ASSET020,Asset,Bahrain,Bahrain,COMP_APMT,Operating / network
+ASSET021,Asset,Pointe-Noire,Congo,COMP_APMT,Operating / network
+ASSET022,Asset,Abidjan Côte d’Ivoire Terminal (CIT),Côte d'Ivoire,COMP_APMT,Operating / network
+ASSET023,Asset,San Pedro,Côte d'Ivoire,COMP_APMT,Operating / network
+ASSET024,Asset,Suez Canal Container Terminal (SCCT),Egypt,COMP_APMT,Operating / network
+ASSET025,Asset,Tema,Ghana,COMP_APMT,Operating / network
+ASSET026,Asset,Aqaba,Jordan,COMP_APMT,Operating / network
+ASSET027,Asset,Monrovia,Liberia,COMP_APMT,Operating / network
+ASSET028,Asset,MedPort Tangier,Morocco,COMP_APMT,Operating / network
+ASSET029,Asset,Tangier,Morocco,COMP_APMT,Operating / network
+ASSET030,Asset,Apapa,Nigeria,COMP_APMT,Operating / network
+ASSET031,Asset,Onne,Nigeria,COMP_APMT,Operating / network
+ASSET032,Asset,Salalah,Oman,COMP_APMT,Operating / network
+ASSET033,Asset,Guangzhou,China,COMP_APMT,Operating / network
+ASSET034,Asset,Qingdao,China,COMP_APMT,Operating / network
+ASSET035,Asset,Shanghai,China,COMP_APMT,Operating / network
+ASSET036,Asset,Tianjin,China,COMP_APMT,Operating / network
+ASSET037,Asset,Xiamen,China,COMP_APMT,Operating / network
+ASSET038,Asset,Mumbai,India,COMP_APMT,Operating / network
+ASSET039,Asset,Pipavav,India,COMP_APMT,Operating / network
+ASSET040,Asset,Yokohama,Japan,COMP_APMT,Operating / network
+ASSET041,Asset,Tanjung Pelepas,Malaysia,COMP_APMT,Operating / network
+ASSET042,Asset,Colombo,Sri Lanka,COMP_APMT,Operating / network
+ASSET043,Asset,Laem Chabang,Thailand,COMP_APMT,Operating / network
+ASSET044,Asset,Cai Mep,Vietnam,COMP_APMT,Operating / network
+ASSET045,Asset,Rijeka Gateway,Croatia,COMP_APMT,Operating / network
+ASSET046,Asset,Aarhus,Denmark,COMP_APMT,Operating / network
+ASSET047,Asset,Kalundborg,Denmark,COMP_APMT,Operating / network
+ASSET048,Asset,Marseille Fos,France,COMP_APMT,Operating / network
+ASSET049,Asset,Poti,Georgia,COMP_APMT,Operating / network
+ASSET050,Asset,Bremerhaven,Germany,COMP_APMT,Operating / network
+ASSET051,Asset,Vado Ligure,Italy,COMP_APMT,Operating / network
+ASSET052,Asset,Rotterdam Maasvlakte II,Netherlands,COMP_APMT,Operating / network
+ASSET053,Asset,Algeciras,Spain,COMP_APMT,Operating / network
+ASSET054,Asset,Barcelona,Spain,COMP_APMT,Operating / network
+ASSET055,Asset,Gijón,Spain,COMP_APMT,Operating / network
+ASSET056,Asset,Valencia,Spain,COMP_APMT,Operating / network
+ASSET057,Asset,Gothenburg,Sweden,COMP_APMT,Operating / network
+ASSET058,Asset,Izmir,Turkey,COMP_APMT,Operating / network
+ASSET059,Asset,Buenos Aires,Argentina,COMP_APMT,Operating / network
+ASSET060,Asset,Itapoá,Brazil,COMP_APMT,Operating / network
+ASSET061,Asset,Pecém,Brazil,COMP_APMT,Operating / network
+ASSET062,Asset,Santos,Brazil,COMP_APMT,Operating / network
+ASSET063,Asset,Suape,Brazil,COMP_APMT,Operating / network
+ASSET064,Asset,Buenaventura,Colombia,COMP_APMT,Operating / network
+ASSET065,Asset,Moín,Costa Rica,COMP_APMT,Operating / network
+ASSET066,Asset,Puerto Quetzal,Guatemala,COMP_APMT,Operating / network
+ASSET067,Asset,Lázaro Cárdenas,Mexico,COMP_APMT,Operating / network
+ASSET068,Asset,Progreso,Mexico,COMP_APMT,Operating / network
+ASSET069,Asset,Callao,Peru,COMP_APMT,Operating / network
+ASSET070,Asset,"Los Angeles, CA",United States,COMP_APMT,Operating / network
+ASSET071,Asset,"Miami, FL",United States,COMP_APMT,Operating / network
+ASSET072,Asset,"Mobile, AL",United States,COMP_APMT,Operating / network
+ASSET073,Asset,"Elizabeth, NJ",United States,COMP_APMT,Operating / network
+ASSET074,Asset,United Ports LLC terminal portfolio,Global,COMP_UNITED_PORTS,Operating
+ASSET075,Asset,GeelongPort,Australia,COMP_GEELONGPORT,Operating
+ASSET076,Asset,International Transportation Service terminal portfolio,United States,COMP_ITS,Operating / expanding
+ASSET077,Asset,KKR/Mirastar UK logistics portfolio - July 2026,United Kingdom,COMP_MIRASTAR,Operating
+ASSET078,Asset,Fort Worth rail-served logistics asset,United States,COMP_STONEPEAK,Operating
+ASSET079,Asset,Proxity pan-European logistics portfolio,Europe,COMP_PROXITY,Operating / expanding
+ASSET080,Asset,PLIVE seed logistics portfolio,Europe,COMP_PLIVE,Operating / expanding
+ASSET081,Asset,Tbilisi Intermodal Hub / Tbilisi Dry Port,Georgia,COMP_TBILISI_DRY_PORT,Operating / expanding
+ASSET082,Asset,Al Faya Dry Port,United Arab Emirates,COMP_ADPORTS,Operating
+ASSET083,Asset,Al Ghail Dry Port rail terminal,United Arab Emirates,COMP_ETIHAD_RAIL,Operating
+ASSET084,Asset,CentrePort Canada,Canada,COMP_CENTREPORT,Operating / expanding
+ASSET085,Asset,Jebel Ali Free Zone (JAFZA),United Arab Emirates,COMP_JAFZA,Operating
+ASSET086,Asset,JAFZA Logistics Park,United Arab Emirates,COMP_JAFZA,Operating / expanding
+ASSET087,Asset,KEZAD economic-zones ecosystem,United Arab Emirates,COMP_KEZAD,Operating / expanding
+ASSET088,Asset,KEZAD East Port Said Economic Zone,Egypt,COMP_KEZAD,Development
+ASSET089,Asset,Al Dhaid Multi-Modal Trade Corridor,United Arab Emirates,COMP_GULFTAINER,Development
+CORRIDOR_SUEZ,Corridor,Suez Canal,Egypt,,Active
+CORRIDOR_HORMUZ,Corridor,Strait of Hormuz,Oman / Iran,,Active
+CORRIDOR_MALACCA,Corridor,Strait of Malacca,Malaysia / Singapore / Indonesia,,Active
+CORRIDOR_PANAMA,Corridor,Panama Canal,Panama,,Active
+CORRIDOR_MIDDLE,Corridor,Middle Corridor / Trans-Caspian route,China / Central Asia / Caspian / Caucasus / Türkiye / Black Sea,,Active / expanding
+CORRIDOR_UAE_RAIL,Corridor,UAE National Rail freight corridor,United Arab Emirates,,Active / expanding
+CORRIDOR_MIDCONTINENT,Corridor,North American Mid-Continent Trade & Transportation Corridor,Canada / United States / Mexico,,Active
+CORRIDOR_GLSS,Corridor,Great Lakes–St. Lawrence Seaway corridor,Canada / United States,,Active / seasonal
+COMP_CMA_CGM,Company,CMA CGM Group,France,,Active
+COMP_CEVA,Company,CEVA Logistics,France,,Active
+COMP_CMA_TERMINALS,Company,CMA Terminals,France,,Active
+COMP_APMT,Company,APM Terminals,Netherlands,,Active
+COMP_DPW,Company,DP World,United Arab Emirates,,Active
+COMP_ADPORTS,Company,AD Ports Group,United Arab Emirates,,Active
+COMP_GULFTAINER,Company,Gulftainer,United Arab Emirates,,Active
+COMP_CARGOLUX,Company,Cargolux Airlines International,Luxembourg,,Active
+COMP_FINCANTIERI,Company,Fincantieri,Italy,,Active
+COMP_ABP,Company,Associated British Ports,United Kingdom,,Active
+COMP_PEEL,Company,Peel Ports Group,United Kingdom,,Active
+COMP_FORTH,Company,Forth Ports,United Kingdom,,Active
+COMP_PDPORTS,Company,PD Ports,United Kingdom,,Active
+COMP_HUTCHISON,Company,Hutchison Ports,"Hong Kong, China",,Active
+COMP_BRISTOL,Company,The Bristol Port Company,United Kingdom,,Active
+COMP_CMA_AIR,Company,CMA CGM AIR CARGO,France,,Active
+COMP_MAERSK,Company,A.P. Moller - Maersk,Denmark,,Active
+COMP_MAERSK_AIR,Company,Maersk Air Cargo,Denmark,,Active
+COMP_MSC,Company,MSC Mediterranean Shipping Company,Switzerland,,Active
+COMP_TIL,Company,Terminal Investment Limited,Switzerland,,Active
+COMP_MSC_CRUISES,Company,MSC Cruises,Switzerland,,Active
+COMP_COSCO_GROUP,Company,COSCO SHIPPING,China,,Active
+COMP_COSCO_LINES,Company,COSCO SHIPPING Lines,China,,Active
+COMP_COSCO_PORTS,Company,COSCO SHIPPING Ports,China,,Active
+COMP_EVERGREEN,Company,Evergreen Marine,Taiwan,,Active
+COMP_NOATUM,Company,Noatum,Spain,,Active
+COMP_NOATUM_MARITIME,Company,Noatum Maritime,Spain,,Active
+COMP_NOATUM_LOGISTICS,Company,Noatum Logistics,Spain,,Active
+COMP_GFS,Company,Global Feeder Shipping,United Arab Emirates,,Active
+COMP_UGR,Company,United Global Ro-Ro,United Arab Emirates,,Active
+COMP_ADNOC,Company,ADNOC,United Arab Emirates,,Active
+COMP_ADNOC_LS,Company,ADNOC Logistics & Services,United Arab Emirates,,Active
+COMP_NAVIG8,Company,Navig8,,,Active
+COMP_ZMI,Company,Zakher Marine International Holdings,United Arab Emirates,,Active
+COMP_AW_SHIPPING,Company,AW Shipping,United Arab Emirates / China,,Active
+COMP_WANHUA,Company,Wanhua Chemical Group,China,,Active
+COMP_ADNOC_GAS,Company,ADNOC Gas,United Arab Emirates,,Active
+COMP_BAHRI,Company,Bahri,Saudi Arabia,,Active
+COMP_NAKILAT,Company,Nakilat,Qatar,,Active
+COMP_MILAHA,Company,Milaha / Qatar Navigation Q.P.S.C.,Qatar,,Active
+COMP_QATARENERGY,Company,QatarEnergy,Qatar,,Active
+COMP_BYD,Company,BYD Company / BYD Auto,China,,Active
+COMP_ZODIAC,Company,Zodiac Maritime,United Kingdom,,Active
+COMP_ZIM,Company,ZIM Integrated Shipping Services,Israel,,Active
+COMP_SINOKOR,Company,SINOKOR Merchant Marine,South Korea,,Active
+COMP_BP,Company,bp p.l.c.,United Kingdom,,Active
+COMP_BP_SHIPPING,Company,bp Shipping Limited,United Kingdom,,Active
+COMP_CHEVRON,Company,Chevron Corporation,United States,,Active
+COMP_CHEVRON_SHIPPING,Company,Chevron Shipping Company,United States,,Active
+COMP_EXXON,Company,Exxon Mobil Corporation,United States,,Active
+COMP_SEARIVER,Company,"SeaRiver Maritime, Inc.",United States,,Active
+COMP_IMT,Company,International Marine Transportation Limited,United Kingdom,,Active
+COMP_PERFORMANCE_SHIPPING,Company,Performance Shipping Inc.,Greece,,Active
+COMP_VITOL,Company,Vitol,,,Active
+COMP_HAPAG_LLOYD,Company,Hapag-Lloyd AG,Germany,,Active
+COMP_ONE,Company,Ocean Network Express Pte. Ltd.,Singapore,,Active
+COMP_YANG_MING,Company,Yang Ming Marine Transport Corporation,Taiwan,,Active
+COMP_HMM,Company,"HMM Co., Ltd.",South Korea,,Active
+COMP_PIL,Company,Pacific International Lines (Pte) Ltd,Singapore,,Active
+COMP_WAN_HAI,Company,Wan Hai Lines Ltd.,Taiwan,,Active
+COMP_SEALEAD,Company,SeaLead Shipping,Singapore,,Active
+COMP_XPRESS,Company,X-Press Feeders,Singapore,,Active
+COMP_UNIFEEDER,Company,Unifeeder A/S,Denmark,,Active
+COMP_ESL,Company,Emirates Shipping Line,United Arab Emirates,,Active
+COMP_SAFEEN_FEEDERS,Company,SAFEEN Feeders,United Arab Emirates,,Active
+COMP_TRANSMAR,Company,Transmar International Shipping,Egypt,,Active
+COMP_GFS_SHIP_MGMT,Company,GFS Ship Management FZE,United Arab Emirates,,Active
+COMP_CHINA_MERCHANTS_GROUP,Company,China Merchants Group,China,,Active
+COMP_CMES,Company,"China Merchants Energy Shipping Co., Ltd.",China,,Active
+COMP_COSCO_ENERGY,Company,"COSCO SHIPPING Energy Transportation Co., Ltd.",China,,Active
+COMP_FRONTLINE,Company,Frontline plc,Cyprus,,Active
+COMP_ANGELICOUSSIS_GROUP,Company,Angelicoussis Group,Greece,,Active
+COMP_MARAN_TANKERS,Company,Maran Tankers Management Inc.,Greece,,Active
+COMP_MOL,Company,"Mitsui O.S.K. Lines, Ltd.",Japan,,Active
+COMP_DHT,Company,"DHT Holdings, Inc.",Bermuda,,Active
+COMP_NYK,Company,Nippon Yusen Kabushiki Kaisha (NYK Line),Japan,,Active
+COMP_ASYAD_GROUP,Company,Asyad Group,Oman,,Active
+COMP_ASYAD_SHIPPING,Company,Asyad Shipping Company,Oman,,Active
+COMP_NITC,Company,National Iranian Tanker Company,Iran,,Active
+COMP_BC_FERRIES,Company,BC Ferries,Canada,,Active
+COMP_WSF,Company,Washington State Ferries,United States,,Active
+COMP_AMHS,Company,Alaska Marine Highway System,United States,,Active
+COMP_MARINE_ATLANTIC,Company,Marine Atlantic,Canada,,Active
+COMP_PO_FERRIES,Company,P&O Ferries,United Kingdom,,Active
+COMP_DFDS,Company,DFDS,Denmark,,Active
+COMP_MOL_SUNFLOWER,Company,MOL Sunflower,Japan,,Active
+COMP_2GO,Company,2GO Group / 2GO Travel,Philippines,,Active
+COMP_ASDP,Company,PT ASDP Indonesia Ferry,Indonesia,,Active
+COMP_STAR_FERRY,Company,The Star Ferry Company,"Hong Kong, China",,Active
+COMP_AB_MARITIME,Company,Arab Bridge Maritime,Jordan,,Active
+COMP_SEALINK_KI,Company,SeaLink Kangaroo Island,Australia,,Active
+COMP_FULLERS360,Company,Fullers360,New Zealand,,Active
+COMP_CALMAC,Company,CalMac Ferries / Caledonian MacBrayne,United Kingdom,,Active
+COMP_CSL_GROUP,Company,The CSL Group,Canada,,Active
+COMP_CSL_CANADA,Company,Canada Steamship Lines,Canada,,Active
+COMP_CSL_AUSTRALIA,Company,CSL Australia,Australia,,Active
+COMP_CSL_AMERICAS,Company,CSL Americas,United States,,Active
+COMP_ALGOMA,Company,Algoma Central Corporation,Canada,,Active
+COMP_INTERLAKE,Company,The Interlake Steamship Company,United States,,Active
+COMP_CN,Company,Canadian National Railway / CN,Canada,,Active
+COMP_GREAT_LAKES_FLEET,Company,Great Lakes Fleet,United States,,Active
+COMP_FEDNAV,Company,Fednav,Canada,,Active
+COMP_MCKEIL,Company,McKeil Marine,Canada,,Active
+COMP_MAINSTAY,Company,Mainstay Maritime,United States,,Active
+COMP_ASC,Company,American Steamship Company,United States,,Active
+COMP_GRN,Company,Grand River Navigation,United States,,Active
+COMP_ANDRIE,Company,Andrie,United States,,Active
+COMP_VICTORY_CRUISE,Company,Victory Cruise Lines,United States,,Active
+COMP_PEARL_SEAS,Company,Pearl Seas Cruises,United States,,Active
+COMP_VIKING,Company,Viking,,,Active
+COMP_PONANT,Company,Ponant,France,,Active
+COMP_HAPAG_LLOYD_CRUISES,Company,Hapag-Lloyd Cruises,Germany,,Active
+COMP_AMERICAN_CRUISE,Company,American Cruise Lines,United States,,Active
+COMP_ST_LAWRENCE_CRUISE,Company,St. Lawrence Cruise Lines,Canada,,Active
+COMP_EUREKA_SHIPPING,Company,Eureka Shipping,,,Active
+COMP_SMT_SHIPPING,Company,SMT Shipping,,,Active
+COMP_ALGOMA_TANKERS,Company,Algoma Tankers Chartering Limited,Canada,,Active
+COMP_FUNDY_TANKERS,Company,Fundy Tankers Ltd.,Canada,,Active
+COMP_LOWER_LAKES,Company,Lower Lakes Towing,Canada,,Active
+COMP_KEY_LAKES,Company,"Key Lakes, Inc.",United States,,Active
+COMP_LAKE_MICHIGAN_CARFERRY,Company,Lake Michigan Carferry,United States,,Active
+COMP_BROOKFIELD_AM,Company,Brookfield Asset Management,Canada,,Active
+COMP_BROOKFIELD_INFRA,Company,Brookfield Infrastructure Partners,Bermuda,,Active
+COMP_KKR,Company,KKR & Co. Inc.,United States,,Active
+COMP_MIRASTAR,Company,Mirastar,United Kingdom,,Active
+COMP_STONEPEAK,Company,Stonepeak,United States,,Active
+COMP_BLACKROCK,Company,"BlackRock, Inc.",United States,,Active
+COMP_GIP,Company,Global Infrastructure Partners,United States,,Active
+COMP_MACQUARIE_AM,Company,Macquarie Asset Management,Australia,,Active
+COMP_IFM,Company,IFM Investors,Australia,,Active
+COMP_BLACKSTONE,Company,Blackstone Inc.,United States,,Active
+COMP_PROXITY,Company,Proxity,Germany,,Active
+COMP_PROLOGIS,Company,"Prologis, Inc.",United States,,Active
+COMP_GIC,Company,GIC,Singapore,,Active
+COMP_LA_CAISSE,Company,La Caisse (CDPQ),Canada,,Active
+COMP_ESR,Company,ESR Group,Hong Kong SAR,,Active
+COMP_CIC,Company,China Investment Corporation,China,,Active
+COMP_LOGICOR,Company,Logicor,United Kingdom / Luxembourg,,Active
+COMP_CARESUPER,Company,CareSuper,Australia,,Active
+COMP_UNITED_PORTS,Company,United Ports LLC,United States,,Active
+COMP_GEELONGPORT,Company,GeelongPort Pty Limited,Australia,,Active
+COMP_ITS,Company,International Transportation Service,United States,,Active
+COMP_PLP,Company,PLP,United Kingdom,,Active
+COMP_PLIVE,Company,Prologis Logistics Investment Venture Europe,Europe,,Active
+COMP_TBILISI_DRY_PORT,Company,Tbilisi Dry Port LLC,Georgia,,Active
+COMP_WILHELMSEN_PORT_SERVICES,Company,Wilhelmsen Port Services,Norway,,Active
+COMP_INVECO,Company,Inveco LLC,Georgia,,Active
+COMP_CENTREPORT,Company,CentrePort Canada Inc.,Canada,,Active
+COMP_ETIHAD_RAIL,Company,Etihad Rail,United Arab Emirates,,Active
+COMP_KEZAD,Company,KEZAD Group,United Arab Emirates,,Active
+COMP_JAFZA,Company,Jebel Ali Free Zone (JAFZA),United Arab Emirates,,Active
+COMP_DHL_AG,Company,DHL AG,Germany,,Active
+COMP_DHL_EXPRESS,Company,DHL Express,Germany,COMP_DHL_AG,Active
+COMP_DHL_GLOBAL_FORWARDING,Company,DHL Global Forwarding,Germany,COMP_DHL_AG,Active
+COMP_DHL_SUPPLY_CHAIN,Company,DHL Supply Chain,Germany,COMP_DHL_AG,Active
+COMP_DHL_ECOMMERCE,Company,DHL eCommerce,Germany,COMP_DHL_AG,Active
+COMP_DEUTSCHE_POST,Company,Deutsche Post AG,Germany,COMP_DHL_AG,Active
+COMP_DHL_AVIATION,Company,DHL Aviation,Germany,COMP_DHL_AG,Active
+COMP_FEDEX_CORP,Company,FedEx Corporation,United States,,Active
+COMP_FEDERAL_EXPRESS,Company,Federal Express Corporation,United States,COMP_FEDEX_CORP,Active
+COMP_FEDEX_SUPPLY_CHAIN,Company,FedEx Supply Chain,United States,COMP_FEDEX_CORP,Active
+COMP_FEDEX_FREIGHT,Company,FedEx Freight Holding Company,United States,,Active
+COMP_AMAZON,Company,"Amazon.com, Inc.",United States,,Active
+COMP_AMAZON_SUPPLY_CHAIN,Company,Amazon Supply Chain Services,United States,COMP_AMAZON,Active
+COMP_AMAZON_GLOBAL_LOGISTICS,Company,Amazon Global Logistics,United States,COMP_AMAZON,Active
+COMP_AMAZON_FREIGHT,Company,Amazon Freight,United States,COMP_AMAZON,Active
+COMP_AMAZON_AIR,Company,Amazon Air,United States,COMP_AMAZON,Active
+COMP_SUN_COUNTRY,Company,Sun Country Airlines,United States,COMP_ALLEGIANT,Active
+COMP_ALLEGIANT,Company,Allegiant Travel Company,United States,,Active
+COMP_ADQ,Company,Abu Dhabi Developmental Holding Company PJSC (ADQ),United Arab Emirates,,Active
+COMP_Q_LOGISTICS,Company,Q Logistics Holding LLC,United Arab Emirates,COMP_ADQ,Active
+COMP_ARAMEX,Company,Aramex PJSC,United Arab Emirates,COMP_ADQ,Active
+PERSON_0034,Person,Tobias Meyer,,,Active
+PERSON_0035,Person,John Pearson,,,Active
+PERSON_0036,Person,Hendrik Venter,,,Active
+PERSON_0037,Person,Oscar de Bok,,,Active
+PERSON_0038,Person,Pablo Ciano,,,Active
+PERSON_0039,Person,Raj Subramaniam,,,Active
+PERSON_0040,Person,Andy Jassy,,,Active
+PERSON_0041,Person,Amadou Diallo,,,Active

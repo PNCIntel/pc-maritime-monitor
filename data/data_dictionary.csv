@@ -1,0 +1,66 @@
+﻿Table,Primary Key,Purpose,Minimum relationship
+entity_registry,entity_id,Universal lookup for every named entity,entity_id links to specialist table
+companies,company_id,Corporate parent / subsidiary / operator entities,relationships.source/target
+people,person_id,Named people,leadership_roles.person_id
+leadership_roles,role_id,Time-bounded company roles,person_id + company_id
+ports,port_id,Port authority / facility layer,operator_company_id + assets
+assets,asset_id,"Terminals, hubs, warehouses, yards, terminals",company_id
+vessels,vessel_id,Individual vessel register,owner_company_id / operator_company_id
+fleet_portfolios,fleet_id,Fleet summary where individual records are incomplete,company_id
+fleet_orders,order_id,"Newbuilds, aircraft orders, naval contracts",buyer_company_id + shipyard
+aircraft,aircraft_id,Aircraft fleet layer,operator_company_id
+shipyards,shipyard_id,Industrial build locations,fleet_orders.shipyard
+investments,investment_id,Capex / M&A / concessions,company_id + asset/location
+infrastructure_works,work_id,"Dredging, berth, rail, warehouse, modernization",company_id + asset/location
+events,event_id,"Cyber, conflict, corridor closure, corporate events",subject_entity_id
+corridors,corridor_id,Chokepoints and trade corridors,events + relationships
+relationships,relationship_id,Graph edge table,source_entity + target_entity
+sources,source_id,Audit trail / provenance,referenced from all tables
+research_queue,research_id,Data completeness control,subject + dataset
+vessel_relationships,vessel_relationship_id,Time-bounded owner/operator/charterer/cargo-principal relationships for individual vessels,vessel_id + company_id
+vessel_build_records,build_record_id,"Links individual vessels to shipyards, hulls, delivery dates and propulsion",vessel_id + shipyard_id
+vessel_contracts,contract_id,"Time-charter, voyage-charter and fleet-program relationships without conflating ownership",vessel_id/order + company_id/counterparty
+fleet_coverage,coverage_id,Explicit completeness control and known-total vs captured-record measurement,company_id + dataset
+event_entity_links,event_link_id,Connects event observations to resolved vessel/company/asset entities,observation_id + entity_id
+vessel_imo_verification,vessel_id,"IMO provenance, verification status and per-vessel lookup URL",vessel_id + IMO
+imo_coverage,owner_company_id,Measures IMO completeness across the canonical individual-vessel register,owner_company_id + vessels
+vessel_identifiers,vessel_id,"Multiple identity keys for domestic and international vessels: IMO, MMSI, USCG, Canadian and national registry identifiers",vessel_id + identifier
+ferry_systems,system_id,"Global ferry-system / operator registry linking company, ownership, geography and service model",system_id + operator_company_id
+ferry_routes,route_id,Point-to-point or multi-stop passenger/vehicle/freight ferry services,system_id + route endpoints
+ferry_terminals,terminal_id,"Ferry terminal / landing nodes with ownership, capacity, border and multimodal connections",terminal_id + system_id
+ferry_vessel_staging,staging_id,Research staging for ferry-vessel names/specs before canonical IMO/entity resolution,system_id + vessel_name
+ferry_service_observations,observation_id,"Sailing-level or advisory-level delay, cancellation, substitution, diversion and restoration observations",system_id + route_id + date
+ferry_performance,performance_id,"Aggregated reliability, cancellations, ridership, utilization and cause metrics by period/system/route",system_id + period
+ferry_fleet_status,status_id,"Time-series state of ferry vessels: in service, reserve, overhaul, commissioning, laid up, replacement",system_id + vessel + as_of
+ferry_disruption_taxonomy,cause_id,Normalized cause taxonomy for ferry delays and cancellations,cause_family + cause_detail
+regional_systems,system_id,"Generic bounded maritime / trade system layer for Great Lakes, canals, seas and future regions",system_id
+system_nodes,node_id,"Critical infrastructure, ports, locks, channels, bridges and other system nodes",system_id + node_id
+system_links,link_id,Navigable or multimodal connections between system areas / nodes,system_id + from/to
+company_system_footprints,footprint_id,Company exposure to a regional system plus cross-regional business footprints,company_id + system_id
+great_lakes_ports,gl_port_id,Great Lakes/St. Lawrence port staging layer before full canonical port/terminal population,gl_port_id
+great_lakes_vessel_staging,staging_id,Great Lakes vessel research staging before IMO / national-ID canonicalization,company_id + vessel_name
+great_lakes_cargo_corridors,corridor_id,Commodity and passenger-flow corridors with infrastructure dependencies,corridor_id
+great_lakes_cruise,cruise_record_id,"Great Lakes cruise companies, ships, ports and seasonal deployment",company_id + vessel
+great_lakes_disruptions,gl_cause_id,"Great Lakes operational disruption taxonomy mapped to navigation, industry and passenger impacts",cause_id
+system_dependencies,dependency_id,"Explicit dependency graph linking companies, ports, flows and vessels to critical nodes / links",subject + dependency node
+global_vessel_staging,staging_id,Cross-regional vessel-discovery queue before canonical IMO/entity resolution,company_id + vessel_name
+vessel_evidence,evidence_id,"Row-wise provenance for vessel identity, fleet association, freshness and confidence",vessel_id + source_id
+fleet_research_universe,company / brand,"Prioritized master universe for fleet harvesting across liner, feeder, ferry, cruise, Great Lakes, bulk, tanker and energy shipping",links to companies + fleet_coverage + research_queue
+carrier_deployment_seeds,seed_id,Time-stamped carrier schedule/service evidence without conflating deployment with ownership,company_id + vessel_id + source_id
+fleet_ranking_snapshots,ranking_id,Time-stamped methodology-aware fleet rankings preserving scope and exclusions,company_id + source_id + as_of
+tanker_fleet_universe,universe_id,Tanker/VLCC company totals with owned/operated/controlled/chartered/orderbook distinctions,company_id + metric_scope + as_of
+vessel_restrictions,restriction_id,"Time-bounded sanctions, blacklists, port bans, detention, class, flag and insurance restrictions at IMO level",vessel_id/IMO + authority + effective_date
+tradeability_assessments,assessment_id,Analytical assessment of vessel tradeability using restriction evidence,vessel_id/IMO + as_of + restriction evidence
+vessel_transactions,transaction_id,"Purchases, sales, sale-leasebacks and fleet acquisitions preserving historical ownership",vessel_id/IMO + buyer/seller + transaction_date
+tanker_corridor_exposure,exposure_id,"Links tanker fleets to commodity systems, chokepoints, STS zones and route dependencies",company_id/vessel segment + corridor + source
+runtime_table_crosswalk,runtime_file,Maps GitHub/Streamlit runtime CSVs to canonical workbook sheets or ingestion layers,runtime file + workbook sheet/layer
+weather_labour_events,external_event_id,"Focused operational-disruption view for weather, natural hazard, labour, protest and civil-unrest events that affect trade or transport",external_event_id + source_id + event_observation
+disruption_watch,watch_id,Forward watch for threatened/planned disruption that has not yet become a confirmed event,watch_id + trigger/threshold + source_id
+infrastructure_investors,investor_id,"Global capital universe covering port investors, infrastructure managers, logistics real estate and sovereign/pension capital",company_id + source_id
+infrastructure_holdings,holding_id,"Time-bounded ownership/economic interests in port, logistics, inland and zone assets",investor_company_id + target_entity/asset + effective date
+infrastructure_deals,deal_id,"Completed, proposed, partial-disposition and JV transactions affecting ports, logistics real estate, dry ports and economic zones",investor/buyer + target + date + status
+economic_zones,zone_id,"Free zones, economic cities and port-linked industrial/logistics zones",asset_id + operator_company_id + parent/owner
+logistics_real_estate,lre_id,"Warehouses, logistics parks, industrial portfolios and transport-linked logistics property",asset_id + owner/investor + deal/source
+dry_ports_inland_hubs,hub_id,"Dry ports, inland ports, intermodal hubs and inland cargo terminals",asset_id + operator + seaport/rail/road connections
+infrastructure_connections,connection_id,"Graph edges linking ports, dry ports, economic zones, logistics real estate, rail, roads, airports and corridors",source_asset_id + target node + mode/corridor
+integrated_logistics_networks,network_id,"Cross-modal operating-network layer for integrators, commerce platforms and logistics groups",parent_company_id + platform/division + modes + physical/network scale + source

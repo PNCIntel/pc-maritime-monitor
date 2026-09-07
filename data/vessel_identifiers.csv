@@ -1,0 +1,359 @@
+﻿Vessel ID,Vessel Name,IMO,MMSI,USCG Official Number,Canadian Official Number,National Registry Number,Call Sign,Radio / Other Identifier,Flag,Identifier Status,Verified As Of,Source ID,Notes
+VESSEL_00001,UGR Al Samha,9973444,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00002,UGR Zakher,9980411,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00003,UGR Al Reef,9448138,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00004,Al Jubail,9547219,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00005,Ramhan,9668960,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00006,UGR Arabian Gulf,9431836,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00007,Erk İzmir,9179983,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00008,Abu Samrah,9925655,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00009,UGR İstanbul,9179995,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00010,Saffet Bey,8417118,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00011,Super Fast Baleares,9398527,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00012,Chang Sheng Hong,9177040,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00013,JINANAH,9395343,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00014,SDERIA,9395355,,,,,,,IMO populated,2026-09-07,SRC_0060,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00015,CMA CGM MONTE CRISTO,1021051,,,,,,,IMO populated,2026-09-07,SRC_0045,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00016,Al Sadaf,9972957,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00017,Arada,9972969,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00018,Al Taweelah,9972971,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00019,Al Hamra,9074640,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00020,Al Rahba,9965435,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00021,Al Reef,9972945,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00022,Al Shelila,9965423,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00023,Ish (FSU),9035864,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00024,Mraweh,9074638,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00025,Mubaraz,9074626,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00026,Shahamah,9035852,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00027,Umm Al Ashtan,9074652,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00028,Ruwais LNG H2711,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00029,Ruwais LNG H2712,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00030,Ruwais LNG H2713,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00031,Ruwais LNG H2714,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00032,Ruwais LNG H2598,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00033,Ruwais LNG H2599,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00034,Ruwais LNG H2600,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00035,Ruwais LNG H2601,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00036,Al Maryah,9393682,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00037,AWS-Delma,9719408,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00038,AWS-Al Ain,9916812,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00039,AWS-Zakher,9916824,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00040,AWS-Rabdan,9916836,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00041,AWS-Al Salam,9923085,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00042,AWS-Baynounah,9923097,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00043,Meera,1066908,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00044,Dana,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00045,Al Ghadeer,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00046,Rimah,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00047,Umm Al Lulu I,9494204,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00048,Al Samha,9380324,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00049,Bani Yas,9487249,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00050,Diyyinah I,9487251,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00051,Mezaira'a,9487275,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00052,Yamilah-III,9487263,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00053,Navig8 Honor,9556181,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00054,Navig8 Martinez,9482847,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00055,Navig8 Messi,9482859,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00056,Navig8 Montiel,9482861,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00057,Abu Dhabi-III,9489027,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00058,Liwa V,9489039,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00059,Al Bateen,9828376,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00060,Al Falah,9828388,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00061,Al Ruwais,9828405,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00062,Al Khtam,9823534,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00063,Yong Jiang (Gas Yongjiang),1013834,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00064,Min Jiang,1013846,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00065,Al Bayraq,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00066,Alhosn,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00067,Al Aryam,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00068,Al Saad,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00069,Al Muzn,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00070,Al Taair,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00071,Al Sila,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00072,Janana,9034236,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00073,ADNOC L&S molten sulphur newbuild,,,,,,,,IMO pending,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00074,Jarnain,9823546,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00075,Tarif,9828390,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00076,Navig8 Precision,9831294,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00077,Navig8 Prestige,9831309,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00078,Navig8 Perseverance,9853266,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00079,Navig8 Passion,9853278,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00080,Navig8 Promise,9791298,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00081,Navig8 Prosperity,9855496,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00082,Navig8 Pride LHJ,9947366,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00083,Navig8 Wolf,9935301,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00084,Navig8 Providence,9947378,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00085,Leicester,9792266,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00086,Hili,9851830,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00087,Zakum,9851842,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00088,Barakah,9902615,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00089,Hafeet,9928009,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00090,Habshan,9928011,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00091,Arzanah,9928023,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00092,Al Bahyah,9937799,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00093,Navig8 Universe,9489106,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00094,Navig8 Constellation,9489118,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00095,Navig8 Grace,9833656,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00096,Navig8 Gallantry,9833668,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00097,Navig8 Guard,9833670,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00098,Navig8 Guide,9833682,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00099,Navig8 Goal,9853216,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00100,Navig8 Gauntlet,9853228,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00101,Navig8 Gladiator,9853230,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00102,Navig8 Gratitude,9853242,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00103,Navig8 Excel,9973901,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00104,Navig8 Exceed,9973913,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00105,Navig8 Express,9976874,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00106,Navig8 Excellence,9976886,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00107,Navig8 Estelle,9973925,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00108,Navig8 Executive,9973937,,,,,,,IMO populated,2026-09-07,SRC_0066,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00109,BYD Explorer No.1,9955181,,,,,,,IMO populated,2026-09-07,SRC_0091,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00110,BYD Changzhou,9955076,,,,,,,IMO populated,2026-09-07,SRC_0091,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00111,BYD Hefei,9999565,,,,,,,IMO populated,2026-09-07,SRC_0091,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00112,BYD Zhengzhou,9999577,,,,,,,IMO populated,2026-09-07,SRC_0091,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00113,BYD Shenzhen,9993963,,,,,,,IMO populated,2026-09-07,SRC_0092,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00114,BYD Xi'an,9993975,,,,,,,IMO populated,2026-09-07,SRC_0095,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00115,BYD Changsha,9993949,,,,,,,IMO populated,2026-09-07,SRC_0093,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00116,BYD Jinan,9993951,,,,,,,IMO populated,2026-09-07,SRC_0094,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00117,SINOKOR NIIGATA,9209908,,,,,,Korea,Korea,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00118,MEREDITH VICTORY,9455959,,,,,,Korea,Korea,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00119,KOOKYANG SINGAPORE,9354234,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00120,GENEVA QUEEN,9638642,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00121,Hakata Voyager,9329588,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00122,Vostochny Voyager,9329590,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00123,HongKong Voyager,9402500,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00124,Osaka Voyager,9329576,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00125,NAGOYA TRADER,9517628,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00126,SAWASDEE PACIFIC,9879363,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00127,SAWASDEE ATLANTIC,9879375,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00128,SAWASDEE BALTIC,9886067,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00129,SAWASDEE SUNRISE,9886079,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00130,HOCHIMINH VOYAGER,9532276,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00131,JAKARTA VOYAGER,9532288,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00132,SHANGHAI VOYAGER,9536973,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00133,NINGBO TRADER,9347968,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00134,YOKOHAMA TRADER,9915961,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00135,SURABAYA VOYAGER,9137703,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00136,KOBE TRADER,9915973,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00137,CHENNAI VOYAGER,9153410,,,,,,Panama,Panama,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00138,SENDAI TRADER,9397107,,,,,,Korea,Korea,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00139,QINGDAO TRADER,9915985,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00140,YANGTZE TRADER,9915997,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00141,NO.2 OCEAN PIONEER,9340439,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00142,OCEAN PIONEER,9347152,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00143,SAWASDEE CHITTAGONG,9940758,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00144,SAWASDEE SHANGHAI,9940760,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00145,SAWASDEE XIAMEN,9940772,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00146,SAWASDEE INCHEON,9940784,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00147,SAWASDEE SIRIUS,9943774,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00148,SAWASDEE VEGA,9943786,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00149,SAWASDEE CAPELLA,9943798,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00150,SAWASDEE RIGEL,9943803,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00151,SAWASDEE ALTAIR,9946635,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00152,SAWASDEE SPICA,9946647,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00153,SAWASDEE DENEB,9946659,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00154,YEOSU VOYAGER,9963138,,,,,,Panama,Panama,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00155,INCHEON VOYAGER,9963140,,,,,,Panama,Panama,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00156,ULSAN VOYAGER,9963152,,,,,,Panama,Panama,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00157,SAWASDEE MIMOSA,9946661,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00158,TOYAMA TRADER,9968114,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00159,KWANGYANG VOYAGER,9963164,,,,,,Panama,Panama,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00160,AKITA TRADER,9968126,,,,,,Liberia,Liberia,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00161,MELBOURNE BRIDGE,9967287,,,,,,Liberia,Liberia,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00162,SYDNEY BRIDGE,9967304,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00163,MOJI EXPRESS,1056032,,,,,,,IMO populated,2026-09-07,SRC_0102,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00164,Asia Excellence,9610767,,,,,,,IMO populated,2026-09-07,SRC_0105,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00165,P. Long Beach,9656890,,,,,,,IMO populated,2026-09-07,SRC_0109,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00166,Largo Eagle,9935911,,,,,,,IMO populated,2026-09-07,SRC_0110,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00167,Nord Ventura,9910337,,,,,,,IMO populated,2026-09-07,SRC_0110,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00168,Rex Tillerson,9953248,,,,,,,IMO populated,2026-09-07,SRC_0086,Primary IMO retained in canonical Vessels; additional national identifiers to be populated for ferry and domestic fleets.,
+VESSEL_00169,CAPT. KATTELMANN,9330915,249831000,,,,9HA6400,,Malta,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00170,ATHENA,9187344,377074000,,,,J8B5445,,St Vincent & Grenadines,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00171,GFS GALAXY,9401271,210154000,,,,5BWV6,,Cyprus,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00172,GFS GENESIS,9704659,566446000,,,,,,Singapore,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00173,GFS PRECIOUS,9436434,563164800,,,,9V8223,,Singapore,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00174,GFS GISELLE,9704661,566456000,,,,,,Singapore,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00175,GFS RUBY,9455909,563115300,,,,,,Singapore,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00176,GFS PRESTIGE,9303819,563115900,,,,9V5726,,Singapore,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00177,GFS PRIDE,9349045,563115400,,,,9V6902,,Singapore,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00178,GFS RANNA,9137569,377751000,,,,J8B5561,,St Vincent & Grenadines,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00179,GFS JADE,9187863,377311000,,,,J8B6169,,St Vincent & Grenadines,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00180,GFS PERFECT,9308039,563127400,,,,9V7054,,Singapore,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00181,GFS PEARL,9320051,210142000,,,,5BRP5,,Cyprus,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00182,GFS JUNO,9187875,375751000,,,,J8B6097,,St Vincent & Grenadines,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00183,GFS PRIME,9311749,209849000,,,,,,Cyprus,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00184,GFS SAPPHIRE,9330927,249197000,,,,9HA6159,,Malta,IMO populated,2026-09-07,SRC_0179,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00185,SIGYN W,9754446,,,,,,,,IMO populated,2026-09-07,SRC_0191,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00186,KOI,9461489,,,,,,,,IMO populated,2026-09-07,SRC_0191,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00187,CMA CGM AMBER,9350381,,,,,,,,IMO populated,2026-09-07,SRC_0191,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00188,CMA CGM SORBONNE,9839210,,,,,,,,IMO populated,2026-09-07,SRC_0191,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00189,CMA CGM MEKONG,9718105,,,,,,,,IMO populated,2026-09-07,SRC_0191,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00190,MSC UTMOST VIII,9302621,,,,,,,,IMO populated,2026-09-07,SRC_0192,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00191,MSC TARA III,9259381,,,,,,,,IMO populated,2026-09-07,SRC_0192,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00192,MSC KAYLA,9242637,,,,,,,,IMO populated,2026-09-07,SRC_0192,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00193,MSC JENNY II,9000742,,,,,,,,IMO populated,2026-09-07,SRC_0192,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00194,MSC SHANGHAI V,9231822,,,,,,,,IMO populated,2026-09-07,SRC_0192,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00195,MAERSK SANA,9289922,,,,,,,,IMO populated,2026-09-07,SRC_0193,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00196,MAERSK STOCKHOLM,9352042,,,,,,,,IMO populated,2026-09-07,SRC_0193,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00197,ADRIAN MAERSK,9948815,,,,,,,,IMO populated,2026-09-07,SRC_0193,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00198,BSG BONAIRE,9303766,,,,,,,,IMO populated,2026-09-07,SRC_0193,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00199,AS SIMONE,9813814,,,,,,,,IMO populated,2026-09-07,SRC_0193,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00200,XIN FEI ZHOU,9337937,,,,,,,,IMO populated,2026-09-07,SRC_0194,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00201,XIN TAI CANG,9320465,,,,,,,,IMO populated,2026-09-07,SRC_0194,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00202,SEASMILE,9632820,,,,,,,,IMO populated,2026-09-07,SRC_0194,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00203,HANSA BREITENBURG,9155391,,,,,,,,IMO populated,2026-09-07,SRC_0194,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00204,SMC COLUMBUS,9961556,,,,,,,,IMO populated,2026-09-07,SRC_0194,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00205,EVER FAR,9850862,,,,,,,,IMO populated,2026-09-07,SRC_0195,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00206,EVER BEFIT,9784128,,,,,,,,IMO populated,2026-09-07,SRC_0195,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00207,EVER LINKING,9629043,,,,,,,,IMO populated,2026-09-07,SRC_0195,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00208,EVER MEMO,9935272,,,,,,,,IMO populated,2026-09-07,SRC_0195,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00209,NORTHERN PRACTISE,9450301,,,,,,,,IMO populated,2026-09-07,SRC_0195,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00210,VALPARAISO EXPRESS,9777589,,,,,,,,IMO populated,2026-09-07,SRC_0196,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00211,SALERNO EXPRESS,9439761,,,,,,,,IMO populated,2026-09-07,SRC_0196,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00212,CARTAGENA EXPRESS,9777618,,,,,,,,IMO populated,2026-09-07,SRC_0196,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00213,DAMIETTA EXPRESS,9543108,,,,,,,,IMO populated,2026-09-07,SRC_0196,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00214,AL NASRIYAH,9708849,,,,,,,,IMO populated,2026-09-07,SRC_0196,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00215,NYK FUJI,9482938,,,,,,,,IMO populated,2026-09-07,SRC_0197,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00216,ONE SPHERE,9975624,,,,,,,,IMO populated,2026-09-07,SRC_0197,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00217,NYK VENUS,9312793,,,,,,,,IMO populated,2026-09-07,SRC_0197,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00218,ONE MODERN,9475636,,,,,,,,IMO populated,2026-09-07,SRC_0197,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00219,ONE MILLAU,9706736,,,,,,,,IMO populated,2026-09-07,SRC_0197,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00220,IBN AL ABBAR,9194490,,,,,,,,IMO populated,2026-09-07,SRC_0198,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00221,YM CAPACITY,9864540,,,,,,,,IMO populated,2026-09-07,SRC_0198,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00222,YM INCEPTION,9319155,,,,,,,,IMO populated,2026-09-07,SRC_0198,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00223,YM EXCELLENCE,9496616,,,,,,,,IMO populated,2026-09-07,SRC_0198,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00224,YM IMMENSE,9319131,,,,,,,,IMO populated,2026-09-07,SRC_0198,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00225,HMM VANCOUVER,9463085,,,,,,,,IMO populated,2026-09-07,SRC_0199,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00226,HMM EMERALD,9944493,,,,,,,,IMO populated,2026-09-07,SRC_0199,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00227,HMM HARMONY,9981142,,,,,,,,IMO populated,2026-09-07,SRC_0199,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00228,SKY RAINBOW,9925722,,,,,,,,IMO populated,2026-09-07,SRC_0199,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00229,HMM SKY,9976599,,,,,,,,IMO populated,2026-09-07,SRC_0199,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00230,KOTA SANTOS,9293765,,,,,,,,IMO populated,2026-09-07,SRC_0200,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00231,KOTA SABAS,9645451,,,,,,,,IMO populated,2026-09-07,SRC_0200,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00232,KOTA GAYA,9616802,,,,,,,,IMO populated,2026-09-07,SRC_0200,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00233,SINAR PANGANDARAN,1033779,,,,,,,,IMO populated,2026-09-07,SRC_0200,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00234,KOTA SEMPENA,9681273,,,,,,,,IMO populated,2026-09-07,SRC_0200,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00235,WAN HAI 283,9871311,,,,,,,,IMO populated,2026-09-07,SRC_0201,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00236,WAN HAI 358,9554080,,,,,,,,IMO populated,2026-09-07,SRC_0201,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00237,WAN HAI 177,9555137,,,,,,,,IMO populated,2026-09-07,SRC_0201,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00238,WAN HAI 333,9951379,,,,,,,,IMO populated,2026-09-07,SRC_0201,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00239,WAN HAI 101,9493298,,,,,,,,IMO populated,2026-09-07,SRC_0201,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00240,ZIM EMERALD,9967976,,,,,,,,IMO populated,2026-09-07,SRC_0202,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00241,CARMEL I,9395927,,,,,,,,IMO populated,2026-09-07,SRC_0202,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00242,MARLA BULL,9932945,,,,,,,,IMO populated,2026-09-07,SRC_0202,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00243,ZIM CHINA,9389382,,,,,,,,IMO populated,2026-09-07,SRC_0202,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00244,MTT SANDAKAN,9872248,,,,,,,,IMO populated,2026-09-07,SRC_0202,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00245,MARBURG,9387592,,,,,,,,IMO populated,2026-09-07,SRC_0203,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00246,ELBSKY,9412531,,,,,,,,IMO populated,2026-09-07,SRC_0203,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00247,JUDITH,9359260,,,,,,,,IMO populated,2026-09-07,SRC_0203,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00248,ELBSUMMER,9386718,,,,,,,,IMO populated,2026-09-07,SRC_0203,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00249,SAN PEDRO,9625281,,,,,,,,IMO populated,2026-09-07,SRC_0204,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00250,REN JIAN 8,9326756,,,,,,,,IMO populated,2026-09-07,SRC_0204,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00251,ZHONG GU YIN CHUAN,9938913,,,,,,,,IMO populated,2026-09-07,SRC_0204,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00252,MARINA VOYAGER,9400813,,,,,,,,IMO populated,2026-09-07,SRC_0204,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00253,ESL SHEKOU,9290945,,,,,,,,IMO populated,2026-09-07,SRC_0205,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00254,ESL WASL,9400071,,,,,,,,IMO populated,2026-09-07,SRC_0205,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00255,ZHONG GU KUN MING,9933858,,,,,,,,IMO populated,2026-09-07,SRC_0205,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00256,BRIGHT,9778399,,,,,,,,IMO populated,2026-09-07,SRC_0205,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00257,TROUPER,9326952,,,,,,,,IMO populated,2026-09-07,SRC_0206,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00258,X PRESS ANGLESEY,9623843,,,,,,,,IMO populated,2026-09-07,SRC_0206,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00259,SKY LIGHT,9118513,,,,,,,,IMO populated,2026-09-07,SRC_0206,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00260,GOLDEN STAR 1,8952857,,,,,,,,IMO populated,2026-09-07,SRC_0206,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00261,SSF VALENCE,9304693,,,,,,,,IMO populated,2026-09-07,SRC_0207,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00262,SM MANALI,9303742,,,,,,,,IMO populated,2026-09-07,SRC_0207,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00263,REMAH,9947720,,,,,,,,IMO populated,2026-09-07,SRC_0207,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00264,MIRROR,9328041,,,,,,,,IMO populated,2026-09-07,SRC_0207,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00265,HUA DA 610,1077385,,,,,,,,IMO populated,2026-09-07,SRC_0208,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00266,AL BATEEN,9668984,,,,,,,,IMO populated,2026-09-07,SRC_0208,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00267,SAFEEN PRIZE,9603594,,,,,,,,IMO populated,2026-09-07,SRC_0208,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00268,SSF DREAM,9346005,,,,,,,,IMO populated,2026-09-07,SRC_0208,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00269,GFS LETO,9346562,,,,,5BWF6,,,IMO populated,2026-09-07,SRC_0209,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00270,GFS LYSA,9368730,,,,,5BYT6,,,IMO populated,2026-09-07,SRC_0209,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00271,GFS MARINE 01,9586368,,,,,P2V5596,,,IMO populated,2026-09-07,SRC_0209,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00272,GFS RHEA,9373486,210639000,,,,5BWE6,,Cyprus,IMO populated,2026-09-07,SRC_0210,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00273,GFS RHINE,9435234,,,,,5BLZ2,,,IMO populated,2026-09-07,SRC_0209,Generated from unified canonical vessel record during v1.9 merge.
+VESSEL_00274,Baie Comeau,9639892,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00275,Baie St. Paul,9601027,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00276,CSL Assiniboine,7413218,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00277,CSL Laurentien,7423108,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00278,CSL Niagara,7128423,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00279,CSL Tadoussac,6918716,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00280,Frontenac,6804848,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00281,Nukumi,9914711,316048137,,,,,,Canada,IMO populated,2026-09-07,SRC_0169,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00282,Rt. Hon. Paul J. Martin,7324405,316001635,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00283,Thunder Bay,9601039,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00284,Whitefish Bay,9639880,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00285,CSL St-Laurent,9665281,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00286,CSL Welland,9665279,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00287,Ferbec,9259848,316014340,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00288,Oakglen,7901148,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00289,Spruceglen,8119261,,,,,,,Canada,IMO populated,2026-09-07,SRC_0153,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00290,Tamarack,1037153,316041965,,,,,,Canada,IMO populated,2026-09-07,SRC_0170,Current CSL regional fleet association verified in 2026; IMO from regulator/current public vessel identity evidence.
+VESSEL_00291,Algoma Guardian,8505850,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00292,Algoma Harvester,9613939,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00293,Algoma Innovator,9773375,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00294,Algoma Intrepid,9773387,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00295,Algoma Mariner,9587893,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00296,Algoma Niagara,9619270,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00297,Algoma Sault,9619282,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00298,Algoma Strongfield,9613953,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00299,Algoma Transport,7711737,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00300,Capt. Henry Jackman,9619294,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00301,G3 Marquis,9613941,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00302,John D Leitch,6714586,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00303,Radcliffe R Latimer,7711725,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00304,Tim S Dool,6800919,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00305,Algonova,9378589,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00306,Algoscotia,9273222,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00307,Algosea,9127198,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00308,Algoterra,9442249,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00309,Algotitan,9333802,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,"Government identity evidence from 2023. Algoma's current segment structure is confirmed, but individual current operating status still requires reconciliation."
+VESSEL_00310,Algoma Bear,9619309,,,,,,,Canada,IMO populated,2026-09-07,SRC_0174,Current Algoma fleet/program evidence with owner/operator separation retained where available.
+VESSEL_00311,Algoma Endeavour,9790141,316017110,,,,,,Canada,IMO populated,2026-09-07,SRC_0175,Current Algoma fleet/program evidence with owner/operator separation retained where available.
+VESSEL_00312,Algoma East Coast,1022079,316018750,,,,,,Canada,IMO populated,2026-09-07,SRC_0172,Current Algoma fleet/program evidence with owner/operator separation retained where available.
+VESSEL_00313,Algoma Acadian,1022081,316018880,,,,,,Canada,IMO populated,2026-09-07,SRC_0173,Current Algoma fleet/program evidence with owner/operator separation retained where available.
+VESSEL_00314,Mark W. Barker,9962445,,,,,,,United States,IMO populated,2026-09-07,SRC_0156,Current Interlake fleet membership verified; IMO cross-checked against regulator identity records.
+VESSEL_00315,Paul R. Tregurtha,7729057,,,,,,,United States,IMO populated,2026-09-07,SRC_0156,Current Interlake fleet membership verified; IMO cross-checked against regulator identity records.
+VESSEL_00316,James R. Barker,7390260,,,,,,,United States,IMO populated,2026-09-07,SRC_0156,Current Interlake fleet membership verified; IMO cross-checked against regulator identity records.
+VESSEL_00317,Mesabi Miner,7390272,,,,,,,United States,IMO populated,2026-09-07,SRC_0156,Current Interlake fleet membership verified; IMO cross-checked against regulator identity records.
+VESSEL_00318,Lee A. Tregurtha,5385625,,,,,,,United States,IMO populated,2026-09-07,SRC_0156,Current Interlake fleet membership verified; IMO cross-checked against regulator identity records.
+VESSEL_00319,Honorable James L. Oberstar,5322518,,,,,,,United States,IMO populated,2026-09-07,SRC_0156,Current Interlake fleet membership verified; IMO cross-checked against regulator identity records.
+VESSEL_00320,Kaye E. Barker,5097450,,,,,,,United States,IMO populated,2026-09-07,SRC_0156,Current Interlake fleet membership verified; IMO cross-checked against regulator identity records.
+VESSEL_00321,Herbert C. Jackson,5148417,,,,,,,United States,IMO populated,2026-09-07,SRC_0156,Current Interlake fleet membership verified; IMO cross-checked against regulator identity records.
+VESSEL_00322,Dorothy Ann,8955732,,,,,,,United States,IMO populated,2026-09-07,SRC_0156,Current Interlake fleet membership verified; IMO cross-checked against regulator identity records.
+VESSEL_00323,Stewart J. Cort,7105495,,,,,,,United States,IMO populated,2026-09-07,SRC_0156,Current Interlake fleet membership verified; IMO cross-checked against regulator identity records.
+VESSEL_00324,American Century,7923196,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Regulator identity seed; current individual operating status requires Mainstay/ASC refresh.
+VESSEL_00325,American Courage,7634226,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Regulator identity seed; current individual operating status requires Mainstay/ASC refresh.
+VESSEL_00326,American Integrity,7514696,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Regulator identity seed; current individual operating status requires Mainstay/ASC refresh.
+VESSEL_00327,American Mariner,7812567,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Regulator identity seed; current individual operating status requires Mainstay/ASC refresh.
+VESSEL_00328,American Spirit,7423392,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Regulator identity seed; current individual operating status requires Mainstay/ASC refresh.
+VESSEL_00329,Burns Harbor,7514713,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Regulator identity seed; current individual operating status requires Mainstay/ASC refresh.
+VESSEL_00330,H. Lee White,7366362,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Regulator identity seed; current individual operating status requires Mainstay/ASC refresh.
+VESSEL_00331,Indiana Harbor,7514701,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Regulator identity seed; current individual operating status requires Mainstay/ASC refresh.
+VESSEL_00332,John J Boland,7318901,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Regulator identity seed; current individual operating status requires Mainstay/ASC refresh.
+VESSEL_00333,Sam Laud,7390210,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Regulator identity seed; current individual operating status requires Mainstay/ASC refresh.
+VESSEL_00334,Walter J. McCarthy Jr.,7514684,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Regulator identity seed; current individual operating status requires Mainstay/ASC refresh.
+VESSEL_00335,Calumet,7329314,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Government identity seed; current operating status requires refresh.
+VESSEL_00336,Defiance,8109761,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Government identity seed; current operating status requires refresh.
+VESSEL_00337,Manitowoc,7366398,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Government identity seed; current operating status requires refresh.
+VESSEL_00338,Menominee,5336351,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Government identity seed; current operating status requires refresh.
+VESSEL_00339,Victory,8003292,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Government identity seed; current operating status requires refresh.
+VESSEL_00340,Olive L Moore,,,,2800309,,,,United States,IMO pending,2026-09-07,SRC_0167,"Michigan regulator report shows numeric identifier 2800309, but it fails the IMO checksum. Preserved in the national/official identifier field rather than treated as IMO."
+VESSEL_00341,Ashtabula,,,,646730,,,,United States,IMO pending,2026-09-07,SRC_0167,"Michigan regulator report shows numeric identifier 646730, which is not a valid seven-digit IMO. Preserved as a national/official identifier pending reconciliation."
+VESSEL_00342,Cuyahoga,5166392,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,Government identity seed; current operating status requires Lower Lakes refresh.
+VESSEL_00343,Kaministiqua,8119285,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,Government identity seed; current operating status requires Lower Lakes refresh.
+VESSEL_00344,Manitoulin,8810918,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,Government identity seed; current operating status requires Lower Lakes refresh.
+VESSEL_00345,Michipicoten,5102865,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,Government identity seed; current operating status requires Lower Lakes refresh.
+VESSEL_00346,Robert S. Pierson,7366403,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,Government identity seed; current operating status requires Lower Lakes refresh.
+VESSEL_00347,Saginaw,5173876,,,,,,,Canada,IMO populated,2026-09-07,SRC_0167,Government identity seed; current operating status requires Lower Lakes refresh.
+VESSEL_00348,Arthur M. Anderson,5025691,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Michigan regulator identifies Key Lakes as operator; CN confirms the current integrated Great Lakes Fleet role. Current individual vessel activity still requires refresh.
+VESSEL_00349,Cason J. Callaway,5065392,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Michigan regulator identifies Key Lakes as operator; CN confirms the current integrated Great Lakes Fleet role. Current individual vessel activity still requires refresh.
+VESSEL_00350,Edgar B. Speer,7625952,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Michigan regulator identifies Key Lakes as operator; CN confirms the current integrated Great Lakes Fleet role. Current individual vessel activity still requires refresh.
+VESSEL_00351,Edwin H. Gott,7606061,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Michigan regulator identifies Key Lakes as operator; CN confirms the current integrated Great Lakes Fleet role. Current individual vessel activity still requires refresh.
+VESSEL_00352,Great Republic,7914236,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Michigan regulator identifies Key Lakes as operator; CN confirms the current integrated Great Lakes Fleet role. Current individual vessel activity still requires refresh.
+VESSEL_00353,John G. Munson,5173670,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Michigan regulator identifies Key Lakes as operator; CN confirms the current integrated Great Lakes Fleet role. Current individual vessel activity still requires refresh.
+VESSEL_00354,Philip R. Clarke,5277062,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Michigan regulator identifies Key Lakes as operator; CN confirms the current integrated Great Lakes Fleet role. Current individual vessel activity still requires refresh.
+VESSEL_00355,Presque Isle,7303877,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Michigan regulator identifies Key Lakes as operator; CN confirms the current integrated Great Lakes Fleet role. Current individual vessel activity still requires refresh.
+VESSEL_00356,Roger Blough,7222138,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Michigan regulator identifies Key Lakes as operator; CN confirms the current integrated Great Lakes Fleet role. Current individual vessel activity still requires refresh.
+VESSEL_00357,Badger,5033583,,,,,,,United States,IMO populated,2026-09-07,SRC_0167,Great Lakes passenger-vessel identity; bridges the ferry and regional-system layers.
+VESSEL_00358,Florence Spirit,9314600,,,839979,,,,Canada,IMO populated,2026-09-07,SRC_0177,McKeil official profile provides IMO 9314600 and Canadian Official Number 839979.
