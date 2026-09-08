@@ -190,19 +190,229 @@ def col(df, candidates):
             return c
     return None
 
-def clean(df):
+def _build_name_maps():
+    """Build lookup maps so internal join keys never have to be shown to users."""
+    maps = {}
+
+    def add_map(df_key, id_cols, name_cols):
+        df = D.get(df_key, pd.DataFrame())
+        if df.empty:
+            return
+        ic = col(df, id_cols)
+        nc = col(df, name_cols)
+        if not ic or not nc:
+            return
+        vals = {
+            str(r[ic]).strip(): str(r[nc]).strip()
+            for _, r in df[[ic, nc]].iterrows()
+            if str(r.get(ic, '')).strip() and str(r.get(nc, '')).strip()
+        }
+        if vals:
+            maps.update(vals)
+
+    # Canonical organizations and generic registry first.
+    add_map('companies', ['Company ID'], ['Company', 'Company Name'])
+    add_map('entity_registry', ['Entity ID'], ['Canonical Name'])
+    add_map('ports', ['Port ID'], ['Port / Facility', 'Port'])
+    add_map('terminals', ['Terminal ID'], ['Terminal / Facility', 'Terminal'])
+    add_map('vessels', ['Vessel ID'], ['Vessel Name'])
+    add_map('assets', ['Asset ID'], ['Asset'])
+    add_map('shipyards', ['Shipyard ID'], ['Shipyard'])
+    add_map('corridors', ['Corridor ID'], ['Corridor'])
+    add_map('rail_networks', ['Rail Network ID'], ['Network / Corridor'])
+    add_map('rail_nodes', ['Rail Node ID'], ['Node'])
+    add_map('rail_operators', ['Rail Operator ID'], ['Operator'])
+    add_map('ferry_systems', ['System ID'], ['System Name'])
+    add_map('ferry_routes', ['Route ID'], ['Route Name'])
+    add_map('ferry_terminals', ['Terminal ID'], ['Terminal Name'])
+    add_map('monitoring', ['Monitoring ID'], ['Title'])
+    add_map('news', ['News ID'], ['Headline'])
+    add_map('events', ['Event ID'], ['Title'])
+
+    # Aircraft are best represented by registration, falling back to type.
+    adf = D.get('aircraft', pd.DataFrame())
+    if not adf.empty and 'Aircraft ID' in adf.columns:
+        for _, r in adf.iterrows():
+            aid = str(r.get('Aircraft ID', '')).strip()
+            if not aid:
+                continue
+            reg = str(r.get('Registration', '')).strip()
+            typ = str(r.get('Aircraft Type', '')).strip()
+            maps[aid] = reg or typ or aid
+
+    return maps
+
+NAME_MAP = _build_name_maps()
+
+# Source keys get a readable publisher/source label when useful.
+SOURCE_NAME_MAP = {}
+if not D.get('sources', pd.DataFrame()).empty:
+    sdf = D['sources']
+    if 'Source ID' in sdf.columns:
+        for _, r in sdf.iterrows():
+            sid = str(r.get('Source ID', '')).strip()
+            label = str(r.get('Publisher', '')).strip() or str(r.get('Source Note', '')).strip()
+            if sid and label:
+                SOURCE_NAME_MAP[sid] = label
+
+_INTERNAL_ID_COLUMNS = {
+    'Relationship ID','Aircraft Relationship ID','Rail Relationship ID','Vessel Relationship ID',
+    'Ownership ID','Observation ID','Canonical Event ID','Source Record ID','News ID',
+    'Monitoring ID','Deal ID','Work ID','Shipyard ID','Equipment Record ID','Event Link ID',
+    'News Link ID','Transaction Link ID','Control Record ID','Constraint ID','Program ID',
+    'Footprint ID','Coverage ID','Order ID','Fleet ID','Staging ID','Status ID','Performance ID',
+    'Impact ID','External Event ID','Research ID','Feed ID','Build Record ID','Contract ID',
+    'Evidence ID','Restriction ID','Transaction ID','Assessment ID','Dependency ID','Link ID',
+    'Node ID','Rail Link ID','Rail Connection ID','Rail Fleet Record ID','Rail News ID',
+}
+
+# ID columns that are foreign keys and should become readable names instead of disappearing.
+_FOREIGN_ID_LABELS = {
+    'Company ID': 'Company',
+    'Owner Company ID': 'Owner',
+    'Operator Company ID': 'Operator',
+    'Primary Operator Company ID': 'Primary Operator',
+    'Lead Operator Company ID': 'Lead Operator',
+    'Primary Company ID': 'Primary Company',
+    'Network Customer Company ID': 'Network Customer',
+    'Buyer / Operator Company ID': 'Buyer / Operator',
+    'Buyer Company ID': 'Buyer',
+    'Seller Company ID': 'Seller',
+    'Investor / Buyer IDs': 'Investor / Buyer',
+    'Co-Investor / Partner IDs': 'Co-Investor / Partner',
+    'Investor / Owner Company IDs': 'Investor / Owner',
+    'Parent / Investor Company ID': 'Parent / Investor',
+    'Parent / Owner Company ID': 'Parent / Owner',
+    'Controller Entity ID': 'Controller',
+    'Subject Entity ID': 'Subject',
+    'Parent Entity ID': 'Parent Entity',
+    'Entity ID': 'Entity',
+    'Source Entity': 'Source',
+    'Target Entity': 'Target',
+    'Target Entity / Asset ID': 'Target / Asset',
+    'Entity / Asset ID': 'Entity / Asset',
+    'Asset / Port ID': 'Asset / Port',
+    'Asset ID': 'Asset',
+    'Port ID': 'Port',
+    'Linked Port ID': 'Linked Port',
+    'Terminal ID': 'Terminal',
+    'Linked Terminal ID': 'Linked Terminal',
+    'Vessel ID': 'Vessel',
+    'Canonical Vessel ID': 'Vessel',
+    'Aircraft ID': 'Aircraft',
+    'Rail Network ID': 'Rail Network',
+    'Rail Node ID': 'Rail Node',
+    'Origin Rail Node ID': 'Origin Rail Node',
+    'Destination Rail Node ID': 'Destination Rail Node',
+    'System ID': 'System',
+    'Route ID': 'Route',
+    'Origin Terminal ID': 'Origin Terminal',
+    'Destination Terminal ID': 'Destination Terminal',
+    'Corridor ID': 'Corridor',
+    'Connected Entity ID': 'Connected Entity',
+    'Subject ID': 'Subject',
+}
+
+_ACRONYMS = {
+    'JV':'JV','IMO':'IMO','ISM':'ISM','AIS':'AIS','LNG':'LNG','LPG':'LPG','TEU':'TEU',
+    'UAE':'UAE','UK':'UK','US':'US','EU':'EU','P&I':'P&I','M&A':'M&A','DG':'DG'
+}
+
+def _human_code(value):
+    """Turn model enums such as PART_OF or OWNER_OPERATOR into readable English."""
+    v = str(value).strip()
+    if not v:
+        return v
+    # Only normalize code-like enums. Natural prose and identifiers are left untouched.
+    if not re.fullmatch(r'[A-Z0-9_&/+ -]+', v):
+        return v
+    words = []
+    for token in v.split('_'):
+        if token in _ACRONYMS:
+            words.append(_ACRONYMS[token])
+        elif token:
+            words.append(token.lower())
+    if not words:
+        return v
+    words[0] = words[0] if words[0] in _ACRONYMS.values() else words[0].capitalize()
+    return ' '.join(words)
+
+def _resolve_key_token(token, source=False):
+    t = str(token).strip()
+    if not t:
+        return ''
+    if source:
+        return SOURCE_NAME_MAP.get(t, t)
+    return NAME_MAP.get(t, t)
+
+def _resolve_key_value(value, source=False):
+    """Resolve one or many semicolon/pipe-separated model keys to display names."""
+    v = str(value).strip()
+    if not v:
+        return v
+    # Keep human prose intact; split only the separators used by model key lists.
+    if ';' in v:
+        return '; '.join(_resolve_key_token(x, source=source) for x in v.split(';') if str(x).strip())
+    return _resolve_key_token(v, source=source)
+
+def prepare_display(df):
+    """Create a user-facing dataframe while preserving canonical IDs underneath the app."""
     if df.empty:
         return df
-    drop_exact = {
-        "Source ID","Source Asset ID","Source Asset IDs","Canonicalization Note",
-        "Company ID","Port ID","Vessel ID","Asset ID","Entity ID","Terminal ID",
-        "Observation ID","Canonical Event ID","Source Record ID","News ID",
-        "Monitoring ID","Deal ID","Work ID","Shipyard ID","Equipment Record ID",
-        "Ownership ID","Event Link ID","News Link ID","Transaction Link ID",
-        "Control Record ID","Constraint ID","Relationship ID"
-    }
-    cols = [c for c in df.columns if c not in drop_exact and not c.lower().endswith("_id")]
-    return df[cols].copy()
+    out = df.copy()
+    display = pd.DataFrame(index=out.index)
+
+    for c in out.columns:
+        # Hide record-management keys completely.
+        if c in _INTERNAL_ID_COLUMNS:
+            continue
+
+        # Source IDs are implementation keys; expose publisher names only if there is no
+        # already-visible source/publisher field that makes them redundant.
+        if c in {'Source ID','Primary Source ID','Source IDs','Source ID / Notes'}:
+            existing_source_cols = {'Source','Publisher','Primary Source','Source Name','Source URL','URL'} & set(out.columns)
+            if existing_source_cols:
+                continue
+            label = 'Source'
+            vals = out[c].map(lambda x: _resolve_key_value(x, source=True))
+            if label not in display.columns:
+                display[label] = vals
+            continue
+
+        if c in _FOREIGN_ID_LABELS:
+            label = _FOREIGN_ID_LABELS[c]
+            vals = out[c].map(_resolve_key_value)
+            # If the source table already has a clean human-name column with the same label,
+            # prefer it and suppress the internal-key derivative.
+            if label in out.columns and label != c:
+                continue
+            if label not in display.columns:
+                display[label] = vals
+            continue
+
+        # Generic foreign-key columns not explicitly listed: resolve if possible, otherwise hide.
+        if c.endswith(' ID') or c.endswith(' IDs') or c.lower().endswith('_id'):
+            vals = out[c].map(_resolve_key_value)
+            changed = (vals.astype(str) != out[c].astype(str)) & (out[c].astype(str).str.strip() != '')
+            if changed.any():
+                label = re.sub(r'\s+IDs?$', '', c).strip()
+                if label not in display.columns and label not in out.columns:
+                    display[label] = vals
+            continue
+
+        vals = out[c].copy()
+        lc = c.lower()
+        if any(k in lc for k in ['relationship','link type','role in system','control type']):
+            vals = vals.map(_human_code)
+        display[c] = vals
+
+    # Avoid duplicated human columns created from a foreign key and an existing descriptive field.
+    display = display.loc[:, ~display.columns.duplicated()]
+    return display
+
+def clean(df):
+    # Backwards-compatible alias used throughout the existing app.
+    return prepare_display(df)
 
 def text_search(df, q):
     if df.empty or not q:
@@ -572,8 +782,8 @@ def watch_area_bundle(corridor_id):
 
 # ---------- Sidebar ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("Intelligence Model v1.17")
-st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.20</div>", unsafe_allow_html=True)
+st.sidebar.caption("Intelligence Model v1.17 • App v1.21")
+st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.21</div>", unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Navigate",
     [
