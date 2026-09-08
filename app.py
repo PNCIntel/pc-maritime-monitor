@@ -124,6 +124,13 @@ def _display_lookup_maps():
         globals().get("model_assets"), ["Asset ID"],
         ["Asset", "Asset Name", "Name", "Facility", "Port / Terminal", "Port"]
     )
+    port = _first_existing_name_map(
+        globals().get("model_ports"), ["Port ID"], ["Port / Facility", "Port", "Name"]
+    )
+    terminal = _first_existing_name_map(
+        globals().get("port_terminals"), ["Terminal ID"],
+        ["Terminal / Facility", "Terminal", "Facility", "Name"]
+    )
     vessel = _first_existing_name_map(
         globals().get("model_vessels"), ["Vessel ID"], ["Vessel Name", "Vessel", "Name"]
     )
@@ -151,13 +158,15 @@ def _display_lookup_maps():
 
     entity = {}
     # More specific maps first; company names intentionally win for COMP_* keys.
-    for lookup in (asset, vessel, system, investor, zone, hub, event, person, company):
+    for lookup in (port, terminal, asset, vessel, system, investor, zone, hub, event, person, company):
         entity.update(lookup)
 
     return {
         "company": company,
         "person": person,
         "asset": asset,
+        "port": port,
+        "terminal": terminal,
         "vessel": vessel,
         "system": system,
         "investor": investor,
@@ -205,6 +214,9 @@ def prepare_display_dataframe(data):
         "Asset ID": ("Asset", maps["asset"]),
         "Source Asset ID": ("Source Asset", maps["asset"]),
         "Target Asset ID": ("Target Asset", maps["asset"]),
+        "Port ID": ("Port", maps["port"]),
+        "Terminal ID": ("Terminal", maps["terminal"]),
+        "Primary Operator Company ID": ("Primary Operator", maps["company"]),
         "Vessel ID": ("Vessel", maps["vessel"]),
         "System ID": ("System", maps["system"]),
         "Investor ID": ("Investor", maps["investor"]),
@@ -246,7 +258,9 @@ def prepare_display_dataframe(data):
         (("company", "owner", "operator", "parent", "buyer"), maps["company"]),
         (("person", "leader", "executive"), maps["person"]),
         (("vessel", "ship"), maps["vessel"]),
-        (("asset", "port", "terminal", "facility"), maps["asset"]),
+        (("terminal",), maps["terminal"] | maps["asset"]),
+        (("port", "facility"), maps["port"] | maps["terminal"] | maps["asset"]),
+        (("asset",), maps["asset"]),
         (("investor", "partner"), maps["company"] | maps["investor"]),
         (("zone",), maps["zone"]),
         (("hub", "dry port"), maps["hub"]),
@@ -711,7 +725,7 @@ def dataset_hint_score(name, q):
     name_l = name.lower()
     score = 0
     hints = {
-        "port": ["port","terminal","harbour","harbor","fujairah","duqm","khalifa"],
+        "port": ["port","terminal","harbour","harbor","berth","draft","depth","quay","crane","rtg","sts","reefer","fujairah","duqm","khalifa"],
         "ukmto": ["ukmto","warning"],
         "attack": ["attack","strike","drone","missile","war","conflict"],
         "piracy": ["piracy","pirate","armed robbery","hijack","boarding"],
@@ -1091,6 +1105,11 @@ people = load("people.csv")
 leadership_roles = load("leadership_roles.csv")
 model_assets = load("assets.csv")
 model_ports = load("ports.csv")
+port_terminals = load("port_terminals.csv")
+port_berths = load("port_berths.csv")
+port_equipment = load("port_equipment.csv")
+port_ownership = load("port_ownership.csv")
+port_news = dates(load("port_news.csv"), "Date")
 model_vessels = load("vessels.csv")
 fleet_portfolios = load("fleet_portfolios.csv")
 fleet_orders = load("fleet_orders.csv")
@@ -1346,7 +1365,12 @@ elif page == "Ask P&C":
         "Integrated logistics networks": integrated_logistics_networks,
         "Leadership roles": leadership_roles,
         "Trade-system assets": model_assets,
-        "Ports and terminals": model_ports,
+        "Parent ports": model_ports,
+        "Port terminals": port_terminals,
+        "Port berths and depth": port_berths,
+        "Port equipment": port_equipment,
+        "Port ownership and JVs": port_ownership,
+        "Port news and developments": port_news,
         "Vessels": model_vessels,
         "Fleet portfolios": fleet_portfolios,
         "Fleet orders": fleet_orders,
@@ -2103,49 +2127,296 @@ elif page == "Energy Shipping":
 elif page == "Ports & Terminals":
     masthead(
         "Ports, Terminals & Infrastructure",
-        "Global port and terminal intelligence, including the Great Lakes–St. Lawrence port system, linked assets, investment and infrastructure works."
+        "Canonical parent ports, physical terminals, berth depth, handling equipment, ownership/JV structures and live terminal developments."
     )
 
     p = model_ports.copy()
+    pt = port_terminals.copy()
+    pb = port_berths.copy()
+    pe = port_equipment.copy()
+    po = port_ownership.copy()
+    pn = port_news.copy()
     gp = great_lakes_ports.copy()
     a = model_assets.copy()
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Canonical port / facility records", len(model_ports))
-    m2.metric("Great Lakes / St. Lawrence port seeds", len(great_lakes_ports))
-    m3.metric("Port datasets", 2)
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Parent ports", len(p))
+    m2.metric("Physical terminals", len(pt))
+    m3.metric("Berth records", len(pb))
+    m4.metric("Equipment records", len(pe))
+    m5.metric("Port news", len(pn))
 
     st.caption(
-        "Great Lakes–St. Lawrence ports are surfaced here as part of the global port universe while remaining "
-        "available in the dedicated Great Lakes System view. Regional seed status is retained internally until "
-        "each record is fully reconciled with the canonical port table."
+        "A physical terminal is counted once. Ownership, concession, operator and JV interests are attached separately, "
+        "so shared facilities such as CMA Terminals Khalifa Port, South Florida Container Terminal, Antwerp Gateway "
+        "and Jeddah South Container Terminal are not double-counted."
     )
 
-    port_tab, gl_tab, infra_tab = st.tabs([
-        "Global Ports & Terminals",
+    tabs = st.tabs([
+        "Terminal Network",
+        "Port / Terminal Detail",
+        "Berths & Depth",
+        "Equipment",
+        "Ownership & JVs",
+        "Latest Port News",
         "Great Lakes / St. Lawrence",
         "Infrastructure & Investment",
     ])
 
-    with port_tab:
-        c1, c2 = st.columns(2)
+    with tabs[0]:
+        t = pt.copy()
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
-            p = filter_select(p, "Country", "Country")
+            if "Country" in t.columns:
+                t = filter_select(t, "Country", "Country", key="pt_country")
         with c2:
-            p = filter_select(p, "Operator", "Operator")
+            if "Operator / Network" in t.columns:
+                t = filter_select(t, "Operator / Network", "Operator / network", key="pt_network")
+        with c3:
+            if "Primary Operator" in t.columns:
+                t = filter_select(t, "Primary Operator", "Primary operator", key="pt_operator")
+        with c4:
+            if "Status" in t.columns:
+                t = filter_select(t, "Status", "Status", key="pt_status")
 
-        st.metric("Matching canonical records", len(p))
-        mp = map_points(
-            p,
-            location_cols=("Port / Facility",),
-            country_col="Country",
-            layer="Port / facility",
+        q_port = st.text_input(
+            "Search terminals",
+            key="pt_search",
+            placeholder="e.g. Jeddah, RTG, 18 m, APM Terminals, Brazil, rail",
         )
-        if not mp.empty:
-            st.map(mp, latitude="lat", longitude="lon", use_container_width=True)
-        display_dataframe(p, use_container_width=True, hide_index=True)
+        if q_port:
+            t = smart_text_search(t, q_port, limit=500)
+            t = t.drop(columns=["_pc_score", "_pc_terms"], errors="ignore")
 
-    with gl_tab:
+        st.metric("Matching terminals", len(t))
+        show_cols = [c for c in [
+            "Terminal / Facility","Parent Port","Country","City / Area","Region","Asset Type",
+            "Primary Operator","Operator / Network","Status","Container Capacity TEU/yr",
+            "Area sqm","Quay Length m","Max Depth m","Berth Count","Rail Connected",
+            "Reefer Points","Confidence","Canonicalization Note"
+        ] if c in t.columns]
+        display_dataframe(t[show_cols] if show_cols else t, use_container_width=True, hide_index=True)
+
+    with tabs[1]:
+        detail = pt.copy()
+        if detail.empty or "Terminal ID" not in detail.columns:
+            st.info("No canonical terminal records are loaded.")
+        else:
+            detail["_label"] = detail.apply(
+                lambda r: f"{r.get('Terminal / Facility','—')} — {r.get('Country','—')} — {r.get('Parent Port','—')}",
+                axis=1
+            )
+            detail = detail.sort_values("_label")
+            chosen_label = st.selectbox(
+                "Select terminal",
+                detail["_label"].tolist(),
+                key="port_terminal_detail_select",
+            )
+            rec = detail[detail["_label"] == chosen_label].iloc[0]
+            terminal_id = str(rec["Terminal ID"])
+
+            st.markdown(f"### {rec.get('Terminal / Facility','Terminal')}")
+            st.caption(
+                " · ".join([
+                    str(x) for x in [
+                        rec.get("Parent Port"), rec.get("City / Area"), rec.get("Country"),
+                        rec.get("Primary Operator"), rec.get("Status")
+                    ] if pd.notna(x) and str(x).strip() not in ("", "nan")
+                ])
+            )
+
+            k1,k2,k3,k4,k5,k6 = st.columns(6)
+            def _metric_number(v, suffix="", divisor=1, decimals=0):
+                try:
+                    num=float(v)
+                    if pd.isna(num): return "—"
+                    num=num/divisor
+                    return f"{num:,.{decimals}f}{suffix}"
+                except Exception:
+                    return "—"
+            k1.metric("Capacity", _metric_number(rec.get("Container Capacity TEU/yr"), " TEU"))
+            k2.metric("Max depth", _metric_number(rec.get("Max Depth m"), " m", decimals=1))
+            k3.metric("Quay", _metric_number(rec.get("Quay Length m"), " m"))
+            k4.metric("Berths", _metric_number(rec.get("Berth Count")))
+            k5.metric("Reefer points", _metric_number(rec.get("Reefer Points")))
+            k6.metric("Area", _metric_number(rec.get("Area sqm"), " ha", divisor=10000, decimals=1))
+
+            left,right = st.columns([1.25,1])
+            with left:
+                st.markdown("#### Infrastructure / operating profile")
+                detail_fields = [
+                    ("Asset type","Asset Type"),("Cargo","Cargo Profile"),("Rail connected","Rail Connected"),
+                    ("Operator / network","Operator / Network"),("Ownership / structure","Ownership / Structure"),
+                    ("Confidence","Confidence"),("Notes","Notes"),("Canonicalization","Canonicalization Note"),
+                ]
+                for label,col in detail_fields:
+                    if col in rec.index and pd.notna(rec[col]) and str(rec[col]).strip() not in ("","nan"):
+                        st.markdown(f"**{label}:** {rec[col]}")
+                raw_sources = str(rec.get("Source URLs","") or "")
+                urls = [u.strip() for u in raw_sources.split(";") if u.strip().startswith("http")]
+                if urls:
+                    st.markdown("**Infrastructure sources:**")
+                    for i,u in enumerate(urls[:5],1):
+                        st.markdown(f"- [Open source {i}]({u})")
+
+            with right:
+                st.markdown("#### Ownership / operator relationships")
+                own = po[po["Terminal ID"].astype(str) == terminal_id].copy() if "Terminal ID" in po.columns else po.head(0)
+                if own.empty:
+                    st.caption("No ownership rows resolved yet.")
+                else:
+                    own_cols=[c for c in ["Company / Partner","Relationship","Equity %","Operating Control","Status","Details"] if c in own.columns]
+                    display_dataframe(own[own_cols], use_container_width=True, hide_index=True)
+
+            d1,d2 = st.columns(2)
+            with d1:
+                st.markdown("#### Berths & marine interface")
+                b = pb[pb["Terminal ID"].astype(str) == terminal_id].copy() if "Terminal ID" in pb.columns else pb.head(0)
+                if b.empty:
+                    st.caption("No berth-level public detail verified yet.")
+                else:
+                    bcols=[c for c in ["Berth / Interface","Berth Count","Quay Length m","Max Depth m","Cargo Use","Status"] if c in b.columns]
+                    display_dataframe(b[bcols], use_container_width=True, hide_index=True)
+            with d2:
+                st.markdown("#### Handling equipment")
+                e = pe[pe["Terminal ID"].astype(str) == terminal_id].copy() if "Terminal ID" in pe.columns else pe.head(0)
+                if e.empty:
+                    st.caption("No equipment-level public detail verified yet.")
+                else:
+                    ecols=[c for c in ["Equipment Type","Quantity","Specification","Status","Source Operator"] if c in e.columns]
+                    display_dataframe(e[ecols], use_container_width=True, hide_index=True)
+
+            st.markdown("#### Latest terminal developments")
+            n = pn[pn["Terminal ID"].astype(str) == terminal_id].copy() if "Terminal ID" in pn.columns else pn.head(0)
+            n = sort_latest(n, ("Date",))
+            if n.empty:
+                st.caption("No linked news/development records yet.")
+            else:
+                for _, row in n.head(12).iterrows():
+                    dt = row.get("Date")
+                    if pd.notna(dt):
+                        try:
+                            dt = pd.to_datetime(dt).strftime("%d %b %Y")
+                        except Exception:
+                            dt = str(dt)
+                    else:
+                        dt = "Undated"
+                    st.markdown(f"**{dt} · {row.get('Headline','Development')}**")
+                    if pd.notna(row.get("Summary")):
+                        st.write(row.get("Summary"))
+                    meta = " · ".join([str(x) for x in [row.get("Event Type"),row.get("Source")] if pd.notna(x) and str(x).strip() not in ("","nan")])
+                    if meta:
+                        st.caption(meta)
+                    url = str(row.get("URL","") or "")
+                    if url.startswith("http"):
+                        st.markdown(f"[Open source]({url})")
+                    st.divider()
+
+    with tabs[2]:
+        b = pb.copy()
+        if not b.empty and "Terminal ID" in b.columns:
+            b = b.merge(
+                pt[[c for c in ["Terminal ID","Terminal / Facility","Parent Port","Country","Primary Operator"] if c in pt.columns]],
+                on="Terminal ID", how="left"
+            )
+        c1,c2,c3 = st.columns(3)
+        with c1:
+            if "Country" in b.columns:
+                b = filter_select(b, "Country", "Country", key="berth_country")
+        with c2:
+            if "Source Operator" in b.columns:
+                b = filter_select(b, "Source Operator", "Source operator", key="berth_source_operator")
+        with c3:
+            min_depth = st.number_input("Minimum depth (m)", min_value=0.0, value=0.0, step=0.5, key="berth_min_depth")
+        if min_depth > 0 and "Max Depth m" in b.columns:
+            dep = pd.to_numeric(b["Max Depth m"], errors="coerce")
+            b = b[dep >= min_depth]
+        bcols=[c for c in ["Terminal / Facility","Parent Port","Country","Primary Operator","Berth / Interface","Berth Count","Quay Length m","Max Depth m","Cargo Use","Status","Source Operator"] if c in b.columns]
+        display_dataframe(b[bcols] if bcols else b, use_container_width=True, hide_index=True)
+
+    with tabs[3]:
+        e = pe.copy()
+        if not e.empty and "Terminal ID" in e.columns:
+            e = e.merge(
+                pt[[c for c in ["Terminal ID","Terminal / Facility","Parent Port","Country","Primary Operator"] if c in pt.columns]],
+                on="Terminal ID", how="left"
+            )
+        c1,c2,c3 = st.columns(3)
+        with c1:
+            if "Equipment Type" in e.columns:
+                e = filter_select(e, "Equipment Type", "Equipment type", key="eq_type")
+        with c2:
+            if "Country" in e.columns:
+                e = filter_select(e, "Country", "Country", key="eq_country")
+        with c3:
+            if "Source Operator" in e.columns:
+                e = filter_select(e, "Source Operator", "Source operator", key="eq_source")
+        ecols=[c for c in ["Terminal / Facility","Parent Port","Country","Primary Operator","Equipment Type","Quantity","Specification","Status","Source Operator"] if c in e.columns]
+        display_dataframe(e[ecols] if ecols else e, use_container_width=True, hide_index=True)
+
+    with tabs[4]:
+        o = po.copy()
+        if not o.empty and "Terminal ID" in o.columns:
+            o = o.merge(
+                pt[[c for c in ["Terminal ID","Terminal / Facility","Parent Port","Country"] if c in pt.columns]],
+                on="Terminal ID", how="left"
+            )
+        c1,c2,c3 = st.columns(3)
+        with c1:
+            if "Company / Partner" in o.columns:
+                o = filter_select(o, "Company / Partner", "Company / partner", key="own_company")
+        with c2:
+            if "Country" in o.columns:
+                o = filter_select(o, "Country", "Country", key="own_country")
+        with c3:
+            if "Relationship" in o.columns:
+                o = filter_select(o, "Relationship", "Relationship", key="own_rel")
+        ocols=[c for c in ["Terminal / Facility","Parent Port","Country","Company / Partner","Relationship","Equity %","Operating Control","Status","Details"] if c in o.columns]
+        display_dataframe(o[ocols] if ocols else o, use_container_width=True, hide_index=True)
+
+    with tabs[5]:
+        n = pn.copy()
+        if not n.empty and "Terminal ID" in n.columns:
+            n = n.merge(
+                pt[[c for c in ["Terminal ID","Terminal / Facility","Parent Port","Country","Primary Operator"] if c in pt.columns]],
+                on="Terminal ID", how="left"
+            )
+        c1,c2,c3 = st.columns(3)
+        with c1:
+            if "Country" in n.columns:
+                n = filter_select(n, "Country", "Country", key="news_country")
+        with c2:
+            if "Event Type" in n.columns:
+                n = filter_select(n, "Event Type", "Event type", key="news_event_type")
+        with c3:
+            if "Primary Operator" in n.columns:
+                n = filter_select(n, "Primary Operator", "Primary operator", key="news_operator")
+        n = sort_latest(n, ("Date",))
+        if n.empty:
+            st.info("No matching port news records.")
+        else:
+            st.metric("Matching developments", len(n))
+            for _, row in n.head(40).iterrows():
+                dt=row.get("Date")
+                if pd.notna(dt):
+                    try: dt=pd.to_datetime(dt).strftime("%d %b %Y")
+                    except Exception: dt=str(dt)
+                else: dt="Undated"
+                term=row.get("Terminal / Facility","")
+                parent=row.get("Parent Port","")
+                country=row.get("Country","")
+                st.markdown(f"**{dt} · {row.get('Headline','Port development')}**")
+                location=" · ".join([str(x) for x in [term,parent,country] if pd.notna(x) and str(x).strip() not in ("","nan")])
+                if location:
+                    st.caption(location)
+                if pd.notna(row.get("Summary")):
+                    st.write(row.get("Summary"))
+                url=str(row.get("URL","") or "")
+                if url.startswith("http"):
+                    st.markdown(f"[Open source]({url})")
+                st.divider()
+
+    with tabs[6]:
         gl1, gl2, gl3 = st.columns(3)
         with gl1:
             if "Country" in gp.columns:
@@ -2171,8 +2442,8 @@ elif page == "Ports & Terminals":
         st.metric("Matching Great Lakes / St. Lawrence records", len(gp))
         display_dataframe(gp, use_container_width=True, hide_index=True)
 
-    with infra_tab:
-        t1, t2, t3 = st.tabs(["Assets", "Investments", "Infrastructure works"])
+    with tabs[7]:
+        t1, t2, t3 = st.tabs(["Trade-system assets", "Investments", "Infrastructure works"])
         with t1:
             display_dataframe(a, use_container_width=True, hide_index=True)
         with t2:
