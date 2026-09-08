@@ -1,0 +1,98 @@
+﻿Sheet,Runtime File,Rows,Columns
+Aircraft,aircraft.csv,13,11
+Aircraft Registry,aircraft_registry.csv,162,18
+Aircraft Relationships,aircraft_relationships.csv,256,10
+Asset Constraints,asset_constraints.csv,3,12
+Asset Control History,asset_control_history.csv,1,10
+Assets,assets.csv,105,11
+Aviation Fleet Summary,aviation_fleet_summary.csv,8,11
+Carrier Deployment Seeds,carrier_deployment_seeds.csv,91,22
+Companies,companies.csv,245,13
+Company System Footprints,company_system_footprints.csv,13,10
+Corridors,corridors.csv,8,9
+Data Dictionary,data_dictionary.csv,87,4
+Disruption Watch,disruption_watch.csv,2,17
+Dry Ports Inland Hubs,dry_ports_inland_hubs.csv,5,25
+Economic Zones,economic_zones.csv,4,21
+Entity Registry,entity_registry.csv,1818,6
+Event Entity Links,event_entity_links.csv,27,10
+Event Impacts,event_impacts.csv,27,10
+Event Ingestion Map,event_ingestion_map.csv,15,5
+Event Observations,event_observations.csv,611,29
+Event Taxonomy,event_taxonomy.csv,17,4
+External Disruptions,external_disruptions.csv,26,15
+Ferry Disruption Taxonomy,ferry_disruption_taxonomy.csv,18,4
+Ferry Fleet Status,ferry_fleet_status.csv,6,9
+Ferry Performance,ferry_performance.csv,4,23
+Ferry Routes,ferry_routes.csv,55,19
+Ferry Service Observations,ferry_service_observations.csv,6,21
+Ferry Systems,ferry_systems.csv,14,15
+Ferry Terminals,ferry_terminals.csv,101,16
+Ferry Vessel Staging,ferry_vessel_staging.csv,81,23
+Fleet Coverage,fleet_coverage.csv,47,11
+Fleet Orders,fleet_orders.csv,32,15
+Fleet Portfolios,fleet_portfolios.csv,56,9
+Fleet Ranking Snapshots,fleet_ranking_snapshots.csv,18,15
+Fleet Research Universe,fleet_research_universe.csv,93,13
+Global Vessel Staging,global_vessel_staging.csv,33,16
+Great Lakes Cargo Corridors,great_lakes_cargo_corridors.csv,7,15
+Great Lakes Cruise,great_lakes_cruise.csv,10,11
+Great Lakes Disruptions,great_lakes_disruptions.csv,15,6
+Great Lakes Ports,great_lakes_ports.csv,41,16
+Great Lakes Vessel Staging,great_lakes_vessel_staging.csv,27,17
+Imo Coverage,imo_coverage.csv,22,8
+Infrastructure Connections,infrastructure_connections.csv,34,14
+Infrastructure Deals,infrastructure_deals.csv,16,20
+Infrastructure Holdings,infrastructure_holdings.csv,14,16
+Infrastructure Investors,infrastructure_investors.csv,33,15
+Infrastructure Works,infrastructure_works.csv,13,13
+Integrated Logistics Networks,integrated_logistics_networks.csv,13,17
+Investments,investments.csv,24,13
+Leadership Roles,leadership_roles.csv,41,9
+Logistics Real Estate,logistics_real_estate.csv,13,20
+Monitoring,monitoring.csv,5,17
+Monitoring Event Links,monitoring_event_links.csv,4,5
+News Entity Links,news_entity_links.csv,40,8
+News Registry,news_registry.csv,17,15
+People,people.csv,41,7
+Port Berths,port_berths.csv,135,11
+Port Equipment,port_equipment.csv,204,9
+Port News,port_news.csv,78,9
+Port Operator Coverage,port_operator_coverage.csv,9,7
+Port Ownership,port_ownership.csv,572,10
+Port Terminals,port_terminals.csv,524,26
+Ports,ports.csv,426,11
+Rail Connections,rail_connections.csv,32,9
+Rail Fleet,rail_fleet.csv,5,9
+Rail Links,rail_links.csv,38,9
+Rail Networks,rail_networks.csv,20,14
+Rail News,rail_news.csv,5,9
+Rail Nodes,rail_nodes.csv,62,10
+Rail Operators,rail_operators.csv,19,13
+Rail Relationships,rail_relationships.csv,26,7
+Regional Systems,regional_systems.csv,1,16
+Relationships,relationships.csv,123,7
+Research Queue,research_queue.csv,100,6
+Runtime Table Crosswalk,runtime_table_crosswalk.csv,109,8
+Shipyards,shipyards.csv,29,9
+Source Feeds,source_feeds.csv,5,10
+Sources,sources.csv,406,6
+Strategic Events,strategic_events.csv,18,10
+Streamlit Map,streamlit_map.csv,15,4
+System Dependencies,system_dependencies.csv,6,15
+System Links,system_links.csv,5,12
+System Nodes,system_nodes.csv,7,15
+Tanker Corridor Exposure,tanker_corridor_exposure.csv,5,15
+Tanker Fleet Universe,tanker_fleet_universe.csv,17,18
+Tradeability Assessments,tradeability_assessments.csv,1,14
+Transaction Asset Links,transaction_asset_links.csv,11,7
+Vessel Build Records,vessel_build_records.csv,63,14
+Vessel Contracts,vessel_contracts.csv,7,15
+Vessel Evidence,vessel_evidence.csv,85,11
+Vessel Identifiers,vessel_identifiers.csv,426,14
+Vessel Imo Verification,vessel_imo_verification.csv,358,12
+Vessel Relationships,vessel_relationships.csv,747,10
+Vessel Restrictions,vessel_restrictions.csv,1,15
+Vessel Transactions,vessel_transactions.csv,1,15
+Vessels,vessels.csv,426,27
+Weather Labour Events,weather_labour_events.csv,31,23
