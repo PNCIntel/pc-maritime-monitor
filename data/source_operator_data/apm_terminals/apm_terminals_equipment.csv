@@ -1,0 +1,57 @@
+﻿asset_id,equipment_type,quantity,specification,status,source_url
+APM-LÁZARO-CÁRDENAS-TERMINAL,STS crane,8,Large automated/electrified gateway cranes,Operating,https://www2.apmterminals.com/en/lazaro-cardenas/about/our-terminal
+APM-SUAPE-TERMINAL,STS crane,2,Fully electric terminal,Operating,https://www2.apmterminals.com/en/suape/about/our-terminal
+APM-SUAPE-TERMINAL,eRTG,7,Remote-operation capable,Operating,https://www2.apmterminals.com/en/suape/about/our-terminal
+APM-SUAPE-TERMINAL,Electric terminal tractor,14,,Operating,https://www2.apmterminals.com/en/suape/about/our-terminal
+APM-SUAPE-TERMINAL,Electric reach stacker,2,,Operating,https://www2.apmterminals.com/en/suape/about/our-terminal
+APM-SUAPE-TERMINAL,Electric empty handler,1,,Operating,https://www2.apmterminals.com/en/suape/about/our-terminal
+APM-ABIDJAN-CÔTE-D-IVOIRE-TERMINAL-CIT,Electric STS crane,6,Post-Panamax,Operating,https://www2.apmterminals.com/en/cit/about/our-terminal
+APM-ABIDJAN-CÔTE-D-IVOIRE-TERMINAL-CIT,Electric RTG,13,,Operating,https://www2.apmterminals.com/en/cit/about/our-terminal
+APM-SUEZ-CANAL-CONTAINER-TERMINAL-SCCT,STS crane,18,,Operating,https://www2.apmterminals.com/en/scct/about/our-terminal
+APM-SUEZ-CANAL-CONTAINER-TERMINAL-SCCT,RTG,60,,Operating,https://www2.apmterminals.com/en/scct/about/our-terminal
+APM-AQABA,STS crane,7,,Operating,https://akamai.apmterminals.com/en/aqaba/about/our-terminal
+APM-AQABA,RTG,22,,Operating,https://akamai.apmterminals.com/en/aqaba/about/our-terminal
+APM-AQABA,Reach stacker,9,,Operating,https://akamai.apmterminals.com/en/aqaba/about/our-terminal
+APM-AQABA,Empty handler,12,,Operating,https://akamai.apmterminals.com/en/aqaba/about/our-terminal
+APM-AQABA,Terminal truck,46,,Operating,https://akamai.apmterminals.com/en/aqaba/about/our-terminal
+APM-MEDPORT-TANGIER,STS crane,20,Dual-trolley,Operating,https://www2.apmterminals.com/en/medport-tangier/about/our-terminal
+APM-MEDPORT-TANGIER,ARMG,70,Automated rail-mounted gantry,Operating,https://www2.apmterminals.com/en/medport-tangier/about/our-terminal
+APM-MEDPORT-TANGIER,Shuttle carrier,65,,Operating,https://www2.apmterminals.com/en/medport-tangier/about/our-terminal
+APM-APAPA,RTG,27,,Operating,https://www2.apmterminals.com/en/apapa/about/our-terminal
+APM-APAPA,Mobile harbour crane,13,,Operating,https://www2.apmterminals.com/en/apapa/about/our-terminal
+APM-APAPA,Reach stacker,7,,Operating,https://www2.apmterminals.com/en/apapa/about/our-terminal
+APM-APAPA,Empty handler,6,,Operating,https://www2.apmterminals.com/en/apapa/about/our-terminal
+APM-APAPA,Terminal truck,65,,Operating,https://www2.apmterminals.com/en/apapa/about/our-terminal
+APM-ONNE,RTG,20,,Operating,https://www2.apmterminals.com/en/onne/about/our-terminal
+APM-ONNE,Mobile harbour crane,5,,Operating,https://www2.apmterminals.com/en/onne/about/our-terminal
+APM-ONNE,Reach stacker,7,,Operating,https://www2.apmterminals.com/en/onne/about/our-terminal
+APM-ONNE,Empty handler,6,,Operating,https://www2.apmterminals.com/en/onne/about/our-terminal
+APM-ONNE,Terminal truck,37,,Operating,https://www2.apmterminals.com/en/onne/about/our-terminal
+APM-SHANGHAI,STS crane,15,Super-Panamax,Operating,https://www2.apmterminals.com/en/shanghai/about/our-terminal
+APM-SHANGHAI,Additional quay crane,2,,Operating,https://www2.apmterminals.com/en/shanghai/about/our-terminal
+APM-MUMBAI,STS crane,11,Twin-lift; 6 new + 5 legacy,Operating,https://www2.apmterminals.com/en/mumbai/about/our-terminal
+APM-MUMBAI,RTG,40,GPS-assisted,Operating,https://www2.apmterminals.com/en/mumbai/about/our-terminal
+APM-MUMBAI,RMG,3,Rail mounted gantry,Operating,https://www2.apmterminals.com/en/mumbai/about/our-terminal
+APM-PIPAVAV,Post-Panamax crane,8,,Operating,https://www2.apmterminals.com/en/pipavav/about/our-terminal
+APM-PIPAVAV,RTG,20,,Operating,https://www2.apmterminals.com/en/pipavav/about/our-terminal
+APM-PIPAVAV,RMG,4,,Operating,https://www2.apmterminals.com/en/pipavav/about/our-terminal
+APM-TANJUNG-PELEPAS,Super Post-Panamax STS,66,24 with 24-box outreach,Operating,https://akamai.apmterminals.com/en/tanjung-pelepas/about/our-terminal
+APM-TANJUNG-PELEPAS,RTG,172,Electrified/automated steering support,Operating,https://akamai.apmterminals.com/en/tanjung-pelepas/about/our-terminal
+APM-CAI-MEP,Super Post-Panamax STS,6,,Operating,https://akamai.apmterminals.com/en/cai-mep/about/our-terminal
+APM-CAI-MEP,RTG,15,,Operating,https://akamai.apmterminals.com/en/cai-mep/about/our-terminal
+APM-CAI-MEP,Reach stacker,3,,Operating,https://akamai.apmterminals.com/en/cai-mep/about/our-terminal
+APM-CAI-MEP,Empty handler,2,,Operating,https://akamai.apmterminals.com/en/cai-mep/about/our-terminal
+APM-PECÉM,STS crane,3,22-container outreach,Operating,https://www2.apmterminals.com/en/pecem/about/our-terminal
+APM-PECÉM,Reach stacker,14,,Operating,https://www2.apmterminals.com/en/pecem/about/our-terminal
+APM-MOÍN,Super Post-Panamax STS,6,,Operating,https://www2.apmterminals.com/en/moin/about/our-terminal
+APM-MOÍN,eRTG,29,,Operating,https://www2.apmterminals.com/en/moin/about/our-terminal
+APM-PUERTO-QUETZAL,Super Post-Panamax STS,3,,Operating,https://www2.apmterminals.com/en/puerto-quetzal/about/our-terminal
+APM-CALLAO,Super Post-Panamax STS,4,,Operating,https://www2.apmterminals.com/en/callao/about/our-terminal
+APM-CALLAO,Panamax STS,2,,Operating,https://www2.apmterminals.com/en/callao/about/our-terminal
+APM-CALLAO,Mobile harbour crane,4,,Operating,https://www2.apmterminals.com/en/callao/about/our-terminal
+APM-CALLAO,eRTG,12,,Operating,https://www2.apmterminals.com/en/callao/about/our-terminal
+APM-CALLAO,RTG,2,Diesel,Operating,https://www2.apmterminals.com/en/callao/about/our-terminal
+APM-LOS-ANGELES-CA,STS crane,19,Tallest cranes in Port of Los Angeles,Operating,https://www2.apmterminals.com/en/los-angeles/about/our-terminal
+APM-MIAMI-FL,eRTG,18,,Operating,https://www2.apmterminals.com/en/miami/about/our-terminal
+APM-MOBILE-AL,Super Post-Panamax STS,6,23-container reach,Operating,https://www2.apmterminals.com/en/mobile/about/our-terminal
+APM-ELIZABETH-NJ,STS crane,14,,Operating,https://www2.apmterminals.com/en/port-elizabeth/about/our-terminal

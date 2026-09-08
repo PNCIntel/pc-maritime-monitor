@@ -1,0 +1,38 @@
+﻿asset_id,berth_or_interface,berths,quay_length_m,max_depth_m,cargo_use,status,source_url
+APM-LÁZARO-CÁRDENAS-TERMINAL,Lázaro Cárdenas terminal marine interface,,750,16.5,Containers / terminal cargo,Operating / Phase III expanding,https://www2.apmterminals.com/en/lazaro-cardenas/about/our-terminal
+APM-SUAPE-TERMINAL,Suape terminal marine interface,1,430,15.1,Containers / terminal cargo,Delivered / commissioning into operation,https://www2.apmterminals.com/en/suape/about/our-terminal
+APM-BAHRAIN,Bahrain marine interface,,1800,15,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/bahrain/about/our-terminal
+APM-POINTE-NOIRE,Pointe-Noire marine interface,,,16.5,Containers / terminal cargo,Operating,https://akamai.apmterminals.com/en/pointe-noire/about/our-terminal
+APM-ABIDJAN-CÔTE-D-IVOIRE-TERMINAL-CIT,Abidjan Côte d’Ivoire Terminal (CIT) marine interface,,1100,16,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/cit/about/our-terminal
+APM-SUEZ-CANAL-CONTAINER-TERMINAL-SCCT,Suez Canal Container Terminal (SCCT) marine interface,,2400,17,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/scct/about/our-terminal
+APM-AQABA,Aqaba marine interface,3,1000,16.5,Containers / terminal cargo,Operating,https://akamai.apmterminals.com/en/aqaba/about/our-terminal
+APM-MONROVIA,Monrovia marine interface,,,12.5,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/monrovia/about/our-terminal
+APM-MEDPORT-TANGIER,MedPort Tangier marine interface,3,2000,18,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/medport-tangier/about/our-terminal
+APM-TANGIER,Tangier marine interface,,,16,Containers / terminal cargo,Operating,https://akamai.apmterminals.com/en/tangier/about/our-terminal
+APM-APAPA,Apapa marine interface,,1005,13.5,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/apapa/about/our-terminal
+APM-ONNE,Onne marine interface,,570,11.3,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/onne/about/our-terminal
+APM-SALALAH,Salalah marine interface,7,2400,18,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/salalah/about/our-terminal
+APM-SHANGHAI,Shanghai marine interface,,1437,14.2,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/shanghai/about/our-terminal
+APM-TIANJIN,Tianjin marine interface,4,1100,15.5,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/tianjin/about/our-terminal
+APM-MUMBAI,Mumbai marine interface,,712,16.5,Containers / terminal cargo,Operating / transformation,https://www2.apmterminals.com/en/mumbai/about/our-terminal
+APM-PIPAVAV,Pipavav marine interface,,735,14.5,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/pipavav/about/our-terminal
+APM-TANJUNG-PELEPAS,Tanjung Pelepas marine interface,14,5040,19,Containers / terminal cargo,Operating,https://akamai.apmterminals.com/en/tanjung-pelepas/about/our-terminal
+APM-CAI-MEP,Cai Mep marine interface,,600,16.5,Containers / terminal cargo,Operating,https://akamai.apmterminals.com/en/cai-mep/about/our-terminal
+APM-RIJEKA-GATEWAY,Rijeka Gateway marine interface,,400,20,Containers / terminal cargo,Operating / Phase 2 planned,https://www2.apmterminals.com/en/rijeka/about/our-terminal
+APM-AARHUS,Aarhus marine interface,,1300,15,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/aarhus/about/our-terminal
+APM-VADO-LIGURE,Vado Ligure marine interface,3,470,14.1,Containers / terminal cargo,Operating,https://akamai.apmterminals.com/en/vado-ligure/about/our-terminal
+APM-ROTTERDAM-MAASVLAKTE-II,Rotterdam Maasvlakte II marine interface,,2000,,Containers / terminal cargo,Operating / major expansion,https://www2.apmterminals.com/en/news/news-releases/2026/260819-APMTerminals-and-Hapag-Lloyd-partner-at-Maasvlakte-II
+APM-VALENCIA,Valencia marine interface,,,16.5,Containers / terminal cargo,Operating / electrification upgrade,https://www2.apmterminals.com/en/news/news-releases/2026/260422-APM-Terminals-invests-in-upgrade-and-extends-partnership
+APM-GOTHENBURG,Gothenburg marine interface,,1800,14.2,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/gothenburg/about/our-terminal
+APM-IZMIR,Izmir marine interface,,700,18,Containers / terminal cargo,Operating / managed,https://www2.apmterminals.com/en/izmir/about/our-terminal
+APM-BUENOS-AIRES,Buenos Aires marine interface,2,495,10.3,Containers / terminal cargo,Operating,https://akamai.apmterminals.com/en/buenos-aires/about/our-terminal
+APM-PECÉM,Pecém marine interface,2,760,15.3,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/pecem/about/our-terminal
+APM-MOÍN,Moín marine interface,,650,14.5,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/moin/about/our-terminal
+APM-PUERTO-QUETZAL,Puerto Quetzal marine interface,,350,14.5,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/puerto-quetzal/about/our-terminal
+APM-CALLAO,Callao marine interface,,1835,16,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/callao/about/our-terminal
+APM-LOS-ANGELES-CA,"Los Angeles, CA marine interface",5,2200,,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/los-angeles/about/our-terminal
+APM-MIAMI-FL,"Miami, FL marine interface",,,15,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/miami/about/our-terminal
+APM-MOBILE-AL,"Mobile, AL marine interface",,732,15.24,Containers / terminal cargo,Operating / expansion,https://www2.apmterminals.com/en/mobile/about/our-terminal
+APM-ELIZABETH-NJ,"Elizabeth, NJ marine interface",,1829,15.2,Containers / terminal cargo,Operating,https://www2.apmterminals.com/en/port-elizabeth/about/our-terminal
+APM-VN-DANANG,Lien Chieu Container Port / APM Terminals Da Nang marine interface,8,,,Containers / terminal cargo,Under development,https://akamai.apmterminals.com/en/news/news-releases/2026/260425-APM-Terminals-and-Hateco-partner-in-Da-Nang
+APM-SA-JEDDAH-SCT,South Container Terminal – APM minority investment marine interface,5,2550,18,Containers / terminal cargo,Agreement announced / transaction completion to verify,https://www2.apmterminals.com/en/news/news-releases/2026/260218-APM-Terminals-DPWorld-strategic-partnership-Jeddah-Islamic-Port
