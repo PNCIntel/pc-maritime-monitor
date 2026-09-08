@@ -751,3 +751,439 @@ PERSON_0038,Person,Pablo Ciano,,,Active
 PERSON_0039,Person,Raj Subramaniam,,,Active
 PERSON_0040,Person,Andy Jassy,,,Active
 PERSON_0041,Person,Amadou Diallo,,,Active
+COMP_TERMINAL_LINK,Company,Terminal Link,France,COMP_CMA_TERMINALS,Active
+PORTG0001,Port,Sydney,Australia,,Active
+PORTG0002,Port,Brisbane,Australia,,Active
+PORTG0003,Port,Melbourne,Australia,,Active
+PORTG0004,Port,Fremantle,Australia,,Active
+PORTG0005,Port,Qingdao,China,,Active
+PORTG0006,Port,Yantai,China,,Active
+PORTG0007,Port,Hong Kong,China,,Active
+PORTG0008,Port,Yiwu Port,China,,Active
+PORTG0009,Port,Belawan,Indonesia,,Active
+PORTG0010,Port,East Java / Gresik,Indonesia,,Active
+PORTG0011,Port,Sapangar Bay,Malaysia,,Active
+PORTG0012,Port,Manila,Philippines,,Active
+PORTG0013,Port,Batangas,Philippines,,Active
+PORTG0014,Port,Cavite / Tanza,Philippines,,Active
+PORTG0015,Port,Busan,South Korea,,Active
+PORTG0016,Port,Laem Chabang,Thailand,,Active
+PORTG0017,Port,Ho Chi Minh City,Vietnam,,Active
+PORTG0018,Port,Port of Antwerp-Bruges,Belgium,,Active
+PORTG0019,Port,Limassol,Cyprus,,Active
+PORTG0020,Port,Rotterdam,Netherlands,,Active
+PORTG0021,Port,Constanța,Romania,,Active
+PORTG0022,Port,Novi Sad,Serbia,,Active
+PORTG0023,Port,Yarımca,Türkiye,,Active
+PORTG0024,Port,Körfez,Türkiye,,Active
+PORTG0025,Port,Pivdennyi,Ukraine,,Active
+PORTG0026,Port,Luanda,Angola,,Active
+PORTG0027,Port,Algiers,Algeria,,Active
+PORTG0028,Port,Djen Djen,Algeria,,Active
+PORTG0029,Port,Sokhna,Egypt,,Active
+PORTG0030,Port,Nhava Sheva,India,,Active
+PORTG0031,Port,Mundra,India,,Active
+PORTG0032,Port,Chennai,India,,Active
+PORTG0033,Port,Cochin,India,,Active
+PORTG0034,Port,Tuna Tekra,India,,Active
+PORTG0035,Port,Maputo,Mozambique,,Active
+PORTG0036,Port,Port Qasim,Pakistan,,Active
+PORTG0037,Port,Jeddah Islamic Port,Saudi Arabia,,Active
+PORTG0038,Port,Dakar,Senegal,,Active
+PORTG0039,Port,Ndayane,Senegal,,Active
+PORTG0040,Port,Berbera,Somaliland,,Active
+PORTG0041,Port,Dar es Salaam,Tanzania,,Active
+PORTG0042,Port,Jebel Ali,United Arab Emirates,,Active
+PORTG0043,Port,Mina Al Hamriya,United Arab Emirates,,Active
+PORTG0044,Port,Dubai Creek / Deira,United Arab Emirates,,Active
+PORTG0045,Port,Mina Rashid,United Arab Emirates,,Active
+PORTG0046,Port,Fujairah,United Arab Emirates,,Active
+PORTG0047,Port,Banana,Democratic Republic of the Congo,,Active
+PORTG0048,Port,Buenos Aires,Argentina,,Active
+PORTG0049,Port,Santos,Brazil,,Active
+PORTG0050,Port,San Antonio,Chile,,Active
+PORTG0051,Port,Lirquén,Chile,,Active
+PORTG0052,Port,Caucedo,Dominican Republic,,Active
+PORTG0053,Port,Posorja,Ecuador,,Active
+PORTG0054,Port,Callao,Peru,,Active
+PORTG0055,Port,Paita,Peru,,Active
+PORTG0056,Port,Paramaribo,Suriname,,Active
+PORTG0057,Port,La Vigilantia,Suriname,,Active
+PORTG0058,Port,Vancouver,Canada,,Active
+PORTG0059,Port,Fraser Surrey,Canada,,Active
+PORTG0060,Port,Nanaimo,Canada,,Active
+PORTG0061,Port,Prince Rupert,Canada,,Active
+PORTG0062,Port,Saint John,Canada,,Active
+PORTG0063,Port,Montréal / Contrecœur,Canada,,Active
+PORTG0064,Port,Corpus Christi,United States,,Active
+PORTG0065,Port,Khalifa Port,United Arab Emirates,,Active
+PORTG0066,Port,Zayed Port,United Arab Emirates,,Active
+PORTG0067,Port,Free Port (Old & New),United Arab Emirates,,Active
+PORTG0068,Port,Musaffah Port,United Arab Emirates,,Active
+PORTG0069,Port,Mugharraq Port,United Arab Emirates,,Active
+PORTG0070,Port,Al Sila Port,United Arab Emirates,,Active
+PORTG0071,Port,Fujairah Port / Fujairah Terminals,United Arab Emirates,,Active
+PORTG0072,Port,Delma Port,United Arab Emirates,,Active
+PORTG0073,Port,Mirfa Port,United Arab Emirates,,Active
+PORTG0074,Port,Shahama Port,United Arab Emirates,,Active
+PORTG0075,Port,Sir Bani Yas Cruise Beach,United Arab Emirates,,Active
+PORTG0076,Port,Port of Aqaba,Jordan,,Active
+PORTG0077,Port,Port of Sharm El Sheikh,Egypt,,Active
+PORTG0078,Port,Port of Hurghada,Egypt,,Active
+PORTG0079,Port,Port Safaga,Egypt,,Active
+PORTG0080,Port,Port of Adabiya,Egypt,,Active
+PORTG0081,Port,Karachi Port East Wharf,Pakistan,,Active
+PORTG0082,Port,Port of Pointe-Noire,Republic of the Congo,,Active
+PORTG0083,Port,Tbilisi Intermodal Hub / Tbilisi Dry Port,Georgia,,Active
+PORTG0084,Port,Kuryk Port,Kazakhstan,,Active
+PORTG0085,Port,Port of Douala,Cameroon,,Active
+PORTG0086,Port,Port of Tarragona,Spain,,Active
+PORTG0087,Port,Port of Castellón,Spain,,Active
+PORTG0088,Port,Port of Sagunto,Spain,,Active
+PORTG0089,Port,Port of Cartagena,Spain,,Active
+PORTG0090,Port,Port of Málaga,Spain,,Active
+PORTG0091,Port,Port of A Coruña,Spain,,Active
+PORTG0092,Port,Port of Ferrol,Spain,,Active
+PORTG0093,Port,Port of Santander,Spain,,Active
+PORTG0094,Port,Port of Bilbao,Spain,,Active
+PORTG0095,Port,Port of Vigo,Spain,,Active
+PORTG0096,Port,Port of Barcelona,Spain,,Active
+PORTG0097,Port,Port of Pasaia / Pasajes,Spain,,Active
+PORTG0098,Port,Port of Los Angeles,United States,,Active
+PORTG0099,Port,Port of New York & New Jersey,United States,,Active
+PORTG0100,Port,Port of Vila do Conde,Brazil,,Active
+PORTG0101,Port,Port of Imbituba,Brazil,,Active
+PORTG0102,Port,Port of Valencia,Spain,,Active
+PORTG0103,Port,Port of Algeciras,Spain,,Active
+PORTG0104,Port,Port of Kaohsiung,Taiwan,,Active
+PORTG0105,Port,Cai Mep-Thi Vai,Vietnam,,Active
+PORTG0106,Port,Jawaharlal Nehru Port,India,,Active
+PORTG0107,Port,Lekki Deep Sea Port,Nigeria,,Active
+PORTG0108,Port,Port of Alexandria,Egypt,,Active
+PORTG0109,Port,Nador West Med,Morocco,,Active
+PORTG0110,Port,Port of Haiphong / Lach Huyen,Vietnam,,Active
+PORTG0111,Port,Port of Hamburg,Germany,,Active
+PORTG0112,Port,Port of Mombasa,Kenya,,Active
+PORTG0113,Port,6th of October City,Egypt,,Active
+PORTG0114,Port,Port Édouard Herriot,France,,Active
+PORTG0115,Port,Port Réunion,France (Réunion),,Active
+PORTG0116,Port,Port of Kribi,Cameroon,,Active
+PORTG0117,Port,Port of Dunkirk,France,,Active
+PORTG0118,Port,Port of Le Havre,France,,Active
+PORTG0119,Port,Nantes Saint-Nazaire Port,France,,Active
+PORTG0120,Port,Port of Marseille-Fos,France,,Active
+PORTG0121,Port,Malta Freeport,Malta,,Active
+PORTG0122,Port,Port of Thessaloniki,Greece,,Active
+PORTG0123,Port,Port of Odesa,Ukraine,,Active
+PORTG0124,Port,Tanger Med,Morocco,,Active
+PORTG0125,Port,Port of Casablanca,Morocco,,Active
+PORTG0126,Port,Port of Abidjan,Côte d’Ivoire,,Active
+PORTG0127,Port,Port of Umm Qasr,Iraq,,Active
+PORTG0128,Port,Port of Singapore,Singapore,,Active
+PORTG0129,Port,PortMiami,United States,,Active
+PORTG0130,Port,Port Houston,United States,,Active
+PORTG0131,Port,Port of Kingston,Jamaica,,Active
+PORTG0132,Port,Port of Long Beach,United States,,Active
+PORTG0133,Port,King Abdullah Port,Saudi Arabia,,Active
+PORTG0134,Port,Port of Navegantes,Brazil,,Active
+PORTG0135,Port,Port of Lomé,Togo,,Active
+PORTG0136,Port,Port Everglades,United States,,Active
+PORTG0137,Port,Port of New Orleans,United States,,Active
+PORTG0138,Port,Port of Seattle,United States,,Active
+PORTG0139,Port,Sparrows Point / Baltimore,United States,,Active
+PORTG0140,Port,Kamarajar / Ennore Port,India,,Active
+PORTG0141,Port,Vizhinjam Port,India,,Active
+PORTG0142,Port,Misurata Free Zone Port,Libya,,Active
+PORTG0143,Port,Port of Gioia Tauro,Italy,,Active
+PORTG0144,Port,Port of Trieste,Italy,,Active
+PORTG0145,Port,Port of Sines,Portugal,,Active
+PORTG0146,Port,Port of Tekirdağ,Türkiye,,Active
+PORTG0147,Port,Port of San Pedro,Côte d’Ivoire,,Active
+PORTG0148,Port,Colón,Panama,,Active
+PORTG0149,Port,Port of Buenos Aires / Dock Sud,Argentina,,Active
+PORTG0150,Port,Port of Ningbo-Zhoushan,China,,Active
+PORTG0151,Port,Port of Lázaro Cárdenas,Mexico,,Active
+PORTG0152,Port,Port of Suape,Brazil,,Active
+PORTG0153,Port,Khalifa Bin Salman Port,Bahrain,,Active
+PORTG0154,Port,Port of Pointe-Noire,Congo,,Active
+PORTG0155,Port,Port of Abidjan,Côte d'Ivoire,,Active
+PORTG0156,Port,Port of San Pedro,Côte d'Ivoire,,Active
+PORTG0157,Port,Port Said East Port,Egypt,,Active
+PORTG0158,Port,Port of Tema,Ghana,,Active
+PORTG0159,Port,Freeport of Monrovia,Liberia,,Active
+PORTG0160,Port,Lagos Port Complex / Apapa,Nigeria,,Active
+PORTG0161,Port,Onne Port,Nigeria,,Active
+PORTG0162,Port,Port of Salalah,Oman,,Active
+PORTG0163,Port,Port of Guangzhou,China,,Active
+PORTG0164,Port,Port of Shanghai,China,,Active
+PORTG0165,Port,Port of Tianjin,China,,Active
+PORTG0166,Port,Port of Xiamen,China,,Active
+PORTG0167,Port,Port Pipavav,India,,Active
+PORTG0168,Port,Port of Yokohama,Japan,,Active
+PORTG0169,Port,Port of Tanjung Pelepas,Malaysia,,Active
+PORTG0170,Port,Port of Colombo,Sri Lanka,,Active
+PORTG0171,Port,Port of Rijeka,Croatia,,Active
+PORTG0172,Port,Port of Aarhus,Denmark,,Active
+PORTG0173,Port,Port of Kalundborg,Denmark,,Active
+PORTG0174,Port,Port of Poti,Georgia,,Active
+PORTG0175,Port,Port of Bremerhaven,Germany,,Active
+PORTG0176,Port,Port of Vado Ligure,Italy,,Active
+PORTG0177,Port,Port of Gijón,Spain,,Active
+PORTG0178,Port,Port of Gothenburg,Sweden,,Active
+PORTG0179,Port,Port of Aliağa / İzmir,Turkey,,Active
+PORTG0180,Port,Port of Itapoá,Brazil,,Active
+PORTG0181,Port,Port of Pecém,Brazil,,Active
+PORTG0182,Port,Port of Buenaventura,Colombia,,Active
+PORTG0183,Port,Port of Moín,Costa Rica,,Active
+PORTG0184,Port,Puerto Quetzal,Guatemala,,Active
+PORTG0185,Port,Port of Progreso,Mexico,,Active
+PORTG0186,Port,Port of Mobile,United States,,Active
+PORTG0187,Port,Port of Chattogram,Bangladesh,,Active
+PORTG0188,Port,Lien Chieu Port,Vietnam,,Active
+PORTG0189,Port,Port of Balboa,Panama,,Active
+PORTG0190,Port,Lach Huyen / Haiphong Port,Vietnam,,Active
+TERM0001,Port terminal,DP World Sydney,Australia,PORTG0001,Active
+TERM0002,Port terminal,DP World Brisbane,Australia,PORTG0002,Active
+TERM0003,Port terminal,DP World Melbourne,Australia,PORTG0003,Active
+TERM0004,Port terminal,DP World Fremantle,Australia,PORTG0004,Active
+TERM0005,Port terminal,DP World Qingdao,China,PORTG0005,Active
+TERM0006,Port terminal,DP World Yantai,China,PORTG0006,Active
+TERM0007,Port terminal,DP World Hong Kong / Berth 3,China,PORTG0007,Active
+TERM0008,Port terminal,DP World Yiwu Port,China,PORTG0008,Active
+TERM0009,Port terminal,DP World Belawan,Indonesia,PORTG0009,Active
+TERM0010,Port terminal,DP World Maspion East Java,Indonesia,PORTG0010,Development
+TERM0011,Port terminal,Sapangar Bay Container Port,Malaysia,PORTG0011,Active
+TERM0012,Port terminal,Manila South Harbor,Philippines,PORTG0012,Active
+TERM0013,Port terminal,Batangas Port,Philippines,PORTG0013,Active
+TERM0014,Port terminal,Cavite Container Barge Terminal,Philippines,PORTG0014,Active
+TERM0015,Port terminal,Pusan Newport Company (PNC),South Korea,PORTG0015,Active
+TERM0016,Port terminal,Laem Chabang International Terminal (LCIT),Thailand,PORTG0016,Active
+TERM0017,Port terminal,Saigon Premier Container Terminal (SPCT),Vietnam,PORTG0017,Active
+TERM0018,Port terminal,Antwerp Gateway,Belgium,PORTG0018,Active
+TERM0019,Port terminal,DP World Limassol,Cyprus,PORTG0019,Active
+TERM0020,Port terminal,Rotterdam World Gateway,Netherlands,PORTG0020,Active
+TERM0021,Port terminal,DP World Constanța,Romania,PORTG0021,Active
+TERM0022,Port terminal,DP World Novi Sad,Serbia,PORTG0022,Active
+TERM0023,Port terminal,DP World Yarımca,Türkiye,PORTG0023,Active
+TERM0024,Port terminal,DP World Evyap Körfez,Türkiye,PORTG0024,Active
+TERM0025,Port terminal,DP World TIS Pivdennyi,Ukraine,PORTG0025,Active
+TERM0026,Port terminal,DP World London Gateway,United Kingdom,UKP053,Active
+TERM0027,Port terminal,DP World Southampton,United Kingdom,UKP054,Active
+TERM0028,Port terminal,DP World Luanda,Angola,PORTG0026,Active
+TERM0029,Port terminal,DP World Djazair,Algeria,PORTG0027,Active
+TERM0030,Port terminal,DP World Djen Djen,Algeria,PORTG0028,Active
+TERM0031,Port terminal,DP World Sokhna,Egypt,PORTG0029,Active
+TERM0032,Port terminal,Nhava Sheva International Container Terminal (NSICT),India,PORTG0030,Active
+TERM0033,Port terminal,Nhava Sheva India Gateway Terminal (NSIGT),India,PORTG0030,Active
+TERM0034,Port terminal,Mundra International Container Terminal (MICT),India,PORTG0031,Active
+TERM0035,Port terminal,Chennai Container Terminal (CCT),India,PORTG0032,Active
+TERM0036,Port terminal,International Container Transshipment Terminal (ICTT),India,PORTG0033,Active
+TERM0037,Port terminal,Tuna-Tekra Mega Container Terminal,India,PORTG0034,Development
+TERM0038,Port terminal,DP World Maputo,Mozambique,PORTG0035,Active
+TERM0039,Port terminal,Qasim International Container Terminal (QICT),Pakistan,PORTG0036,Active
+TERM0040,Port terminal,South Container Terminal – Jeddah,Saudi Arabia,PORTG0037,Active
+TERM0041,Port terminal,DP World Dakar,Senegal,PORTG0038,Active
+TERM0042,Port terminal,Port of Ndayane,Senegal,PORTG0039,Development
+TERM0043,Port terminal,DP World Berbera,Somaliland,PORTG0040,Active
+TERM0044,Port terminal,DP World Dar es Salaam - Terminal 1,Tanzania,PORTG0041,Active
+TERM0045,Port terminal,Jebel Ali Port,United Arab Emirates,PORTG0042,Active
+TERM0046,Port terminal,Mina Al Hamriya,United Arab Emirates,PORTG0043,Active
+TERM0047,Port terminal,Dubai Creek & Deira Wharfage,United Arab Emirates,PORTG0044,Active
+TERM0048,Port terminal,Mina Rashid,United Arab Emirates,PORTG0045,Active
+TERM0049,Port terminal,Al Rugaylat Container & Multi-Purpose Terminal,United Arab Emirates,PORTG0046,Development
+TERM0050,Port terminal,Dibba General Cargo Terminal,United Arab Emirates,PORTG0046,Development
+TERM0051,Port terminal,Banana Deep-Sea Port,Democratic Republic of the Congo,PORTG0047,Development
+TERM0052,Port terminal,Terminales Río de la Plata (TRP),Argentina,PORTG0048,Active
+TERM0053,Port terminal,DP World Santos,Brazil,PORTG0049,Active
+TERM0054,Port terminal,DP World San Antonio,Chile,PORTG0050,Active
+TERM0055,Port terminal,DP World Lirquén,Chile,PORTG0051,Active
+TERM0056,Port terminal,DP World Caucedo,Dominican Republic,PORTG0052,Active
+TERM0057,Port terminal,DP World Posorja,Ecuador,PORTG0053,Active
+TERM0058,Port terminal,DP World Callao - South Terminal,Peru,PORTG0054,Active
+TERM0059,Port terminal,Terminal Portuario de Paita (TPE),Peru,PORTG0055,Active
+TERM0060,Port terminal,DP World Paramaribo,Suriname,PORTG0056,Active
+TERM0061,Port terminal,DP World La Vigilantia,Suriname,PORTG0057,Active
+TERM0062,Port terminal,DP World Vancouver,Canada,PORTG0058,Active
+TERM0063,Port terminal,DP World Fraser Surrey,Canada,PORTG0059,Active
+TERM0064,Port terminal,DP World Nanaimo / Duke Point,Canada,PORTG0060,Active
+TERM0065,Port terminal,DP World Prince Rupert,Canada,PORTG0061,Active
+TERM0066,Port terminal,DP World Saint John,Canada,PORTG0062,Active
+TERM0067,Port terminal,Contrecœur Container Terminal,Canada,PORTG0063,Development
+TERM0068,Port terminal,Proposed DP World Container Terminal,United States,PORTG0064,Active
+TERM0069,Port terminal,Khalifa Port,United Arab Emirates,PORTG0065,Active
+TERM0070,Port terminal,Zayed Port,United Arab Emirates,PORTG0066,Active
+TERM0071,Port terminal,Free Port (Old & New),United Arab Emirates,PORTG0067,Active
+TERM0072,Port terminal,Musaffah Port,United Arab Emirates,PORTG0068,Active
+TERM0073,Port terminal,Mugharraq Port,United Arab Emirates,PORTG0069,Active
+TERM0074,Port terminal,Al Sila Port,United Arab Emirates,PORTG0070,Active
+TERM0075,Port terminal,Fujairah Port / Fujairah Terminals,United Arab Emirates,PORTG0071,Active
+TERM0076,Port terminal,Delma Port,United Arab Emirates,PORTG0072,Active
+TERM0077,Port terminal,Mirfa Port,United Arab Emirates,PORTG0073,Active
+TERM0078,Port terminal,Shahama Port,United Arab Emirates,PORTG0074,Active
+TERM0079,Port terminal,Al Faya Dry Port,United Arab Emirates,PORTG0065,Active
+TERM0080,Port terminal,Abu Dhabi Terminals,United Arab Emirates,PORTG0065,Active
+TERM0081,Port terminal,CSP Abu Dhabi Terminal,United Arab Emirates,PORTG0065,Active
+TERM0082,Port terminal,CMA Terminals Khalifa Port,United Arab Emirates,PORTG0065,Active
+TERM0083,Port terminal,Autoterminal Khalifa Port,United Arab Emirates,PORTG0065,Active
+TERM0084,Port terminal,South Quay,United Arab Emirates,PORTG0065,Active
+TERM0085,Port terminal,Khalifa Port Logistics,United Arab Emirates,PORTG0065,Active
+TERM0086,Port terminal,Abu Dhabi Cruise Terminal,United Arab Emirates,PORTG0066,Active
+TERM0087,Port terminal,Sir Bani Yas Cruise Beach,United Arab Emirates,PORTG0075,Active
+TERM0088,Port terminal,Aqaba Cruise Terminal,Jordan,PORTG0076,Active
+TERM0089,Port terminal,Sharm El Sheikh Cruise Terminal,Egypt,PORTG0077,Active
+TERM0090,Port terminal,Hurghada Cruise Terminal,Egypt,PORTG0078,Active
+TERM0091,Port terminal,Safaga Cruise & Ferry Terminal,Egypt,PORTG0079,Active
+TERM0092,Port terminal,Noatum Ports Safaga Terminal,Egypt,PORTG0079,Active
+TERM0093,Port terminal,TCI / Al Adabiya Terminal,Egypt,PORTG0080,Active
+TERM0094,Port terminal,Karachi Gateway Terminal Limited (KGTL),Pakistan,PORTG0081,Active
+TERM0095,Port terminal,Karachi Gateway Terminal Multipurpose Limited (KGTML),Pakistan,PORTG0081,Active
+TERM0096,Port terminal,Noatum Ports Luanda Terminal,Angola,PORTG0026,Active
+TERM0097,Port terminal,Noatum Ports Pointe-Noire Terminal,Republic of the Congo,PORTG0082,Development
+TERM0098,Port terminal,Dar es Salaam Container Terminal 2 (TICTS / berths 8-11),Tanzania,PORTG0041,Active
+TERM0099,Port terminal,Tbilisi Intermodal Hub / Tbilisi Dry Port,Georgia,PORTG0083,Active
+TERM0100,Port terminal,Sarzha Grain Terminal,Kazakhstan,PORTG0084,Development
+TERM0101,Port terminal,New Dry Bulk Terminal – Douala Port,Cameroon,PORTG0085,Development
+TERM0102,Port terminal,Aqaba Multipurpose Port,Jordan,PORTG0076,Active
+TERM0103,Port terminal,Noatum Ports Tarragona Terminal,Spain,PORTG0086,Active
+TERM0104,Port terminal,Noatum Ports Castellón Terminal,Spain,PORTG0087,Active
+TERM0105,Port terminal,Noatum Ports Sagunto Terminal,Spain,PORTG0088,Active
+TERM0106,Port terminal,Noatum Ports Cartagena Terminal,Spain,PORTG0089,Active
+TERM0107,Port terminal,Noatum Ports Málaga Terminal,Spain,PORTG0090,Active
+TERM0108,Port terminal,Noatum Ports A Coruña Terminal,Spain,PORTG0091,Active
+TERM0109,Port terminal,Noatum Ports Ferrol Terminal,Spain,PORTG0092,Active
+TERM0110,Port terminal,Noatum Ports Santander Terminal,Spain,PORTG0093,Active
+TERM0111,Port terminal,Noatum Ports Bilbao Terminal,Spain,PORTG0094,Active
+TERM0112,Port terminal,Noatum Ports Vigo Terminal,Spain,PORTG0095,Active
+TERM0113,Port terminal,Autoterminal Barcelona,Spain,PORTG0096,Active
+TERM0114,Port terminal,Noatum Ports Pasajes Terminal,Spain,PORTG0097,Active
+TERM0115,Port terminal,Fenix Marine Services,United States,PORTG0098,Active
+TERM0116,Port terminal,Port Liberty New York,United States,PORTG0099,Active
+TERM0117,Port terminal,Port Liberty Bayonne,United States,PORTG0099,Active
+TERM0118,Port terminal,Tecon Santos / Santos Brasil,Brazil,PORTG0049,Active
+TERM0119,Port terminal,Tecon Vila do Conde,Brazil,PORTG0100,Active
+TERM0120,Port terminal,Tecon Imbituba,Brazil,PORTG0101,Active
+TERM0121,Port terminal,CSP Valencia Terminal,Spain,PORTG0102,Active
+TERM0122,Port terminal,CSP Bilbao Terminal,Spain,PORTG0094,Active
+TERM0123,Port terminal,TTI Algeciras,Spain,PORTG0103,Active
+TERM0124,Port terminal,CMA CGM Kaohsiung Terminal,Taiwan,PORTG0104,Active
+TERM0125,Port terminal,Gemalink Container Terminal,Vietnam,PORTG0105,Active
+TERM0126,Port terminal,Nhava Sheva Freeport Terminal,India,PORTG0106,Active
+TERM0127,Port terminal,Lekki Freeport Terminal,Nigeria,PORTG0107,Active
+TERM0128,Port terminal,Trans Misr Terminal Alexandria,Egypt,PORTG0108,Active
+TERM0129,Port terminal,West Container Terminal – Nador West Med,Morocco,PORTG0109,Development
+TERM0130,Port terminal,Jeddah Islamic Port Terminal 4,Saudi Arabia,PORTG0037,Development
+TERM0131,Port terminal,Lach Huyen Terminals 7 & 8,Vietnam,PORTG0110,Development
+TERM0132,Port terminal,EUROGATE Container Terminal Hamburg – proposed CMA stake,Germany,PORTG0111,Active
+TERM0133,Port terminal,Mombasa terminal development framework,Kenya,PORTG0112,Development
+TERM0134,Port terminal,October Dry Port,Egypt,PORTG0113,Active
+TERM0135,Port terminal,Lyon Rhône Terminal,France,PORTG0114,Active
+TERM0136,Port terminal,SAMR – Port Réunion Terminal,France (Réunion),PORTG0115,Active
+TERM0137,Port terminal,Kribi Conteneurs Terminal,Cameroon,PORTG0116,Active
+TERM0138,Port terminal,Terminal Link – Rotterdam,Netherlands,PORTG0020,Active
+TERM0139,Port terminal,Terminal des Flandres,France,PORTG0117,Active
+TERM0140,Port terminal,Terminal Link – Le Havre,France,PORTG0118,Active
+TERM0141,Port terminal,Terminal du Grand Ouest / Montoir,France,PORTG0119,Active
+TERM0142,Port terminal,EUROFOS,France,PORTG0120,Active
+TERM0143,Port terminal,Malta Freeport Terminal,Malta,PORTG0121,Active
+TERM0144,Port terminal,Thessaloniki Container Terminal,Greece,PORTG0122,Active
+TERM0145,Port terminal,Terminal Link – Odesa,Ukraine,PORTG0123,Active
+TERM0146,Port terminal,Eurogate Tanger,Morocco,PORTG0124,Active
+TERM0147,Port terminal,SOMAPORT Casablanca,Morocco,PORTG0125,Active
+TERM0148,Port terminal,Terminal Link – Côte d’Ivoire / Abidjan,Côte d’Ivoire,PORTG0126,Active
+TERM0149,Port terminal,CMA CGM Terminal Iraq / Umm Qasr,Iraq,PORTG0127,Active
+TERM0150,Port terminal,Vietnam International Container Terminals (VICT),Vietnam,PORTG0017,Active
+TERM0151,Port terminal,Laem Chabang International Terminal,Thailand,PORTG0016,Active
+TERM0152,Port terminal,CMA CGM PSA Lion Terminal,Singapore,PORTG0128,Active
+TERM0153,Port terminal,Terminal Link – Qingdao,China,PORTG0005,Active
+TERM0154,Port terminal,Busan New Container Terminal,South Korea,PORTG0015,Active
+TERM0155,Port terminal,South Florida Container Terminal,United States,PORTG0129,Active
+TERM0156,Port terminal,Houston Terminal Link,United States,PORTG0130,Active
+TERM0157,Port terminal,Kingston Freeport Terminal,Jamaica,PORTG0131,Active
+TERM0158,Port terminal,MSC PSA European Terminal (MPET),Belgium,PORTG0018,Active
+TERM0159,Port terminal,Total Terminals International (TTI) Pier T,United States,PORTG0132,Active
+TERM0160,Port terminal,MSC PSA Asia Terminal (MPAT),Singapore,PORTG0128,Active
+TERM0161,Port terminal,National Container Terminals (NCT),Saudi Arabia,PORTG0133,Active
+TERM0162,Port terminal,Portonave,Brazil,PORTG0134,Active
+TERM0163,Port terminal,MSC Terminal Valencia,Spain,PORTG0102,Active
+TERM0164,Port terminal,Terminaux de Normandie,France,PORTG0118,Active
+TERM0165,Port terminal,Lomé Container Terminal,Togo,PORTG0135,Active
+TERM0166,Port terminal,Port Newark Container Terminal (PNCT),United States,PORTG0099,Active
+TERM0167,Port terminal,Port Everglades Terminal (PET),United States,PORTG0136,Active
+TERM0168,Port terminal,New Orleans Terminal (NOT),United States,PORTG0137,Active
+TERM0169,Port terminal,Houston Terminal – Bayport,United States,PORTG0130,Active
+TERM0170,Port terminal,Houston Terminal – Barbours Cut,United States,PORTG0130,Active
+TERM0171,Port terminal,Los Angeles TraPac/terminal interest (LATT),United States,PORTG0098,Active
+TERM0172,Port terminal,SSATS Terminal 18,United States,PORTG0138,Active
+TERM0173,Port terminal,SSATS Terminal 5,United States,PORTG0138,Active
+TERM0174,Port terminal,Sparrows Point Container Terminal,United States,PORTG0139,Development
+TERM0175,Port terminal,Adani International Container Terminal / CT3,India,PORTG0031,Active
+TERM0176,Port terminal,Adani Ennore Container Terminal,India,PORTG0140,Active
+TERM0177,Port terminal,Vizhinjam International Seaport,India,PORTG0141,Active
+TERM0178,Port terminal,Misurata Free Zone Port container terminals,Libya,PORTG0142,Development
+TERM0179,Port terminal,Medcenter Container Terminal,Italy,PORTG0143,Active
+TERM0180,Port terminal,Trieste Marine Terminal,Italy,PORTG0144,Active
+TERM0181,Port terminal,PSA Sines / Terminal XXI TiL-linked interest,Portugal,PORTG0145,Active
+TERM0182,Port terminal,Asyaport,Türkiye,PORTG0146,Active
+TERM0183,Port terminal,Brasil Terminal Portuário,Brazil,PORTG0049,Active
+TERM0184,Port terminal,San Pedro Container Terminal / TiL-linked asset,Côte d’Ivoire,PORTG0147,Development
+TERM0185,Port terminal,Panama Colon Container Port / TiL-linked asset,Panama,PORTG0148,Active
+TERM0186,Port terminal,Exolgan Container Terminal,Argentina,PORTG0149,Active
+TERM0187,Port terminal,TiL-linked Callao terminal interest,Peru,PORTG0054,Active
+TERM0188,Port terminal,TiL terminal investment – Ningbo,China,PORTG0150,Active
+TERM0189,Port terminal,TiL terminal investment – Busan,South Korea,PORTG0015,Active
+TERM0190,Port terminal,TiL terminal investment – Rotterdam,Netherlands,PORTG0020,Active
+TERM0191,Port terminal,Lázaro Cárdenas terminal,Mexico,PORTG0151,Active
+TERM0192,Port terminal,Suape terminal,Brazil,PORTG0152,Active
+TERM0193,Port terminal,Bahrain,Bahrain,PORTG0153,Active
+TERM0194,Port terminal,Pointe-Noire,Congo,PORTG0154,Active
+TERM0195,Port terminal,Abidjan Côte d’Ivoire Terminal (CIT),Côte d'Ivoire,PORTG0155,Active
+TERM0196,Port terminal,San Pedro,Côte d'Ivoire,PORTG0156,Active
+TERM0197,Port terminal,Suez Canal Container Terminal (SCCT),Egypt,PORTG0157,Active
+TERM0198,Port terminal,Tema,Ghana,PORTG0158,Active
+TERM0199,Port terminal,Aqaba,Jordan,PORTG0076,Active
+TERM0200,Port terminal,Monrovia,Liberia,PORTG0159,Active
+TERM0201,Port terminal,MedPort Tangier,Morocco,PORTG0124,Active
+TERM0202,Port terminal,Tangier,Morocco,PORTG0124,Active
+TERM0203,Port terminal,Apapa,Nigeria,PORTG0160,Active
+TERM0204,Port terminal,Onne,Nigeria,PORTG0161,Active
+TERM0205,Port terminal,Salalah,Oman,PORTG0162,Active
+TERM0206,Port terminal,Guangzhou,China,PORTG0163,Active
+TERM0207,Port terminal,Qingdao,China,PORTG0005,Active
+TERM0208,Port terminal,Shanghai,China,PORTG0164,Active
+TERM0209,Port terminal,Tianjin,China,PORTG0165,Active
+TERM0210,Port terminal,Xiamen,China,PORTG0166,Active
+TERM0211,Port terminal,Mumbai,India,PORTG0106,Active
+TERM0212,Port terminal,Pipavav,India,PORTG0167,Active
+TERM0213,Port terminal,Yokohama,Japan,PORTG0168,Active
+TERM0214,Port terminal,Tanjung Pelepas,Malaysia,PORTG0169,Active
+TERM0215,Port terminal,Colombo,Sri Lanka,PORTG0170,Active
+TERM0216,Port terminal,Cai Mep,Vietnam,PORTG0105,Active
+TERM0217,Port terminal,Rijeka Gateway,Croatia,PORTG0171,Active
+TERM0218,Port terminal,Aarhus,Denmark,PORTG0172,Active
+TERM0219,Port terminal,Kalundborg,Denmark,PORTG0173,Active
+TERM0220,Port terminal,Marseille Fos,France,PORTG0120,Active
+TERM0221,Port terminal,Poti,Georgia,PORTG0174,Active
+TERM0222,Port terminal,Bremerhaven,Germany,PORTG0175,Active
+TERM0223,Port terminal,Vado Ligure,Italy,PORTG0176,Active
+TERM0224,Port terminal,Rotterdam Maasvlakte II,Netherlands,PORTG0020,Active
+TERM0225,Port terminal,Algeciras,Spain,PORTG0103,Active
+TERM0226,Port terminal,Barcelona,Spain,PORTG0096,Active
+TERM0227,Port terminal,Gijón,Spain,PORTG0177,Active
+TERM0228,Port terminal,Valencia,Spain,PORTG0102,Active
+TERM0229,Port terminal,Gothenburg,Sweden,PORTG0178,Active
+TERM0230,Port terminal,Izmir,Turkey,PORTG0179,Active
+TERM0231,Port terminal,Buenos Aires,Argentina,PORTG0048,Active
+TERM0232,Port terminal,Itapoá,Brazil,PORTG0180,Active
+TERM0233,Port terminal,Pecém,Brazil,PORTG0181,Active
+TERM0234,Port terminal,Buenaventura,Colombia,PORTG0182,Active
+TERM0235,Port terminal,Moín,Costa Rica,PORTG0183,Active
+TERM0236,Port terminal,Puerto Quetzal,Guatemala,PORTG0184,Active
+TERM0237,Port terminal,Progreso,Mexico,PORTG0185,Active
+TERM0238,Port terminal,Callao,Peru,PORTG0054,Active
+TERM0239,Port terminal,"Los Angeles, CA",United States,PORTG0098,Active
+TERM0240,Port terminal,"Mobile, AL",United States,PORTG0186,Active
+TERM0241,Port terminal,"Elizabeth, NJ",United States,PORTG0099,Active
+TERM0242,Port terminal,APM Terminals Laldia,Bangladesh,PORTG0187,Development
+TERM0243,Port terminal,Lien Chieu Container Port / APM Terminals Da Nang,Vietnam,PORTG0188,Development
+TERM0244,Port terminal,Balboa Container Terminal – temporary APM operation,Panama,PORTG0189,Active
+TERM0245,Port terminal,Hateco Haiphong International Container Terminal (HHIT),Vietnam,PORTG0190,Active

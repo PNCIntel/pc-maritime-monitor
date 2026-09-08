@@ -15,8 +15,8 @@ ASSET013,COMP_ADPORTS,ICAD rail-linked inland logistics network,Inland dry ports
 ASSET014,COMP_DPW,Jebel Ali Port,Port / container terminal,Dubai,United Arab Emirates,Flagship global hub and JAFZA-linked gateway,Container / logistics,Operating,DP World,SRC_0034
 ASSET015,COMP_DPW,London Gateway,Port / logistics park,London Gateway,United Kingdom,UK deep-sea container gateway and logistics park,Container / logistics,Operating / expanding,DP World,SRC_0034
 ASSET016,COMP_DPW,Southampton Container Terminal,Container terminal,Southampton,United Kingdom,Major UK container gateway,Container,Operating,DP World,SRC_0034
-ASSET017,COMP_APMT,Lázaro Cárdenas terminal,Container terminal,Lázaro Cárdenas,Mexico,"Automated Pacific gateway; Phase II open, Phase III underway",Container,Operating / expanding,APM Terminals,SRC_0044
-ASSET018,COMP_APMT,Suape terminal,Container / general cargo terminal,Suape,Brazil,Fully electric terminal; opening targeted Q3 2026,Container / general cargo,Development,APM Terminals,SRC_0018
+ASSET017,COMP_APMT,Lázaro Cárdenas terminal,Container terminal,Lázaro Cárdenas,Mexico,Automated Pacific gateway; Phase II opened Mar 2026; Phase III under construction; canonical infrastructure in Port Terminals,Container,Operating / expanding,APM Terminals,SRC_0044
+ASSET018,COMP_APMT,Suape terminal,Container / general cargo terminal,Suape,Brazil,Fully electric Suape terminal delivered Jun 2026; commissioning/operational ramp-up; canonical infrastructure in Port Terminals,Container / general cargo,Delivered / commissioning,APM Terminals,SRC_0018
 ASSET019,COMP_FINCANTIERI,Muggiano Integrated Shipyard,Naval shipyard,La Spezia,Italy,U212 NFS submarine construction site,Defence shipbuilding,Operating,Fincantieri,SRC_0037
 ASSET020,COMP_APMT,Bahrain,Container terminal,Bahrain,Bahrain,APM Terminals global network location,Container,Operating / network,,SRC_0020
 ASSET021,COMP_APMT,Pointe-Noire,Container terminal,Pointe-Noire,Congo,APM Terminals global network location,Container,Operating / network,,SRC_0020
@@ -43,7 +43,7 @@ ASSET041,COMP_APMT,Tanjung Pelepas,Container terminal,Tanjung Pelepas,Malaysia,A
 ASSET042,COMP_APMT,Colombo,Container terminal,Colombo,Sri Lanka,APM Terminals global network location,Container,Operating / network,,SRC_0020
 ASSET043,COMP_APMT,Laem Chabang,Container terminal,Laem Chabang,Thailand,APM Terminals global network location,Container,Operating / network,,SRC_0020
 ASSET044,COMP_APMT,Cai Mep,Container terminal,Cai Mep,Vietnam,APM Terminals global network location,Container,Operating / network,,SRC_0020
-ASSET045,COMP_APMT,Rijeka Gateway,Container terminal,Rijeka Gateway,Croatia,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET045,COMP_APMT,Rijeka Gateway,Container terminal,Rijeka Gateway,Croatia,Rijeka Gateway Phase 1 operating since Sep 2025; Phase 2 planned; canonical infrastructure in Port Terminals,Container,Operating / expanding,,SRC_0020
 ASSET046,COMP_APMT,Aarhus,Container terminal,Aarhus,Denmark,APM Terminals global network location,Container,Operating / network,,SRC_0020
 ASSET047,COMP_APMT,Kalundborg,Container terminal,Kalundborg,Denmark,APM Terminals global network location,Container,Operating / network,,SRC_0020
 ASSET048,COMP_APMT,Marseille Fos,Container terminal,Marseille Fos,France,APM Terminals global network location,Container,Operating / network,,SRC_0020
@@ -61,11 +61,11 @@ ASSET059,COMP_APMT,Buenos Aires,Container terminal,Buenos Aires,Argentina,APM Te
 ASSET060,COMP_APMT,Itapoá,Container terminal,Itapoá,Brazil,APM Terminals global network location,Container,Operating / network,,SRC_0020
 ASSET061,COMP_APMT,Pecém,Container terminal,Pecém,Brazil,APM Terminals global network location,Container,Operating / network,,SRC_0020
 ASSET062,COMP_APMT,Santos,Container terminal,Santos,Brazil,APM Terminals global network location,Container,Operating / network,,SRC_0020
-ASSET063,COMP_APMT,Suape,Container terminal,Suape,Brazil,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET063,COMP_APMT,Suape,Container terminal,Suape,Brazil,Legacy APM network seed for Suape; use ASSET018 / Port Terminals for canonical physical asset,Container,Legacy alias / do not count,,SRC_0020
 ASSET064,COMP_APMT,Buenaventura,Container terminal,Buenaventura,Colombia,APM Terminals global network location,Container,Operating / network,,SRC_0020
 ASSET065,COMP_APMT,Moín,Container terminal,Moín,Costa Rica,APM Terminals global network location,Container,Operating / network,,SRC_0020
 ASSET066,COMP_APMT,Puerto Quetzal,Container terminal,Puerto Quetzal,Guatemala,APM Terminals global network location,Container,Operating / network,,SRC_0020
-ASSET067,COMP_APMT,Lázaro Cárdenas,Container terminal,Lázaro Cárdenas,Mexico,APM Terminals global network location,Container,Operating / network,,SRC_0020
+ASSET067,COMP_APMT,Lázaro Cárdenas,Container terminal,Lázaro Cárdenas,Mexico,Legacy APM network seed for Lázaro Cárdenas; use ASSET017 / Port Terminals for canonical physical asset,Container,Legacy alias / do not count,,SRC_0020
 ASSET068,COMP_APMT,Progreso,Container terminal,Progreso,Mexico,APM Terminals global network location,Container,Operating / network,,SRC_0020
 ASSET069,COMP_APMT,Callao,Container terminal,Callao,Peru,APM Terminals global network location,Container,Operating / network,,SRC_0020
 ASSET070,COMP_APMT,"Los Angeles, CA",Container terminal,"Los Angeles, CA",United States,APM Terminals global network location,Container,Operating / network,,SRC_0020

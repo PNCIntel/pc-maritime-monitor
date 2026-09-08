@@ -64,3 +64,8 @@ logistics_real_estate,lre_id,"Warehouses, logistics parks, industrial portfolios
 dry_ports_inland_hubs,hub_id,"Dry ports, inland ports, intermodal hubs and inland cargo terminals",asset_id + operator + seaport/rail/road connections
 infrastructure_connections,connection_id,"Graph edges linking ports, dry ports, economic zones, logistics real estate, rail, roads, airports and corridors",source_asset_id + target node + mode/corridor
 integrated_logistics_networks,network_id,"Cross-modal operating-network layer for integrators, commerce platforms and logistics groups",parent_company_id + platform/division + modes + physical/network scale + source
+port_terminals,terminal_id,"Canonical physical terminal/facility layer with capacity, area, quay, depth, berth, rail, reefer and source summaries",terminal_id + port_id + primary_operator_company_id
+port_berths,berth_record_id,"Berth/interface-level quay length, depth, use and status",terminal_id + source_asset_id
+port_equipment,equipment_record_id,"Row-wise cargo-handling equipment including STS, RTG, RMG, ASC, straddles and support equipment",terminal_id + equipment_type
+port_ownership,ownership_id,"Equity, concession, minority investment, operator-control and JV relationships for physical terminals",terminal_id + company_id + relationship
+port_news,news_id,"Terminal-linked current developments with live URLs, separate from static infrastructure",terminal_id + date + source_asset_id

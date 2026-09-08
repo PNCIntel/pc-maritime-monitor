@@ -1,0 +1,126 @@
+﻿Berth Record ID,Terminal ID,Berth / Interface,Berth Count,Quay Length m,Max Depth m,Cargo Use,Status,Source Operator,Source URL,Source Asset ID
+BERTH00001,TERM0001,Terminal berths (aggregate),,936.0,15.0,Containers,Operational,DP World,https://dpw-prod-cd-1.dpworld.com/australia/ports-and-terminals/dp-world-sydney,DPW-AUS-SYD
+BERTH00002,TERM0002,Terminal berths (aggregate),,900.0,14.0,Containers,Operational,DP World,https://dpw-prod-cd-1.dpworld.com/australia/ports-and-terminals/dp-world-brisbane,DPW-AUS-BNE
+BERTH00003,TERM0003,Terminal berths (aggregate),,929.0,14.0,Containers,Operational,DP World,https://dpw-prod-cd-1.dpworld.com/australia/ports-and-terminals/dp-world-melbourne,DPW-AUS-MEL
+BERTH00004,TERM0004,Terminal berths (aggregate),,646.0,14.5,Containers,Operational,DP World,https://dpw-prod-cd-1.dpworld.com/australia/ports-and-terminals/dp-world-fremantle,DPW-AUS-FRE
+BERTH00005,TERM0012,Pier 3,,600.0,13.0,Containers,Operational,DP World,https://www.dpworld.com/en/news/dp-world-and-asian-terminals-inc-invest-us100-million-to-boost-capacity-at-manila-south-harbour,DPW-PHL-MSH
+BERTH00006,TERM0015,PNC berths (aggregate),,2000.0,17.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/south-korea/pnc-port,DPW-KOR-BUS
+BERTH00007,TERM0016,B5 + C3,,900.0,,Containers,Operational,DP World,https://www.dpworld.com/en/news/dp-world-secures-laem-chabang-concession-extension-amid-rising-intra-asia-trade,DPW-THA-LCB
+BERTH00008,TERM0018,Antwerp Gateway berths (aggregate),,1660.0,16.0,Containers / feeder / barge,Operational,DP World,https://www.dpworld.com/en/ports-terminals/belgium/antwerp,DPW-BEL-ANT
+BERTH00009,TERM0021,Main quay,,640.0,,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/romania/constanta,DPW-ROU-CTA
+BERTH00010,TERM0021,Feeder quay,,380.0,,Containers / feeder,Operational,DP World,https://www.dpworld.com/en/ports-terminals/romania/constanta,DPW-ROU-CTA
+BERTH00011,TERM0022,Danube berths (aggregate),,800.0,10.0,Multipurpose,Operational,DP World,https://www.dpworld.com/en/ports-terminals/eu-intermodal/novi-sad,DPW-SRB-NVS
+BERTH00012,TERM0026,Berths 1–4 (current aggregate),,1690.0,16.5,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/united-kingdom/london-gateway/infrastructure-facts,DPW-GBR-LGW
+BERTH00013,TERM0026,Berth 5,,400.0,,Containers,Under construction,DP World,https://www.dpworld.com/en/news/united-kingdom/dp-world-to-begin-construction-of-london-gateway-expansion,DPW-GBR-LGW
+BERTH00014,TERM0026,Berth 6,,400.0,,Containers,Planned / under expansion program,DP World,https://www.dpworld.com/en/news/united-kingdom/dp-world-to-begin-construction-of-london-gateway-expansion,DPW-GBR-LGW
+BERTH00015,TERM0027,Terminal berths (aggregate),,1920.0,16.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/united-kingdom/southampton/infrastructure-facts,DPW-GBR-SOU
+BERTH00016,TERM0029,Container berths,,600.0,11.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/algeria/djazair,DPW-DZA-DZA
+BERTH00017,TERM0030,Deep-water quay,,1590.0,17.0,Containers / multipurpose,Operational,DP World,https://www.dpworld.com/en/ports-terminals/algeria/djendjen,DPW-DZA-DJD
+BERTH00018,TERM0030,Secondary quay,,250.0,11.0,Feeder / multipurpose,Operational,DP World,https://www.dpworld.com/en/ports-terminals/algeria/djendjen,DPW-DZA-DJD
+BERTH00019,TERM0031,Berth 1,,750.0,17.0,Containers / multipurpose,Operational,DP World,https://www.dpworld.com/en/ports-terminals/egypt/sokhna/infrastructure-facts,DPW-EGY-SOK
+BERTH00020,TERM0031,Berth 2,,1350.0,17.0,Containers / multipurpose,Operational,DP World,https://www.dpworld.com/en/ports-terminals/egypt/sokhna/infrastructure-facts,DPW-EGY-SOK
+BERTH00021,TERM0032,NSICT quay,,600.0,16.2,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/india/nsict/infrastructure,DPW-IND-NSI
+BERTH00022,TERM0033,NSIGT quay,,600.0,16.2,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/india/nsigt/infrastructure,DPW-IND-NSG
+BERTH00023,TERM0034,MICT quay,,632.0,15.5,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/india/mict/infrastructure,DPW-IND-MUN
+BERTH00024,TERM0035,CB1,,,13.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/india/cct/infrastructure,DPW-IND-CCT
+BERTH00025,TERM0035,CB2,,,13.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/india/cct/infrastructure,DPW-IND-CCT
+BERTH00026,TERM0035,CB3,,,13.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/india/cct/infrastructure,DPW-IND-CCT
+BERTH00027,TERM0035,CB4,,,15.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/india/cct/infrastructure,DPW-IND-CCT
+BERTH00028,TERM0036,ICTT quay,,950.0,17.6,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/india/ictt/infrastructure,DPW-IND-COK
+BERTH00029,TERM0037,Phase 1 berth,,1100.0,,Containers,Development,DP World,https://www.dpworld.com/en/news/india/dp-world-signs-concession-to-develop-tuna-tekra-mega-container-terminal-in-india,DPW-IND-TUN
+BERTH00030,TERM0038,Container quay,,330.0,12.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/mozambique/maputo,DPW-MOZ-MAP
+BERTH00031,TERM0039,Terminal 1 quay,,712.0,13.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/pakistan/qasim,DPW-PAK-QAS
+BERTH00032,TERM0039,Terminal 2 quay,,615.0,13.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/pakistan/qasim,DPW-PAK-QAS
+BERTH00033,TERM0040,South Container Terminal berths,,2550.0,18.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/saudi-arabia/jeddah,DPW-SAU-JED
+BERTH00034,TERM0041,Dakar container berths,,720.0,,Containers,Operational,DP World,https://dpw-prod-cd-1.dpworld.com/senegal/ports-and-terminals,DPW-SEN-DKR
+BERTH00035,TERM0042,Ndayane Phase 1,,840.0,,Containers,Development,DP World,https://www.dpworld.com/en/ports-terminals/senegal,DPW-SEN-NDY
+BERTH00036,TERM0043,Expansion quay,,400.0,,Containers,Operational / expanding,DP World,https://www.dpworld.com/en/ports-terminals/somaliland/berbera,DPW-SML-BER
+BERTH00037,TERM0044,Berth 0,,,,Multipurpose / RoRo,Operational,DP World,https://www.dpworld.com/en/ports-terminals/dar-es-salaam/infrastructure,DPW-TZA-DAR
+BERTH00038,TERM0044,Berths 1–4,,,,Multipurpose,Operational,DP World,https://www.dpworld.com/en/ports-terminals/dar-es-salaam/infrastructure,DPW-TZA-DAR
+BERTH00039,TERM0044,Berths 5–7,,550.0,,Multipurpose,Operational,DP World,https://www.dpworld.com/en/ports-terminals/dar-es-salaam/infrastructure,DPW-TZA-DAR
+BERTH00040,TERM0046,Mina Al Hamriya berths,,1800.0,7.0,Multipurpose / coastal,Operational,DP World,https://www.dpworld.com/en/ports-terminals/uae/mina-al-hamriya,DPW-UAE-HAM
+BERTH00041,TERM0047,Dubai Creek & Deira wharfage,,5000.0,8.0,Dhow / coastal / general cargo,Operational,DP World,https://www.dpworld.com/en/ports-terminals/uae/dubai-creek-and-deira-wharfage,DPW-UAE-DEI
+BERTH00042,TERM0051,Initial quay,,600.0,,Containers,Development,DP World,https://www.dpworld.com/en/news/dp-world-and-democratic-republic-of-the-congo-sign-final-agreement-to-develop-banana-port,DPW-COD-BAN
+BERTH00043,TERM0053,DP World Santos quay,,1100.0,,Containers / multipurpose,Operational,DP World,https://www.dpworld.com/en/ports-terminals/brazil/santos,DPW-BRA-STS
+BERTH00044,TERM0054,San Antonio berthing facility,,700.0,,Containers / multipurpose,Operational,DP World,https://www.dpworld.com/en/ports-terminals/chile/san-antonio,DPW-CHL-SAI
+BERTH00045,TERM0055,Pier 1 - Berth 1,,220.0,,Multipurpose,Operational,DP World,https://www.dpworld.com/lirquen/about-us/infrastructure,DPW-CHL-LIR
+BERTH00046,TERM0055,Pier 1 - Berth 2,,220.0,,Multipurpose,Operational,DP World,https://www.dpworld.com/lirquen/about-us/infrastructure,DPW-CHL-LIR
+BERTH00047,TERM0055,Pier 2 - Berth 5,,367.0,,Multipurpose,Operational,DP World,https://www.dpworld.com/lirquen/about-us/infrastructure,DPW-CHL-LIR
+BERTH00048,TERM0055,Pier 2 - Berth 6,,304.0,,Multipurpose,Operational,DP World,https://www.dpworld.com/lirquen/about-us/infrastructure,DPW-CHL-LIR
+BERTH00049,TERM0056,Dock 3,,,15.5,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/dominican-republic/caucedo-port,DPW-DOM-CAU
+BERTH00050,TERM0056,Breakwater dock,,,12.0,Containers / feeder,Operational,DP World,https://www.dpworld.com/en/ports-terminals/dominican-republic/caucedo-port,DPW-DOM-CAU
+BERTH00051,TERM0057,Current quay,,700.0,,Containers,Operational,DP World,https://www.dpworld.com/en/news/dp-world-inaugurates-posorja-terminal-expansion-boosting-ecuadors-global-trade-capacity,DPW-ECU-POS
+BERTH00052,TERM0058,South Terminal quay,,1050.0,,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/peru/callao,DPW-PER-CAL
+BERTH00053,TERM0061,La Vigilantia quay,,73.0,,Multipurpose,Operational,DP World,https://www.dpworld.com/en/ports-terminals/suriname/la-vigilantia,DPW-SUR-VIG
+BERTH00054,TERM0062,Centerm berths,,724.0,15.5,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/canada/vancouver,DPW-CAN-VAN
+BERTH00055,TERM0063,Fraser Surrey berths,,1575.0,,Multipurpose,Operational,DP World,https://www.dpworld.com/en/ports-terminals/canada/fraser-surrey-docks,DPW-CAN-FSD
+BERTH00056,TERM0064,Deep-sea berth,,170.0,13.5,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/canada/nanaimo,DPW-CAN-NAN
+BERTH00057,TERM0064,Barge berth,,82.0,,Barge / short-sea,Operational,DP World,https://www.dpworld.com/en/ports-terminals/canada/nanaimo,DPW-CAN-NAN
+BERTH00058,TERM0065,Fairview berths,,800.0,17.0,Containers,Operational,DP World,https://www.dpworld.com/en/ports-terminals/canada/prince-rupert,DPW-CAN-PRR
+BERTH00059,TERM0082,CMA Terminals Khalifa Port – Phase 1,2,800.0,18.5,Container,Operating,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2025/03/14/the-cma-cgm-iron-the-first-dual-fuel-methanol-vessel-to-visit-abu-dhabi-at-khalifa-port,ADP-UAE-CMA
+BERTH00060,TERM0073,Mugharraq quay,,480.0,8.0,Heavy lift / Ro-Ro / general cargo,Operating,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2022/09/29/ad-ports-group-welcomes-first-international-shipment-at-mugharraq-port,ADP-UAE-MUGHARRAQ
+BERTH00061,TERM0094,Karachi East Wharf berths 6-10,5,,13.0,Container,Operating; dredging to 15.5 m,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2025/09/02/ad-ports-groups-karachi-terminals-in-pakistan-sign-major-dredging-agreement,ADP-PAK-KGTL
+BERTH00062,TERM0095,Karachi East Wharf berths 11-17,7,,,Bulk / general cargo,Operating,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2024/02/03/ad-ports-group-and-karachi-port-trust-extend-cooperation-through-25-year-concession-agreement,ADP-PAK-KGTML
+BERTH00063,TERM0092,Safaga multipurpose quay,,1000.0,,Multipurpose,Trial operations / development,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2025/03/04/ad-ports-group-prepares-to-receive-state-of-the-art-panamax-class-cranes-in-safaga,ADP-EGY-SAFAGA
+BERTH00064,TERM0097,Pointe-Noire initial quay,,420.0,16.0,Container,Under construction,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2026/05/18/ad-ports-group-awards-three-contracts-for-noatum-ports-pointe-noire-terminal,ADP-COG-POINTE
+BERTH00065,TERM0096,Luanda upgraded terminal quay,,,16.0,Container / Ro-Ro / general cargo,Modernisation,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2025/09/19/ad-ports-group-breaks-ground-on-noatum-ports-luanda-terminal,ADP-AGO-LUANDA
+BERTH00066,TERM0103,Tarragona operating berthing line,,5000.0,16.0,Multipurpose / bulk / Ro-Ro,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-tarragona-terminal/,ADP-ESP-TARR
+BERTH00067,TERM0104,Castellón berthing line,,990.0,13.0,Multipurpose / container / bulk,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-castellon-terminal/,ADP-ESP-CAST
+BERTH00068,TERM0105,Sagunto berthing line,,1530.0,12.7,Multipurpose / Ro-Ro,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-sagunto-terminal/,ADP-ESP-SAG
+BERTH00069,TERM0107,Málaga berthing line,,723.0,16.0,Multipurpose / Ro-Ro / container,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-malaga-terminal/,ADP-ESP-MAL
+BERTH00070,TERM0110,Santander berthing line,,3100.0,13.0,Multipurpose / bulk / Ro-Ro,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-santander-terminal/,ADP-ESP-SANT
+BERTH00071,TERM0115,Fenix Marine Services berths,4,,15.24,Containers,Operating,CMA Terminals / Terminal Link,https://www.cma-cgm.com/news/4028/cma-cgm-completes-the-acquisition-of-fenix-marine-services-one-of-the-largest-container-terminals-in-the-port-of-los-angeles,CMA-US-FENIX
+BERTH00072,TERM0082,Khalifa phase 1 quay,2,800.0,18.5,Containers,Operating,CMA Terminals / Terminal Link,https://www.adportsgroup.com/en/news-and-media/2025/03/14/the-cma-cgm-iron-the-first-dual-fuel-methanol-vessel-to-visit-abu-dhabi-at-khalifa-port,CMA-AE-KHAL
+BERTH00073,TERM0082,Khalifa expanded quay,,1200.0,18.5,Containers,Planned early 2028,CMA Terminals / Terminal Link,https://www.adportsgroup.com/en/news-and-media/2025/11/18/ad-ports-group-signs-agreement-with-cma-cgm-group-to-expand-terminal-at-khalifa-port,CMA-AE-KHAL
+BERTH00074,TERM0127,Lekki quay,2,680.0,16.5,Containers,Operating,CMA Terminals / Terminal Link,https://www.cma-cgm.com/assets/public/pdf/LEKKI%20FREEPORT%20TERMINAL%20Q3%202022.pdf,CMA-NG-LEKKI
+BERTH00075,TERM0128,Trans Misr / Pier 55 quay,,2000.0,,Containers,Operating,CMA Terminals / Terminal Link,https://www.cma-cgm.com/ebusiness/schedules/terminal/detail/EGALY-MPT,CMA-EG-ALEX
+BERTH00076,TERM0129,Nador West Container Terminal,,900.0,18.0,Containers / transshipment,Under development,CMA Terminals / Terminal Link,https://www.cma-cgm.com/news/5223/marsa-maroc-and-cma-cgm-finalize-the-agreement-for-the-operation-of-a-container-terminal-at-the-port-of-nador-west-med,CMA-MA-NADOR
+BERTH00077,TERM0097,Pointe-Noire initial quay,,420.0,16.0,Containers / multipurpose,Under development,CMA Terminals / Terminal Link,https://www.adportsgroup.com/en/news-and-media/2026/05/18/ad-ports-group-awards-three-contracts-for-noatum-ports-pointe-noire-terminal,CMA-CG-PNR
+BERTH00078,TERM0125,Gemalink Phase 2 quay extension,,450.0,,Containers,Under expansion,CMA Terminals / Terminal Link,https://www.cmacgm-group.com/en/news-media/cma-cgm-launches-phase-2-expansion-works-gemalink-container-terminal,CMA-VN-GEMA
+BERTH00079,TERM0132,Hamburg western expansion,,1050.0,,Containers,Planned,CMA Terminals / Terminal Link,https://www1.eurogate.de/eurogate-and-cma-terminals-agree-on-strategic-partnership-at-eurogate-container-terminal-hamburg/,CMA-DE-HAM
+BERTH00080,TERM0158,MPET quay,,3680.0,17.0,Containers,Operating,TiL,https://www.tilgroup.com/our-terminals/antwerp.html,TIL-BE-MPET
+BERTH00081,TERM0159,TTI Pier T quay,,1524.0,17.0,Containers,Operating,TiL,https://www.tilgroup.com/our-terminals/long-beach.html,TIL-US-TTI
+BERTH00082,TERM0160,MPAT quay,,3015.0,16.0,Containers,Operating,TiL,https://www.tilgroup.com/our-terminals/pasir.html,TIL-SG-MPAT
+BERTH00083,TERM0161,NCT quay,,2170.0,17.0,Containers,Operating,TiL,https://tilgroup.com/our-terminals/king-abdullah.html,TIL-SA-NCT
+BERTH00084,TERM0162,Portonave quay,3,900.0,14.0,Containers,Operating / reinforcement,TiL,https://www.tilgroup.com/our-terminals/navegantes.html,TIL-BR-PORTO
+BERTH00085,TERM0163,MSC Terminal Valencia quay,,770.0,15.9,Containers,Operating,TiL,https://www.tilgroup.com/our-terminals/valencia.html,TIL-ES-VAL
+BERTH00086,TERM0164,Terminaux de Normandie quay,6,2100.0,16.0,Containers,Operating / modernization,TiL,https://tilgroup.com/our-terminals/havre.html,TIL-FR-TN
+BERTH00087,TERM0165,Lomé Container Terminal quay,,1050.0,16.6,Containers / transshipment,Operating,TiL,https://www.tilgroup.com/our-terminals/lome.html,TIL-TG-LCT
+BERTH00088,TERM0176,Ennore container quay,,400.0,,Containers,Operating,TiL,https://www.adaniports.com/newsroom/media-releases/apsez-expands-strategic-partnership-with-msc,TIL-IN-ENN
+BERTH00089,TERM0191,Lázaro Cárdenas terminal marine interface,,750.0,16.5,Containers / terminal cargo,Operating / Phase III expanding,APM Terminals,https://www2.apmterminals.com/en/lazaro-cardenas/about/our-terminal,APM-LÁZARO-CÁRDENAS-TERMINAL
+BERTH00090,TERM0192,Suape terminal marine interface,1,430.0,15.1,Containers / terminal cargo,Delivered / commissioning into operation,APM Terminals,https://www2.apmterminals.com/en/suape/about/our-terminal,APM-SUAPE-TERMINAL
+BERTH00091,TERM0193,Bahrain marine interface,,1800.0,15.0,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/bahrain/about/our-terminal,APM-BAHRAIN
+BERTH00092,TERM0194,Pointe-Noire marine interface,,,16.5,Containers / terminal cargo,Operating,APM Terminals,https://akamai.apmterminals.com/en/pointe-noire/about/our-terminal,APM-POINTE-NOIRE
+BERTH00093,TERM0195,Abidjan Côte d’Ivoire Terminal (CIT) marine interface,,1100.0,16.0,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/cit/about/our-terminal,APM-ABIDJAN-CÔTE-D-IVOIRE-TERMINAL-CIT
+BERTH00094,TERM0197,Suez Canal Container Terminal (SCCT) marine interface,,2400.0,17.0,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/scct/about/our-terminal,APM-SUEZ-CANAL-CONTAINER-TERMINAL-SCCT
+BERTH00095,TERM0199,Aqaba marine interface,3,1000.0,16.5,Containers / terminal cargo,Operating,APM Terminals,https://akamai.apmterminals.com/en/aqaba/about/our-terminal,APM-AQABA
+BERTH00096,TERM0200,Monrovia marine interface,,,12.5,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/monrovia/about/our-terminal,APM-MONROVIA
+BERTH00097,TERM0201,MedPort Tangier marine interface,3,2000.0,18.0,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/medport-tangier/about/our-terminal,APM-MEDPORT-TANGIER
+BERTH00098,TERM0202,Tangier marine interface,,,16.0,Containers / terminal cargo,Operating,APM Terminals,https://akamai.apmterminals.com/en/tangier/about/our-terminal,APM-TANGIER
+BERTH00099,TERM0203,Apapa marine interface,,1005.0,13.5,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/apapa/about/our-terminal,APM-APAPA
+BERTH00100,TERM0204,Onne marine interface,,570.0,11.3,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/onne/about/our-terminal,APM-ONNE
+BERTH00101,TERM0205,Salalah marine interface,7,2400.0,18.0,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/salalah/about/our-terminal,APM-SALALAH
+BERTH00102,TERM0208,Shanghai marine interface,,1437.0,14.2,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/shanghai/about/our-terminal,APM-SHANGHAI
+BERTH00103,TERM0209,Tianjin marine interface,4,1100.0,15.5,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/tianjin/about/our-terminal,APM-TIANJIN
+BERTH00104,TERM0211,Mumbai marine interface,,712.0,16.5,Containers / terminal cargo,Operating / transformation,APM Terminals,https://www2.apmterminals.com/en/mumbai/about/our-terminal,APM-MUMBAI
+BERTH00105,TERM0212,Pipavav marine interface,,735.0,14.5,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/pipavav/about/our-terminal,APM-PIPAVAV
+BERTH00106,TERM0214,Tanjung Pelepas marine interface,14,5040.0,19.0,Containers / terminal cargo,Operating,APM Terminals,https://akamai.apmterminals.com/en/tanjung-pelepas/about/our-terminal,APM-TANJUNG-PELEPAS
+BERTH00107,TERM0216,Cai Mep marine interface,,600.0,16.5,Containers / terminal cargo,Operating,APM Terminals,https://akamai.apmterminals.com/en/cai-mep/about/our-terminal,APM-CAI-MEP
+BERTH00108,TERM0217,Rijeka Gateway marine interface,,400.0,20.0,Containers / terminal cargo,Operating / Phase 2 planned,APM Terminals,https://www2.apmterminals.com/en/rijeka/about/our-terminal,APM-RIJEKA-GATEWAY
+BERTH00109,TERM0218,Aarhus marine interface,,1300.0,15.0,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/aarhus/about/our-terminal,APM-AARHUS
+BERTH00110,TERM0223,Vado Ligure marine interface,3,470.0,14.1,Containers / terminal cargo,Operating,APM Terminals,https://akamai.apmterminals.com/en/vado-ligure/about/our-terminal,APM-VADO-LIGURE
+BERTH00111,TERM0224,Rotterdam Maasvlakte II marine interface,,2000.0,,Containers / terminal cargo,Operating / major expansion,APM Terminals,https://www2.apmterminals.com/en/news/news-releases/2026/260819-APMTerminals-and-Hapag-Lloyd-partner-at-Maasvlakte-II,APM-ROTTERDAM-MAASVLAKTE-II
+BERTH00112,TERM0228,Valencia marine interface,,,16.5,Containers / terminal cargo,Operating / electrification upgrade,APM Terminals,https://www2.apmterminals.com/en/news/news-releases/2026/260422-APM-Terminals-invests-in-upgrade-and-extends-partnership,APM-VALENCIA
+BERTH00113,TERM0229,Gothenburg marine interface,,1800.0,14.2,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/gothenburg/about/our-terminal,APM-GOTHENBURG
+BERTH00114,TERM0230,Izmir marine interface,,700.0,18.0,Containers / terminal cargo,Operating / managed,APM Terminals,https://www2.apmterminals.com/en/izmir/about/our-terminal,APM-IZMIR
+BERTH00115,TERM0231,Buenos Aires marine interface,2,495.0,10.3,Containers / terminal cargo,Operating,APM Terminals,https://akamai.apmterminals.com/en/buenos-aires/about/our-terminal,APM-BUENOS-AIRES
+BERTH00116,TERM0233,Pecém marine interface,2,760.0,15.3,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/pecem/about/our-terminal,APM-PECÉM
+BERTH00117,TERM0235,Moín marine interface,,650.0,14.5,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/moin/about/our-terminal,APM-MOÍN
+BERTH00118,TERM0236,Puerto Quetzal marine interface,,350.0,14.5,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/puerto-quetzal/about/our-terminal,APM-PUERTO-QUETZAL
+BERTH00119,TERM0238,Callao marine interface,,1835.0,16.0,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/callao/about/our-terminal,APM-CALLAO
+BERTH00120,TERM0239,"Los Angeles, CA marine interface",5,2200.0,,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/los-angeles/about/our-terminal,APM-LOS-ANGELES-CA
+BERTH00121,TERM0155,"Miami, FL marine interface",,,15.0,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/miami/about/our-terminal,APM-MIAMI-FL
+BERTH00122,TERM0240,"Mobile, AL marine interface",,732.0,15.24,Containers / terminal cargo,Operating / expansion,APM Terminals,https://www2.apmterminals.com/en/mobile/about/our-terminal,APM-MOBILE-AL
+BERTH00123,TERM0241,"Elizabeth, NJ marine interface",,1829.0,15.2,Containers / terminal cargo,Operating,APM Terminals,https://www2.apmterminals.com/en/port-elizabeth/about/our-terminal,APM-ELIZABETH-NJ
+BERTH00124,TERM0243,Lien Chieu Container Port / APM Terminals Da Nang marine interface,8,,,Containers / terminal cargo,Under development,APM Terminals,https://akamai.apmterminals.com/en/news/news-releases/2026/260425-APM-Terminals-and-Hateco-partner-in-Da-Nang,APM-VN-DANANG
+BERTH00125,TERM0040,South Container Terminal – APM minority investment marine interface,5,2550.0,18.0,Containers / terminal cargo,Agreement announced / transaction completion to verify,APM Terminals,https://www2.apmterminals.com/en/news/news-releases/2026/260218-APM-Terminals-DPWorld-strategic-partnership-Jeddah-Islamic-Port,APM-SA-JEDDAH-SCT

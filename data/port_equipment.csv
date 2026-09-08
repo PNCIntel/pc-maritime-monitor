@@ -1,0 +1,193 @@
+﻿Equipment Record ID,Terminal ID,Equipment Type,Quantity,Specification,Status,Source Operator,Source URL,Source Asset ID
+EQ00001,TERM0001,RTG,10,2023 investment doubled fleet to 10; verify subsequent changes.,,DP World,https://www.dpworld.com/en/news/dp-world-invests-in-new-rubber-tyred-gantry-cranes-at-sydney,DPW-AUS-SYD
+EQ00002,TERM0012,STS quay crane,2,Two new STS cranes added in 2025; not total fleet.,,DP World,https://www.dpworld.com/en/news/dp-world-and-asian-terminals-inc-invest-us100-million-to-boost-capacity-at-manila-south-harbour,DPW-PHL-MSH
+EQ00003,TERM0014,Fixed harbour crane,2,,,DP World,https://www.dpworld.com/en/ports-terminals/philippines/cavite-port,DPW-PHL-CAV
+EQ00004,TERM0014,Reach stacker,2,,,DP World,https://www.dpworld.com/en/ports-terminals/philippines/cavite-port,DPW-PHL-CAV
+EQ00005,TERM0014,Internal transfer vehicle,4,,,DP World,https://www.dpworld.com/en/ports-terminals/philippines/cavite-port,DPW-PHL-CAV
+EQ00006,TERM0018,STS quay crane,15,,,DP World,https://www.dpworld.com/en/ports-terminals/belgium/antwerp,DPW-BEL-ANT
+EQ00007,TERM0018,Automated stacking crane (ASC),38,,Automated,DP World,https://www.dpworld.com/en/ports-terminals/belgium/antwerp,DPW-BEL-ANT
+EQ00008,TERM0018,Straddle carrier,65,,,DP World,https://www.dpworld.com/en/ports-terminals/belgium/antwerp,DPW-BEL-ANT
+EQ00009,TERM0018,Rail-mounted gantry (RMG),2,,,DP World,https://www.dpworld.com/en/ports-terminals/belgium/antwerp,DPW-BEL-ANT
+EQ00010,TERM0018,Mobile harbour crane,1,,,DP World,https://www.dpworld.com/en/ports-terminals/belgium/antwerp,DPW-BEL-ANT
+EQ00011,TERM0021,Rail-mounted gantry (RMG),2,,,DP World,https://www.dpworld.com/en/ports-terminals/romania/constanta,DPW-ROU-CTA
+EQ00012,TERM0021,Quay / mobile cranes,8,Mix of QGC and mobile/electric mobile harbour cranes.,,DP World,https://www.dpworld.com/en/ports-terminals/romania/constanta,DPW-ROU-CTA
+EQ00013,TERM0026,STS quay crane,16,,,DP World,https://www.dpworld.com/en/ports-terminals/united-kingdom/london-gateway/infrastructure-facts,DPW-GBR-LGW
+EQ00014,TERM0026,Automated stacking crane (ASC),78,,Automated,DP World,https://www.dpworld.com/en/ports-terminals/united-kingdom/london-gateway/infrastructure-facts,DPW-GBR-LGW
+EQ00015,TERM0026,Straddle carrier,60,,,DP World,https://www.dpworld.com/en/ports-terminals/united-kingdom/london-gateway/infrastructure-facts,DPW-GBR-LGW
+EQ00016,TERM0026,Rail-mounted gantry (RMG),5,,,DP World,https://www.dpworld.com/en/ports-terminals/united-kingdom/london-gateway/infrastructure-facts,DPW-GBR-LGW
+EQ00017,TERM0026,Reach stacker,4,,,DP World,https://www.dpworld.com/en/ports-terminals/united-kingdom/london-gateway/infrastructure-facts,DPW-GBR-LGW
+EQ00018,TERM0027,STS quay crane,14,,,DP World,https://www.dpworld.com/en/ports-terminals/united-kingdom/southampton/infrastructure-facts,DPW-GBR-SOU
+EQ00019,TERM0030,Super-post-Panamax STS,12,,,DP World,https://www.dpworld.com/en/ports-terminals/algeria/djendjen,DPW-DZA-DJD
+EQ00020,TERM0030,Feeder STS,2,,,DP World,https://www.dpworld.com/en/ports-terminals/algeria/djendjen,DPW-DZA-DJD
+EQ00021,TERM0030,RTG,35,,,DP World,https://www.dpworld.com/en/ports-terminals/algeria/djendjen,DPW-DZA-DJD
+EQ00022,TERM0030,Mobile harbour crane,1,,,DP World,https://www.dpworld.com/en/ports-terminals/algeria/djendjen,DPW-DZA-DJD
+EQ00023,TERM0030,Internal transfer vehicle,6,,,DP World,https://www.dpworld.com/en/ports-terminals/algeria/djendjen,DPW-DZA-DJD
+EQ00024,TERM0030,Reach stacker,4,,,DP World,https://www.dpworld.com/en/ports-terminals/algeria/djendjen,DPW-DZA-DJD
+EQ00025,TERM0030,Empty container handler,2,,,DP World,https://www.dpworld.com/en/ports-terminals/algeria/djendjen,DPW-DZA-DJD
+EQ00026,TERM0031,Mobile harbour crane,6,2 Gottwald + 2 Gottwald + 2 Liebherr across berth equipment listings.,,DP World,https://www.dpworld.com/en/ports-terminals/egypt/sokhna/infrastructure-facts,DPW-EGY-SOK
+EQ00027,TERM0032,Quay crane,8,,,DP World,https://www.dpworld.com/en/ports-terminals/india/nsict/infrastructure,DPW-IND-NSI
+EQ00028,TERM0032,RTG,26,,,DP World,https://www.dpworld.com/en/ports-terminals/india/nsict/infrastructure,DPW-IND-NSI
+EQ00029,TERM0032,Reach stacker,2,,,DP World,https://www.dpworld.com/en/ports-terminals/india/nsict/infrastructure,DPW-IND-NSI
+EQ00030,TERM0032,Empty container handler,2,,,DP World,https://www.dpworld.com/en/ports-terminals/india/nsict/infrastructure,DPW-IND-NSI
+EQ00031,TERM0032,Forklift,2,,,DP World,https://www.dpworld.com/en/ports-terminals/india/nsict/infrastructure,DPW-IND-NSI
+EQ00032,TERM0033,Quay crane,8,,,DP World,https://www.dpworld.com/en/ports-terminals/india/nsigt/infrastructure,DPW-IND-NSG
+EQ00033,TERM0033,RTG,26,,,DP World,https://www.dpworld.com/en/ports-terminals/india/nsigt/infrastructure,DPW-IND-NSG
+EQ00034,TERM0033,Reach stacker,2,,,DP World,https://www.dpworld.com/en/ports-terminals/india/nsigt/infrastructure,DPW-IND-NSG
+EQ00035,TERM0033,Empty container handler,2,,,DP World,https://www.dpworld.com/en/ports-terminals/india/nsigt/infrastructure,DPW-IND-NSG
+EQ00036,TERM0033,Forklift,2,,,DP World,https://www.dpworld.com/en/ports-terminals/india/nsigt/infrastructure,DPW-IND-NSG
+EQ00037,TERM0034,Quay crane,8,After new crane addition in 2025.,,DP World,https://www.dpworld.com/en/news/india/dp-world-mundra-boosts-capacity-sustainability,DPW-IND-MUN
+EQ00038,TERM0034,RTG,29,Conflicts with another DP World page showing 27 RTGCs.,,DP World,https://www.dpworld.com/en/ports-terminals/india/mict/infrastructure,DPW-IND-MUN
+EQ00039,TERM0034,Rail-mounted gantry (RMG),3,,,DP World,https://www.dpworld.com/en/ports-terminals/india/mict/infrastructure,DPW-IND-MUN
+EQ00040,TERM0034,Reach stacker,1,,,DP World,https://www.dpworld.com/en/ports-terminals/india/mict/infrastructure,DPW-IND-MUN
+EQ00041,TERM0034,Empty container handler,1,,,DP World,https://www.dpworld.com/en/ports-terminals/india/mict/infrastructure,DPW-IND-MUN
+EQ00042,TERM0035,Gantry / quay crane,7,,,DP World,https://www.dpworld.com/en/ports-terminals/india/cct/infrastructure,DPW-IND-CCT
+EQ00043,TERM0035,RTG,15,,,DP World,https://www.dpworld.com/en/ports-terminals/india/cct,DPW-IND-CCT
+EQ00044,TERM0035,Reach stacker,3,,,DP World,https://www.dpworld.com/en/ports-terminals/india/cct,DPW-IND-CCT
+EQ00045,TERM0036,Quay crane,7,,,DP World,https://www.dpworld.com/en/ports-terminals/india/ictt/infrastructure,DPW-IND-COK
+EQ00046,TERM0036,RTG,21,,,DP World,https://www.dpworld.com/en/ports-terminals/india/ictt/infrastructure,DPW-IND-COK
+EQ00047,TERM0038,Mobile harbour crane,3,,,DP World,https://www.dpworld.com/en/ports-terminals/mozambique/maputo,DPW-MOZ-MAP
+EQ00048,TERM0038,RTG,6,,,DP World,https://www.dpworld.com/en/ports-terminals/mozambique/maputo,DPW-MOZ-MAP
+EQ00049,TERM0039,RTG,45,,,DP World,https://www.dpworld.com/en/ports-terminals/pakistan/qasim,DPW-PAK-QAS
+EQ00050,TERM0039,Reach stacker,7,,,DP World,https://www.dpworld.com/en/ports-terminals/pakistan/qasim,DPW-PAK-QAS
+EQ00051,TERM0039,Empty container handler,3,,,DP World,https://www.dpworld.com/en/ports-terminals/pakistan/qasim,DPW-PAK-QAS
+EQ00052,TERM0039,Internal transfer vehicle,82,,,DP World,https://www.dpworld.com/en/ports-terminals/pakistan/qasim,DPW-PAK-QAS
+EQ00053,TERM0040,Quay crane,14,Narrative on same public page references a larger fleet; flagged for refresh.,,DP World,https://www.dpworld.com/en/ports-terminals/saudi-arabia/jeddah,DPW-SAU-JED
+EQ00054,TERM0040,RTG,61,,,DP World,https://www.dpworld.com/en/ports-terminals/saudi-arabia/jeddah,DPW-SAU-JED
+EQ00055,TERM0040,Internal transfer vehicle,191,,,DP World,https://www.dpworld.com/en/ports-terminals/saudi-arabia/jeddah,DPW-SAU-JED
+EQ00056,TERM0040,Empty container handler,9,,,DP World,https://www.dpworld.com/en/ports-terminals/saudi-arabia/jeddah,DPW-SAU-JED
+EQ00057,TERM0040,Reach stacker,6,,,DP World,https://www.dpworld.com/en/ports-terminals/saudi-arabia/jeddah,DPW-SAU-JED
+EQ00058,TERM0041,STS quay crane,6,,,DP World,https://dpw-prod-cd-1.dpworld.com/senegal/ports-and-terminals,DPW-SEN-DKR
+EQ00059,TERM0041,RTG,20,,,DP World,https://dpw-prod-cd-1.dpworld.com/senegal/ports-and-terminals,DPW-SEN-DKR
+EQ00060,TERM0042,STS quay crane,6,Includes 2 relocated from Dakar in plan.,,DP World,https://dpw-prod-cd-1.dpworld.com/senegal/ports-and-terminals,DPW-SEN-NDY
+EQ00061,TERM0042,RTG,20,,,DP World,https://dpw-prod-cd-1.dpworld.com/senegal/ports-and-terminals,DPW-SEN-NDY
+EQ00062,TERM0043,STS quay crane,3,,,DP World,https://www.dpworld.com/en/ports-terminals/somaliland/berbera,DPW-SML-BER
+EQ00063,TERM0043,RTG,8,,,DP World,https://www.dpworld.com/en/ports-terminals/somaliland/berbera,DPW-SML-BER
+EQ00064,TERM0043,Forklift,8,,,DP World,https://www.dpworld.com/en/ports-terminals/somaliland/berbera,DPW-SML-BER
+EQ00065,TERM0043,Empty container handler,6,,,DP World,https://www.dpworld.com/en/ports-terminals/somaliland/berbera,DPW-SML-BER
+EQ00066,TERM0056,STS quay crane,10,,,DP World,https://www.dpworld.com/en/ports-terminals/dominican-republic/caucedo-port,DPW-DOM-CAU
+EQ00067,TERM0056,Mobile harbour crane,3,,,DP World,https://www.dpworld.com/en/ports-terminals/dominican-republic/caucedo-port,DPW-DOM-CAU
+EQ00068,TERM0056,RTG,32,,,DP World,https://www.dpworld.com/en/ports-terminals/dominican-republic/caucedo-port,DPW-DOM-CAU
+EQ00069,TERM0056,Terminal tractor,90,,,DP World,https://www.dpworld.com/en/ports-terminals/dominican-republic/caucedo-port,DPW-DOM-CAU
+EQ00070,TERM0057,Super Post-Panamax STS,2,Two new cranes delivered in 2025 and operational by 2026.,,DP World,https://www.dpworld.com/en/news/dp-world-inaugurates-posorja-terminal-expansion-boosting-ecuadors-global-trade-capacity,DPW-ECU-POS
+EQ00071,TERM0057,RTG,3,Announced as part of expansion; not total fleet.,,DP World,https://www.dpworld.com/en/news/usa/posorja-named-latin-america-and-caribbean-most-efficient-port-by-world-bank,DPW-ECU-POS
+EQ00072,TERM0058,Quay gantry crane,10,3 identified as electric on current page.,,DP World,https://www.dpworld.com/en/ports-terminals/peru/callao,DPW-PER-CAL
+EQ00073,TERM0058,Yard crane,7,2 identified as electric on current page.,,DP World,https://www.dpworld.com/en/ports-terminals/peru/callao,DPW-PER-CAL
+EQ00074,TERM0062,RTG,19,,,DP World,https://www.dpworld.com/en/ports-terminals/canada/vancouver,DPW-CAN-VAN
+EQ00075,TERM0062,Rail-mounted gantry (RMG),5,,,DP World,https://www.dpworld.com/en/ports-terminals/canada/vancouver,DPW-CAN-VAN
+EQ00076,TERM0064,Gantry crane,1,,,DP World,https://www.dpworld.com/en/ports-terminals/canada/nanaimo,DPW-CAN-NAN
+EQ00077,TERM0064,Mobile harbour crane,1,,,DP World,https://www.dpworld.com/en/ports-terminals/canada/nanaimo,DPW-CAN-NAN
+EQ00078,TERM0064,Quay crane,2,Planned replacement/addition under 2027 expansion.,,DP World,https://www.dpworld.com/en/news/canada/03302026_canada_20th_anniversary,DPW-CAN-NAN
+EQ00079,TERM0065,Super-post-Panamax quay crane,8,,,DP World,https://www.dpworld.com/en/ports-terminals/canada/prince-rupert,DPW-CAN-PRR
+EQ00080,TERM0065,RTG,6,,,DP World,https://www.dpworld.com/en/ports-terminals/canada/prince-rupert,DPW-CAN-PRR
+EQ00081,TERM0063,Quay crane,3,,,DP World,https://www.dpworld.com/en/ports-terminals/canada/fraser-surrey-docks,DPW-CAN-FSD
+EQ00082,TERM0082,STS crane,8,Next-generation STS cranes,Operating,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2025/03/14/the-cma-cgm-iron-the-first-dual-fuel-methanol-vessel-to-visit-abu-dhabi-at-khalifa-port,ADP-UAE-CMA
+EQ00083,TERM0082,RTG,20,Electric RTGs,Operating,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2025/03/14/the-cma-cgm-iron-the-first-dual-fuel-methanol-vessel-to-visit-abu-dhabi-at-khalifa-port,ADP-UAE-CMA
+EQ00084,TERM0092,STS crane,3,Super Post-Panamax ZPMC,Delivered 2026,AD Ports / Noatum,https://wpvip.adportsgroup.com/adportsgroup/news-and-media/2026/04/06/noatum-ports-safaga-terminal-egypt/,ADP-EGY-SAFAGA
+EQ00085,TERM0092,RTG,6,ZPMC RTGs,Delivered 2026,AD Ports / Noatum,https://wpvip.adportsgroup.com/adportsgroup/news-and-media/2026/04/06/noatum-ports-safaga-terminal-egypt/,ADP-EGY-SAFAGA
+EQ00086,TERM0097,STS crane,3,ZPMC,Ordered / development,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2026/05/18/ad-ports-group-awards-three-contracts-for-noatum-ports-pointe-noire-terminal,ADP-COG-POINTE
+EQ00087,TERM0097,RTG,9,ZPMC,Ordered / development,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2026/05/18/ad-ports-group-awards-three-contracts-for-noatum-ports-pointe-noire-terminal,ADP-COG-POINTE
+EQ00088,TERM0096,STS crane,3,Super Post-Panamax,Planned for upgraded terminal,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2025/09/19/ad-ports-group-breaks-ground-on-noatum-ports-luanda-terminal,ADP-AGO-LUANDA
+EQ00089,TERM0096,RTG,8,Hybrid RTG,Planned for upgraded terminal,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2025/09/19/ad-ports-group-breaks-ground-on-noatum-ports-luanda-terminal,ADP-AGO-LUANDA
+EQ00090,TERM0099,Reach stacker,3,New units,Operating phase 1,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2025/06/03/ad-ports-group-inaugurates-tbilisi-intermodal-hub-in-georgia,ADP-GEO-TBILISI
+EQ00091,TERM0099,Locomotive,2,Shunting locomotives,Operating phase 1,AD Ports / Noatum,https://www.adportsgroup.com/en/news-and-media/2025/06/03/ad-ports-group-inaugurates-tbilisi-intermodal-hub-in-georgia,ADP-GEO-TBILISI
+EQ00092,TERM0104,STS crane,5,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-castellon-terminal/,ADP-ESP-CAST
+EQ00093,TERM0104,Reach stacker,11,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-castellon-terminal/,ADP-ESP-CAST
+EQ00094,TERM0104,Mobile crane,4,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-castellon-terminal/,ADP-ESP-CAST
+EQ00095,TERM0107,Super Post-Panamax portainer,3,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-malaga-terminal/,ADP-ESP-MAL
+EQ00096,TERM0107,Panamax portainer,2,Mixed,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-malaga-terminal/,ADP-ESP-MAL
+EQ00097,TERM0107,RTG,5,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-malaga-terminal/,ADP-ESP-MAL
+EQ00098,TERM0107,Reach stacker,4,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-malaga-terminal/,ADP-ESP-MAL
+EQ00099,TERM0105,Mobile crane,6,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-sagunto-terminal/,ADP-ESP-SAG
+EQ00100,TERM0105,Forklift,45,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-sagunto-terminal/,ADP-ESP-SAG
+EQ00101,TERM0105,Reach stacker,6,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-sagunto-terminal/,ADP-ESP-SAG
+EQ00102,TERM0103,Mobile crane,3,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-tarragona-terminal/,ADP-ESP-TARR
+EQ00103,TERM0103,RTG,1,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-tarragona-terminal/,ADP-ESP-TARR
+EQ00104,TERM0103,Forklift,6,,Operating,AD Ports / Noatum,https://www.noatum.com/en/terminals-port-operations/noatum-ports-tarragona-terminal/,ADP-ESP-TARR
+EQ00105,TERM0115,STS / quay crane,16,8 capable of serving very large container vessels,Operating,CMA Terminals / Terminal Link,https://www.cma-cgm.com/news/4028/cma-cgm-completes-the-acquisition-of-fenix-marine-services-one-of-the-largest-container-terminals-in-the-port-of-los-angeles,CMA-US-FENIX
+EQ00106,TERM0082,STS crane,8,Next-generation STS,Operating,CMA Terminals / Terminal Link,https://www.adportsgroup.com/en/news-and-media/2025/03/14/the-cma-cgm-iron-the-first-dual-fuel-methanol-vessel-to-visit-abu-dhabi-at-khalifa-port,CMA-AE-KHAL
+EQ00107,TERM0082,RTG,20,Electric RTGs,Operating,CMA Terminals / Terminal Link,https://www.adportsgroup.com/en/news-and-media/2025/03/14/the-cma-cgm-iron-the-first-dual-fuel-methanol-vessel-to-visit-abu-dhabi-at-khalifa-port,CMA-AE-KHAL
+EQ00108,TERM0127,STS crane,5,First African terminal cited by CMA as equipped with STS cranes,Operating,CMA Terminals / Terminal Link,https://www.cma-cgm.com/assets/public/pdf/LEKKI%20FREEPORT%20TERMINAL%20Q3%202022.pdf,CMA-NG-LEKKI
+EQ00109,TERM0129,STS crane,8,Target configuration,Planned,CMA Terminals / Terminal Link,https://www.cma-cgm.com/news/4902/cma-cgm-and-marsa-maroc-join-forces-in-a-joint-venture-to-equip-and-operate-half-of-the-nador-west-med-container-terminal,CMA-MA-NADOR
+EQ00110,TERM0129,RTG,24,Electric RTGs target configuration,Planned,CMA Terminals / Terminal Link,https://www.cma-cgm.com/news/4902/cma-cgm-and-marsa-maroc-join-forces-in-a-joint-venture-to-equip-and-operate-half-of-the-nador-west-med-container-terminal,CMA-MA-NADOR
+EQ00111,TERM0097,STS crane,3,ZPMC,Ordered / under development,CMA Terminals / Terminal Link,https://www.adportsgroup.com/en/news-and-media/2026/05/18/ad-ports-group-awards-three-contracts-for-noatum-ports-pointe-noire-terminal,CMA-CG-PNR
+EQ00112,TERM0097,RTG,9,ZPMC,Ordered / under development,CMA Terminals / Terminal Link,https://www.adportsgroup.com/en/news-and-media/2026/05/18/ad-ports-group-awards-three-contracts-for-noatum-ports-pointe-noire-terminal,CMA-CG-PNR
+EQ00113,TERM0130,STS crane,10,New cranes announced with T4 investment,Planned,CMA Terminals / Terminal Link,https://rsgt.com.sa/news/rsgt-and-cma-cgm-announce-usd-434-million-initial-investment-sar-1-6-billion-to-develop-terminal-4-and-add-up-to-2-6-million-teus-of-capacity-at-jeddah-islamic-port/,CMA-SA-JED4
+EQ00114,TERM0125,STS crane,13,Phase 2 target; up from 8,Planned/expanding,CMA Terminals / Terminal Link,https://www.cmacgm-group.com/en/news-media/cma-cgm-launches-phase-2-expansion-works-gemalink-container-terminal,CMA-VN-GEMA
+EQ00115,TERM0136,Straddle carrier,3,Kalmar hybrid,Delivered/operating after 2024 order,CMA Terminals / Terminal Link,https://www.kalmarglobal.com/news--insights/press_releases/2024/kalmar-concluded-an-agreement-to/,CMA-FR-REU
+EQ00116,TERM0158,Quay crane,38,,Operating,TiL,https://www.tilgroup.com/our-terminals/antwerp.html,TIL-BE-MPET
+EQ00117,TERM0158,Yard crane,228,,Operating,TiL,https://www.tilgroup.com/our-terminals/antwerp.html,TIL-BE-MPET
+EQ00118,TERM0159,Quay crane,16,Up to 14 can work three ULCVs simultaneously,Operating,TiL,https://www.tilgroup.com/our-terminals/long-beach.html,TIL-US-TTI
+EQ00119,TERM0159,Yard crane,28,RTG/top-handler mix in yard,Operating,TiL,https://www.tilgroup.com/our-terminals/long-beach.html,TIL-US-TTI
+EQ00120,TERM0160,Quay crane,35,,Operating,TiL,https://www.tilgroup.com/our-terminals/pasir.html,TIL-SG-MPAT
+EQ00121,TERM0160,Yard crane,106,,Operating,TiL,https://www.tilgroup.com/our-terminals/pasir.html,TIL-SG-MPAT
+EQ00122,TERM0161,Quay crane,20,,Operating,TiL,https://tilgroup.com/our-terminals/king-abdullah.html,TIL-SA-NCT
+EQ00123,TERM0161,Yard crane,68,,Operating,TiL,https://tilgroup.com/our-terminals/king-abdullah.html,TIL-SA-NCT
+EQ00124,TERM0162,Quay crane,6,Legacy TiL key figure; current upgrade program is adding capability,Operating / upgrading,TiL,https://www.tilgroup.com/our-terminals/navegantes.html,TIL-BR-PORTO
+EQ00125,TERM0162,Yard crane,5,Legacy TiL key figure,Operating / upgrading,TiL,https://www.tilgroup.com/our-terminals/navegantes.html,TIL-BR-PORTO
+EQ00126,TERM0163,Quay crane,20,8 Malaccamax-capable STS cited by TiL,Operating,TiL,https://www.tilgroup.com/our-terminals/valencia.html,TIL-ES-VAL
+EQ00127,TERM0163,Yard crane,28,77% yard-crane fleet electrified per TiL,Operating,TiL,https://www.tilgroup.com/our-terminals/valencia.html,TIL-ES-VAL
+EQ00128,TERM0163,STS crane,22,Future automated terminal target,Planned,TiL,https://www.tilgroup.com/our-terminals/valencia.html,TIL-ES-VAL
+EQ00129,TERM0163,Automated stacking crane,50,Future automated terminal target,Planned,TiL,https://www.tilgroup.com/our-terminals/valencia.html,TIL-ES-VAL
+EQ00130,TERM0163,AGV,160,Future automated terminal target,Planned,TiL,https://www.tilgroup.com/our-terminals/valencia.html,TIL-ES-VAL
+EQ00131,TERM0164,Quay crane,11,Expansion target 20,Operating,TiL,https://tilgroup.com/our-terminals/havre.html,TIL-FR-TN
+EQ00132,TERM0164,Yard crane,68,,Operating,TiL,https://tilgroup.com/our-terminals/havre.html,TIL-FR-TN
+EQ00133,TERM0165,Quay crane,9,,Operating,TiL,https://www.tilgroup.com/our-terminals/lome.html,TIL-TG-LCT
+EQ00134,TERM0165,Yard crane,27,,Operating,TiL,https://www.tilgroup.com/our-terminals/lome.html,TIL-TG-LCT
+EQ00135,TERM0176,Quay crane,4,65m outreach / 22 rows across,Operating,TiL,https://www.adaniports.com/Ports-and-Terminals/Ennore-Terminal,TIL-IN-ENN
+EQ00136,TERM0176,e-RTG,12,Electric RTGs,Operating,TiL,https://www.adaniports.com/Ports-and-Terminals/Ennore-Terminal,TIL-IN-ENN
+EQ00137,TERM0191,STS crane,8,Large automated/electrified gateway cranes,Operating,APM Terminals,https://www2.apmterminals.com/en/lazaro-cardenas/about/our-terminal,APM-LÁZARO-CÁRDENAS-TERMINAL
+EQ00138,TERM0192,STS crane,2,Fully electric terminal,Operating,APM Terminals,https://www2.apmterminals.com/en/suape/about/our-terminal,APM-SUAPE-TERMINAL
+EQ00139,TERM0192,eRTG,7,Remote-operation capable,Operating,APM Terminals,https://www2.apmterminals.com/en/suape/about/our-terminal,APM-SUAPE-TERMINAL
+EQ00140,TERM0192,Electric terminal tractor,14,,Operating,APM Terminals,https://www2.apmterminals.com/en/suape/about/our-terminal,APM-SUAPE-TERMINAL
+EQ00141,TERM0192,Electric reach stacker,2,,Operating,APM Terminals,https://www2.apmterminals.com/en/suape/about/our-terminal,APM-SUAPE-TERMINAL
+EQ00142,TERM0192,Electric empty handler,1,,Operating,APM Terminals,https://www2.apmterminals.com/en/suape/about/our-terminal,APM-SUAPE-TERMINAL
+EQ00143,TERM0195,Electric STS crane,6,Post-Panamax,Operating,APM Terminals,https://www2.apmterminals.com/en/cit/about/our-terminal,APM-ABIDJAN-CÔTE-D-IVOIRE-TERMINAL-CIT
+EQ00144,TERM0195,Electric RTG,13,,Operating,APM Terminals,https://www2.apmterminals.com/en/cit/about/our-terminal,APM-ABIDJAN-CÔTE-D-IVOIRE-TERMINAL-CIT
+EQ00145,TERM0197,STS crane,18,,Operating,APM Terminals,https://www2.apmterminals.com/en/scct/about/our-terminal,APM-SUEZ-CANAL-CONTAINER-TERMINAL-SCCT
+EQ00146,TERM0197,RTG,60,,Operating,APM Terminals,https://www2.apmterminals.com/en/scct/about/our-terminal,APM-SUEZ-CANAL-CONTAINER-TERMINAL-SCCT
+EQ00147,TERM0199,STS crane,7,,Operating,APM Terminals,https://akamai.apmterminals.com/en/aqaba/about/our-terminal,APM-AQABA
+EQ00148,TERM0199,RTG,22,,Operating,APM Terminals,https://akamai.apmterminals.com/en/aqaba/about/our-terminal,APM-AQABA
+EQ00149,TERM0199,Reach stacker,9,,Operating,APM Terminals,https://akamai.apmterminals.com/en/aqaba/about/our-terminal,APM-AQABA
+EQ00150,TERM0199,Empty handler,12,,Operating,APM Terminals,https://akamai.apmterminals.com/en/aqaba/about/our-terminal,APM-AQABA
+EQ00151,TERM0199,Terminal truck,46,,Operating,APM Terminals,https://akamai.apmterminals.com/en/aqaba/about/our-terminal,APM-AQABA
+EQ00152,TERM0201,STS crane,20,Dual-trolley,Operating,APM Terminals,https://www2.apmterminals.com/en/medport-tangier/about/our-terminal,APM-MEDPORT-TANGIER
+EQ00153,TERM0201,ARMG,70,Automated rail-mounted gantry,Operating,APM Terminals,https://www2.apmterminals.com/en/medport-tangier/about/our-terminal,APM-MEDPORT-TANGIER
+EQ00154,TERM0201,Shuttle carrier,65,,Operating,APM Terminals,https://www2.apmterminals.com/en/medport-tangier/about/our-terminal,APM-MEDPORT-TANGIER
+EQ00155,TERM0203,RTG,27,,Operating,APM Terminals,https://www2.apmterminals.com/en/apapa/about/our-terminal,APM-APAPA
+EQ00156,TERM0203,Mobile harbour crane,13,,Operating,APM Terminals,https://www2.apmterminals.com/en/apapa/about/our-terminal,APM-APAPA
+EQ00157,TERM0203,Reach stacker,7,,Operating,APM Terminals,https://www2.apmterminals.com/en/apapa/about/our-terminal,APM-APAPA
+EQ00158,TERM0203,Empty handler,6,,Operating,APM Terminals,https://www2.apmterminals.com/en/apapa/about/our-terminal,APM-APAPA
+EQ00159,TERM0203,Terminal truck,65,,Operating,APM Terminals,https://www2.apmterminals.com/en/apapa/about/our-terminal,APM-APAPA
+EQ00160,TERM0204,RTG,20,,Operating,APM Terminals,https://www2.apmterminals.com/en/onne/about/our-terminal,APM-ONNE
+EQ00161,TERM0204,Mobile harbour crane,5,,Operating,APM Terminals,https://www2.apmterminals.com/en/onne/about/our-terminal,APM-ONNE
+EQ00162,TERM0204,Reach stacker,7,,Operating,APM Terminals,https://www2.apmterminals.com/en/onne/about/our-terminal,APM-ONNE
+EQ00163,TERM0204,Empty handler,6,,Operating,APM Terminals,https://www2.apmterminals.com/en/onne/about/our-terminal,APM-ONNE
+EQ00164,TERM0204,Terminal truck,37,,Operating,APM Terminals,https://www2.apmterminals.com/en/onne/about/our-terminal,APM-ONNE
+EQ00165,TERM0208,STS crane,15,Super-Panamax,Operating,APM Terminals,https://www2.apmterminals.com/en/shanghai/about/our-terminal,APM-SHANGHAI
+EQ00166,TERM0208,Additional quay crane,2,,Operating,APM Terminals,https://www2.apmterminals.com/en/shanghai/about/our-terminal,APM-SHANGHAI
+EQ00167,TERM0211,STS crane,11,Twin-lift; 6 new + 5 legacy,Operating,APM Terminals,https://www2.apmterminals.com/en/mumbai/about/our-terminal,APM-MUMBAI
+EQ00168,TERM0211,RTG,40,GPS-assisted,Operating,APM Terminals,https://www2.apmterminals.com/en/mumbai/about/our-terminal,APM-MUMBAI
+EQ00169,TERM0211,RMG,3,Rail mounted gantry,Operating,APM Terminals,https://www2.apmterminals.com/en/mumbai/about/our-terminal,APM-MUMBAI
+EQ00170,TERM0212,Post-Panamax crane,8,,Operating,APM Terminals,https://www2.apmterminals.com/en/pipavav/about/our-terminal,APM-PIPAVAV
+EQ00171,TERM0212,RTG,20,,Operating,APM Terminals,https://www2.apmterminals.com/en/pipavav/about/our-terminal,APM-PIPAVAV
+EQ00172,TERM0212,RMG,4,,Operating,APM Terminals,https://www2.apmterminals.com/en/pipavav/about/our-terminal,APM-PIPAVAV
+EQ00173,TERM0214,Super Post-Panamax STS,66,24 with 24-box outreach,Operating,APM Terminals,https://akamai.apmterminals.com/en/tanjung-pelepas/about/our-terminal,APM-TANJUNG-PELEPAS
+EQ00174,TERM0214,RTG,172,Electrified/automated steering support,Operating,APM Terminals,https://akamai.apmterminals.com/en/tanjung-pelepas/about/our-terminal,APM-TANJUNG-PELEPAS
+EQ00175,TERM0216,Super Post-Panamax STS,6,,Operating,APM Terminals,https://akamai.apmterminals.com/en/cai-mep/about/our-terminal,APM-CAI-MEP
+EQ00176,TERM0216,RTG,15,,Operating,APM Terminals,https://akamai.apmterminals.com/en/cai-mep/about/our-terminal,APM-CAI-MEP
+EQ00177,TERM0216,Reach stacker,3,,Operating,APM Terminals,https://akamai.apmterminals.com/en/cai-mep/about/our-terminal,APM-CAI-MEP
+EQ00178,TERM0216,Empty handler,2,,Operating,APM Terminals,https://akamai.apmterminals.com/en/cai-mep/about/our-terminal,APM-CAI-MEP
+EQ00179,TERM0233,STS crane,3,22-container outreach,Operating,APM Terminals,https://www2.apmterminals.com/en/pecem/about/our-terminal,APM-PECÉM
+EQ00180,TERM0233,Reach stacker,14,,Operating,APM Terminals,https://www2.apmterminals.com/en/pecem/about/our-terminal,APM-PECÉM
+EQ00181,TERM0235,Super Post-Panamax STS,6,,Operating,APM Terminals,https://www2.apmterminals.com/en/moin/about/our-terminal,APM-MOÍN
+EQ00182,TERM0235,eRTG,29,,Operating,APM Terminals,https://www2.apmterminals.com/en/moin/about/our-terminal,APM-MOÍN
+EQ00183,TERM0236,Super Post-Panamax STS,3,,Operating,APM Terminals,https://www2.apmterminals.com/en/puerto-quetzal/about/our-terminal,APM-PUERTO-QUETZAL
+EQ00184,TERM0238,Super Post-Panamax STS,4,,Operating,APM Terminals,https://www2.apmterminals.com/en/callao/about/our-terminal,APM-CALLAO
+EQ00185,TERM0238,Panamax STS,2,,Operating,APM Terminals,https://www2.apmterminals.com/en/callao/about/our-terminal,APM-CALLAO
+EQ00186,TERM0238,Mobile harbour crane,4,,Operating,APM Terminals,https://www2.apmterminals.com/en/callao/about/our-terminal,APM-CALLAO
+EQ00187,TERM0238,eRTG,12,,Operating,APM Terminals,https://www2.apmterminals.com/en/callao/about/our-terminal,APM-CALLAO
+EQ00188,TERM0238,RTG,2,Diesel,Operating,APM Terminals,https://www2.apmterminals.com/en/callao/about/our-terminal,APM-CALLAO
+EQ00189,TERM0239,STS crane,19,Tallest cranes in Port of Los Angeles,Operating,APM Terminals,https://www2.apmterminals.com/en/los-angeles/about/our-terminal,APM-LOS-ANGELES-CA
+EQ00190,TERM0155,eRTG,18,,Operating,APM Terminals,https://www2.apmterminals.com/en/miami/about/our-terminal,APM-MIAMI-FL
+EQ00191,TERM0240,Super Post-Panamax STS,6,23-container reach,Operating,APM Terminals,https://www2.apmterminals.com/en/mobile/about/our-terminal,APM-MOBILE-AL
+EQ00192,TERM0241,STS crane,14,,Operating,APM Terminals,https://www2.apmterminals.com/en/port-elizabeth/about/our-terminal,APM-ELIZABETH-NJ
