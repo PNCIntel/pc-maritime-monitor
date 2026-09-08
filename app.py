@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.17"
+APP_VERSION = "v1.18"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(
@@ -64,6 +64,11 @@ def load_csv(name):
 
 TABLES = {
     "companies": "companies.csv",
+    "relationships": "relationships.csv",
+    "entity_registry": "entity_registry.csv",
+    "corridors": "corridors.csv",
+    "system_nodes": "system_nodes.csv",
+    "system_links": "system_links.csv",
     "ports": "ports.csv",
     "terminals": "port_terminals.csv",
     "port_operator_coverage": "port_operator_coverage.csv",
@@ -223,6 +228,276 @@ def page_header(title, sub):
     st.markdown(f"<div class='pc-title'>{title}</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='pc-sub'>{sub}</div>", unsafe_allow_html=True)
 
+
+# ---------- Relationship graph / watch-area helpers ----------
+def _first_existing(row, names, default=""):
+    for name in names:
+        if name in row and str(row.get(name, "")).strip():
+            return str(row.get(name, "")).strip()
+    return default
+
+@st.cache_data(show_spinner=False)
+def build_entity_index():
+    """Return canonical label/type metadata for graph rendering."""
+    idx = {}
+    er = D.get("entity_registry", pd.DataFrame())
+    if not er.empty:
+        for _, r in er.iterrows():
+            eid = str(r.get("Entity ID", "")).strip()
+            if eid:
+                idx[eid] = {
+                    "label": str(r.get("Canonical Name", eid)).strip() or eid,
+                    "type": str(r.get("Entity Type", "Entity")).strip() or "Entity",
+                    "country": str(r.get("Country", "")).strip(),
+                }
+
+    specs = [
+        ("companies", "Company ID", ["Company", "Company Name"], "Company", ["HQ Country"]),
+        ("ports", "Port ID", ["Port / Facility", "Port"], "Port", ["Country"]),
+        ("terminals", "Terminal ID", ["Terminal / Facility"], "Terminal", ["Country"]),
+        ("vessels", "Vessel ID", ["Vessel Name"], "Vessel", ["Flag"]),
+        ("assets", "Asset ID", ["Asset", "Asset Name"], "Asset", ["Country"]),
+        ("rail_networks", "Rail Network ID", ["Rail Network / Corridor", "Rail Network", "Network / Corridor", "Name"], "Rail Network", ["Countries / Jurisdictions", "Country / Geography", "Country"]),
+        ("rail_nodes", "Rail Node ID", ["Node", "Rail Node"], "Rail Node", ["Country"]),
+        ("corridors", "Corridor ID", ["Corridor"], "Corridor", ["Country / Region"]),
+        ("ferry_systems", "System ID", ["System Name", "Ferry System", "System"], "Ferry System", ["Country / Jurisdiction", "Country"]),
+    ]
+    for key, idc, names, etype, countries in specs:
+        df = D.get(key, pd.DataFrame())
+        if df.empty or idc not in df.columns:
+            continue
+        for _, r in df.iterrows():
+            eid = str(r.get(idc, "")).strip()
+            if not eid:
+                continue
+            label = _first_existing(r, names, eid)
+            country = _first_existing(r, countries, "")
+            prior = idx.get(eid, {})
+            idx[eid] = {
+                "label": prior.get("label") or label,
+                "type": prior.get("type") or etype,
+                "country": prior.get("country") or country,
+            }
+    return idx
+
+@st.cache_data(show_spinner=False)
+def build_graph_edges():
+    """Normalize relationship-bearing tables into one graph edge list."""
+    edges = []
+    def add(src, dst, rel, category, source=""):
+        src, dst = str(src).strip(), str(dst).strip()
+        if src and dst and src != dst:
+            edges.append({"source":src, "target":dst, "relationship":str(rel).strip() or "related to", "category":category, "source_table":source})
+
+    rel = D.get("relationships", pd.DataFrame())
+    if not rel.empty:
+        for _, r in rel.iterrows():
+            add(r.get("Source Entity",""), r.get("Target Entity",""), r.get("Relationship","related to"), "Corporate", "relationships")
+
+    vr = D.get("vessel_relationships", pd.DataFrame())
+    if not vr.empty:
+        for _, r in vr.iterrows():
+            add(r.get("Company ID",""), r.get("Vessel ID",""), r.get("Relationship Type", r.get("Relationship","vessel relationship")), "Vessels", "vessel_relationships")
+
+    vessels = D.get("vessels", pd.DataFrame())
+    if not vessels.empty:
+        for _, r in vessels.iterrows():
+            vid = r.get("Vessel ID","")
+            add(r.get("Owner Company ID",""), vid, "owns", "Vessels", "vessels")
+            add(r.get("Operator Company ID",""), vid, "operates", "Vessels", "vessels")
+
+    terms = D.get("terminals", pd.DataFrame())
+    if not terms.empty:
+        for _, r in terms.iterrows():
+            tid = r.get("Terminal ID","")
+            add(r.get("Primary Operator Company ID",""), tid, "operates", "Ports & Terminals", "port_terminals")
+            add(r.get("Port ID",""), tid, "contains", "Ports & Terminals", "port_terminals")
+
+    ports = D.get("ports", pd.DataFrame())
+    if not ports.empty:
+        for _, r in ports.iterrows():
+            add(r.get("Operator Company ID",""), r.get("Port ID",""), "operates", "Ports & Terminals", "ports")
+
+    own = D.get("ownership", pd.DataFrame())
+    if not own.empty:
+        for _, r in own.iterrows():
+            add(r.get("Company ID",""), r.get("Terminal ID",""), r.get("Relationship","owns / controls"), "Ownership", "port_ownership")
+
+    rr = D.get("rail_relationships", pd.DataFrame())
+    if not rr.empty:
+        for _, r in rr.iterrows():
+            add(r.get("Company ID",""), r.get("Rail Network ID",""), r.get("Relationship Type","rail relationship"), "Rail", "rail_relationships")
+
+    rn = D.get("rail_nodes", pd.DataFrame())
+    if not rn.empty:
+        for _, r in rn.iterrows():
+            nid = r.get("Rail Node ID","")
+            add(r.get("Primary Company ID",""), nid, "operates / controls", "Rail", "rail_nodes")
+            add(nid, r.get("Linked Port ID",""), "connects to port", "Rail", "rail_nodes")
+            add(nid, r.get("Linked Terminal ID",""), "connects to terminal", "Rail", "rail_nodes")
+
+    rc = D.get("rail_connections", pd.DataFrame())
+    if not rc.empty:
+        for _, r in rc.iterrows():
+            add(r.get("Rail Node ID",""), r.get("Connected Entity ID",""), "rail connection", "Rail", "rail_connections")
+
+    ic = D.get("connections", pd.DataFrame())
+    if not ic.empty:
+        for _, r in ic.iterrows():
+            add(r.get("Source Asset ID",""), r.get("Target Entity / Asset ID",""), r.get("Relationship","connected to"), "Infrastructure", "infrastructure_connections")
+            cid = r.get("Corridor ID","")
+            if cid:
+                add(cid, r.get("Source Asset ID",""), "includes / serves", "Corridors", "infrastructure_connections")
+                add(cid, r.get("Target Entity / Asset ID",""), "includes / serves", "Corridors", "infrastructure_connections")
+
+    al = D.get("aircraft_relationships", pd.DataFrame())
+    if not al.empty:
+        # Aircraft relationship schemas vary; resolve common identifiers conservatively.
+        for _, r in al.iterrows():
+            aid = _first_existing(r, ["Aircraft ID","Registration","Aircraft Registry ID"], "")
+            cid = _first_existing(r, ["Company ID","Operator Company ID","Network Customer Company ID"], "")
+            add(cid, aid, _first_existing(r,["Relationship Type","Relationship"],"aircraft relationship"), "Aviation", "aircraft_relationships")
+
+    df = pd.DataFrame(edges)
+    if df.empty:
+        return df
+    return df.drop_duplicates(subset=["source","target","relationship","category"]).reset_index(drop=True)
+
+ENTITY_INDEX = build_entity_index()
+GRAPH_EDGES = build_graph_edges()
+
+def entity_label(entity_id):
+    meta = ENTITY_INDEX.get(str(entity_id), {})
+    return meta.get("label", str(entity_id))
+
+def entity_type(entity_id):
+    return ENTITY_INDEX.get(str(entity_id), {}).get("type", "Entity")
+
+def graph_subgraph(root_id, depth=1, categories=None, max_nodes=60):
+    if GRAPH_EDGES.empty or not root_id:
+        return pd.DataFrame(), set()
+    allowed = set(categories or GRAPH_EDGES["category"].unique().tolist())
+    edges = GRAPH_EDGES[GRAPH_EDGES["category"].isin(allowed)].copy()
+    visited = {str(root_id)}
+    frontier = {str(root_id)}
+    selected = []
+    for _ in range(max(1, int(depth))):
+        if not frontier or len(visited) >= max_nodes:
+            break
+        hit = edges[edges["source"].isin(frontier) | edges["target"].isin(frontier)]
+        if hit.empty:
+            break
+        selected.append(hit)
+        neighbors = set(hit["source"]).union(set(hit["target"])) - visited
+        room = max_nodes - len(visited)
+        neighbors = set(list(sorted(neighbors))[:max(0, room)])
+        visited |= neighbors
+        frontier = neighbors
+    out = pd.concat(selected, ignore_index=True).drop_duplicates() if selected else pd.DataFrame(columns=GRAPH_EDGES.columns)
+    out = out[out["source"].isin(visited) & out["target"].isin(visited)]
+    return out, visited
+
+def dot_escape(value):
+    return str(value).replace("\\", "\\\\").replace('"','\\"').replace("\n", " ")
+
+def graph_dot(edges, root_id=None, title="Relationship graph"):
+    if edges.empty:
+        return ""
+    nodes = sorted(set(edges["source"]).union(set(edges["target"])))
+    type_style = {
+        "Company": ("box", "#18314f"),
+        "Port": ("component", "#17433b"),
+        "Terminal": ("folder", "#234b3d"),
+        "Vessel": ("ellipse", "#243b63"),
+        "Rail Network": ("hexagon", "#4a3920"),
+        "Rail Node": ("diamond", "#4a3920"),
+        "Corridor": ("octagon", "#4a2d46"),
+        "Asset": ("box3d", "#374151"),
+        "Entity": ("box", "#374151"),
+    }
+    lines = [
+        "digraph G {",
+        'graph [bgcolor="transparent", rankdir="LR", pad="0.35", nodesep="0.45", ranksep="0.75", splines="spline", overlap="false"];',
+        'node [fontname="Arial", fontsize="10", fontcolor="#eef4fb", style="rounded,filled", color="#57708d", penwidth="1.1", margin="0.12,0.08"];',
+        'edge [fontname="Arial", fontsize="8", fontcolor="#aebed0", color="#70859c", arrowsize="0.65", penwidth="1.0"];',
+    ]
+    for nid in nodes:
+        typ = entity_type(nid)
+        shape, fill = type_style.get(typ, type_style["Entity"])
+        label = entity_label(nid)
+        if len(label) > 42:
+            label = label[:39] + "…"
+        pen = "2.3" if str(nid) == str(root_id) else "1.1"
+        color = "#c8a45b" if str(nid) == str(root_id) else "#57708d"
+        lines.append(f'"{dot_escape(nid)}" [label="{dot_escape(label)}", shape="{shape}", fillcolor="{fill}", color="{color}", penwidth="{pen}"];')
+    for _, r in edges.iterrows():
+        rel = str(r.get("relationship","related to")).replace("_"," ").lower()
+        if len(rel) > 28:
+            rel = rel[:25] + "…"
+        lines.append(f'"{dot_escape(r["source"])}" -> "{dot_escape(r["target"])}" [label="{dot_escape(rel)}"];')
+    lines.append("}")
+    return "\n".join(lines)
+
+def render_relationship_graph(root_id, key_prefix="graph", default_depth=1, max_nodes_default=55):
+    if not root_id:
+        st.info("No canonical entity ID is available for this record.")
+        return
+    cats = sorted(GRAPH_EDGES["category"].unique().tolist()) if not GRAPH_EDGES.empty else []
+    a,b,c = st.columns([2,1,1])
+    with a:
+        selected_cats = st.multiselect("Relationship layers", cats, default=cats, key=f"{key_prefix}_cats")
+    with b:
+        depth = st.selectbox("Graph depth", [1,2,3], index=max(0,default_depth-1), key=f"{key_prefix}_depth")
+    with c:
+        max_nodes = st.selectbox("Max nodes", [25,40,55,75,100], index=[25,40,55,75,100].index(max_nodes_default) if max_nodes_default in [25,40,55,75,100] else 2, key=f"{key_prefix}_max")
+    edges, nodes = graph_subgraph(root_id, depth=depth, categories=selected_cats, max_nodes=max_nodes)
+    if edges.empty:
+        st.info("No graph relationships are currently linked to this entity.")
+        return
+    st.caption(f"{len(nodes)} nodes • {len(edges)} relationship edges • centred on {entity_label(root_id)}")
+    st.graphviz_chart(graph_dot(edges, root_id), use_container_width=True)
+    with st.expander("Relationship evidence"):
+        evidence = edges.copy()
+        evidence.insert(0,"Source Name", evidence["source"].map(entity_label))
+        evidence.insert(2,"Target Name", evidence["target"].map(entity_label))
+        safe_display(evidence, 300)
+
+def watch_area_bundle(corridor_id):
+    corridors = D.get("corridors", pd.DataFrame())
+    if corridors.empty or "Corridor ID" not in corridors.columns:
+        return {}, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    hit = corridors[corridors["Corridor ID"] == corridor_id]
+    if hit.empty:
+        return {}, pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    row = hit.iloc[0].to_dict()
+    name = str(row.get("Corridor", ""))
+    geo = str(row.get("Country / Region", ""))
+    # For a country-defined chokepoint, use canonical Country columns to avoid substring errors (e.g. Panama vs Panamax).
+    ports = D.get("ports", pd.DataFrame()).copy()
+    if not ports.empty and geo and "Country" in ports.columns and "/" not in geo:
+        country_terms = [x.strip() for x in re.split(r"[,;]", geo) if x.strip()]
+        pmask = pd.Series(False, index=ports.index)
+        for term in country_terms:
+            pmask |= ports["Country"].str.fullmatch(re.escape(term), case=False, na=False)
+        p_hits = ports[pmask]
+    else:
+        p_hits = text_search(ports, name) if not ports.empty else pd.DataFrame()
+    terminals = D.get("terminals", pd.DataFrame())
+    t_hits = pd.DataFrame()
+    if not p_hits.empty and not terminals.empty and "Port ID" in p_hits.columns and "Port ID" in terminals.columns:
+        t_hits = terminals[terminals["Port ID"].isin(p_hits["Port ID"].tolist())]
+    connections = D.get("connections", pd.DataFrame())
+    c_hits = connections[connections.get("Corridor ID", pd.Series(dtype=str)) == corridor_id] if not connections.empty and "Corridor ID" in connections.columns else pd.DataFrame()
+    # Event/news evidence uses corridor name plus geography; this is intentionally evidence-bound.
+    events = D.get("event_observations", pd.DataFrame())
+    news = D.get("news", pd.DataFrame())
+    e_hits = text_search(events, name) if not events.empty else pd.DataFrame()
+    n_hits = text_search(news, name) if not news.empty else pd.DataFrame()
+    if geo:
+        if e_hits.empty and not events.empty: e_hits = text_search(events, geo)
+        if n_hits.empty and not news.empty: n_hits = text_search(news, geo)
+    return row, p_hits, t_hits, c_hits, pd.concat([e_hits.assign(_kind="Event"), n_hits.assign(_kind="News")], ignore_index=True, sort=False)
+
 # ---------- Sidebar ----------
 st.sidebar.markdown("### P&C Trade System")
 st.sidebar.caption("Intelligence Model v1.17")
@@ -241,11 +516,13 @@ page = st.sidebar.radio(
         "Rail Networks",
         "Ferry Systems",
         "Great Lakes",
+        "Entity Explorer",
+        "Watch Areas",
         "Ask P&C",
     ],
 )
 st.sidebar.markdown("---")
-st.sidebar.caption("Ports • rail • fleets • entity-enriched news • monitoring • transactions")
+st.sidebar.caption("Trade infrastructure • fleets • rail • corridors • entity graphs • watch areas • intelligence")
 
 # ---------- Pages ----------
 if page == "Operating Picture":
@@ -301,14 +578,16 @@ elif page == "Companies":
         ("Scale / network","Scale / Network Notes"),
     ]), 3)
 
-    tabs = st.tabs(["Relationships","Assets","Fleet","Transactions","Events","News"])
+    tabs = st.tabs(["Relationship Graph","Relationships","Assets","Fleet","Transactions","Events","News"])
     with tabs[0]:
+        render_relationship_graph(cid, key_prefix=f"company_{cid}", default_depth=2, max_nodes_default=55)
+    with tabs[1]:
         rel = D["relationships"]
         if not rel.empty:
             mask = (rel.get("Source Entity","") == cid) | (rel.get("Target Entity","") == cid)
             safe_display(rel[mask])
         else: st.info("No relationship table.")
-    with tabs[1]:
+    with tabs[2]:
         assets = D["assets"]
         safe_display(assets[assets.get("Company ID","") == cid] if not assets.empty else assets)
         ptc = D["terminals"]
@@ -337,7 +616,7 @@ elif page == "Companies":
             if not linked_nodes.empty:
                 st.markdown("#### Rail terminals / nodes")
                 safe_display(linked_nodes)
-    with tabs[2]:
+    with tabs[3]:
         vessel_rel = D["vessel_relationships"]
         vessels = D["vessels"]
         direct = vessels[
@@ -373,7 +652,7 @@ elif page == "Companies":
             if not rv.empty:
                 st.markdown("#### Rail fleet / rolling stock")
                 safe_display(rv)
-    with tabs[3]:
+    with tabs[4]:
         deals = D["infra_deals"]
         tl = D["transaction_links"]
         if not deals.empty:
@@ -383,9 +662,9 @@ elif page == "Companies":
                 d_ids = tl[tl["Entity / Asset ID"] == cid]["Deal ID"].unique().tolist()
                 linked_deals = pd.concat([linked_deals, deals[deals["Deal ID"].isin(d_ids)]]).drop_duplicates()
             safe_display(linked_deals)
-    with tabs[4]:
-        safe_display(entity_events(cid))
     with tabs[5]:
+        safe_display(entity_events(cid))
+    with tabs[6]:
         safe_display(entity_news(cid))
 
 elif page == "Ports & Terminals":
@@ -416,6 +695,8 @@ elif page == "Ports & Terminals":
         ("Country","Country"),("Facility type","Facility Type"),("Operator","Operator"),
         ("Key role","Key Role"),("Coverage","Coverage Note"),
     ]), 3)
+    with st.expander("System relationship graph", expanded=False):
+        render_relationship_graph(pid, key_prefix=f"port_{pid}", default_depth=2, max_nodes_default=40)
 
     tabs = st.tabs(["Terminals","Berths & Equipment","Ownership","Rail","Projects & Constraints","Events","News"])
     terminals = D["terminals"]
@@ -506,6 +787,8 @@ elif page == "Vessels":
             ("Primary service","Primary Service"),("Status","Status"),
             ("Registered owner","Registered Owner (Legal)"),("Manager","Technical / ISM Manager"),
         ]), 3)
+        with st.expander("Ownership / operating network", expanded=False):
+            render_relationship_graph(vid, key_prefix=f"vessel_{vid}", default_depth=2, max_nodes_default=40)
         tabs = st.tabs(["Relationships","Events","News"])
         with tabs[0]:
             vr = D["vessel_relationships"]
@@ -624,6 +907,13 @@ elif page == "Rail Networks":
     with b: metric_card("Networks", f"{len(D['rail_networks']):,}", "named corridors / systems")
     with c: metric_card("Physical nodes", f"{len(D['rail_nodes']):,}", "ports, dry ports, borders, hubs")
     with d: metric_card("Movement links", f"{len(D['rail_links']):,}", "origin → destination edges")
+    if not D["rail_networks"].empty and "Rail Network ID" in D["rail_networks"].columns:
+        rn_name = col(D["rail_networks"], ["Network / Corridor","Rail Network / Corridor","Rail Network","Name"])
+        if rn_name:
+            with st.expander("Rail network relationship graph", expanded=False):
+                rlabels = {f"{r[rn_name]} — {r['Rail Network ID']}":r['Rail Network ID'] for _,r in D["rail_networks"].iterrows()}
+                rpick = st.selectbox("Network / corridor", sorted(rlabels.keys()), key="rail_graph_pick")
+                render_relationship_graph(rlabels[rpick], key_prefix=f"rail_{rlabels[rpick]}", default_depth=2, max_nodes_default=55)
     tabs=st.tabs(["Networks","Nodes","Links","Operators","Fleet","Port / asset connections","News"])
     with tabs[0]:
         q=st.text_input("Search rail network / corridor",key="railnetq")
@@ -664,6 +954,111 @@ elif page == "Great Lakes":
     with tabs[2]: safe_display(D["great_lakes_corridors"],300)
     with tabs[3]: safe_display(D["great_lakes_cruise"],300)
     with tabs[4]: safe_display(D["great_lakes_disruptions"],300)
+
+elif page == "Entity Explorer":
+    page_header("Entity Explorer", "Visualize corporate, asset, fleet, port, rail and corridor relationships from the canonical model.")
+    if not ENTITY_INDEX:
+        st.info("No canonical entity registry is available.")
+    else:
+        type_options = sorted(set(v.get("type","Entity") for v in ENTITY_INDEX.values()))
+        c1,c2 = st.columns([1,2])
+        with c1:
+            typ = st.selectbox("Entity type", ["All"] + type_options)
+        candidates = [(eid,meta) for eid,meta in ENTITY_INDEX.items() if typ == "All" or meta.get("type") == typ]
+        labels = {f'{meta.get("label",eid)} [{meta.get("type","Entity")}] — {eid}':eid for eid,meta in candidates}
+        with c2:
+            query = st.text_input("Filter entities", placeholder="e.g. MSC, Tbilisi, Panama Canal, Etihad Rail")
+        if query:
+            ql=query.lower()
+            labels={k:v for k,v in labels.items() if ql in k.lower()}
+        if not labels:
+            st.info("No matching canonical entity.")
+        else:
+            pick = st.selectbox("Focus entity", sorted(labels.keys()))
+            root = labels[pick]
+            meta = ENTITY_INDEX.get(root,{})
+            render_pairs([
+                ("Canonical entity", meta.get("label",root)),
+                ("Entity type", meta.get("type","Entity")),
+                ("Country / geography", meta.get("country","")),
+                ("Canonical ID", root),
+            ], 4)
+            st.markdown("### Relationship graph")
+            render_relationship_graph(root, key_prefix=f"entity_{root}", default_depth=2, max_nodes_default=55)
+            a,b = st.columns(2)
+            with a:
+                st.markdown("### Linked events")
+                safe_display(entity_events(root), 100)
+            with b:
+                st.markdown("### Linked news")
+                safe_display(entity_news(root), 100)
+
+elif page == "Watch Areas":
+    page_header("Watch Areas", "Operational watch zones combine chokepoints, gateway ports, terminals, companies, corridors and current intelligence evidence.")
+    corridors = D.get("corridors", pd.DataFrame())
+    if corridors.empty:
+        st.info("No corridor registry is available.")
+    else:
+        namec = col(corridors,["Corridor"])
+        options = sorted([x for x in corridors[namec].unique() if x]) if namec else []
+        chosen = st.selectbox("Watch area / corridor", options)
+        crow = corridors[corridors[namec] == chosen].iloc[0]
+        cid = crow.get("Corridor ID","")
+        row, ports_w, terms_w, connections_w, evidence_w = watch_area_bundle(cid)
+        render_pairs([
+            ("Type", row.get("Type","")),
+            ("Geography", row.get("Country / Region","")),
+            ("Connects", row.get("Connects","")),
+            ("Primary traffic", row.get("Primary Traffic","")),
+            ("Status", row.get("Status","")),
+            ("Strategic note", row.get("Strategic Note","")),
+        ], 3)
+        # Build a watch-area graph from the corridor plus discovered gateway assets.
+        watch_edges = []
+        if cid:
+            if not ports_w.empty and "Port ID" in ports_w.columns:
+                for _,r in ports_w.iterrows():
+                    watch_edges.append({"source":cid,"target":r.get("Port ID",""),"relationship":"gateway / watch-area port","category":"Watch Area","source_table":"ports"})
+            if not terms_w.empty:
+                for _,r in terms_w.iterrows():
+                    watch_edges.append({"source":r.get("Port ID",""),"target":r.get("Terminal ID",""),"relationship":"contains","category":"Watch Area","source_table":"port_terminals"})
+                    if r.get("Primary Operator Company ID",""):
+                        watch_edges.append({"source":r.get("Primary Operator Company ID",""),"target":r.get("Terminal ID",""),"relationship":"operates","category":"Watch Area","source_table":"port_terminals"})
+            if not connections_w.empty:
+                for _,r in connections_w.iterrows():
+                    if r.get("Source Asset ID","") and r.get("Target Entity / Asset ID",""):
+                        watch_edges.append({"source":r.get("Source Asset ID",""),"target":r.get("Target Entity / Asset ID",""),"relationship":r.get("Relationship","connected to"),"category":"Watch Area","source_table":"infrastructure_connections"})
+        wedge = pd.DataFrame(watch_edges)
+        tabs = st.tabs(["System View","Gateway Ports & Terminals","Connections","Intelligence Evidence","What to Monitor"])
+        with tabs[0]:
+            if wedge.empty:
+                # Fall back to canonical graph relationships around the corridor.
+                gedges,_ = graph_subgraph(cid, depth=2, categories=None, max_nodes=55)
+                wedge = gedges
+            if wedge.empty:
+                st.info("The watch area exists in the corridor registry, but its asset links have not yet been fully populated.")
+            else:
+                st.graphviz_chart(graph_dot(wedge, cid), use_container_width=True)
+                st.caption("The system view is assembled from canonical corridor, port, terminal, company and infrastructure relationships already in the model.")
+        with tabs[1]:
+            st.markdown("#### Gateway ports")
+            safe_display(ports_w, 200)
+            st.markdown("#### Terminals")
+            safe_display(terms_w, 300)
+        with tabs[2]:
+            safe_display(connections_w, 300)
+        with tabs[3]:
+            if evidence_w.empty:
+                st.info("No corridor-specific event/news evidence is currently linked or text-matched in the local model.")
+            else:
+                safe_display(evidence_w, 300)
+        with tabs[4]:
+            st.markdown("""
+            **Operational indicators:** chokepoint restrictions, draft/slot changes, closures, congestion, queues, lock/bridge outages and navigation warnings.  
+            **Gateway indicators:** berth/crane outages, terminal congestion, labour action, customs delays, landside access and intermodal disruption.  
+            **Security indicators:** attacks, sabotage, cyber events, protests, sanctions/enforcement activity and military restrictions.  
+            **Network indicators:** rail/road outages, alternate-gateway use, rerouting, carrier schedule changes and material changes in tradeability.
+            """)
 
 elif page == "Ask P&C":
     page_header("Ask P&C", "Local evidence search across the normalized model. It works without an external AI API.")
