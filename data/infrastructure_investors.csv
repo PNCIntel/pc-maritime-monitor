@@ -1,4 +1,9 @@
-﻿Investor ID,Company ID,Investor / Platform,Investor Type,Parent / Manager,HQ Country,Core Strategies,Port / Terminal Exposure,Logistics Real Estate Exposure,Economic Zone / Inland Exposure,Current Scale / Notes,Canonical Status,Research Priority,Source ID,Verified As Of
+﻿Infrastructure & Logistics Capital Universe,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,
+"Scope includes direct port infrastructure investors, infrastructure fund managers, logistics real-estate owners/managers, sovereign and pension capital, and investment platforms whose assets influence ports, free zones, dry ports, inland hubs, warehousing or trade corridors.",,,,,,,,,,,,,,
+Total Investors,Canonical,Research Universe,Deals Seeded,Holdings Seeded,Economic Zones,Dry / Inland Hubs,Verified As Of,,,,,,,
+28,14,14,16,14,4,5,2026-09-07,,,,,,,
+Investor ID,Company ID,Investor / Platform,Investor Type,Parent / Manager,HQ Country,Core Strategies,Port / Terminal Exposure,Logistics Real Estate Exposure,Economic Zone / Inland Exposure,Current Scale / Notes,Canonical Status,Research Priority,Source ID,Verified As Of
 INVESTOR_0001,COMP_BROOKFIELD_INFRA,Brookfield Infrastructure Partners,Listed infrastructure investor/operator,Brookfield Asset Management,Bermuda / Canada,Transport; utilities; midstream; data,PD Ports / UK port operation,Global intermodal/logistics exposure,Rail / logistics infrastructure,25% retained UK port interest after 2025 sell-down,Canonical,High,SRC_0255,2026-09-07
 INVESTOR_0002,COMP_KKR,KKR,Alternative asset manager,,United States,Infrastructure; real estate; private equity; credit,Monitor direct port bids / infrastructure transactions,Mirastar European logistics platform,Transport-linked real estate,July 2026 UK logistics portfolio acquisition,Canonical,High,SRC_0263,2026-09-07
 INVESTOR_0003,COMP_STONEPEAK,Stonepeak,Infrastructure / real-assets investor,,United States,Transport & logistics; real estate; digital; energy,United Ports; GeelongPort,Rail-served logistics real estate,Transport-linked real assets,Approx. $93bn AUM in Aug 2026 source,Canonical,High,SRC_0285,2026-09-07

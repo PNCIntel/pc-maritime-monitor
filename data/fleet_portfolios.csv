@@ -48,3 +48,10 @@ FLEET_0046,COMP_AMAZON_FREIGHT,Intermodal,Intermodal containers,"24,000+","24,00
 FLEET_0047,COMP_AMAZON_FREIGHT,Road freight ecosystem,Vetted carriers,"50,000+","50,000+ carriers",Carrier network; not Amazon-owned fleet.,SRC_0303,2026-09-07
 FLEET_0048,COMP_SUN_COUNTRY,Air cargo,Amazon-dedicated freighters,22,22 Boeing 737-800 cargo aircraft,Aircraft subleased directly from Amazon; Sun Country operates under ATSA.,SRC_0307,2026-09-07
 FLEET_0049,COMP_ARAMEX,Contract logistics,Managed warehouse space,"800,000 sqm",60+ facilities in 29 countries,Physical warehousing network; separate from express/freight shipment volume.,SRC_0310,2026-09-07
+FLEET_0050,COMP_BC_FERRIES,Ferry / Ro-Pax,Current public fleet,39,39 ferries,All 39 current public fleet entries canonicalized to individual Vessels in v1.14.,SRC_0319,2026-09-08
+FLEET_0051,COMP_WSF,Ferry / Ro-Pax,Current public fleet,21,21 auto-passenger ferries,All 21 WSF ferries canonicalized to individual Vessels in v1.14.,SRC_0322,2026-09-08
+FLEET_0052,COMP_AMAZON_AIR,Air cargo network,Network aircraft,100+,100+ official network; 97 tracked identity rows captured,Network/customer relationship is separated from legal aircraft operator.,SRC_0325,2026-09-08
+FLEET_0053,COMP_CARGOLUX,Air cargo,Group freighters,30,30 x Boeing 747 freighters,26 Cargolux + 4 Cargolux Italia identity rows captured.,SRC_0327,2026-09-08
+FLEET_0054,COMP_MAERSK_AIR,Air cargo,Tracked freighters,20,18 x Boeing 767 + 2 x Boeing 777F,Registration-level identity layer captured from current tracker snapshot.,SRC_0329,2026-09-08
+FLEET_0055,COMP_MSC_AIR_CARGO,Air cargo,Freighters,7,7 x Boeing 777F,Seven current MSC Air Cargo aircraft mapped at registration level.,SRC_0333,2026-09-08
+FLEET_0056,COMP_UPS_AIRLINES,Air cargo,Owned / operated aircraft,274,274 owned/operated + 213 charter/lease aircraft operated by others,Official filing denominator; tail-level identity build remains separate.,SRC_0336,2026-09-08

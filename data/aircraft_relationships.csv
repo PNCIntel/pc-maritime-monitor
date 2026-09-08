@@ -1,0 +1,257 @@
+﻿Aircraft Relationship ID,Aircraft ID,Registration,Company ID,Relationship Type,Effective From,Effective To,Confidence,Source ID,Notes
+AREL_000001,AIRFRAME_00001,N1013A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000002,AIRFRAME_00002,N1049A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000003,AIRFRAME_00003,N1093A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000004,AIRFRAME_00004,N1181A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000005,AIRFRAME_00005,N1229A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000006,AIRFRAME_00006,N1321A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000007,AIRFRAME_00007,N1327A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000008,AIRFRAME_00008,N1361A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000009,AIRFRAME_00009,N1373A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000010,AIRFRAME_00010,N1381A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000011,AIRFRAME_00011,N1409A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000012,AIRFRAME_00012,N1427A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000013,AIRFRAME_00013,N1439A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000014,AIRFRAME_00014,N1487A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000015,AIRFRAME_00015,N1489A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000016,AIRFRAME_00016,N1499A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000017,AIRFRAME_00017,N1511A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000018,AIRFRAME_00018,N1619A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000019,AIRFRAME_00019,N1709A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000020,AIRFRAME_00020,N1997A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000021,AIRFRAME_00021,N227AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000022,AIRFRAME_00022,N229AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000023,AIRFRAME_00023,N233AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000024,AIRFRAME_00024,N239AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000025,AIRFRAME_00025,N241AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000026,AIRFRAME_00026,N251AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000027,AIRFRAME_00027,N257AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000028,AIRFRAME_00028,N307AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000029,AIRFRAME_00029,N311AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000030,AIRFRAME_00030,N313AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000031,AIRFRAME_00031,N317AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000032,AIRFRAME_00032,N331AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000033,AIRFRAME_00033,N337AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000034,AIRFRAME_00034,N347AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000035,AIRFRAME_00035,N353AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000036,AIRFRAME_00036,N359AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000037,AIRFRAME_00037,N367AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000038,AIRFRAME_00038,N379AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000039,AIRFRAME_00039,N389AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000040,AIRFRAME_00040,N397AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000041,AIRFRAME_00041,N409AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000042,AIRFRAME_00042,N419AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000043,AIRFRAME_00043,N431AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000044,AIRFRAME_00044,N433AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000045,AIRFRAME_00045,N443AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000046,AIRFRAME_00046,N449AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000047,AIRFRAME_00047,N457AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000048,AIRFRAME_00048,N479AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000049,AIRFRAME_00049,N491AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000050,AIRFRAME_00050,N499AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000051,AIRFRAME_00051,N503AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000052,AIRFRAME_00052,N569AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000053,AIRFRAME_00053,N571AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000054,AIRFRAME_00054,N607AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000055,AIRFRAME_00055,N613AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000056,AIRFRAME_00056,N617AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000057,AIRFRAME_00057,N619AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000058,AIRFRAME_00058,N641AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000059,AIRFRAME_00059,N643AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000060,AIRFRAME_00060,N661AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000061,AIRFRAME_00061,N673AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000062,AIRFRAME_00062,N683AZ,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000063,AIRFRAME_00063,N5113A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000064,AIRFRAME_00063,N5113A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000065,AIRFRAME_00064,N5147A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000066,AIRFRAME_00064,N5147A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000067,AIRFRAME_00065,N5153A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000068,AIRFRAME_00065,N5153A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000069,AIRFRAME_00066,N5167A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000070,AIRFRAME_00066,N5167A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000071,AIRFRAME_00067,N5209A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000072,AIRFRAME_00067,N5209A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000073,AIRFRAME_00068,N5227A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000074,AIRFRAME_00068,N5227A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000075,AIRFRAME_00069,N5237A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000076,AIRFRAME_00069,N5237A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000077,AIRFRAME_00070,N5261A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000078,AIRFRAME_00070,N5261A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000079,AIRFRAME_00071,N5479A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000080,AIRFRAME_00071,N5479A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000081,AIRFRAME_00072,N5683A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000082,AIRFRAME_00072,N5683A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000083,AIRFRAME_00073,N5693A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000084,AIRFRAME_00073,N5693A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000085,AIRFRAME_00074,N7901A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000086,AIRFRAME_00074,N7901A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000087,AIRFRAME_00075,N7907A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000088,AIRFRAME_00075,N7907A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000089,AIRFRAME_00076,N7919A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000090,AIRFRAME_00076,N7919A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000091,AIRFRAME_00077,N7933A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000092,AIRFRAME_00077,N7933A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000093,AIRFRAME_00078,N7949A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000094,AIRFRAME_00078,N7949A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000095,AIRFRAME_00079,N8011A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000096,AIRFRAME_00079,N8011A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000097,AIRFRAME_00080,N8059A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000098,AIRFRAME_00080,N8059A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000099,AIRFRAME_00081,N8093A,COMP_SUN_COUNTRY,OPERATOR,,,Medium-High,SRC_0326,Aircraft-level operating relationship.
+AREL_000100,AIRFRAME_00081,N8093A,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000101,AIRFRAME_00082,N4621K,COMP_HAWAIIAN,OPERATOR,,,High,SRC_0326,Aircraft-level operating relationship.
+AREL_000102,AIRFRAME_00082,N4621K,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000103,AIRFRAME_00083,N4649K,COMP_HAWAIIAN,OPERATOR,,,High,SRC_0326,Aircraft-level operating relationship.
+AREL_000104,AIRFRAME_00083,N4649K,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000105,AIRFRAME_00084,N4663K,COMP_HAWAIIAN,OPERATOR,,,High,SRC_0326,Aircraft-level operating relationship.
+AREL_000106,AIRFRAME_00084,N4663K,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000107,AIRFRAME_00085,N4787K,COMP_HAWAIIAN,OPERATOR,,,High,SRC_0326,Aircraft-level operating relationship.
+AREL_000108,AIRFRAME_00085,N4787K,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000109,AIRFRAME_00086,N5827K,COMP_HAWAIIAN,OPERATOR,,,High,SRC_0326,Aircraft-level operating relationship.
+AREL_000110,AIRFRAME_00086,N5827K,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000111,AIRFRAME_00087,N5843K,COMP_HAWAIIAN,OPERATOR,,,High,SRC_0326,Aircraft-level operating relationship.
+AREL_000112,AIRFRAME_00087,N5843K,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000113,AIRFRAME_00088,N5869K,COMP_HAWAIIAN,OPERATOR,,,High,SRC_0326,Aircraft-level operating relationship.
+AREL_000114,AIRFRAME_00088,N5869K,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000115,AIRFRAME_00089,N5879K,COMP_HAWAIIAN,OPERATOR,,,High,SRC_0326,Aircraft-level operating relationship.
+AREL_000116,AIRFRAME_00089,N5879K,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000117,AIRFRAME_00090,N5881K,COMP_HAWAIIAN,OPERATOR,,,High,SRC_0326,Aircraft-level operating relationship.
+AREL_000118,AIRFRAME_00090,N5881K,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000119,AIRFRAME_00091,N5897K,COMP_HAWAIIAN,OPERATOR,,,High,SRC_0326,Aircraft-level operating relationship.
+AREL_000120,AIRFRAME_00091,N5897K,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000121,AIRFRAME_00092,N749AX,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000122,AIRFRAME_00093,N750AX,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000123,AIRFRAME_00094,N761CX,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000124,AIRFRAME_00095,N763CX,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000125,AIRFRAME_00096,N774AX,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000126,AIRFRAME_00097,N343PA,COMP_AMAZON_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0326,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000127,AIRFRAME_00098,LX-VCB,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000128,AIRFRAME_00098,LX-VCB,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000129,AIRFRAME_00099,LX-VCC,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000130,AIRFRAME_00099,LX-VCC,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000131,AIRFRAME_00100,LX-VCA,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000132,AIRFRAME_00100,LX-VCA,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000133,AIRFRAME_00101,LX-VCD,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000134,AIRFRAME_00101,LX-VCD,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000135,AIRFRAME_00102,LX-VCE,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000136,AIRFRAME_00102,LX-VCE,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000137,AIRFRAME_00103,LX-VCF,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000138,AIRFRAME_00103,LX-VCF,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000139,AIRFRAME_00104,LX-VCG,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000140,AIRFRAME_00104,LX-VCG,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000141,AIRFRAME_00105,LX-VCH,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000142,AIRFRAME_00105,LX-VCH,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000143,AIRFRAME_00106,LX-VCI,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000144,AIRFRAME_00106,LX-VCI,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000145,AIRFRAME_00107,LX-VCJ,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000146,AIRFRAME_00107,LX-VCJ,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000147,AIRFRAME_00108,LX-VCK,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000148,AIRFRAME_00108,LX-VCK,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000149,AIRFRAME_00109,LX-VCL,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000150,AIRFRAME_00109,LX-VCL,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000151,AIRFRAME_00110,LX-VCM,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000152,AIRFRAME_00110,LX-VCM,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000153,AIRFRAME_00111,LX-VCN,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000154,AIRFRAME_00111,LX-VCN,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000155,AIRFRAME_00112,LX-TCV,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000156,AIRFRAME_00112,LX-TCV,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000157,AIRFRAME_00113,LX-RCV,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000158,AIRFRAME_00113,LX-RCV,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000159,AIRFRAME_00114,LX-ECV,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000160,AIRFRAME_00114,LX-ECV,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000161,AIRFRAME_00115,LX-JCV,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000162,AIRFRAME_00115,LX-JCV,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000163,AIRFRAME_00116,LX-SCV,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000164,AIRFRAME_00116,LX-SCV,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000165,AIRFRAME_00117,LX-GCL,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000166,AIRFRAME_00117,LX-GCL,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000167,AIRFRAME_00118,LX-ICL,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000168,AIRFRAME_00118,LX-ICL,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000169,AIRFRAME_00119,LX-KCL,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000170,AIRFRAME_00119,LX-KCL,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000171,AIRFRAME_00120,LX-LCL,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000172,AIRFRAME_00120,LX-LCL,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000173,AIRFRAME_00121,LX-MCL,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000174,AIRFRAME_00121,LX-MCL,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000175,AIRFRAME_00122,LX-NCL,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000176,AIRFRAME_00122,LX-NCL,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000177,AIRFRAME_00123,LX-OCV,COMP_CARGOLUX,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000178,AIRFRAME_00123,LX-OCV,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000179,AIRFRAME_00124,LX-UCV,COMP_CARGOLUX_ITALIA,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000180,AIRFRAME_00124,LX-UCV,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000181,AIRFRAME_00125,LX-VCV,COMP_CARGOLUX_ITALIA,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000182,AIRFRAME_00125,LX-VCV,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000183,AIRFRAME_00126,LX-WCV,COMP_CARGOLUX_ITALIA,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000184,AIRFRAME_00126,LX-WCV,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000185,AIRFRAME_00127,LX-YCV,COMP_CARGOLUX_ITALIA,OPERATOR,,,High,SRC_0328,Aircraft-level operating relationship.
+AREL_000186,AIRFRAME_00127,LX-YCV,COMP_CARGOLUX,NETWORK_CUSTOMER / BRAND,,,High,SRC_0328,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000187,AIRFRAME_00128,OY-SRU,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000188,AIRFRAME_00128,OY-SRU,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000189,AIRFRAME_00129,OY-SRV,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000190,AIRFRAME_00129,OY-SRV,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000191,AIRFRAME_00130,OY-SRW,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000192,AIRFRAME_00130,OY-SRW,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000193,AIRFRAME_00131,OY-SYA,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000194,AIRFRAME_00131,OY-SYA,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000195,AIRFRAME_00132,OY-SYB,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000196,AIRFRAME_00132,OY-SYB,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000197,AIRFRAME_00133,OY-SYC,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000198,AIRFRAME_00133,OY-SYC,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000199,AIRFRAME_00134,OY-SYD,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000200,AIRFRAME_00134,OY-SYD,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000201,AIRFRAME_00135,N493MM,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000202,AIRFRAME_00135,N493MM,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000203,AIRFRAME_00136,N495MM,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000204,AIRFRAME_00136,N495MM,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000205,AIRFRAME_00137,N496MM,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000206,AIRFRAME_00137,N496MM,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000207,AIRFRAME_00138,OY-RLB,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000208,AIRFRAME_00138,OY-RLB,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000209,AIRFRAME_00139,OY-SRF,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000210,AIRFRAME_00139,OY-SRF,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000211,AIRFRAME_00140,OY-SRG,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000212,AIRFRAME_00140,OY-SRG,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000213,AIRFRAME_00141,OY-SRI,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000214,AIRFRAME_00141,OY-SRI,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000215,AIRFRAME_00142,OY-SRK,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000216,AIRFRAME_00142,OY-SRK,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000217,AIRFRAME_00143,OY-SRM,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000218,AIRFRAME_00143,OY-SRM,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000219,AIRFRAME_00144,OY-SRN,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000220,AIRFRAME_00144,OY-SRN,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000221,AIRFRAME_00145,OY-SRO,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000222,AIRFRAME_00145,OY-SRO,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000223,AIRFRAME_00146,OY-MAC,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000224,AIRFRAME_00146,OY-MAC,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000225,AIRFRAME_00147,OY-MAD,COMP_MAERSK_AIR,OPERATOR,,,High,SRC_0329,Aircraft-level operating relationship.
+AREL_000226,AIRFRAME_00147,OY-MAD,COMP_MAERSK_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0329,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000227,AIRFRAME_00148,F-HMRB,COMP_CMA_AIR,OPERATOR,,,High,SRC_0331,Aircraft-level operating relationship.
+AREL_000228,AIRFRAME_00148,F-HMRB,COMP_CMA_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0331,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000229,AIRFRAME_00149,F-HMRF,COMP_CMA_AIR,OPERATOR,,,High,SRC_0331,Aircraft-level operating relationship.
+AREL_000230,AIRFRAME_00149,F-HMRF,COMP_CMA_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0331,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000231,AIRFRAME_00150,F-HMRO,COMP_CMA_AIR,OPERATOR,,,High,SRC_0331,Aircraft-level operating relationship.
+AREL_000232,AIRFRAME_00150,F-HMRO,COMP_CMA_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0331,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000233,AIRFRAME_00151,N760GT,COMP_ATLAS_AIR,OPERATOR,,,Medium-High,SRC_0331,Aircraft-level operating relationship.
+AREL_000234,AIRFRAME_00151,N760GT,COMP_CMA_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0331,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000235,AIRFRAME_00152,N761GT,COMP_ATLAS_AIR,OPERATOR,,,Medium-High,SRC_0331,Aircraft-level operating relationship.
+AREL_000236,AIRFRAME_00152,N761GT,COMP_CMA_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0331,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000237,AIRFRAME_00153,F-HMRI,COMP_CMA_AIR,OPERATOR,,,High,SRC_0331,Aircraft-level operating relationship.
+AREL_000238,AIRFRAME_00153,F-HMRI,COMP_CMA_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0331,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000239,AIRFRAME_00154,OO-LFC,COMP_AIR_BELGIUM,OPERATOR,,,High,SRC_0332,Aircraft-level operating relationship.
+AREL_000240,AIRFRAME_00154,OO-LFC,COMP_CMA_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0332,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000241,AIRFRAME_00155,OE-LFD,COMP_AIR_BELGIUM,OPERATOR,,,High,SRC_0332,Aircraft-level operating relationship.
+AREL_000242,AIRFRAME_00155,OE-LFD,COMP_CMA_AIR,NETWORK_CUSTOMER / BRAND,,,High,SRC_0332,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000243,AIRFRAME_00156,N707GT,COMP_ATLAS_AIR,OPERATOR,,,High,SRC_0333,Aircraft-level operating relationship.
+AREL_000244,AIRFRAME_00156,N707GT,COMP_MSC_AIR_CARGO,NETWORK_CUSTOMER / BRAND,,,High,SRC_0333,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000245,AIRFRAME_00157,N708GT,COMP_ATLAS_AIR,OPERATOR,,,High,SRC_0333,Aircraft-level operating relationship.
+AREL_000246,AIRFRAME_00157,N708GT,COMP_MSC_AIR_CARGO,NETWORK_CUSTOMER / BRAND,,,High,SRC_0333,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000247,AIRFRAME_00158,N709GT,COMP_ATLAS_AIR,OPERATOR,,,High,SRC_0333,Aircraft-level operating relationship.
+AREL_000248,AIRFRAME_00158,N709GT,COMP_MSC_AIR_CARGO,NETWORK_CUSTOMER / BRAND,,,High,SRC_0333,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000249,AIRFRAME_00159,N710GT,COMP_ATLAS_AIR,OPERATOR,,,High,SRC_0333,Aircraft-level operating relationship.
+AREL_000250,AIRFRAME_00159,N710GT,COMP_MSC_AIR_CARGO,NETWORK_CUSTOMER / BRAND,,,High,SRC_0333,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000251,AIRFRAME_00160,I-MSCA,COMP_ALISCARGO,OPERATOR,,,High,SRC_0333,Aircraft-level operating relationship.
+AREL_000252,AIRFRAME_00160,I-MSCA,COMP_MSC_AIR_CARGO,NETWORK_CUSTOMER / BRAND,,,High,SRC_0333,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000253,AIRFRAME_00161,I-MSCB,COMP_ALISCARGO,OPERATOR,,,High,SRC_0333,Aircraft-level operating relationship.
+AREL_000254,AIRFRAME_00161,I-MSCB,COMP_MSC_AIR_CARGO,NETWORK_CUSTOMER / BRAND,,,High,SRC_0333,Aircraft assigned to or tracked in network/customer fleet.
+AREL_000255,AIRFRAME_00162,I-MSCC,COMP_ALISCARGO,OPERATOR,,,High,SRC_0333,Aircraft-level operating relationship.
+AREL_000256,AIRFRAME_00162,I-MSCC,COMP_MSC_AIR_CARGO,NETWORK_CUSTOMER / BRAND,,,High,SRC_0333,Aircraft assigned to or tracked in network/customer fleet.

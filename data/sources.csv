@@ -317,3 +317,91 @@ SRC_0315,Aramex,"Current Dubai Logistics City healthcare facility: ~5,500 sqm am
 SRC_0316,DHL Group,"Halle logistics center: 34,000 sqm warehouse and 55,000 pallet spaces near Leipzig/Halle Airport.",https://group.dhl.com/en/media-relations/press-releases/2025/dhl-supply-chain-invests-in-climate-neutral-expansion-new-logistics-center-strengthens-leipzig-halle-as-europes-freight-hub.html,2026-09-07,Official / primary
 SRC_0317,APM Terminals,Current network: 60 strategic locations; 2026 global charging framework states operations in 35 countries.,https://www2.apmterminals.com/en/,2026-09-08,Official / primary
 SRC_0318,Terminal Link,Current public location network: 21 terminals in 16 countries; Terminal Link ownership structure within CMA Terminals Holding.,https://www.terminal-link.com/ports/location,2026-09-08,Official / primary
+SRC_0319,BC Ferries,Current fleet directory and regular-route assignments; fleet page reports 39 ferries.,https://www.bcferries.com/on-the-ferry/our-fleet,2026-09-08,Official / primary
+SRC_0320,BC Ferries,2026 operating / fleet readiness data and current vessel capacity baseline.,https://www.bcferries.com/web_image/hf7/hf6/9087517687838.pdf,2026-09-08,Official / primary
+SRC_0321,BC Ferries,Island Class program and new-vessel deployment / propulsion information.,https://www.bcferries.com/in-the-community/projects/island-class-ferries,2026-09-08,Official / primary
+SRC_0322,Washington State Ferries,Current fleet overview: 21 vessels.,https://wsdot.wa.gov/travel/washington-state-ferries/ferries-terminals/about-our-fleet,2026-09-08,Official / primary
+SRC_0323,Washington State Ferries,"December 2025 Fleet Guide used for class, year, passenger/vehicle capacity and propulsion.",https://wsdot.wa.gov/sites/default/files/2026-03/WSF-FleetGuide-December2025.pdf,2026-09-08,Official / primary
+SRC_0324,Washington State Ferries,2026 Fact Sheet: 21 auto-passenger vessels and 20 terminals; Sidney service remains suspended.,https://wsdot.wa.gov/sites/default/files/2026-03/WSF-FactSheet-2026_0.pdf,2026-09-08,Official / primary
+SRC_0325,Amazon Air Cargo,"Current network scale: 100+ aircraft, 250+ daily flights; direct contracted carrier partners.",https://www.amazonaircargo.com/,2026-09-08,Official / primary
+SRC_0326,Plane Finder,"Amazon Air current/recent registration, variant and construction-number fleet register.",https://planefinder.net/data/airline/MZN/fleet,2026-09-08,Secondary aircraft registry
+SRC_0327,Cargolux,Current group fleet: 30 Boeing 747-400/747-8 purpose-built freighters.,https://www.cargolux.com/fleet-equipment/,2026-09-08,Official / primary
+SRC_0328,Plane Finder,Cargolux and Cargolux Italia registration / construction-number fleet registers.,https://planefinder.net/data/airline/CLX/fleet,2026-09-08,Secondary aircraft registry
+SRC_0329,Plane Finder,Maersk Air Cargo registration / construction-number fleet register.,https://planefinder.net/data/airline/SRR/fleet,2026-09-08,Secondary aircraft registry
+SRC_0330,CMA CGM,Q1 2026: eight aircraft operated under CMA CGM AIR CARGO and Air Belgium brands.,https://www.cmacgm-group.com/en/news-media/first-quarter-2026-financial-results,2026-09-08,Official / primary
+SRC_0331,Plane Finder,CMA CGM Air Cargo registration / construction-number fleet register.,https://planefinder.net/data/airline/CMA/fleet,2026-09-08,Secondary aircraft registry
+SRC_0332,CMA CGM,Air Belgium cargo integration; two Boeing 747-8F operated by Air Belgium within CMA CGM air-cargo network.,https://www.cmacgm-group.com/en/group-and-vision/our-activities/air-freight,2026-09-08,Official / primary
+SRC_0333,MSC Group,MSC Air Cargo fleet expanded to seven Boeing 777 freighters; Italian-registered I-MSCB and I-MSCC added in 2026.,https://cms.mscgroup.com/en/story-hub/msc-air-cargo-expands-with-boeing-777f-and-mxp-pvg-route,2026-09-08,Official / primary
+SRC_0334,FedEx,Federal Express global air network: 700 aircraft serving more than 650 airports.,https://www.fedex.com/en-us/about/company-structure.html,2026-09-08,Official / primary
+SRC_0335,Plane Finder,FedEx registration-level tracker snapshot used as a tail-identity research source; not the official denominator.,https://planefinder.net/data/airline/FDX/fleet,2026-09-08,Secondary aircraft registry
+SRC_0336,UPS,30 Jun 2026 filing: 274 owned/operated aircraft plus 213 charters/leases operated by others; 13 B767 on order.,https://investors.ups.com/sec-filings/all-sec-filings/content/0001628280-26-049912/exhibit992-financialstatem.htm,2026-09-08,Official filing
+SRC_0337,Plane Finder,UPS Airlines registration-level tracker snapshot used as tail-identity research source.,https://planefinder.net/data/airline/UPS/fleet,2026-09-08,Secondary aircraft registry
+SRC_0338,DHL Group,"2026 Business Profile: >275 dedicated aircraft, 19 partner airlines, ~300 commercial-carrier capacity partners and >2,400 daily flights.",https://group.dhl.com/content/dam/deutschepostdhl/en/media-center/investors/documents/business-profiles/DHL-Group-2026-Business-Profile.pdf,2026-09-08,Official / primary
+SRC_0339,Maersk,Maersk Air Cargo fleet-expansion context including Boeing 777F integration.,https://www.maersk.com/news/articles/2024/07/17/continued-impact-of-the-red-sea-situation-on-supply-chains,2026-09-08,Official / primary baseline
+SRC_0340,Financial Ports,Stena Estrid / Holyhead Terminal 3 collision and MAIB findings,https://financialports.com/500-tonne-flood-nearly-sank-ferry-after-jetty-collision-maib-report/,2026-09-08,Secondary maritime media
+SRC_0341,Splash247,Samsung Electronics America $186m FMC complaint against CMA CGM,https://splash247.com/samsung-hits-cma-cgm-with-186m-fmc-claim/,2026-09-08,Secondary maritime media
+SRC_0342,Splash247,Port of Antwerp-Bruges backs ten modal-shift logistics projects,https://splash247.com/antwerp-backs-ten-projects-to-take-freight-off-roads/,2026-09-08,Secondary maritime media
+SRC_0343,Splash247,Rosneft opens Bukhta Sever Arctic oil export terminal,https://splash247.com/russia-opens-giant-new-arctic-oil-export-terminal/,2026-09-08,Secondary maritime media
+SRC_0344,Splash247,Port Louis / CHCL container terminal equipment renewal,https://splash247.com/port-louis-advances-58m-plus-terminal-upgrade/,2026-09-08,Secondary maritime media
+SRC_0345,Splash247,South Korea port-authority merger report,https://splash247.com/south-korea-confirms-sweeping-port-authority-merger/,2026-09-08,Secondary maritime media
+SRC_0346,gCaptain / Reuters,Ecuador-US joint maritime counter-drug vessel interdictions,https://gcaptain.com/ecuador-says-us-sinkings-of-vessels-were-part-of-joint-anti-drug-probe/,2026-09-08,Secondary / wire report
+SRC_0347,gCaptain,Port of Oakland $642m turning-basin widening project,https://gcaptain.com/port-of-oakland-advances-642-million-harbor-widening-project-for-larger-ships/,2026-09-08,Secondary maritime media
+SRC_0348,The Maritime Executive,Austal USA potential Wildcat bid challenging Hanwha,https://maritime-executive.com/article/potential-u-s-bidder-emerges-to-challenge-hanwha-for-austal-usa,2026-09-08,Secondary maritime media
+SRC_0349,The Maritime Executive,Yemen Coast Guard intercepts tanker after Ras Isa call,https://maritime-executive.com/article/yemen-coast-guard-stops-tanker-after-delivery-to-houthi-controlled-port,2026-09-08,Secondary maritime media
+SRC_0350,The Maritime Executive,Hapag-Lloyd receives extension to revise ZIM acquisition proposal,https://maritime-executive.com/article/hapag-lloyd-gets-extension-to-address-concerns-and-rework-bid-for-zim,2026-09-08,Secondary maritime media
+SRC_0351,The Maritime Executive,Anti-immigration protesters block Port of Dover access,https://maritime-executive.com/article/anti-immigration-protestors-block-dover-uk-s-busiest-ferry-port,2026-09-08,Secondary maritime media
+SRC_0352,The Maritime Executive,Port of Oakland turning-basin project coverage,https://maritime-executive.com/article/california-s-port-of-oakland-to-expand-turning-basin-to-handle-larger-ships,2026-09-08,Secondary maritime media
+SRC_0353,The Maritime Executive,Span Asia 39 loses containers near Batangas; navigation warning,https://maritime-executive.com/article/navigation-warning-after-ship-loses-46-containers-in-philippine-waters,2026-09-08,Secondary maritime media
+SRC_0354,The Maritime Executive,ICTSI agreement to acquire The Logistics Group,https://maritime-executive.com/article/ictsi-expands-southern-africa-market-grip-with-tlg-acquisition,2026-09-08,Secondary maritime media
+SRC_0355,The Maritime Executive,SMF Ixora breakaway tanker contact with Sungai Johor Bridge,https://maritime-executive.com/article/video-breakaway-tanker-stopped-by-roadway-bridge-supports,2026-09-08,Secondary maritime media
+SRC_0356,The Maritime Executive,Alpha Crux sinks alongside at Montevideo after stability loss,https://maritime-executive.com/article/photos-russian-commercial-fishing-vessel-sinks-at-the-dock-in-montevideo,2026-09-08,Secondary maritime media
+SRC_0357,gCaptain,Ports category archive for standing news intake,https://gcaptain.com/category/ports/,2026-09-08,Standing source feed
+SRC_0358,gCaptain,Shipbuilding category archive for standing news intake,https://gcaptain.com/category/shipbuilding-news/,2026-09-08,Standing source feed
+SRC_0359,gCaptain,Shipping category archive for standing news intake,https://gcaptain.com/category/shipping/,2026-09-08,Standing source feed
+SRC_0360,PSA International,Current public global offices / terminal network.,https://www.globalpsa.com/globaloffices/,2026-09-08,Official / primary
+SRC_0361,Hutchison Ports,Current public network brochure: 53 ports in 24 countries.,https://www.hutchisonports.com/media/d/Hutchison%2BPorts%2BBrochure_Oct_2025.pdf?key=000000000017603396271743dTS5,2026-09-08,Official / primary
+SRC_0362,COSCO SHIPPING Ports,Current corporate portfolio: 387 berths at 40 ports; official terminal gallery used for terminal names.,https://ports.coscoshipping.com/en/Media/PhotoGallery/,2026-09-08,Official / primary
+SRC_0363,ICTSI,Current public terminal portfolio and sitemap; 34 terminals in 19 countries.,https://www.ictsi.com/our-offering/our-terminals,2026-09-08,Official / primary
+SRC_0364,ICTSI,Current sitemap with named terminal portfolio.,https://www.ictsi.com/sitemap,2026-09-08,Official / primary
+SRC_0365,China Merchants Port,Current China Merchants Port / Western Shenzhen and overseas port portfolio sources.,https://www.cmport.com.hk/,2026-09-08,Official / primary
+SRC_0366,China Merchants Port South China,Western Shenzhen port complex: SCT/CCT/MCT and infrastructure.,https://en.portshekou.com/gsgk/,2026-09-08,Official / primary
+SRC_0367,Gulftainer,"Current ports & terminals portfolio: UAE, Saudi Arabia, Iraq and United States.",https://www.gulftainer.com/solutions/ports-terminals/,2026-09-08,Official / primary
+SRC_0368,SSA Marine,"Current global terminal footprint across container, conventional and cruise operations.",https://www.ssamarine.com/,2026-09-08,Official / primary
+SRC_0369,SSA Marine,Current footprint page 2.,https://www.ssamarine.com/?6fdf7a44_page=2,2026-09-08,Official / primary
+SRC_0370,SSA Marine,Current footprint page 3.,https://www.ssamarine.com/?6fdf7a44_page=3,2026-09-08,Official / primary
+SRC_0371,SSA Marine,Current footprint page 4.,https://www.ssamarine.com/?6fdf7a44_page=4,2026-09-08,Official / primary
+SRC_0372,EUROGATE,Current EUROGATE terminal network.,https://www1.eurogate.de/en/terminals/,2026-09-08,Official / primary
+SRC_0373,Contship Italia,Current EUROGATE/Contship Mediterranean terminal network.,https://contshipitalia.com/en/terminals/,2026-09-08,Official / primary
+SRC_0374,HHLA,Current HHLA seaport terminal portfolio and operational data.,https://hhla.de/en/company/subsidiaries/seaport-terminals,2026-09-08,Official / primary
+SRC_0375,Davao International Container Terminal,Current DICT company/operator information.,https://www.dict.com.ph/about,2026-09-08,Official / primary
+SRC_0376,Flexport Atlas,SPAN ASIA 39 identity: IMO 9385568 / MMSI 548582800.,https://atlas.flexport.com/vessel/imo%3A9385568/mmsi%3A548582800/name%3Aspan-asia-39,2026-09-08,Secondary registry
+SRC_0377,CCAMLR,"ALPHA CRUX identity/ownership: IMO 9024621, owner/operator LLC Vodoley.",https://www.ccamlr.org/en/node/123439,2026-09-08,Official / primary
+SRC_0378,Port of Hamburg,"EUROGATE Hamburg infrastructure: 2,080m berth, 15.1m depth, 21 gantry cranes, rail and reefer data.",https://www.hafen-hamburg.de/en/address/eurogate-container-terminal-hamburg-gmbh-7975/,2026-09-08,Port authority / primary
+SRC_0379,ICTSI Investors,2026 Aratu ATU12 and ATU18 dry-bulk terminal acquisitions.,https://investors.ictsi.com/company-disclosures/sec-filings?page=0,2026-09-08,Official filing index
+SRC_0380,Etihad Rail,UAE National Rail Network: 900 km Ghuwaifat-Fujairah; freight active across 11 terminals and four major ports.,https://corporate.etihadrail.ae/en,2026-09-08,Official / primary
+SRC_0381,Etihad Rail,"Network completion: 38 locomotives, 1,000+ wagons; Ruwais, ICAD, Khalifa, Dubai Industrial City, Jebel Ali, Al Ghail and Fujairah freight nodes.",https://corporate.etihadrail.ae/en/newsroom/press/his-highness-sheikh-mohammed-bin-rashid-vice-president-and-prime-minister-and-ruler-of-dubai-announces-the-completion-of-the-uae-national-rail-network,2026-09-08,Official / primary
+SRC_0382,Hafeet Rail,"238 km UAE-Oman link from Sohar into UAE network; ETCS Level 2; freight up to 15,000 t or 276 TEU/trip.",https://www.hafeetrail.com/,2026-09-08,Official / primary
+SRC_0383,Etihad Rail / Hafeet Rail,"Hafeet Rail 40% complete on 20 Apr 2026; JV of Etihad Rail, Oman Rail and Mubadala Investment.",https://corporate.etihadrail.ae/en/newsroom/press/hafeet-rail-announces-40-completion-of-omanuae-railway-connection-project,2026-09-08,Official / primary
+SRC_0384,Saudi Arabia Railways,"East Freight: 566 km King Abdulaziz Port Dammam-Riyadh; 2,596 freight cars.",https://sar.com.sa/about-sar/railnetwork/,2026-09-08,Official / primary
+SRC_0385,Saudi Arabia Railways,SAR wholly owned by PIF and sole owner/operator of Saudi intercity rail infrastructure.,https://www.sar.com.sa/about-sar/,2026-09-08,Official / primary
+SRC_0386,Azerbaijan Transport Ministry,"Middle Corridor: 4,256 km rail + 508 km sea; China-Kazakhstan-Azerbaijan-Georgia, onward via BTK/Black Sea.",https://transit.gov.az/en/corridors/east-west-corridor,2026-09-08,Official / primary
+SRC_0387,Georgian Railway,"BTK route update, 2 Jun 2026.",https://www.railway.ge/baqo-tbilisi-yarsis-marshruti-akhal-shesadzleblobebs-qmnis/,2026-09-08,Official / primary
+SRC_0388,Georgian Railway,Current schedule confirms Tbilisi-Poti and Tbilisi-Batumi corridors.,https://www.railway.ge/en/traffic-general-schedule/,2026-09-08,Official / primary
+SRC_0389,CN,"CN rail network ~20,000 route-miles / 30,000 km, three coasts.",https://www.cn.ca/en/our-services/rail,2026-09-08,Official / primary
+SRC_0390,CN,"CN port network: Prince Rupert, Vancouver, Montreal, Halifax, New Orleans, Mobile and others.",https://www.cn.ca/en/our-services/maps-and-network/ports,2026-09-08,Official / primary
+SRC_0391,CPKC,"CPKC port access includes Vancouver, Saint John and Lázaro Cárdenas.",https://author.cpkcr.com/en/our-advantage/port-access,2026-09-08,Official / primary
+SRC_0392,CPKC,"~20,000 route-mile transnational network; 2026 Southeast Mexico Express with CSX.",https://author.cpkcr.com/en/media/SMX-May2026,2026-09-08,Official / primary
+SRC_0393,ACTA,"Alameda Corridor: 60 track-miles, 32 daily trains, 16,793 daily TEU.",https://www.acta.org/,2026-09-08,Official / primary
+SRC_0394,BNSF,Current intermodal facility network.,https://www.bnsf.com/ship-with-bnsf/intermodal/service-options-and-details.html,2026-09-08,Official / primary
+SRC_0395,Union Pacific,"West Coast intermodal access: LA, Long Beach, Oakland, Tacoma, Seattle.",https://www.up.com/shipping/intermodal/us-westcoast,2026-09-08,Official / primary
+SRC_0396,Norfolk Southern,"19,200 route miles in 22 states.",https://www.norfolksouthern.com/en/ship-by-rail/our-rail-network,2026-09-08,Official / primary
+SRC_0397,Norfolk Southern,"Serves 43 ports including Savannah, Charleston and New Orleans.",https://www.norfolksouthern.com/en/ship-by-rail/our-rail-network/ports-international,2026-09-08,Official / primary
+SRC_0398,Transnet Freight Rail,Container Corridor: 688 km Durban-Gauteng / City Deep.,https://www.transnet.net/SubsiteRender.aspx?id=4492347,2026-09-08,Official / primary
+SRC_0399,Transnet Freight Rail,North Corridor serves export coal flows to Richards Bay.,https://www.transnet.net/SubsiteRender.aspx?id=4460373,2026-09-08,Official / primary
+SRC_0400,Tanger Med Port Authority,Rail terminal: 10 ha; three 800 m tracks + parking track; auto/container flows.,https://www.tangermedport.com/en/activities/railway/,2026-09-08,Official / primary
+SRC_0401,HHLA,"METRANS fully owned by HHLA; 20 terminals, 190+ locomotives, 4,000+ railcars.",https://hhla.de/en/media/hhla-overview,2026-09-08,Official / primary
+SRC_0402,HHLA,METRANS North Sea/Baltic/Adriatic/Black Sea hinterland network.,https://hhla.de/en/the-power-of-networks/intermodal-logistics,2026-09-08,Official / primary
+SRC_0403,HHLA,"Hamburg Port Railway: ~290 km, ~210 freight trains and >5,500 wagons daily.",https://hhla.de/en/the-power-of-networks/intermodal-logistics/railway-port-hamburg,2026-09-08,Official / primary
+SRC_0404,HHLA,METRANS acquired 50% of Afluent Arad South Terminal in June 2026.,https://bericht.hhla.de/halbjahresfinanzbericht-2026/zwischenabschluss/verkuerzter-konzernanhang/erwerb-und-veraeusserungen.html,2026-09-08,Official / primary
+SRC_0405,CONCOR,Current rail-terminal directory lists 193 container rail terminal locations/stations.,https://www.concorindia.co.in/rail-terminals,2026-09-08,Official / primary
+SRC_0406,DFCCIL,"Western DFC ~1,506 km JNPT-Dadri; mostly double-track electrified; double-stack design.",https://dfccil.com/upload/1353697422824.pdf,2026-09-08,Official / primary

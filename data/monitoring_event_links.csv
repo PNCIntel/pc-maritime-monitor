@@ -1,0 +1,5 @@
+﻿Monitoring Link ID,Monitoring ID,Canonical Event ID,Relationship,Notes
+MLINK0001,MON0001,EVENT_0017,CONTAINS / TRACKS,Eastern Pacific interdictions
+MLINK0002,MON0003,EVENT_0014,CONTAINS / TRACKS,Dover protest event
+MLINK0003,MON0004,EVENT_0012,CONTAINS / TRACKS,Nereida / Ras Isa enforcement
+MLINK0004,MON0005,EVENT_0013,CONTAINS / TRACKS,Span Asia 39 container-loss incident

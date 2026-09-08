@@ -1187,3 +1187,633 @@ TERM0242,Port terminal,APM Terminals Laldia,Bangladesh,PORTG0187,Development
 TERM0243,Port terminal,Lien Chieu Container Port / APM Terminals Da Nang,Vietnam,PORTG0188,Development
 TERM0244,Port terminal,Balboa Container Terminal – temporary APM operation,Panama,PORTG0189,Active
 TERM0245,Port terminal,Hateco Haiphong International Container Terminal (HHIT),Vietnam,PORTG0190,Active
+COMP_ATI,Company,Air Transport International,United States,,Active
+COMP_ABX_AIR,Company,ABX Air,United States,,Active
+COMP_21_AIR,Company,21 Air,United States,,Active
+COMP_HAWAIIAN,Company,Hawaiian Airlines,United States,,Active
+COMP_CARGOJET,Company,Cargojet Airways,Canada,,Active
+COMP_ASL_IRELAND,Company,ASL Airlines Ireland,Ireland,,Active
+COMP_QUIKJET,Company,Quikjet Cargo Airlines,India,,Active
+COMP_MSC_AIR_CARGO,Company,MSC Air Cargo,Switzerland,COMP_MSC,Active
+COMP_ATLAS_AIR,Company,Atlas Air,United States,,Active
+COMP_ALISCARGO,Company,AlisCargo Airlines / MSC Air,Italy,COMP_MSC,Active
+COMP_CARGOLUX_ITALIA,Company,Cargolux Italia,Italy,COMP_CARGOLUX,Active
+COMP_UPS,Company,"United Parcel Service, Inc.",United States,,Active
+COMP_UPS_AIRLINES,Company,UPS Airlines,United States,COMP_UPS,Active
+COMP_AIR_BELGIUM,Company,Air Belgium,Belgium,COMP_CMA_CGM,Active
+COMP_STENA_LINE,Company,Stena Line,Sweden,,Active
+COMP_STENA_LINE_PORTS,Company,Stena Line Ports,United Kingdom,,Active
+COMP_SAMSUNG_ELECTRONICS_AMERICA,Company,Samsung Electronics America,United States,,Active
+COMP_FMC,Company,Federal Maritime Commission,United States,,Active
+COMP_ICTSI,Company,"International Container Terminal Services, Inc. (ICTSI)",Philippines,,Active
+COMP_TLG,Company,The Logistics Group (TLG),South Africa,,Active / acquisition agreed
+COMP_AIIM,Company,African Infrastructure Investment Managers,South Africa,,Active
+COMP_MOKOBELA,Company,Mokobela Shataki Proprietary Limited,South Africa,,Active
+COMP_ROSNEFT,Company,Rosneft,Russia,,Active
+COMP_VOSTOK_OIL,Company,Vostok Oil,Russia,,Development / ramp-up
+COMP_CHCL,Company,Cargo Handling Corporation Ltd (CHCL),Mauritius,,Active
+COMP_MPA_MAURITIUS,Company,Mauritius Ports Authority,Mauritius,,Active
+COMP_PORT_OAKLAND,Company,Port of Oakland,United States,,Active
+COMP_USACE,Company,U.S. Army Corps of Engineers,United States,,Active
+COMP_AUSTAL,Company,Austal Limited,Australia,,Active
+COMP_AUSTAL_USA,Company,Austal USA,United States,,Active / strategic review
+COMP_WILDCAT_INFRA,Company,Wildcat Infrastructure,United States,,Active
+COMP_HANWHA_GROUP,Company,Hanwha Group,South Korea,,Active
+COMP_PHIL_SPAN_ASIA,Company,Philippine Span Asia Carrier Corp.,Philippines,,Active
+COMP_BENZMARK,Company,Benzmark Marine Shipyard,Malaysia,,Active
+COMP_ANP_URUGUAY,Company,Administración Nacional de Puertos (ANP),Uruguay,,Active
+COMP_IDERNOL,Company,Idernol Oriental Shipping,Uruguay,,Active
+COMP_NUEVA_ERA_OSRO,Company,Nueva Era Oil Spill Response Organization,Uruguay,,Active
+COMP_YEMEN_COAST_GUARD,Company,Yemen Coast Guard,Yemen,,Active
+COMP_BUSAN_PA,Company,Busan Port Authority,South Korea,,Active / restructuring
+COMP_INCHEON_PA,Company,Incheon Port Authority,South Korea,,Active / restructuring
+COMP_ULSAN_PA,Company,Ulsan Port Authority,South Korea,,Active / restructuring
+COMP_YEOSU_GWANGYANG_PA,Company,Yeosu Gwangyang Port Authority,South Korea,,Active / restructuring
+COMP_KOREA_PORT_AUTHORITY,Company,Korea Port Authority (proposed integrated organization),South Korea,,Proposed / developing
+PORTG0191,Port / Facility,Holyhead Port,United Kingdom,,Active
+PORTG0192,Port / Facility,Port of Oakland,United States,,Active
+PORTG0193,Port / Facility,Port Louis,Mauritius,,Active
+PORTG0194,Port / Facility,Bukhta Sever Terminal,Russia,,Active
+PORTG0195,Port / Facility,Port of Hodeidah,Yemen,,Active
+PORTG0196,Port / Facility,Ras Isa Terminal,Yemen,,Active
+PORTG0197,Port / Facility,Port of Salif,Yemen,,Active
+PORTG0198,Port / Facility,Port of Mokha,Yemen,,Active
+PORTG0199,Port / Facility,Port of Aden,Yemen,,Active
+PORTG0200,Port / Facility,Port of Mukalla,Yemen,,Active
+PORTG0201,Port / Facility,Balhaf LNG Terminal,Yemen,,Active
+PORTG0202,Port / Facility,Port of Nishtun,Yemen,,Active
+PORTG0203,Port / Facility,Qana Port,Yemen,,Active
+PORTG0204,Port / Facility,Port of Socotra,Yemen,,Active
+PORTG0205,Port / Facility,Port of Dover,United Kingdom,,Active
+PORTG0206,Port / Facility,Port of Montevideo,Uruguay,,Active
+PORTG0207,Port / Facility,Port of Davao,Philippines,,Active
+PORTG0208,Port / Facility,Port of Manila,Philippines,,Active
+PORTG0209,Port / Facility,Port of Cebu,Philippines,,Active
+PORTG0210,Port / Facility,Port of Cagayan de Oro,Philippines,,Active
+PORTG0211,Port / Facility,Port of Durban,South Africa,,Active
+PORTG0212,Port / Facility,Port of Beira,Mozambique,,Active
+PORTG0213,Port / Facility,Port of Maputo / Matola,Mozambique,,Active
+PORTG0214,Port / Facility,Port of Saldanha Bay,South Africa,,Active
+PORTG0215,Port / Facility,Port of Nacala,Mozambique,,Active
+VESSEL_00419,Vessel,STENA ESTRID,Cyprus,,Operating / casualty repaired
+VESSEL_00420,Vessel,NEREIDA,,,Sanctioned / interdicted
+VESSEL_00421,Vessel,SPAN ASIA 39,Philippines,,Operating / casualty
+VESSEL_00422,Vessel,SMF IXORA,Malaysia,,Operating / casualty
+VESSEL_00423,Vessel,ALPHA CRUX,Russia,,Sunk alongside / salvage pending
+VESSEL_00424,Vessel,VALENTIN PIKUL,,,Operating
+VESSEL_00425,Vessel,CONQUISTA II,Ecuador,,Interdicted / sunk after crew removal
+VESSEL_00426,Vessel,OM2,Ecuador,,Interdicted / sunk after crew removal
+ASSET099,Asset,Holyhead Terminal 3,United Kingdom,COMP_STENA_LINE_PORTS,Operating / resilience works
+ASSET100,Asset,Holyhead Terminal 5,United Kingdom,COMP_STENA_LINE_PORTS,Repair / resilience works
+ASSET101,Asset,Oakland Inner Harbor Turning Basin,United States,COMP_PORT_OAKLAND,Design / widening planned
+ASSET102,Asset,Oakland Outer Harbor Turning Basin,United States,COMP_PORT_OAKLAND,Design / widening planned
+ASSET103,Asset,Vankor-Payakha-Bukhta Sever Pipeline,Russia,COMP_ROSNEFT,Operating / ramp-up
+ASSET104,Asset,Sungai Johor Bridge,Malaysia,COMP_BENZMARK,Operating
+ASSET105,Asset,Southern Africa TLG Logistics Platform,South Africa / Mozambique / Namibia,COMP_TLG,Active / acquisition agreed
+YARD_0027,Shipyard,Austal USA Mobile Shipyard,United States,,Active
+YARD_0028,Shipyard,Austal USA San Diego,United States,,Active
+YARD_0029,Shipyard,Benzmark Marine Shipyard,Malaysia,,Active
+COMP_PSA,Company,PSA International,Singapore,,Active
+COMP_CM_PORT,Company,China Merchants Port Holdings / China Merchants Port Group,China,,Active
+COMP_SSA_MARINE,Company,SSA Marine,United States,,Active
+COMP_EUROGATE,Company,EUROGATE,Germany,,Active
+COMP_HHLA,Company,Hamburger Hafen und Logistik AG (HHLA),Germany,,Active
+COMP_DICT,Company,"Davao International Container Terminal, Inc.",Philippines,,Active
+COMP_VODOLEY,Company,LLC Vodoley,Russia,,Active
+PORTG0216,Port,Port of Tanjung Priok,Indonesia,,Active
+PORTG0217,Port,Laem Chabang Port,Thailand,,Active
+PORTG0218,Port,Bangkok / Chao Phraya logistics gateway,Thailand,,Active
+PORTG0219,Port,Port of Qinzhou,China,,Active
+PORTG0220,Port,Port of Dalian,China,,Active
+PORTG0221,Port,Port of Fuzhou / Jiangyin,China,,Active
+PORTG0222,Port,Port of Fuzhou / Mawei,China,,Active
+PORTG0223,Port,Port of Lianyungang,China,,Active
+PORTG0224,Port,Port of Incheon,South Korea,,Active
+PORTG0225,Port,Port of Busan,South Korea,,Active
+PORTG0226,Port,Port of Chennai,India,,Active
+PORTG0227,Port,King Abdulaziz Port Dammam,Saudi Arabia,,Active
+PORTG0228,Port,Port of Zeebrugge,Belgium,,Active
+PORTG0229,Port,Port of Genoa,Italy,,Active
+PORTG0230,Port,Port of Venice,Italy,,Active
+PORTG0231,Port,Port of Mersin,Türkiye,,Active
+PORTG0232,Port,Port of Gdańsk,Poland,,Active
+PORTG0233,Port,Port of Rodman / Panama Pacific,Panama,,Active
+PORTG0234,Port,Port of Halifax,Canada,,Active
+PORTG0235,Port,Port of Philadelphia / Delaware River,United States,,Active
+PORTG0236,Port,Willebroek Port / Inland Waterway Terminal,Belgium,,Active
+PORTG0237,Port,Port of Duisburg,Germany,,Active
+PORTG0238,Port,Port of Gdynia,Poland,,Active
+PORTG0239,Port,Port of Stockholm,Sweden,,Active
+PORTG0240,Port,Port of Amsterdam,Netherlands,,Active
+PORTG0241,Port,Port of Moerdijk,Netherlands,,Active
+PORTG0242,Port,Port of Rotterdam,Netherlands,,Active
+PORTG0243,Port,Venlo Inland Terminal,Netherlands,,Active
+PORTG0244,Port,Port of Harwich,United Kingdom,,Active
+PORTG0245,Port,Port of London / Medway,United Kingdom,,Active
+PORTG0246,Port,Port of Alexandria / El Dekheila,Egypt,,Active
+PORTG0247,Port,Port of Abu Qir,Egypt,,Active
+PORTG0248,Port,Port of El Dekheila,Egypt,,Active
+PORTG0249,Port,Port of Ain Sokhna,Egypt,,Active
+PORTG0250,Port,Port of Umm Qasr / Basra,Iraq,,Active
+PORTG0251,Port,Port of Sohar,Oman,,Active
+PORTG0252,Port,Port of Khasab,Oman,,Active
+PORTG0253,Port,Port of Jazan,Saudi Arabia,,Active
+PORTG0254,Port,Port of Ajman,United Arab Emirates,,Active
+PORTG0255,Port,Port of Ras Al Khaimah,United Arab Emirates,,Active
+PORTG0256,Port,Port of Umm Al Quwain,United Arab Emirates,,Active
+PORTG0257,Port,Kwai Tsing Container Terminals,"Hong Kong, China",,Active
+PORTG0258,Port,Tuen Mun / River Trade Terminal,"Hong Kong, China",,Active
+PORTG0259,Port,Yantian Port,China,,Active
+PORTG0260,Port,Port of Huizhou,China,,Active
+PORTG0261,Port,Port of Jiangmen,China,,Active
+PORTG0262,Port,Port of Nanhai / Foshan,China,,Active
+PORTG0263,Port,Port Klang,Malaysia,,Active
+PORTG0264,Port,Port of Thilawa / Yangon,Myanmar,,Active
+PORTG0265,Port,Port of Karachi,Pakistan,,Active
+PORTG0266,Port,Port of Gwangyang,South Korea,,Active
+PORTG0267,Port,Port of Brisbane,Australia,,Active
+PORTG0268,Port,Port Botany,Australia,,Active
+PORTG0269,Port,Port of Ensenada,Mexico,,Active
+PORTG0270,Port,Port of Veracruz,Mexico,,Active
+PORTG0271,Port,Port of Manzanillo,Mexico,,Active
+PORTG0272,Port,Port of Cristobal,Panama,,Active
+PORTG0273,Port,Freeport Harbour,Bahamas,,Active
+PORTG0274,Port,Port of Wuhan,China,,Active
+PORTG0275,Port,Port of Quanzhou / Jinjiang,China,,Active
+PORTG0276,Port,Port of Jinzhou,China,,Active
+PORTG0277,Port,Port of Kaohsiung,China,,Active
+PORTG0278,Port,Port of Guangzhou / Nansha,China,,Active
+PORTG0279,Port,Port of Nantong,China,,Active
+PORTG0280,Port,Port of Qingdao,China,,Active
+PORTG0281,Port,Port of Qinhuangdao,China,,Active
+PORTG0282,Port,Port of Quanzhou,China,,Active
+PORTG0283,Port,Port of Taicang,China,,Active
+PORTG0284,Port,Port of Yingkou,China,,Active
+PORTG0285,Port,Port of Ambarlı / Istanbul,Türkiye,,Active
+PORTG0286,Port,Port of Piraeus,Greece,,Active
+PORTG0287,Port,Port of Bauan,Philippines,,Active
+PORTG0288,Port,Port of Tanza / Cavite,Philippines,,Active
+PORTG0289,Port,Laguna inland terminal,Philippines,,Active
+PORTG0290,Port,PHIVIDEC Industrial Estate / Mindanao Container Terminal,Philippines,,Active
+PORTG0291,Port,Port of Subic,Philippines,,Active
+PORTG0292,Port,Makar Wharf / General Santos,Philippines,,Active
+PORTG0293,Port,Port of Iloilo / Visayas,Philippines,,Active
+PORTG0294,Port,Port of Batu Ampar,Indonesia,,Active
+PORTG0295,Port,Port of Lamongan / East Java,Indonesia,,Active
+PORTG0296,Port,Port Moresby / Motukea,Papua New Guinea,,Active
+PORTG0297,Port,Port of Lae,Papua New Guinea,,Active
+PORTG0298,Port,Port of Melbourne,Australia,,Active
+PORTG0299,Port,Port of Batumi,Georgia,,Active
+PORTG0300,Port,Port of Matadi,DR Congo,,Active
+PORTG0301,Port,Port of Toamasina,Madagascar,,Active
+PORTG0302,Port,Port of Guayaquil,Ecuador,,Active
+PORTG0303,Port,Pouso Alegre inland logistics terminal,Brazil,,Active
+PORTG0304,Port,Port of Rio de Janeiro,Brazil,,Active
+PORTG0305,Port,Puerto Cortés,Honduras,,Active
+PORTG0306,Port,Port of La Plata,Argentina,,Active
+PORTG0307,Port,Port of Aratu,Brazil,,Active
+PORTG0308,Port,Western Shenzhen Port / Shekou,China,,Active
+PORTG0309,Port,Western Shenzhen Port / Chiwan,China,,Active
+PORTG0310,Port,Western Shenzhen Port / Mawan,China,,Active
+PORTG0311,Port,Port of Hambantota,Sri Lanka,,Active
+PORTG0312,Port,Port of Djibouti,Djibouti,,Active
+PORTG0313,Port,Port of Paranaguá,Brazil,,Active
+PORTG0314,Port,Port of Lagos / Tin Can Island,Nigeria,,Active
+PORTG0315,Port,Port of Khorfakkan,United Arab Emirates,,Active
+PORTG0316,Port,Port Khalid / Sharjah,United Arab Emirates,,Active
+PORTG0317,Port,Sajaa Dry Port,United Arab Emirates,,Active
+PORTG0318,Port,Jubail Commercial Port,Saudi Arabia,,Active
+PORTG0319,Port,Umm Qasr Port,Iraq,,Active
+PORTG0320,Port,Umm Qasr Port logistics zone,Iraq,,Active
+PORTG0321,Port,Port Canaveral,United States,,Active
+PORTG0322,Port,Port of Limón,Costa Rica,,Active
+PORTG0323,Port,Port of Caldera,Costa Rica,,Active
+PORTG0324,Port,Port of Baltimore,United States,,Active
+PORTG0325,Port,Port of Nanaimo,Canada,,Active
+PORTG0326,Port,Port of Jacksonville,United States,,Active
+PORTG0327,Port,Port of San Diego,United States,,Active
+PORTG0328,Port,Port of Portland,United States,,Active
+PORTG0329,Port,Port of Cai Lan,Vietnam,,Active
+PORTG0330,Port,Port of Vancouver,Canada,,Active
+PORTG0331,Port,Port of Brunswick,United States,,Active
+PORTG0332,Port,Port of Charleston,United States,,Active
+PORTG0333,Port,Port of Tacoma,United States,,Active
+PORTG0334,Port,Port of Savannah,United States,,Active
+PORTG0335,Port,Port of Norfolk / Virginia,United States,,Active
+PORTG0336,Port,Port of Montreal,Canada,,Active
+PORTG0337,Port,Port of Manzanillo / Colón,Panama,,Active
+PORTG0338,Port,Port of Virginia,United States,,Active
+PORTG0339,Port,Port of Kalama,United States,,Active
+PORTG0340,Port,Port of Everett,United States,,Active
+PORTG0341,Port,Port of Astoria,United States,,Active
+PORTG0342,Port,Port of Beaumont,United States,,Active
+PORTG0343,Port,Port of Benicia,United States,,Active
+PORTG0344,Port,Port of Coos Bay,United States,,Active
+PORTG0345,Port,Port of Duluth-Superior,United States,,Active
+PORTG0346,Port,Port of Galveston,United States,,Active
+PORTG0347,Port,Port of Grays Harbor,United States,,Active
+PORTG0348,Port,Port of Gulfport,United States,,Active
+PORTG0349,Port,Port of Hueneme,United States,,Active
+PORTG0350,Port,Port of Morehead City,United States,,Active
+PORTG0351,Port,Port of Olympia,United States,,Active
+PORTG0352,Port,Port of Panama City Florida,United States,,Active
+PORTG0353,Port,Port of Pascagoula,United States,,Active
+PORTG0354,Port,Port of Port Angeles,United States,,Active
+PORTG0355,Port,Port of Port Arthur,United States,,Active
+PORTG0356,Port,Port of Providence,United States,,Active
+PORTG0357,Port,Port of Stockton,United States,,Active
+PORTG0358,Port,Port Tampa Bay,United States,,Active
+PORTG0359,Port,Port of West Sacramento,United States,,Active
+PORTG0360,Port,Port of Wilmington NC,United States,,Active
+PORTG0361,Port,Port of San Antonio,Chile,,Active
+PORTG0362,Port,Port of Santa Marta,Colombia,,Active
+PORTG0363,Port,Port of San Vicente / Talcahuano,Chile,,Active
+PORTG0364,Port,Port of Squamish,Canada,,Active
+PORTG0365,Port,JadeWeserPort Wilhelmshaven,Germany,,Active
+PORTG0366,Port,Port of La Spezia,Italy,,Active
+PORTG0367,Port,Port of Ravenna,Italy,,Active
+PORTG0368,Port,Port of Salerno,Italy,,Active
+PORTG0369,Port,Port of Damietta,Egypt,,Active
+PORTG0370,Port,Port of Muuga / Tallinn,Estonia,,Active
+TERM0246,Terminal,Holyhead Terminal 3,United Kingdom,PORTG0191,Active
+TERM0247,Terminal,Mauritius Container Terminal,Mauritius,PORTG0193,Active
+TERM0248,Terminal,Bukhta Sever Oil Export Terminal,Russia,PORTG0194,Active
+TERM0249,Terminal,Ras Isa Oil / Product Terminal,Yemen,PORTG0196,Active
+TERM0250,Terminal,Davao International Container Terminal,Philippines,PORTG0207,Active
+TERM0251,Terminal,PSA Singapore – Pasir Panjang Terminal,Singapore,PORTG0128,Active
+TERM0252,Terminal,PSA Singapore – Tuas Port,Singapore,PORTG0128,Active
+TERM0253,Terminal,New Priok Container Terminal One,Indonesia,PORTG0216,Active
+TERM0254,Terminal,Eastern Sea Laem Chabang Terminal,Thailand,PORTG0217,Active
+TERM0255,Terminal,Thai Connectivity Terminal,Thailand,PORTG0218,Active
+TERM0256,Terminal,SP-PSA International Port,Vietnam,PORTG0105,Active
+TERM0257,Terminal,Beibu-Gulf International Container Terminal,China,PORTG0219,Active
+TERM0258,Terminal,Dalian Container Terminal,China,PORTG0220,Active
+TERM0259,Terminal,Fuzhou International Container Terminal,China,PORTG0221,Active
+TERM0260,Terminal,Fujian Jiangyin International Container Terminal,China,PORTG0221,Active
+TERM0261,Terminal,Huafu Fuzhou Jiangyin Terminal,China,PORTG0221,Active
+TERM0262,Terminal,Fuzhou Qingzhou Container Terminal,China,PORTG0222,Active
+TERM0263,Terminal,Guangzhou Container Terminal,China,PORTG0163,Active
+TERM0264,Terminal,LYG-PSA Container Terminal,China,PORTG0223,Active
+TERM0265,Terminal,Tianjin Port Pacific International Container Terminal,China,PORTG0165,Active
+TERM0266,Terminal,Incheon Container Terminal,South Korea,PORTG0224,Active
+TERM0267,Terminal,HMM PSA New-Port Terminal,South Korea,PORTG0225,Active
+TERM0268,Terminal,Pusan Newport International Terminal,South Korea,PORTG0225,Active
+TERM0269,Terminal,PSA Chennai / Chennai International Terminals,India,PORTG0226,Active
+TERM0270,Terminal,PSA Mumbai / Bharat Mumbai Container Terminals,India,PORTG0106,Active
+TERM0271,Terminal,Saudi Global Ports – Dammam,Saudi Arabia,PORTG0227,Active
+TERM0272,Terminal,PSA Antwerp,Belgium,PORTG0018,Active
+TERM0273,Terminal,PSA Breakbulk Antwerp,Belgium,PORTG0018,Active
+TERM0274,Terminal,PSA Zeebrugge,Belgium,PORTG0228,Active
+TERM0275,Terminal,PSA Genova Pra’,Italy,PORTG0229,Active
+TERM0276,Terminal,PSA SECH / Southern European Container Hub,Italy,PORTG0229,Active
+TERM0277,Terminal,PSA Venice / Vecon,Italy,PORTG0230,Active
+TERM0278,Terminal,PSA Sines,Portugal,PORTG0145,Active
+TERM0279,Terminal,Mersin International Port,Türkiye,PORTG0231,Active
+TERM0280,Terminal,Baltic Hub Container Terminal,Poland,PORTG0232,Active
+TERM0281,Terminal,PSA Panama International Terminal,Panama,PORTG0233,Active
+TERM0282,Terminal,Sociedad Puerto Industrial Aguadulce,Colombia,PORTG0182,Active
+TERM0283,Terminal,PSA Halifax Atlantic Hub,Canada,PORTG0234,Active
+TERM0284,Terminal,PSA Halifax Fairview Cove,Canada,PORTG0234,Active
+TERM0285,Terminal,PSA Penn Terminals,United States,PORTG0235,Active
+TERM0286,Terminal,Hutchison Ports Belgium,Belgium,PORTG0236,Active
+TERM0287,Terminal,Hutchison Ports Duisburg,Germany,PORTG0237,Active
+TERM0288,Terminal,Hutchison Ports Gdynia,Poland,PORTG0238,Active
+TERM0289,Terminal,Hutchison Ports BEST,Spain,PORTG0096,Active
+TERM0290,Terminal,Hutchison Ports Stockholm,Sweden,PORTG0239,Active
+TERM0291,Terminal,Hutchison Ports Amsterdam,Netherlands,PORTG0240,Active
+TERM0292,Terminal,Grote Hout Terminal,Netherlands,PORTG0240,Active
+TERM0293,Terminal,Moerdijk Container Terminals,Netherlands,PORTG0241,Active
+TERM0294,Terminal,ECT Delta Terminal,Netherlands,PORTG0242,Active
+TERM0295,Terminal,ECT Delta II Terminal,Netherlands,PORTG0242,Active
+TERM0296,Terminal,Euromax Terminal Rotterdam,Netherlands,PORTG0242,Active
+TERM0297,Terminal,Hutchison Ports Venlo,Netherlands,PORTG0243,Active
+TERM0298,Terminal,Port of Felixstowe,United Kingdom,UKP050,Active
+TERM0299,Terminal,Harwich International Port,United Kingdom,PORTG0244,Active
+TERM0300,Terminal,London Thamesport,United Kingdom,PORTG0245,Active
+TERM0301,Terminal,El Dekheila Container Terminals B100,Egypt,PORTG0246,Active
+TERM0302,Terminal,Hutchison Ports Abu Qir,Egypt,PORTG0247,Active
+TERM0303,Terminal,Hutchison Ports Alexandria,Egypt,PORTG0108,Active
+TERM0304,Terminal,Hutchison Ports El Dekheila,Egypt,PORTG0248,Active
+TERM0305,Terminal,Red Sea Container Terminals / Sokhna,Egypt,PORTG0249,Active
+TERM0306,Terminal,Hutchison Ports Basra,Iraq,PORTG0250,Active
+TERM0307,Terminal,Hutchison Ports Sohar,Oman,PORTG0251,Active
+TERM0308,Terminal,Port of Khasab Terminal,Oman,PORTG0252,Active
+TERM0309,Terminal,Hutchison Ports Jazan,Saudi Arabia,PORTG0253,Active
+TERM0310,Terminal,Hutchison Ports Ajman,United Arab Emirates,PORTG0254,Active
+TERM0311,Terminal,Hutchison Ports RAK,United Arab Emirates,PORTG0255,Active
+TERM0312,Terminal,Hutchison Ports UAQ,United Arab Emirates,PORTG0256,Active
+TERM0313,Terminal,Hongkong International Terminals (HIT),"Hong Kong, China",PORTG0257,Active
+TERM0314,Terminal,COSCO-HIT,"Hong Kong, China",PORTG0257,Active
+TERM0315,Terminal,Asia Container Terminals (ACT),"Hong Kong, China",PORTG0257,Active
+TERM0316,Terminal,River Trade Terminal,"Hong Kong, China",PORTG0258,Active
+TERM0317,Terminal,Hutchison Ports YANTIAN,China,PORTG0259,Active
+TERM0318,Terminal,Huizhou International Container Terminals (HICT),China,PORTG0260,Active
+TERM0319,Terminal,Huizhou Port International Container Terminal (HPIC),China,PORTG0260,Active
+TERM0320,Terminal,Jiangmen International Container Terminals,China,PORTG0261,Active
+TERM0321,Terminal,Nanhai International Container Terminals,China,PORTG0262,Active
+TERM0322,Terminal,Ningbo Beilun International Container Terminals,China,PORTG0150,Active
+TERM0323,Terminal,Shanghai Mingdong Container Terminals,China,PORTG0164,Active
+TERM0324,Terminal,Shanghai Pudong International Container Terminals,China,PORTG0164,Active
+TERM0325,Terminal,Xiamen International Container Terminals,China,PORTG0166,Active
+TERM0326,Terminal,Jakarta International Container Terminal / Koja portfolio,Indonesia,PORTG0216,Active
+TERM0327,Terminal,Westports Malaysia,Malaysia,PORTG0263,Active
+TERM0328,Terminal,Myanmar International Terminals Thilawa,Myanmar,PORTG0264,Active
+TERM0329,Terminal,Karachi International Container Terminal (KICT),Pakistan,PORTG0265,Active
+TERM0330,Terminal,Hutchison Ports Pakistan,Pakistan,PORTG0265,Active
+TERM0331,Terminal,Hutchison Ports Busan,South Korea,PORTG0225,Active
+TERM0332,Terminal,Hutchison Ports Gwangyang,South Korea,PORTG0266,Active
+TERM0333,Terminal,Hutchison Ports Thailand,Thailand,PORTG0217,Active
+TERM0334,Terminal,Hutchison Ports SITV,Vietnam,PORTG0105,Active
+TERM0335,Terminal,Hutchison Ports Brisbane,Australia,PORTG0267,Active
+TERM0336,Terminal,Hutchison Ports Sydney,Australia,PORTG0268,Active
+TERM0337,Terminal,Ensenada International Terminal (EIT),Mexico,PORTG0269,Active
+TERM0338,Terminal,ICAVE Veracruz,Mexico,PORTG0270,Active
+TERM0339,Terminal,Lazaro Cardenas Terminal (LCT),Mexico,PORTG0151,Active
+TERM0340,Terminal,TIMSA Manzanillo,Mexico,PORTG0271,Active
+TERM0341,Terminal,PPC Balboa,Panama,PORTG0189,Active
+TERM0342,Terminal,PPC Cristobal,Panama,PORTG0272,Active
+TERM0343,Terminal,Freeport Container Port / Freeport Harbour portfolio,Bahamas,PORTG0273,Active
+TERM0344,Terminal,CSP Wuhan Terminal,China,PORTG0274,Active
+TERM0345,Terminal,Dalian Automobile Terminal,China,PORTG0220,Active
+TERM0346,Terminal,Dalian Dagang China Shipping Terminal,China,PORTG0220,Active
+TERM0347,Terminal,Dalian Port Container Terminal,China,PORTG0220,Active
+TERM0348,Terminal,Guangzhou South China Oceangate Terminal,China,PORTG0163,Active
+TERM0349,Terminal,Jinjiang Pacific Ports Development Terminal,China,PORTG0275,Active
+TERM0350,Terminal,Jinzhou New Age Terminal,China,PORTG0276,Active
+TERM0351,Terminal,Kao Ming Container Terminal,China,PORTG0277,Active
+TERM0352,Terminal,Lianyungang New Oriental International Terminal,China,PORTG0223,Active
+TERM0353,Terminal,Nansha Stevedoring Corporation Terminal,China,PORTG0278,Active
+TERM0354,Terminal,Nantong Tonghai Terminal,China,PORTG0279,Active
+TERM0355,Terminal,Ningbo Yuan Dong Terminal,China,PORTG0150,Active
+TERM0356,Terminal,Qingdao Port Dongjiakou Ore Terminal,China,PORTG0280,Active
+TERM0357,Terminal,Qingdao Port International Container Terminal,China,PORTG0280,Active
+TERM0358,Terminal,Qinhuangdao Port New Harbour Terminal,China,PORTG0281,Active
+TERM0359,Terminal,Qinzhou International Container Terminal,China,PORTG0219,Active
+TERM0360,Terminal,Quanzhou Pacific Container Terminal,China,PORTG0282,Active
+TERM0361,Terminal,Taicang International Container Terminal,China,PORTG0283,Active
+TERM0362,Terminal,Tianjin Port Euroasia International Container Terminal,China,PORTG0165,Active
+TERM0363,Terminal,Xiamen Ocean Gate Container Terminal,China,PORTG0166,Active
+TERM0364,Terminal,Yantian International Container Terminals,China,PORTG0259,Active
+TERM0365,Terminal,Yingkou New Century Container Terminal,China,PORTG0284,Active
+TERM0366,Terminal,Yingkou Container Terminal,China,PORTG0284,Active
+TERM0367,Terminal,Busan Port Terminal,South Korea,PORTG0225,Active
+TERM0368,Terminal,COSCO-PSA Terminal,Singapore,PORTG0128,Active
+TERM0369,Terminal,CSP Zeebrugge Terminals,Belgium,PORTG0228,Active
+TERM0370,Terminal,Kumport Terminal,Türkiye,PORTG0285,Active
+TERM0371,Terminal,Piraeus Container Terminal,Greece,PORTG0286,Active
+TERM0372,Terminal,SSA Terminals Seattle / COSCO interest,United States,PORTG0138,Active
+TERM0373,Terminal,Suez Canal Container Terminal,Egypt,PORTG0157,Active
+TERM0374,Terminal,Bauan International Port,Philippines,PORTG0287,Active
+TERM0375,Terminal,Cavite Gateway Terminal,Philippines,PORTG0288,Active
+TERM0376,Terminal,Laguna Gateway Inland Container Terminal,Philippines,PORTG0289,Active
+TERM0377,Terminal,Manila International Container Terminal,Philippines,PORTG0208,Active
+TERM0378,Terminal,Manila Multipurpose Terminal,Philippines,PORTG0208,Active
+TERM0379,Terminal,Manila North Harbor,Philippines,PORTG0208,Active
+TERM0380,Terminal,Mindanao Container Terminal,Philippines,PORTG0290,Active
+TERM0381,Terminal,Subic Bay International Terminal,Philippines,PORTG0291,Active
+TERM0382,Terminal,South Cotabato Integrated Port Services,Philippines,PORTG0292,Active
+TERM0383,Terminal,Visayas Container Terminal,Philippines,PORTG0293,Active
+TERM0384,Terminal,Batu Ampar Container Terminal,Indonesia,PORTG0294,Active
+TERM0385,Terminal,East Java Multipurpose Terminal,Indonesia,PORTG0295,Active
+TERM0386,Terminal,Motukea International Terminal,Papua New Guinea,PORTG0296,Active
+TERM0387,Terminal,South Pacific International Container Terminal,Papua New Guinea,PORTG0297,Active
+TERM0388,Terminal,Victoria International Container Terminal,Australia,PORTG0298,Active
+TERM0389,Terminal,Adriatic Gate Container Terminal,Croatia,PORTG0171,Active
+TERM0390,Terminal,Durban Gateway Terminal / DCT Pier 2,South Africa,PORTG0211,Active
+TERM0391,Terminal,Baltic Container Terminal,Poland,PORTG0238,Active
+TERM0392,Terminal,Basra Gateway Terminal,Iraq,PORTG0127,Active
+TERM0393,Terminal,Batumi International Container Terminal,Georgia,PORTG0299,Active
+TERM0394,Terminal,Matadi Gateway Terminal / ICTSI D.R. Congo,DR Congo,PORTG0300,Active
+TERM0395,Terminal,Kribi Multipurpose Terminal,Cameroon,PORTG0116,Active
+TERM0396,Terminal,Madagascar International Container Terminal,Madagascar,PORTG0301,Active
+TERM0397,Terminal,Onne Multipurpose Terminal,Nigeria,PORTG0161,Active
+TERM0398,Terminal,Contecon Guayaquil,Ecuador,PORTG0302,Active
+TERM0399,Terminal,Contecon Manzanillo,Mexico,PORTG0271,Active
+TERM0400,Terminal,CLIA Pouso Alegre,Brazil,PORTG0303,Active
+TERM0401,Terminal,Rio Brasil Terminal,Brazil,PORTG0304,Active
+TERM0402,Terminal,Operadora Portuaria Centroamericana,Honduras,PORTG0305,Active
+TERM0403,Terminal,Sociedad Puerto Industrial de Aguadulce,Colombia,PORTG0182,Active
+TERM0404,Terminal,Tecon Suape,Brazil,PORTG0152,Active
+TERM0405,Terminal,TecPlata,Argentina,PORTG0306,Active
+TERM0406,Terminal,Aratu ATU12 Dry Bulk Terminal,Brazil,PORTG0307,Active
+TERM0407,Terminal,Aratu ATU18 Dry Bulk Terminal,Brazil,PORTG0307,Active
+TERM0408,Terminal,Shekou Container Terminal (SCT),China,PORTG0308,Active
+TERM0409,Terminal,Chiwan Container Terminal (CCT),China,PORTG0309,Active
+TERM0410,Terminal,Mawan Smart Port / MCT,China,PORTG0310,Active
+TERM0411,Terminal,Colombo International Container Terminals (CICT),Sri Lanka,PORTG0170,Active
+TERM0412,Terminal,Hambantota International Port,Sri Lanka,PORTG0311,Active
+TERM0413,Terminal,Doraleh Multipurpose Port / Djibouti portfolio,Djibouti,PORTG0312,Active
+TERM0414,Terminal,TCP Paranaguá Container Terminal,Brazil,PORTG0313,Active
+TERM0415,Terminal,Tin Can Island Container Terminal,Nigeria,PORTG0314,Active
+TERM0416,Terminal,Khorfakkan Commercial Terminal,United Arab Emirates,PORTG0315,Active
+TERM0417,Terminal,Sharjah Container Terminal,United Arab Emirates,PORTG0316,Active
+TERM0418,Terminal,Sajaa Dry Port,United Arab Emirates,PORTG0317,Active
+TERM0419,Terminal,Jubail Commercial Port,Saudi Arabia,PORTG0318,Active
+TERM0420,Terminal,Iraq Container Terminal,Iraq,PORTG0319,Active
+TERM0421,Terminal,Umm Qasr Logistics Centre,Iraq,PORTG0320,Active
+TERM0422,Terminal,Canaveral Cargo Terminal,United States,PORTG0321,Active
+TERM0423,Terminal,Alamo Terminals – Limón,Costa Rica,PORTG0322,Active
+TERM0424,Terminal,Alamo Terminals – Caldera,Costa Rica,PORTG0323,Active
+TERM0425,Terminal,Atlantic Terminal,United States,PORTG0324,Active
+TERM0426,Terminal,Barbours Cut Terminal,United States,PORTG0130,Active
+TERM0427,Terminal,Bayport Terminal,United States,PORTG0130,Active
+TERM0428,Terminal,BC Vehicle Processing Centre,Canada,PORTG0325,Active
+TERM0429,Terminal,Berth 83,United States,PORTG0132,Active
+TERM0430,Terminal,Blount Island Terminal,United States,PORTG0326,Active
+TERM0431,Terminal,B Street Pier,United States,PORTG0327,Active
+TERM0432,Terminal,Bulk Terminal 5,United States,PORTG0328,Active
+TERM0433,Terminal,Cai Lan International Container Terminal,Vietnam,PORTG0329,Active
+TERM0434,Terminal,Canada Place Cruise Terminal,Canada,PORTG0330,Active
+TERM0435,Terminal,Cape Liberty Cruise Port,United States,PORTG0099,Active
+TERM0436,Terminal,Chesapeake Terminal,United States,PORTG0324,Active
+TERM0437,Terminal,Colonel’s Island Terminal,United States,PORTG0331,Active
+TERM0438,Terminal,Columbus Street Terminal,United States,PORTG0332,Active
+TERM0439,Terminal,Conventional Cargo Terminals,United States,PORTG0333,Active
+TERM0440,Terminal,Dundalk Terminal,United States,PORTG0324,Active
+TERM0441,Terminal,Ed Austin Terminal / Dames Point,United States,PORTG0326,Active
+TERM0442,Terminal,Erato St. Terminal,United States,PORTG0137,Active
+TERM0443,Terminal,Garden City Terminal,United States,PORTG0334,Active
+TERM0444,Terminal,Half Moon Cruise Terminal,United States,PORTG0335,Active
+TERM0445,Terminal,Jacksonville Container Terminal,United States,PORTG0326,Active
+TERM0446,Terminal,Julia St. Terminal,United States,PORTG0137,Active
+TERM0447,Terminal,Lynnterm Terminal,Canada,PORTG0330,Active
+TERM0448,Terminal,Maisonneuve and Viau Terminals,Canada,PORTG0336,Active
+TERM0449,Terminal,Manzanillo International Terminal,Panama,PORTG0337,Active
+TERM0450,Terminal,Manzanillo Multipurpose Port Facility,Mexico,PORTG0271,Active
+TERM0451,Terminal,Manzanillo Multipurpose Terminal,Mexico,PORTG0271,Active
+TERM0452,Terminal,Manzanillo Specialized Container Terminal TEC I,Mexico,PORTG0271,Active
+TERM0453,Terminal,Mayor’s Point Terminal,United States,PORTG0331,Active
+TERM0454,Terminal,MPA Cruise Terminal,United States,PORTG0324,Active
+TERM0455,Terminal,New Orleans Terminal / Napoleon Avenue,United States,PORTG0137,Active
+TERM0456,Terminal,NIT Terminal,United States,PORTG0338,Active
+TERM0457,Terminal,NNMT Terminal,United States,PORTG0338,Active
+TERM0458,Terminal,North Port Marine Terminal,United States,PORTG0339,Active
+TERM0459,Terminal,Oakland International Container Terminal,United States,PORTG0192,Active
+TERM0460,Terminal,Ocean Terminal,United States,PORTG0334,Active
+TERM0461,Terminal,Outer Harbor Berth 54/55,United States,PORTG0098,Active
+TERM0462,Terminal,Pacific Container Terminal,United States,PORTG0132,Active
+TERM0463,Terminal,Pacific Terminal,United States,PORTG0340,Active
+TERM0464,Terminal,Pier A,United States,PORTG0132,Active
+TERM0465,Terminal,Pier F Berth 206,United States,PORTG0132,Active
+TERM0466,Terminal,Port Canaveral Cruise/Cargo Operations,United States,PORTG0321,Active
+TERM0467,Terminal,Port of Astoria Operations,United States,PORTG0341,Active
+TERM0468,Terminal,Port of Beaumont Operations,United States,PORTG0342,Active
+TERM0469,Terminal,Port of Benicia Operations,United States,PORTG0343,Active
+TERM0470,Terminal,Port of Coos Bay Operations,United States,PORTG0344,Active
+TERM0471,Terminal,Port of Duluth-Superior Operations,United States,PORTG0345,Active
+TERM0472,Terminal,Port of Galveston Cruise Operations,United States,PORTG0346,Active
+TERM0473,Terminal,Port of Grays Harbor Operations,United States,PORTG0347,Active
+TERM0474,Terminal,Port of Gulfport Operations,United States,PORTG0348,Active
+TERM0475,Terminal,Port of Hueneme Operations,United States,PORTG0349,Active
+TERM0476,Terminal,Port of Lázaro Cárdenas Operations,Mexico,PORTG0151,Active
+TERM0477,Terminal,Port of Miami Cruise Operations,United States,PORTG0129,Active
+TERM0478,Terminal,Port of Mobile Operations,United States,PORTG0186,Active
+TERM0479,Terminal,Port of Morehead City Operations,United States,PORTG0350,Active
+TERM0480,Terminal,Port of Olympia Operations,United States,PORTG0351,Active
+TERM0481,Terminal,Port of Panama City Operations,United States,PORTG0352,Active
+TERM0482,Terminal,Port of Pascagoula Operations,United States,PORTG0353,Active
+TERM0483,Terminal,Port of Port Angeles Operations,United States,PORTG0354,Active
+TERM0484,Terminal,Port of Port Arthur Operations,United States,PORTG0355,Active
+TERM0485,Terminal,Port of Progreso Cruise Operations,Mexico,PORTG0185,Active
+TERM0486,Terminal,Port of Providence Operations,United States,PORTG0356,Active
+TERM0487,Terminal,Port of Stockton Operations,United States,PORTG0357,Active
+TERM0488,Terminal,Port of Tampa Cruise Operations,United States,PORTG0358,Active
+TERM0489,Terminal,Port of Veracruz Operations,Mexico,PORTG0270,Active
+TERM0490,Terminal,Port of West Sacramento Operations,United States,PORTG0359,Active
+TERM0491,Terminal,Port of Wilmington Operations,United States,PORTG0360,Active
+TERM0492,Terminal,San Antonio Terminal Internacional,Chile,PORTG0361,Active
+TERM0493,Terminal,Santa Marta International Terminal,Colombia,PORTG0362,Active
+TERM0494,Terminal,San Vicente Terminal Internacional,Chile,PORTG0363,Active
+TERM0495,Terminal,Smith Cove Terminal Pier 91,United States,PORTG0138,Active
+TERM0496,Terminal,South Locust Point Terminal,United States,PORTG0324,Active
+TERM0497,Terminal,SP-SSA International Terminal,Vietnam,PORTG0105,Active
+TERM0498,Terminal,Squamish Terminals,Canada,PORTG0364,Active
+TERM0499,Terminal,Tenth Avenue Marine Terminal,United States,PORTG0327,Active
+TERM0500,Terminal,Terminal 18,United States,PORTG0138,Active
+TERM0501,Terminal,Terminal 30,United States,PORTG0138,Active
+TERM0502,Terminal,Terminal 5,United States,PORTG0138,Active
+TERM0503,Terminal,Terminal B63,United States,PORTG0192,Active
+TERM0504,Terminal,EUROGATE Container Terminal Hamburg,Germany,PORTG0111,Active
+TERM0505,Terminal,EUROGATE Container Terminal Bremerhaven,Germany,PORTG0175,Active
+TERM0506,Terminal,North Sea Terminal Bremerhaven (NTB),Germany,PORTG0175,Active
+TERM0507,Terminal,MSC Gate Bremerhaven,Germany,PORTG0175,Active
+TERM0508,Terminal,EUROGATE Container Terminal Wilhelmshaven,Germany,PORTG0365,Active
+TERM0509,Terminal,La Spezia Container Terminal,Italy,PORTG0366,Active
+TERM0510,Terminal,Terminal Container Ravenna,Italy,PORTG0367,Active
+TERM0511,Terminal,Salerno Container Terminal,Italy,PORTG0368,Active
+TERM0512,Terminal,EUROGATE Tanger TC2,Morocco,PORTG0124,Active
+TERM0513,Terminal,Tanger Alliance TC3,Morocco,PORTG0124,Active
+TERM0514,Terminal,Damietta Alliance Container Terminal,Egypt,PORTG0369,Active
+TERM0515,Terminal,HHLA Container Terminal Altenwerder (CTA),Germany,PORTG0111,Active
+TERM0516,Terminal,HHLA Container Terminal Burchardkai (CTB),Germany,PORTG0111,Active
+TERM0517,Terminal,HHLA Container Terminal Tollerort (CTT),Germany,PORTG0111,Active
+TERM0518,Terminal,HHLA Container Terminal Odessa,Ukraine,PORTG0123,Active
+TERM0519,Terminal,HHLA Container Terminal Estonia,Estonia,PORTG0370,Active
+TERM0520,Terminal,UNIKAI,Germany,PORTG0111,Active
+TERM0521,Terminal,HHLA Frucht- und Kühl-Zentrum,Germany,PORTG0111,Active
+TERM0522,Terminal,HHLA TK Estonia,Estonia,PORTG0370,Active
+TERM0523,Terminal,HHLA PLT Italy,Italy,PORTG0144,Active
+TERM0524,Terminal,Hansaport,Germany,PORTG0111,Active
+COMP_HAFEET_RAIL,Company,Hafeet Rail,UAE / Oman,,Active
+COMP_OMAN_RAIL,Company,Oman Rail,Oman,,Active
+COMP_MUBADALA,Company,Mubadala Investment Company,United Arab Emirates,,Active
+COMP_SAR,Company,Saudi Arabia Railways (SAR),Saudi Arabia,,Active
+COMP_GEORGIAN_RAILWAY,Company,Georgian Railway,Georgia,,Active
+COMP_ADY,Company,Azerbaijan Railways (ADY),Azerbaijan,,Active
+COMP_KTZ,Company,Kazakhstan Temir Zholy (KTZ),Kazakhstan,,Active
+COMP_TCDD,Company,Turkish State Railways (TCDD),Türkiye,,Active
+COMP_CPKC,Company,Canadian Pacific Kansas City (CPKC),Canada,,Active
+COMP_BNSF,Company,BNSF Railway,United States,,Active
+COMP_UNION_PACIFIC,Company,Union Pacific Railroad,United States,,Active
+COMP_CSX,Company,CSX Transportation,United States,,Active
+COMP_NORFOLK_SOUTHERN,Company,Norfolk Southern Railway,United States,,Active
+COMP_ACTA,Company,Alameda Corridor Transportation Authority,United States,,Active
+COMP_TRANSNET_FREIGHT_RAIL,Company,Transnet Freight Rail,South Africa,,Active
+COMP_ONCF,Company,ONCF,Morocco,,Active
+COMP_METRANS,Company,METRANS,Czech Republic,,Active
+COMP_CONCOR,Company,Container Corporation of India (CONCOR),India,,Active
+COMP_DFCCIL,Company,Dedicated Freight Corridor Corporation of India Ltd. (DFCCIL),India,,Active
+COMP_INDIAN_RAILWAYS,Company,Indian Railways,India,,Active
+COMP_HAMBURG_PORT_AUTHORITY,Company,Hamburg Port Authority,Germany,,Active
+RAILNET_0001,Rail Network,UAE National Rail Network,United Arab Emirates,COMP_ETIHAD_RAIL,Operating
+RAILNET_0002,Rail Network,Hafeet Rail UAE-Oman Link,UAE / Oman,COMP_HAFEET_RAIL,Under construction
+RAILNET_0003,Rail Network,SAR East Freight Train,Saudi Arabia,COMP_SAR,Operating
+RAILNET_0004,Rail Network,Middle Corridor / Trans-Caspian East-West,China / Kazakhstan / Azerbaijan / Georgia / Türkiye,,Operating
+RAILNET_0005,Rail Network,Baku-Tbilisi-Kars Railway,Azerbaijan / Georgia / Türkiye,,Operating
+RAILNET_0006,Rail Network,Georgia Black Sea Port Rail Corridor,Georgia,COMP_GEORGIAN_RAILWAY,Operating
+RAILNET_0007,Rail Network,CN Tri-Coastal Freight Network,Canada / United States,COMP_CN,Operating
+RAILNET_0008,Rail Network,CPKC North American Port Network,Canada / US / Mexico,COMP_CPKC,Operating
+RAILNET_0009,Rail Network,Alameda Corridor,United States,COMP_ACTA,Operating
+RAILNET_0010,Rail Network,BNSF International Intermodal Network,United States,COMP_BNSF,Operating
+RAILNET_0011,Rail Network,Union Pacific West Coast Port Network,United States,COMP_UNION_PACIFIC,Operating
+RAILNET_0012,Rail Network,Norfolk Southern East Coast Port Network,United States,COMP_NORFOLK_SOUTHERN,Operating
+RAILNET_0013,Rail Network,Southeast Mexico Express,Mexico / United States,,Operating
+RAILNET_0014,Rail Network,Transnet Container Corridor,South Africa,COMP_TRANSNET_FREIGHT_RAIL,Operating
+RAILNET_0015,Rail Network,Transnet North Corridor,South Africa,COMP_TRANSNET_FREIGHT_RAIL,Operating
+RAILNET_0016,Rail Network,Tanger Med Rail Gateway,Morocco,COMP_ONCF,Operating
+RAILNET_0017,Rail Network,HHLA / METRANS European Intermodal Network,Europe,COMP_METRANS,Operating
+RAILNET_0018,Rail Network,Hamburg Port Railway,Germany,COMP_HAMBURG_PORT_AUTHORITY,Operating
+RAILNET_0019,Rail Network,Western Dedicated Freight Corridor,India,COMP_DFCCIL,Operating / final works
+RAILNET_0020,Rail Network,CONCOR Container Rail Network,India,COMP_CONCOR,Operating
+RAILNODE_0001,Rail Node,Ghuwaifat Border Rail Gateway,United Arab Emirates,COMP_ETIHAD_RAIL,Active
+RAILNODE_0002,Rail Node,Ruwais Freight Facility,United Arab Emirates,COMP_ETIHAD_RAIL,Active
+RAILNODE_0003,Rail Node,ICAD / Mussafah Freight Facility,United Arab Emirates,COMP_ETIHAD_RAIL,Active
+RAILNODE_0004,Rail Node,Khalifa Port Rail Terminal,United Arab Emirates,COMP_ETIHAD_RAIL,Active
+RAILNODE_0005,Rail Node,Dubai Industrial City Rail Facility,United Arab Emirates,COMP_ETIHAD_RAIL,Active
+RAILNODE_0006,Rail Node,Jebel Ali Port Rail Terminal,United Arab Emirates,COMP_ETIHAD_RAIL,Active
+RAILNODE_0007,Rail Node,Al Ghail Rail Freight Facility,United Arab Emirates,COMP_ETIHAD_RAIL,Active
+RAILNODE_0008,Rail Node,Fujairah Port Rail Terminal,United Arab Emirates,COMP_ETIHAD_RAIL,Active
+RAILNODE_0009,Rail Node,Sohar Port Rail Gateway,Oman,COMP_HAFEET_RAIL,Under construction
+RAILNODE_0010,Rail Node,Al Ain / UAE Rail Junction,United Arab Emirates,COMP_HAFEET_RAIL,Under construction
+RAILNODE_0011,Rail Node,King Abdulaziz Port Dammam Rail Terminal,Saudi Arabia,COMP_SAR,Active
+RAILNODE_0012,Rail Node,Riyadh Rail Freight / Dry Port Node,Saudi Arabia,COMP_SAR,Active
+RAILNODE_0013,Rail Node,China-Kazakhstan Border Gateway,Kazakhstan,COMP_KTZ,Active
+RAILNODE_0014,Rail Node,Aktau Rail-Port Interface,Kazakhstan,COMP_KTZ,Active
+RAILNODE_0015,Rail Node,Kuryk Port Rail Interface,Kazakhstan,COMP_KTZ,Active
+RAILNODE_0016,Rail Node,Baku / Alat Rail-Port Interface,Azerbaijan,COMP_ADY,Active
+RAILNODE_0017,Rail Node,Tbilisi Rail Hub,Georgia,COMP_GEORGIAN_RAILWAY,Active
+RAILNODE_0018,Rail Node,Tbilisi Intermodal Hub,Georgia,COMP_TBILISI_DRY_PORT,Active
+RAILNODE_0019,Rail Node,Poti Rail-Port Interface,Georgia,COMP_GEORGIAN_RAILWAY,Active
+RAILNODE_0020,Rail Node,Batumi Rail-Port Interface,Georgia,COMP_GEORGIAN_RAILWAY,Active
+RAILNODE_0021,Rail Node,Akhalkalaki Gauge-Change Hub,Georgia,COMP_GEORGIAN_RAILWAY,Active
+RAILNODE_0022,Rail Node,Kars Rail Gateway,Türkiye,COMP_TCDD,Active
+RAILNODE_0023,Rail Node,Prince Rupert Port Rail Gateway,Canada,COMP_CN,Active
+RAILNODE_0024,Rail Node,Vancouver Port Rail Gateway,Canada,,Active
+RAILNODE_0025,Rail Node,Montreal Port Rail Gateway,Canada,,Active
+RAILNODE_0026,Rail Node,Halifax Port Rail Gateway,Canada,COMP_CN,Active
+RAILNODE_0027,Rail Node,Saint John Port Rail Gateway,Canada,COMP_CPKC,Active
+RAILNODE_0028,Rail Node,Lázaro Cárdenas Port Rail Gateway,Mexico,COMP_CPKC,Active
+RAILNODE_0029,Rail Node,Chicago Intermodal Hub,United States,,Active
+RAILNODE_0030,Rail Node,Kansas City Intermodal Hub,United States,,Active
+RAILNODE_0031,Rail Node,Laredo Rail Border Gateway,United States / Mexico,COMP_CPKC,Active
+RAILNODE_0032,Rail Node,Port of Los Angeles Rail Gateway,United States,,Active
+RAILNODE_0033,Rail Node,Port of Long Beach Rail Gateway,United States,,Active
+RAILNODE_0034,Rail Node,Los Angeles BNSF Intermodal Facility,United States,COMP_BNSF,Active
+RAILNODE_0035,Rail Node,Logistics Park Chicago,United States,COMP_BNSF,Active
+RAILNODE_0036,Rail Node,Seattle International Gateway,United States,COMP_BNSF,Active
+RAILNODE_0037,Rail Node,Oakland International Gateway,United States,COMP_BNSF,Active
+RAILNODE_0038,Rail Node,Tacoma Port Rail Gateway,United States,COMP_UNION_PACIFIC,Active
+RAILNODE_0039,Rail Node,Savannah Port Rail Gateway,United States,COMP_NORFOLK_SOUTHERN,Active
+RAILNODE_0040,Rail Node,Charleston Port Rail Gateway,United States,COMP_NORFOLK_SOUTHERN,Active
+RAILNODE_0041,Rail Node,New Orleans Port Rail Gateway,United States,,Active
+RAILNODE_0042,Rail Node,Mobile Port Rail Gateway,United States,COMP_CN,Active
+RAILNODE_0043,Rail Node,Port of Durban Rail Gateway,South Africa,COMP_TRANSNET_FREIGHT_RAIL,Active
+RAILNODE_0044,Rail Node,City Deep Inland Terminal,South Africa,COMP_TRANSNET_FREIGHT_RAIL,Active
+RAILNODE_0045,Rail Node,Richards Bay Rail Gateway,South Africa,COMP_TRANSNET_FREIGHT_RAIL,Active
+RAILNODE_0046,Rail Node,Tanger Med Rail Terminal,Morocco,COMP_ONCF,Active
+RAILNODE_0047,Rail Node,Kenitra Automotive Rail Node,Morocco,COMP_ONCF,Active
+RAILNODE_0048,Rail Node,Renault Tanger Automotive Rail Node,Morocco,COMP_ONCF,Active
+RAILNODE_0049,Rail Node,Hamburg Port Railway,Germany,COMP_HAMBURG_PORT_AUTHORITY,Active
+RAILNODE_0050,Rail Node,HHLA CTA Rail Terminal,Germany,COMP_HHLA,Active
+RAILNODE_0051,Rail Node,Prague METRANS Hub,Czech Republic,COMP_METRANS,Active
+RAILNODE_0052,Rail Node,Ceska Trebova METRANS Hub,Czech Republic,COMP_METRANS,Active
+RAILNODE_0053,Rail Node,Dunajska Streda METRANS Hub,Slovakia,COMP_METRANS,Active
+RAILNODE_0054,Rail Node,Budapest METRANS Hub,Hungary,COMP_METRANS,Active
+RAILNODE_0055,Rail Node,Trieste Rail Gateway,Italy,COMP_METRANS,Active
+RAILNODE_0056,Rail Node,Rotterdam Rail Gateway,Netherlands,COMP_METRANS,Active
+RAILNODE_0057,Rail Node,Bremerhaven Rail Gateway,Germany,COMP_METRANS,Active
+RAILNODE_0058,Rail Node,JNPT / Nhava Sheva Rail Gateway,India,COMP_DFCCIL,Active
+RAILNODE_0059,Rail Node,Dadri DFC Terminal,India,COMP_DFCCIL,Active
+RAILNODE_0060,Rail Node,Rewari DFC Junction,India,COMP_DFCCIL,Active
+RAILNODE_0061,Rail Node,Mundra Rail Gateway,India,COMP_CONCOR,Active
+RAILNODE_0062,Rail Node,Pipavav Rail Gateway,India,COMP_CONCOR,Active

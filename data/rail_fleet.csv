@@ -1,0 +1,6 @@
+﻿Rail Fleet Record ID,Company ID,Rail Network ID,Fleet Type,Count,Composition / Capacity,Status,Notes,Source ID
+RAILFLEET_0001,COMP_ETIHAD_RAIL,RAILNET_0001,Locomotives,38,Freight locomotives,Operating,UAE network completion baseline,SRC_0381
+RAILFLEET_0002,COMP_ETIHAD_RAIL,RAILNET_0001,Freight wagons,1000+,Multiple cargo types,Operating,"Network exceeds 1,000 wagons",SRC_0381
+RAILFLEET_0003,COMP_SAR,RAILNET_0003,Freight wagons,2596,858 double-stack; 948 standard container; bulk/vehicle types,Operating,East Train fleet,SRC_0384
+RAILFLEET_0004,COMP_METRANS,RAILNET_0017,Locomotives,190+,Modern locomotives,Operating,Current METRANS network,SRC_0401
+RAILFLEET_0005,COMP_METRANS,RAILNET_0017,Railcars,4000+,Special intermodal railcars,Operating,Current METRANS network,SRC_0401

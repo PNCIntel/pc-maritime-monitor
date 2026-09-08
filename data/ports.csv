@@ -245,3 +245,183 @@ PORTG0187,Port of Chattogram,Bangladesh,,,,,Port / harbour,Parent port for canon
 PORTG0188,Lien Chieu Port,Vietnam,,,,,Port / harbour,Parent port for canonical terminal model,v1.13 global terminal expansion,
 PORTG0189,Port of Balboa,Panama,,,,,Port / harbour,Parent port for canonical terminal model,v1.13 global terminal expansion,
 PORTG0190,Lach Huyen / Haiphong Port,Vietnam,,,,,Port / harbour,Parent port for canonical terminal model,v1.13 global terminal expansion,
+PORTG0191,Holyhead Port,United Kingdom,,,COMP_STENA_LINE_PORTS,Stena Line Ports,Ferry port / harbour,Irish Sea Ro-Pax gateway; Holyhead-Dublin,Added from casualty/infrastructure reporting,SRC_0340
+PORTG0192,Port of Oakland,United States,,,COMP_PORT_OAKLAND,Port of Oakland,Port / harbour,Transpacific container gateway,Turning-basin widening project,SRC_0347
+PORTG0193,Port Louis,Mauritius,,,COMP_MPA_MAURITIUS,Mauritius Ports Authority,Port / harbour,National container and general cargo gateway,Mauritius Container Terminal upgrade,SRC_0344
+PORTG0194,Bukhta Sever Terminal,Russia,,,COMP_ROSNEFT,Rosneft,Oil export terminal / Arctic port,Vostok Oil Arctic crude export gateway,30m t/y first phase; future expansion planned,SRC_0343
+PORTG0195,Port of Hodeidah,Yemen,,,,,Commercial port,Red Sea gateway,Canonical Yemen port; control/operations require continuous verification,SRC_0349
+PORTG0196,Ras Isa Terminal,Yemen,,,,,Oil / product terminal,Red Sea oil/product gateway,Reported Houthi-controlled in cited 2026 incident,SRC_0349
+PORTG0197,Port of Salif,Yemen,,,,,Bulk / commercial port,Red Sea bulk and general cargo gateway,Canonical Yemen port; control/operations require continuous verification,SRC_0349
+PORTG0198,Port of Mokha,Yemen,,,,,Commercial port,Bab al-Mandeb / Red Sea gateway,Canonical Yemen port,SRC_0349
+PORTG0199,Port of Aden,Yemen,,,,,Commercial / container port,Gulf of Aden gateway,Canonical Yemen port; Coast Guard-linked enforcement node,SRC_0349
+PORTG0200,Port of Mukalla,Yemen,,,,,Commercial port,Hadhramaut / Gulf of Aden gateway,Canonical Yemen port,SRC_0349
+PORTG0201,Balhaf LNG Terminal,Yemen,,,,,LNG export terminal,Energy export infrastructure,Canonical Yemen strategic energy asset,SRC_0349
+PORTG0202,Port of Nishtun,Yemen,,,,,Commercial port,Eastern Yemen gateway,Canonical Yemen port,SRC_0349
+PORTG0203,Qana Port,Yemen,,,,,Oil / commercial terminal,Shabwah energy/logistics gateway,Canonical Yemen port,SRC_0349
+PORTG0204,Port of Socotra,Yemen,,,,,Island port,Socotra logistics gateway,Canonical Yemen port,SRC_0349
+PORTG0205,Port of Dover,United Kingdom,,,,,Ferry port / harbour,Primary UK Short Straits ferry gateway,Civil-disruption event linked,SRC_0351
+PORTG0206,Port of Montevideo,Uruguay,,,COMP_ANP_URUGUAY,Administración Nacional de Puertos,Port / harbour,Uruguay principal commercial port,Alpha Crux casualty linked,SRC_0356
+PORTG0207,Port of Davao,Philippines,,,,,Port / harbour,Mindanao container and domestic-shipping gateway,Parent port for Davao International Container Terminal,SRC_0353
+PORTG0208,Port of Manila,Philippines,,,,,Port / harbour,Philippines principal container and domestic gateway,Span Asia route / North Manila Anchorage context,SRC_0353
+PORTG0209,Port of Cebu,Philippines,,,,,Port / harbour,Central Philippines domestic/container gateway,Span Asia route node,SRC_0353
+PORTG0210,Port of Cagayan de Oro,Philippines,,,,,Port / harbour,Northern Mindanao domestic/container gateway,Span Asia route node,SRC_0353
+PORTG0211,Port of Durban,South Africa,,,,,Port / harbour,South Africa primary container gateway,ICTSI DCT Pier 2 strategic exposure,SRC_0354
+PORTG0212,Port of Beira,Mozambique,,,,,Port / harbour,Mozambique regional gateway,TLG footprint research seed,SRC_0354
+PORTG0213,Port of Maputo / Matola,Mozambique,,,,,Port / harbour,Mozambique bulk and logistics gateway,TLG footprint research seed,SRC_0354
+PORTG0214,Port of Saldanha Bay,South Africa,,,,,Port / harbour,Bulk/mineral export gateway,TLG footprint research seed,SRC_0354
+PORTG0215,Port of Nacala,Mozambique,,,,,Port / harbour,Northern Mozambique corridor gateway,TLG footprint research seed,SRC_0354
+PORTG0216,Port of Tanjung Priok,Indonesia,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0217,Laem Chabang Port,Thailand,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0218,Bangkok / Chao Phraya logistics gateway,Thailand,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0219,Port of Qinzhou,China,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0220,Port of Dalian,China,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0221,Port of Fuzhou / Jiangyin,China,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0222,Port of Fuzhou / Mawei,China,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0223,Port of Lianyungang,China,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0224,Port of Incheon,South Korea,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0225,Port of Busan,South Korea,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0226,Port of Chennai,India,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0227,King Abdulaziz Port Dammam,Saudi Arabia,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0228,Port of Zeebrugge,Belgium,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0229,Port of Genoa,Italy,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0230,Port of Venice,Italy,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0231,Port of Mersin,Türkiye,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0232,Port of Gdańsk,Poland,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0233,Port of Rodman / Panama Pacific,Panama,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0234,Port of Halifax,Canada,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0235,Port of Philadelphia / Delaware River,United States,,,COMP_PSA,PSA International,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0360
+PORTG0236,Willebroek Port / Inland Waterway Terminal,Belgium,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0237,Port of Duisburg,Germany,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0238,Port of Gdynia,Poland,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0239,Port of Stockholm,Sweden,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0240,Port of Amsterdam,Netherlands,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0241,Port of Moerdijk,Netherlands,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0242,Port of Rotterdam,Netherlands,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0243,Venlo Inland Terminal,Netherlands,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0244,Port of Harwich,United Kingdom,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0245,Port of London / Medway,United Kingdom,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0246,Port of Alexandria / El Dekheila,Egypt,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0247,Port of Abu Qir,Egypt,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0248,Port of El Dekheila,Egypt,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0249,Port of Ain Sokhna,Egypt,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0250,Port of Umm Qasr / Basra,Iraq,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0251,Port of Sohar,Oman,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0252,Port of Khasab,Oman,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0253,Port of Jazan,Saudi Arabia,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0254,Port of Ajman,United Arab Emirates,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0255,Port of Ras Al Khaimah,United Arab Emirates,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0256,Port of Umm Al Quwain,United Arab Emirates,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0257,Kwai Tsing Container Terminals,"Hong Kong, China",,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0258,Tuen Mun / River Trade Terminal,"Hong Kong, China",,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0259,Yantian Port,China,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0260,Port of Huizhou,China,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0261,Port of Jiangmen,China,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0262,Port of Nanhai / Foshan,China,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0263,Port Klang,Malaysia,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0264,Port of Thilawa / Yangon,Myanmar,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0265,Port of Karachi,Pakistan,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0266,Port of Gwangyang,South Korea,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0267,Port of Brisbane,Australia,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0268,Port Botany,Australia,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0269,Port of Ensenada,Mexico,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0270,Port of Veracruz,Mexico,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0271,Port of Manzanillo,Mexico,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0272,Port of Cristobal,Panama,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0273,Freeport Harbour,Bahamas,,,COMP_HUTCHISON,Hutchison Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0361
+PORTG0274,Port of Wuhan,China,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0275,Port of Quanzhou / Jinjiang,China,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0276,Port of Jinzhou,China,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0277,Port of Kaohsiung,China,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0278,Port of Guangzhou / Nansha,China,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0279,Port of Nantong,China,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0280,Port of Qingdao,China,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0281,Port of Qinhuangdao,China,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0282,Port of Quanzhou,China,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0283,Port of Taicang,China,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0284,Port of Yingkou,China,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0285,Port of Ambarlı / Istanbul,Türkiye,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0286,Port of Piraeus,Greece,,,COMP_COSCO_PORTS,COSCO SHIPPING Ports,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0362
+PORTG0287,Port of Bauan,Philippines,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0288,Port of Tanza / Cavite,Philippines,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0289,Laguna inland terminal,Philippines,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0290,PHIVIDEC Industrial Estate / Mindanao Container Terminal,Philippines,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0291,Port of Subic,Philippines,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0292,Makar Wharf / General Santos,Philippines,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0293,Port of Iloilo / Visayas,Philippines,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0294,Port of Batu Ampar,Indonesia,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0295,Port of Lamongan / East Java,Indonesia,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0296,Port Moresby / Motukea,Papua New Guinea,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0297,Port of Lae,Papua New Guinea,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0298,Port of Melbourne,Australia,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0299,Port of Batumi,Georgia,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0300,Port of Matadi,DR Congo,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0301,Port of Toamasina,Madagascar,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0302,Port of Guayaquil,Ecuador,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0303,Pouso Alegre inland logistics terminal,Brazil,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0304,Port of Rio de Janeiro,Brazil,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0305,Puerto Cortés,Honduras,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0306,Port of La Plata,Argentina,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0364
+PORTG0307,Port of Aratu,Brazil,,,COMP_ICTSI,ICTSI,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0379
+PORTG0308,Western Shenzhen Port / Shekou,China,,,COMP_CM_PORT,China Merchants Port,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0365
+PORTG0309,Western Shenzhen Port / Chiwan,China,,,COMP_CM_PORT,China Merchants Port,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0365
+PORTG0310,Western Shenzhen Port / Mawan,China,,,COMP_CM_PORT,China Merchants Port,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0365
+PORTG0311,Port of Hambantota,Sri Lanka,,,COMP_CM_PORT,China Merchants Port,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0365
+PORTG0312,Port of Djibouti,Djibouti,,,COMP_CM_PORT,China Merchants Port,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0365
+PORTG0313,Port of Paranaguá,Brazil,,,COMP_CM_PORT,China Merchants Port,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0365
+PORTG0314,Port of Lagos / Tin Can Island,Nigeria,,,COMP_CM_PORT,China Merchants Port,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0365
+PORTG0315,Port of Khorfakkan,United Arab Emirates,,,COMP_GULFTAINER,Gulftainer,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0367
+PORTG0316,Port Khalid / Sharjah,United Arab Emirates,,,COMP_GULFTAINER,Gulftainer,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0367
+PORTG0317,Sajaa Dry Port,United Arab Emirates,,,COMP_GULFTAINER,Gulftainer,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0367
+PORTG0318,Jubail Commercial Port,Saudi Arabia,,,COMP_GULFTAINER,Gulftainer,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0367
+PORTG0319,Umm Qasr Port,Iraq,,,COMP_GULFTAINER,Gulftainer,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0367
+PORTG0320,Umm Qasr Port logistics zone,Iraq,,,COMP_GULFTAINER,Gulftainer,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0367
+PORTG0321,Port Canaveral,United States,,,COMP_GULFTAINER,Gulftainer,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0367
+PORTG0322,Port of Limón,Costa Rica,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0323,Port of Caldera,Costa Rica,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0324,Port of Baltimore,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0325,Port of Nanaimo,Canada,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0326,Port of Jacksonville,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0327,Port of San Diego,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0328,Port of Portland,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0329,Port of Cai Lan,Vietnam,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0330,Port of Vancouver,Canada,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0331,Port of Brunswick,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0332,Port of Charleston,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0333,Port of Tacoma,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0334,Port of Savannah,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0335,Port of Norfolk / Virginia,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0368
+PORTG0336,Port of Montreal,Canada,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0369
+PORTG0337,Port of Manzanillo / Colón,Panama,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0369
+PORTG0338,Port of Virginia,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0369
+PORTG0339,Port of Kalama,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0369
+PORTG0340,Port of Everett,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0369
+PORTG0341,Port of Astoria,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0342,Port of Beaumont,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0343,Port of Benicia,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0344,Port of Coos Bay,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0345,Port of Duluth-Superior,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0346,Port of Galveston,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0347,Port of Grays Harbor,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0348,Port of Gulfport,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0349,Port of Hueneme,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0350,Port of Morehead City,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0351,Port of Olympia,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0352,Port of Panama City Florida,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0353,Port of Pascagoula,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0354,Port of Port Angeles,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0355,Port of Port Arthur,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0356,Port of Providence,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0357,Port of Stockton,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0358,Port Tampa Bay,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0370
+PORTG0359,Port of West Sacramento,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0371
+PORTG0360,Port of Wilmington NC,United States,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0371
+PORTG0361,Port of San Antonio,Chile,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0371
+PORTG0362,Port of Santa Marta,Colombia,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0371
+PORTG0363,Port of San Vicente / Talcahuano,Chile,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0371
+PORTG0364,Port of Squamish,Canada,,,COMP_SSA_MARINE,SSA Marine,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0371
+PORTG0365,JadeWeserPort Wilhelmshaven,Germany,,,COMP_EUROGATE,EUROGATE,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0372
+PORTG0366,Port of La Spezia,Italy,,,COMP_EUROGATE,EUROGATE,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0373
+PORTG0367,Port of Ravenna,Italy,,,COMP_EUROGATE,EUROGATE,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0373
+PORTG0368,Port of Salerno,Italy,,,COMP_EUROGATE,EUROGATE,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0373
+PORTG0369,Port of Damietta,Egypt,,,COMP_EUROGATE,EUROGATE,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0373
+PORTG0370,Port of Muuga / Tallinn,Estonia,,,COMP_HHLA,HHLA,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0374

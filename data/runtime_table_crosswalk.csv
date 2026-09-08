@@ -96,3 +96,15 @@ port_berths.csv,Canonical / structured runtime table,Port Berths,Added in v1.13,
 port_equipment.csv,Canonical / structured runtime table,Port Equipment,Added in v1.13,Equipment Record ID + Terminal ID,N/A,Direct source URLs in table,STS/RTG/RMG/ASC and other handling equipment.
 port_ownership.csv,Canonical / structured runtime table,Port Ownership,Added in v1.13,Ownership ID + Terminal ID + Company ID,N/A,Direct source URLs in table,"Separates equity, investment and operating control."
 port_news.csv,Canonical / structured runtime table,Port News,Added in v1.13,News ID + Terminal ID,N/A,Direct source URLs in table,Live terminal news/development layer for Streamlit port detail.
+aircraft_registry.csv,Canonical aircraft identity table,Aircraft Registry,Added in v1.14,Aircraft ID + Registration,Registration / MSN,Direct source URL + Source ID,One row per physical aircraft; separates network customer from legal operator.
+aircraft_relationships.csv,Aircraft-company relationship edge table,Aircraft Relationships,Added in v1.14,Aircraft Relationship ID + Aircraft ID,Registration,Source ID,Operator and network-customer / brand edges.
+aviation_fleet_summary.csv,Aviation portfolio / coverage table,Aviation Fleet Summary,Added in v1.14,Program ID + Company ID,N/A,Source ID,Preserves official fleet totals separately from identity coverage.
+port_operator_coverage.csv,Derived coverage / QA table,Port Operator Coverage,Added in v1.16,Operator Company ID,N/A,Unified source namespace,"Coverage/QA summary for PSA, Hutchison Ports, COSCO SHIPPING Ports, ICTSI, China Merchants Port, Gulftainer, SSA Marine, EUROGATE and HHLA."
+rail_operators.csv,Canonical rail operator table,Rail Operators,Added in v1.17,Rail Operator ID + Company ID,N/A,Unified source namespace,Company-linked operators/authorities.
+rail_networks.csv,Canonical rail network/corridor table,Rail Networks,Added in v1.17,Rail Network ID,N/A,Unified source namespace,Named physical corridors with start/end nodes.
+rail_nodes.csv,Canonical rail node table,Rail Nodes,Added in v1.17,Rail Node ID,N/A,Unified source namespace,"Ports, dry ports, borders, hubs and junctions."
+rail_links.csv,Rail movement-edge table,Rail Links,Added in v1.17,Rail Link ID + Rail Network ID,N/A,Unified source namespace,Origin-destination links.
+rail_relationships.csv,Rail-company relationship table,Rail Relationships,Added in v1.17,Rail Relationship ID,N/A,Unified source namespace,Owner/operator/JV/service edges.
+rail_fleet.csv,Rail rolling-stock aggregate table,Rail Fleet,Added in v1.17,Rail Fleet Record ID,N/A,Unified source namespace,Locomotive/wagon fleet aggregates.
+rail_connections.csv,Cross-domain rail connection table,Rail Connections,Added in v1.17,Rail Connection ID,N/A,Unified source namespace,Rail nodes linked to P&C ports/assets.
+rail_news.csv,Rail news/development table,Rail News,Added in v1.17,Rail News ID,N/A,Unified source namespace,Project/service/news layer keyed to rail graph.

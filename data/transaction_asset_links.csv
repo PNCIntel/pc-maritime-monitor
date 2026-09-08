@@ -1,0 +1,12 @@
+﻿Transaction Link ID,Deal ID,Entity / Asset ID,Entity / Asset,Link Type,Confidence,Notes
+TALINK0001,IDEAL_0013,COMP_TLG,The Logistics Group,TARGET,High,Acquisition target
+TALINK0002,IDEAL_0013,PORTG0211,Port of Durban,NETWORK_EXPOSURE,Medium,TLG/ICTSI Southern Africa exposure; exact asset relationship requires enrichment
+TALINK0003,IDEAL_0013,PORTG0212,Port of Beira,NETWORK_EXPOSURE,Medium,TLG regional footprint research seed
+TALINK0004,IDEAL_0013,PORTG0213,Port of Maputo / Matola,NETWORK_EXPOSURE,Medium,TLG regional footprint research seed
+TALINK0005,IDEAL_0013,PORTG0214,Port of Saldanha Bay,NETWORK_EXPOSURE,Medium,TLG regional footprint research seed
+TALINK0006,IDEAL_0013,PORTG0215,Port of Nacala,NETWORK_EXPOSURE,Medium,TLG regional footprint research seed
+TALINK0007,IDEAL_0014,COMP_AUSTAL_USA,Austal USA,TARGET,High,
+TALINK0008,IDEAL_0014,YARD_0027,Austal USA Mobile Shipyard,PHYSICAL_ASSET,High,
+TALINK0009,IDEAL_0014,YARD_0028,Austal USA San Diego,PHYSICAL_ASSET,High,
+TALINK0010,IDEAL_0015,COMP_AUSTAL_USA,Austal USA,TARGET,Medium,Potential competing bid
+TALINK0011,IDEAL_0016,COMP_ZIM,ZIM Integrated Shipping Services,TARGET,High,Company and fleet exposure

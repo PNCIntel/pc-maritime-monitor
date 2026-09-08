@@ -7,3 +7,22 @@ ELINK_000005,OBS_000213,,VESSEL_00055,Vessel,AFFECTS / SUBJECT,Vessel name exact
 ELINK_000006,OBS_000223,,VESSEL_00092,Vessel,AFFECTS / SUBJECT,Vessel name exact-normalized,High,imo_gulf_confirmed_2026,Observation subject: AL BAHYAH
 ELINK_000007,OBS_000041,EVENT_0005,VESSEL_00171,Vessel,AFFECTS / SUBJECT,IMO 9401271 exact match,High,maritime_attacks_2026,Existing observation resolved to newly added canonical GFS Galaxy vessel.
 ELINK_000008,OBS_000226,EVENT_0005,VESSEL_00171,Vessel,AFFECTS / SUBJECT,IMO 9401271 exact match,High,imo_gulf_confirmed_2026,IMO-confirmed observation resolved to newly added canonical GFS Galaxy vessel.
+ELINK_000009,OBS_000604,EVENT_0011,COMP_CMA_CGM,Company,RESPONDENT,Exact company match,High,news_intake_v1_15,FMC complaint respondent
+ELINK_000010,OBS_000604,EVENT_0011,COMP_SAMSUNG_ELECTRONICS_AMERICA,Company,CLAIMANT,Exact company match,High,news_intake_v1_15,FMC complaint claimant
+ELINK_000011,OBS_000604,EVENT_0011,COMP_FMC,Authority,REGULATOR,Exact authority match,High,news_intake_v1_15,Adjudicating regulator
+ELINK_000012,OBS_000605,EVENT_0012,VESSEL_00420,Vessel,AFFECTS / SUBJECT,IMO 9163269,High,news_intake_v1_15,Nereida
+ELINK_000013,OBS_000605,EVENT_0012,PORTG0196,Port,PRIOR_CALL,Port name exact,High,news_intake_v1_15,Ras Isa
+ELINK_000014,OBS_000605,EVENT_0012,COMP_YEMEN_COAST_GUARD,Authority,ENFORCEMENT_ACTOR,Exact entity,High,news_intake_v1_15,Yemen Coast Guard
+ELINK_000015,OBS_000606,EVENT_0013,VESSEL_00421,Vessel,AFFECTS / SUBJECT,Vessel name exact,High,news_intake_v1_15,Span Asia 39
+ELINK_000016,OBS_000606,EVENT_0013,COMP_PHIL_SPAN_ASIA,Company,OPERATOR,Exact company,High,news_intake_v1_15,Operator
+ELINK_000017,OBS_000607,EVENT_0014,PORTG0205,Port,AFFECTS,Port name exact,High,news_intake_v1_15,Port of Dover access
+ELINK_000018,OBS_000608,EVENT_0015,VESSEL_00422,Vessel,AFFECTS / SUBJECT,Vessel name exact,High,news_intake_v1_15,SMF Ixora
+ELINK_000019,OBS_000608,EVENT_0015,ASSET104,Bridge,AFFECTS,Infrastructure exact,High,news_intake_v1_15,Sungai Johor Bridge
+ELINK_000020,OBS_000609,EVENT_0016,VESSEL_00423,Vessel,AFFECTS / SUBJECT,Vessel name exact,High,news_intake_v1_15,Alpha Crux
+ELINK_000021,OBS_000609,EVENT_0016,PORTG0206,Port,LOCATION,Port name exact,High,news_intake_v1_15,Montevideo
+ELINK_000022,OBS_000610,EVENT_0017,VESSEL_00425,Vessel,AFFECTS / SUBJECT,Vessel name exact,High,news_intake_v1_15,Conquista II
+ELINK_000023,OBS_000610,EVENT_0017,VESSEL_00426,Vessel,AFFECTS / SUBJECT,Vessel name exact,High,news_intake_v1_15,OM2
+ELINK_000024,OBS_000611,EVENT_0018,COMP_BUSAN_PA,Authority,AFFECTS,Exact authority,High,news_intake_v1_15,Busan PA
+ELINK_000025,OBS_000611,EVENT_0018,COMP_INCHEON_PA,Authority,AFFECTS,Exact authority,High,news_intake_v1_15,Incheon PA
+ELINK_000026,OBS_000611,EVENT_0018,COMP_ULSAN_PA,Authority,AFFECTS,Exact authority,High,news_intake_v1_15,Ulsan PA
+ELINK_000027,OBS_000611,EVENT_0018,COMP_YEOSU_GWANGYANG_PA,Authority,AFFECTS,Exact authority,High,news_intake_v1_15,Yeosu-Gwangyang PA

@@ -1,0 +1,33 @@
+﻿Rail Connection ID,Rail Node ID,Connected Entity Type,Connected Entity ID,Connected Entity Name,Rail / Node Company ID,Status,Source ID,Notes
+RCON_0001,RAILNODE_0004,PORT,PORTG0065,Khalifa Port Rail Terminal,COMP_ETIHAD_RAIL,Active,SRC_0381,Canonical rail node ↔ P&C port connection.
+RCON_0002,RAILNODE_0006,PORT,PORTG0042,Jebel Ali Port Rail Terminal,COMP_ETIHAD_RAIL,Active,SRC_0381,Canonical rail node ↔ P&C port connection.
+RCON_0003,RAILNODE_0008,PORT,PORTG0071,Fujairah Port Rail Terminal,COMP_ETIHAD_RAIL,Active,SRC_0381,Canonical rail node ↔ P&C port connection.
+RCON_0004,RAILNODE_0009,PORT,PORTG0251,Sohar Port Rail Gateway,COMP_HAFEET_RAIL,Under construction,SRC_0382,Canonical rail node ↔ P&C port connection.
+RCON_0005,RAILNODE_0011,PORT,PORTG0227,King Abdulaziz Port Dammam Rail Terminal,COMP_SAR,Active,SRC_0384,Canonical rail node ↔ P&C port connection.
+RCON_0006,RAILNODE_0015,PORT,PORTG0084,Kuryk Port Rail Interface,COMP_KTZ,Active,SRC_0386,Canonical rail node ↔ P&C port connection.
+RCON_0007,RAILNODE_0019,PORT,PORTG0174,Poti Rail-Port Interface,COMP_GEORGIAN_RAILWAY,Active,SRC_0388,Canonical rail node ↔ P&C port connection.
+RCON_0008,RAILNODE_0020,PORT,PORTG0299,Batumi Rail-Port Interface,COMP_GEORGIAN_RAILWAY,Active,SRC_0388,Canonical rail node ↔ P&C port connection.
+RCON_0009,RAILNODE_0023,PORT,PORTG0061,Prince Rupert Port Rail Gateway,COMP_CN,Active,SRC_0390,Canonical rail node ↔ P&C port connection.
+RCON_0010,RAILNODE_0024,PORT,PORTG0330,Vancouver Port Rail Gateway,MULTI,Active,SRC_0390,Canonical rail node ↔ P&C port connection.
+RCON_0011,RAILNODE_0025,PORT,PORTG0336,Montreal Port Rail Gateway,MULTI,Active,SRC_0390,Canonical rail node ↔ P&C port connection.
+RCON_0012,RAILNODE_0026,PORT,PORTG0234,Halifax Port Rail Gateway,COMP_CN,Active,SRC_0390,Canonical rail node ↔ P&C port connection.
+RCON_0013,RAILNODE_0027,PORT,PORTG0062,Saint John Port Rail Gateway,COMP_CPKC,Active,SRC_0391,Canonical rail node ↔ P&C port connection.
+RCON_0014,RAILNODE_0028,PORT,PORTG0151,Lázaro Cárdenas Port Rail Gateway,COMP_CPKC,Active,SRC_0391,Canonical rail node ↔ P&C port connection.
+RCON_0015,RAILNODE_0032,PORT,PORTG0098,Port of Los Angeles Rail Gateway,MULTI,Active,SRC_0393,Canonical rail node ↔ P&C port connection.
+RCON_0016,RAILNODE_0033,PORT,PORTG0132,Port of Long Beach Rail Gateway,MULTI,Active,SRC_0393,Canonical rail node ↔ P&C port connection.
+RCON_0017,RAILNODE_0036,PORT,PORTG0138,Seattle International Gateway,COMP_BNSF,Active,SRC_0394,Canonical rail node ↔ P&C port connection.
+RCON_0018,RAILNODE_0037,PORT,PORTG0192,Oakland International Gateway,COMP_BNSF,Active,SRC_0394,Canonical rail node ↔ P&C port connection.
+RCON_0019,RAILNODE_0038,PORT,PORTG0333,Tacoma Port Rail Gateway,COMP_UNION_PACIFIC,Active,SRC_0395,Canonical rail node ↔ P&C port connection.
+RCON_0020,RAILNODE_0041,PORT,PORTG0137,New Orleans Port Rail Gateway,MULTI,Active,SRC_0390,Canonical rail node ↔ P&C port connection.
+RCON_0021,RAILNODE_0042,PORT,PORTG0186,Mobile Port Rail Gateway,COMP_CN,Active,SRC_0390,Canonical rail node ↔ P&C port connection.
+RCON_0022,RAILNODE_0043,PORT,PORTG0211,Port of Durban Rail Gateway,COMP_TRANSNET_FREIGHT_RAIL,Active,SRC_0398,Canonical rail node ↔ P&C port connection.
+RCON_0023,RAILNODE_0046,PORT,PORTG0124,Tanger Med Rail Terminal,COMP_ONCF,Active,SRC_0400,Canonical rail node ↔ P&C port connection.
+RCON_0024,RAILNODE_0049,PORT,PORTG0111,Hamburg Port Railway,COMP_HAMBURG_PORT_AUTHORITY,Active,SRC_0403,Canonical rail node ↔ P&C port connection.
+RCON_0025,RAILNODE_0050,PORT,PORTG0111,HHLA CTA Rail Terminal,COMP_HHLA,Active,SRC_0403,Canonical rail node ↔ P&C port connection.
+RCON_0026,RAILNODE_0055,PORT,PORTG0144,Trieste Rail Gateway,COMP_METRANS,Active,SRC_0402,Canonical rail node ↔ P&C port connection.
+RCON_0027,RAILNODE_0056,PORT,PORTG0242,Rotterdam Rail Gateway,COMP_METRANS,Active,SRC_0402,Canonical rail node ↔ P&C port connection.
+RCON_0028,RAILNODE_0057,PORT,PORTG0175,Bremerhaven Rail Gateway,COMP_METRANS,Active,SRC_0402,Canonical rail node ↔ P&C port connection.
+RCON_0029,RAILNODE_0058,PORT,PORTG0030,JNPT / Nhava Sheva Rail Gateway,COMP_DFCCIL,Active,SRC_0406,Canonical rail node ↔ P&C port connection.
+RCON_0030,RAILNODE_0061,PORT,PORTG0031,Mundra Rail Gateway,COMP_CONCOR,Active,SRC_0405,Canonical rail node ↔ P&C port connection.
+RCON_0031,RAILNODE_0062,PORT,PORTG0167,Pipavav Rail Gateway,COMP_CONCOR,Active,SRC_0405,Canonical rail node ↔ P&C port connection.
+RCON_0032,RAILNODE_0018,DRY_PORT,ASSET081,Tbilisi Intermodal Hub / Tbilisi Dry Port,COMP_TBILISI_DRY_PORT,Active,SRC_0278,Middle Corridor rail ↔ canonical AD Ports-led dry-port asset.

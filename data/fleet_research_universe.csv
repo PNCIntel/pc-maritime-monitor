@@ -1,4 +1,10 @@
-﻿Priority,Segment,Company / Brand,Parent / Strategic Link,Company ID,Canonical Status,Fleet Scope to Capture,Why Included,Primary Seed Source,Research Status,Known Fleet Snapshot,Last Verified,Notes
+﻿Fleet Research Universe — v1.8,,,,,,,,,,,,
+Universe Companies,,Canonical Companies,,Canonical Vessels,,GFS Managed Seed,,,CMA CGM commercial snapshot,GFS commercial snapshot,AD Ports ownership of GFS,Verified
+87,,61,,358,273,16,,,844,36,81%,2026-09-07
+,,,,,,,,,,,,
+"Data rule: IMO is the vessel key. Keep registered owner, beneficial owner, commercial operator, technical/ISM manager and charterer as separate relationships. Do not merge Global Feeder Shipping LLC with GFS Ship Management FZE until the legal corporate relationship is verified.",,,,,,,,,,,,
+,,,,,,,,,,,,
+Priority,Segment,Company / Brand,Parent / Strategic Link,Company ID,Canonical Status,Fleet Scope to Capture,Why Included,Primary Seed Source,Research Status,Known Fleet Snapshot,Last Verified,Notes
 Tier 1,Container / liner,CMA CGM Group,CMA CGM Group,COMP_CMA_CGM,Canonical,Owned + chartered + commercially operated container fleet,Global top-tier liner; major Khalifa Port / UAE exposure,https://www.linescape.com/carriers/3/,In progress,844 commercially scheduled vessels,2026-09-07,Keep commercial fleet separate from 400-owned-vessel milestone.
 Tier 1,Container / liner,MSC,MSC Group,COMP_MSC,Canonical,Cargo fleet; owned/chartered split,Largest-scale global container network; Khalifa Port JV exposure,https://www.linescape.com/carriers/,Queued,"~1,000 cargo vessels in current company baseline",2026-09-07,
 Tier 1,Container / liner,Maersk,A.P. Moller - Maersk,COMP_MAERSK,Canonical,Owned + chartered container fleet,Global liner / terminals / air-logistics ecosystem,https://www.linescape.com/carriers/,Queued,,2026-09-07,

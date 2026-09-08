@@ -14,3 +14,5 @@ Transport Accident,"Aircraft, vessel, rail, truck accident disrupting trade move
 Infrastructure Failure,"Bridge, crane, power, channel, runway, rail or terminal system failure",Multimodal,Future
 Regulatory / Policy,"Flight ban, customs restriction, embargo, emergency closure",Multimodal,FAA Haiti restriction
 Supply Constraint,"Fuel, power, container, equipment or critical input shortage",Multimodal,Future bunker-fuel / capacity shock
+Commercial / Transaction,"M&A, bids, concessions, ownership changes and strategic corporate transactions",Corporate / Ports / Shipyards / Logistics,ICTSI-TLG; Hapag-Lloyd-ZIM; Austal USA
+Monitoring / Campaign,Ongoing analytical watch aggregating multiple events and indicators,Multimodal,Eastern Pacific counter-narcotics; Yemen port enforcement

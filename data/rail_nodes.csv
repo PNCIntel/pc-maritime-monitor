@@ -1,0 +1,63 @@
+﻿Rail Node ID,Node,Country,Node Type,Primary Company ID,Linked Port ID,Linked Terminal ID,Status,Notes,Source ID
+RAILNODE_0001,Ghuwaifat Border Rail Gateway,United Arab Emirates,Border gateway,COMP_ETIHAD_RAIL,,,Active,Saudi border end of UAE National Rail Network,SRC_0380
+RAILNODE_0002,Ruwais Freight Facility,United Arab Emirates,Freight terminal,COMP_ETIHAD_RAIL,,,Active,Industrial freight node,SRC_0381
+RAILNODE_0003,ICAD / Mussafah Freight Facility,United Arab Emirates,Freight terminal,COMP_ETIHAD_RAIL,,,Active,Industrial City of Abu Dhabi rail node,SRC_0381
+RAILNODE_0004,Khalifa Port Rail Terminal,United Arab Emirates,Port rail terminal,COMP_ETIHAD_RAIL,PORTG0065,,Active,Rail interface at Khalifa Port,SRC_0381
+RAILNODE_0005,Dubai Industrial City Rail Facility,United Arab Emirates,Freight terminal,COMP_ETIHAD_RAIL,,,Active,Industrial rail node,SRC_0381
+RAILNODE_0006,Jebel Ali Port Rail Terminal,United Arab Emirates,Port rail terminal,COMP_ETIHAD_RAIL,PORTG0042,,Active,Rail interface at Jebel Ali,SRC_0381
+RAILNODE_0007,Al Ghail Rail Freight Facility,United Arab Emirates,Freight terminal,COMP_ETIHAD_RAIL,,,Active,Northern UAE rail node,SRC_0381
+RAILNODE_0008,Fujairah Port Rail Terminal,United Arab Emirates,Port rail terminal,COMP_ETIHAD_RAIL,PORTG0071,,Active,East coast rail-port interface,SRC_0381
+RAILNODE_0009,Sohar Port Rail Gateway,Oman,Port rail terminal,COMP_HAFEET_RAIL,PORTG0251,,Under construction,Oman endpoint of Hafeet Rail,SRC_0382
+RAILNODE_0010,Al Ain / UAE Rail Junction,United Arab Emirates,Junction,COMP_HAFEET_RAIL,,,Under construction,Hafeet Rail connection to UAE network,SRC_0383
+RAILNODE_0011,King Abdulaziz Port Dammam Rail Terminal,Saudi Arabia,Port rail terminal,COMP_SAR,PORTG0227,,Active,Start of SAR East Freight corridor,SRC_0384
+RAILNODE_0012,Riyadh Rail Freight / Dry Port Node,Saudi Arabia,Dry port / inland terminal,COMP_SAR,,,Active,Dammam-Riyadh inland endpoint,SRC_0384
+RAILNODE_0013,China-Kazakhstan Border Gateway,Kazakhstan,Border gateway,COMP_KTZ,,,Active,Eastern Middle Corridor rail gateway,SRC_0386
+RAILNODE_0014,Aktau Rail-Port Interface,Kazakhstan,Port rail interface,COMP_KTZ,,,Active,Caspian Middle Corridor interface,SRC_0386
+RAILNODE_0015,Kuryk Port Rail Interface,Kazakhstan,Port rail interface,COMP_KTZ,PORTG0084,,Active,Caspian port rail node,SRC_0386
+RAILNODE_0016,Baku / Alat Rail-Port Interface,Azerbaijan,Port rail interface,COMP_ADY,,,Active,Western Caspian rail hub,SRC_0386
+RAILNODE_0017,Tbilisi Rail Hub,Georgia,Rail hub,COMP_GEORGIAN_RAILWAY,,,Active,Georgia transit hub,SRC_0388
+RAILNODE_0018,Tbilisi Intermodal Hub,Georgia,Dry port / intermodal terminal,COMP_TBILISI_DRY_PORT,,,Active,AD Ports-led Tbilisi dry port / rail-road transfer,SRC_0278
+RAILNODE_0019,Poti Rail-Port Interface,Georgia,Port rail interface,COMP_GEORGIAN_RAILWAY,PORTG0174,,Active,Black Sea gateway,SRC_0388
+RAILNODE_0020,Batumi Rail-Port Interface,Georgia,Port rail interface,COMP_GEORGIAN_RAILWAY,PORTG0299,,Active,Black Sea gateway,SRC_0388
+RAILNODE_0021,Akhalkalaki Gauge-Change Hub,Georgia,Gauge-change / border terminal,COMP_GEORGIAN_RAILWAY,,,Active,BTK transition toward Türkiye,SRC_0387
+RAILNODE_0022,Kars Rail Gateway,Türkiye,Border / inland rail hub,COMP_TCDD,,,Active,BTK western endpoint,SRC_0387
+RAILNODE_0023,Prince Rupert Port Rail Gateway,Canada,Port rail terminal,COMP_CN,PORTG0061,,Active,CN Pacific gateway,SRC_0390
+RAILNODE_0024,Vancouver Port Rail Gateway,Canada,Port rail gateway,MULTI,PORTG0330,,Active,CN/CPKC Pacific gateway,SRC_0390
+RAILNODE_0025,Montreal Port Rail Gateway,Canada,Port rail gateway,MULTI,PORTG0336,,Active,CN/CPKC Atlantic gateway,SRC_0390
+RAILNODE_0026,Halifax Port Rail Gateway,Canada,Port rail gateway,COMP_CN,PORTG0234,,Active,CN Atlantic gateway,SRC_0390
+RAILNODE_0027,Saint John Port Rail Gateway,Canada,Port rail gateway,COMP_CPKC,PORTG0062,,Active,CPKC Atlantic gateway,SRC_0391
+RAILNODE_0028,Lázaro Cárdenas Port Rail Gateway,Mexico,Port rail gateway,COMP_CPKC,PORTG0151,,Active,Exclusive CPKC on-dock access,SRC_0391
+RAILNODE_0029,Chicago Intermodal Hub,United States,Inland intermodal hub,MULTI,,,Active,Major inland rail market,SRC_0391
+RAILNODE_0030,Kansas City Intermodal Hub,United States,Inland intermodal hub,MULTI,,,Active,North American rail junction,SRC_0392
+RAILNODE_0031,Laredo Rail Border Gateway,United States / Mexico,Border gateway,COMP_CPKC,,,Active,Cross-border rail gateway,SRC_0392
+RAILNODE_0032,Port of Los Angeles Rail Gateway,United States,Port rail gateway,MULTI,PORTG0098,,Active,ACTA/BNSF/UP interface,SRC_0393
+RAILNODE_0033,Port of Long Beach Rail Gateway,United States,Port rail gateway,MULTI,PORTG0132,,Active,ACTA/BNSF/UP interface,SRC_0393
+RAILNODE_0034,Los Angeles BNSF Intermodal Facility,United States,Inland intermodal terminal,COMP_BNSF,,,Active,BNSF LA facility,SRC_0394
+RAILNODE_0035,Logistics Park Chicago,United States,Inland intermodal terminal,COMP_BNSF,,,Active,BNSF Chicago-region hub,SRC_0394
+RAILNODE_0036,Seattle International Gateway,United States,Port/intermodal terminal,COMP_BNSF,PORTG0138,,Active,BNSF Seattle gateway,SRC_0394
+RAILNODE_0037,Oakland International Gateway,United States,Port intermodal terminal,COMP_BNSF,PORTG0192,,Active,BNSF Oakland gateway,SRC_0394
+RAILNODE_0038,Tacoma Port Rail Gateway,United States,Port rail gateway,COMP_UNION_PACIFIC,PORTG0333,,Active,Pacific Northwest gateway,SRC_0395
+RAILNODE_0039,Savannah Port Rail Gateway,United States,Port rail gateway,COMP_NORFOLK_SOUTHERN,,,Active,NS East Coast port,SRC_0397
+RAILNODE_0040,Charleston Port Rail Gateway,United States,Port rail gateway,COMP_NORFOLK_SOUTHERN,,,Active,NS East Coast port,SRC_0397
+RAILNODE_0041,New Orleans Port Rail Gateway,United States,Port rail gateway,MULTI,PORTG0137,,Active,Gulf rail-port gateway,SRC_0390
+RAILNODE_0042,Mobile Port Rail Gateway,United States,Port rail gateway,COMP_CN,PORTG0186,,Active,CN Gulf gateway,SRC_0390
+RAILNODE_0043,Port of Durban Rail Gateway,South Africa,Port rail gateway,COMP_TRANSNET_FREIGHT_RAIL,PORTG0211,,Active,ContainerCor endpoint,SRC_0398
+RAILNODE_0044,City Deep Inland Terminal,South Africa,Inland intermodal terminal,COMP_TRANSNET_FREIGHT_RAIL,,,Active,Gauteng inland container node,SRC_0398
+RAILNODE_0045,Richards Bay Rail Gateway,South Africa,Port rail gateway,COMP_TRANSNET_FREIGHT_RAIL,,,Active,Coal-export endpoint,SRC_0399
+RAILNODE_0046,Tanger Med Rail Terminal,Morocco,Port rail terminal,COMP_ONCF,PORTG0124,,Active,10 ha; 3 x 800 m tracks + parking track,SRC_0400
+RAILNODE_0047,Kenitra Automotive Rail Node,Morocco,Industrial rail terminal,COMP_ONCF,,,Active,Stellantis flow to Tanger Med,SRC_0400
+RAILNODE_0048,Renault Tanger Automotive Rail Node,Morocco,Industrial rail terminal,COMP_ONCF,,,Active,Renault vehicle flow to Tanger Med,SRC_0400
+RAILNODE_0049,Hamburg Port Railway,Germany,Port railway,COMP_HAMBURG_PORT_AUTHORITY,PORTG0111,,Active,Public port railway,SRC_0403
+RAILNODE_0050,HHLA CTA Rail Terminal,Germany,Port rail terminal,COMP_HHLA,PORTG0111,,Active,Nine tracks over 700 m,SRC_0403
+RAILNODE_0051,Prague METRANS Hub,Czech Republic,Inland intermodal terminal,COMP_METRANS,,,Active,Core METRANS hub,SRC_0402
+RAILNODE_0052,Ceska Trebova METRANS Hub,Czech Republic,Inland intermodal terminal,COMP_METRANS,,,Active,METRANS hub,SRC_0402
+RAILNODE_0053,Dunajska Streda METRANS Hub,Slovakia,Inland intermodal terminal,COMP_METRANS,,,Active,METRANS hub,SRC_0402
+RAILNODE_0054,Budapest METRANS Hub,Hungary,Inland intermodal terminal,COMP_METRANS,,,Active,METRANS hub,SRC_0402
+RAILNODE_0055,Trieste Rail Gateway,Italy,Port rail gateway,COMP_METRANS,PORTG0144,,Active,Adriatic METRANS gateway,SRC_0402
+RAILNODE_0056,Rotterdam Rail Gateway,Netherlands,Port rail gateway,COMP_METRANS,PORTG0242,,Active,North Sea METRANS gateway,SRC_0402
+RAILNODE_0057,Bremerhaven Rail Gateway,Germany,Port rail gateway,COMP_METRANS,PORTG0175,,Active,North Sea METRANS gateway,SRC_0402
+RAILNODE_0058,JNPT / Nhava Sheva Rail Gateway,India,Port rail gateway,COMP_DFCCIL,PORTG0030,,Active,Western DFC maritime endpoint,SRC_0406
+RAILNODE_0059,Dadri DFC Terminal,India,Inland freight terminal,COMP_DFCCIL,,,Active,Western DFC northern endpoint,SRC_0406
+RAILNODE_0060,Rewari DFC Junction,India,Rail junction,COMP_DFCCIL,,,Active,WDFC junction / NCR access,SRC_0406
+RAILNODE_0061,Mundra Rail Gateway,India,Port rail gateway,COMP_CONCOR,PORTG0031,,Active,Container rail gateway,SRC_0405
+RAILNODE_0062,Pipavav Rail Gateway,India,Port rail gateway,COMP_CONCOR,PORTG0167,,Active,Container rail gateway,SRC_0405

@@ -1,0 +1,39 @@
+﻿Rail Link ID,Rail Network ID,Origin Rail Node ID,Destination Rail Node ID,Via / Intermediate Nodes,Link Role,Status,Notes,Source ID
+RAILLINK_0001,RAILNET_0001,RAILNODE_0001,RAILNODE_0008,Ruwais; ICAD; Khalifa; Dubai Industrial City; Jebel Ali; Al Ghail,National trunk,Operating,Ghuwaifat-Fujairah,SRC_0380
+RAILLINK_0002,RAILNET_0002,RAILNODE_0009,RAILNODE_0010,Al Buraimi; Wadi Al Jizzi,Cross-border trunk,Under construction,Sohar-UAE network,SRC_0383
+RAILLINK_0003,RAILNET_0003,RAILNODE_0011,RAILNODE_0012,Al-Ahsa; Buqayq; Al-Kharj; Haradh,Port-inland freight,Operating,Dammam-Riyadh,SRC_0384
+RAILLINK_0004,RAILNET_0004,RAILNODE_0013,RAILNODE_0016,Aktau/Kuryk; Caspian,Trans-Caspian,Operating,Kazakhstan-Azerbaijan,SRC_0386
+RAILLINK_0005,RAILNET_0005,RAILNODE_0016,RAILNODE_0022,Tbilisi; Akhalkalaki,BTK trunk,Operating,Baku-Kars,SRC_0387
+RAILLINK_0006,RAILNET_0006,RAILNODE_0017,RAILNODE_0019,,Black Sea branch,Operating,Tbilisi-Poti,SRC_0388
+RAILLINK_0007,RAILNET_0006,RAILNODE_0017,RAILNODE_0020,,Black Sea branch,Operating,Tbilisi-Batumi,SRC_0388
+RAILLINK_0008,RAILNET_0007,RAILNODE_0023,RAILNODE_0029,Edmonton; Winnipeg,Pacific gateway,Operating,Prince Rupert-Chicago/inland,SRC_0390
+RAILLINK_0009,RAILNET_0007,RAILNODE_0024,RAILNODE_0029,Edmonton; Winnipeg,Pacific gateway,Operating,Vancouver-Chicago/inland,SRC_0390
+RAILLINK_0010,RAILNET_0007,RAILNODE_0026,RAILNODE_0029,Montreal; Toronto,Atlantic gateway,Operating,Halifax-inland,SRC_0390
+RAILLINK_0011,RAILNET_0007,RAILNODE_0041,RAILNODE_0029,Memphis; Midwest,Gulf gateway,Operating,New Orleans-inland,SRC_0390
+RAILLINK_0012,RAILNET_0008,RAILNODE_0024,RAILNODE_0029,,Pacific gateway,Operating,Vancouver-Chicago,SRC_0391
+RAILLINK_0013,RAILNET_0008,RAILNODE_0027,RAILNODE_0029,Montreal,Atlantic gateway,Operating,Saint John-inland,SRC_0391
+RAILLINK_0014,RAILNET_0008,RAILNODE_0028,RAILNODE_0029,Laredo; Kansas City,Mexico-Pacific,Operating,Lázaro Cárdenas-inland,SRC_0391
+RAILLINK_0015,RAILNET_0009,RAILNODE_0032,RAILNODE_0029,ACTA / LA rail yards,Port-inland,Operating,LA-transcontinental network,SRC_0393
+RAILLINK_0016,RAILNET_0009,RAILNODE_0033,RAILNODE_0029,ACTA / LA rail yards,Port-inland,Operating,Long Beach-transcontinental,SRC_0393
+RAILLINK_0017,RAILNET_0010,RAILNODE_0034,RAILNODE_0035,Barstow; Kansas City,Intermodal trunk,Operating,LA-Chicago,SRC_0394
+RAILLINK_0018,RAILNET_0010,RAILNODE_0036,RAILNODE_0035,Spokane; St Paul,Intermodal trunk,Operating,Seattle-Chicago,SRC_0394
+RAILLINK_0019,RAILNET_0010,RAILNODE_0037,RAILNODE_0035,Stockton; Kansas City,Intermodal trunk,Operating,Oakland-inland,SRC_0394
+RAILLINK_0020,RAILNET_0011,RAILNODE_0032,RAILNODE_0029,,West Coast intermodal,Operating,LA-inland,SRC_0395
+RAILLINK_0021,RAILNET_0011,RAILNODE_0033,RAILNODE_0029,,West Coast intermodal,Operating,Long Beach-inland,SRC_0395
+RAILLINK_0022,RAILNET_0011,RAILNODE_0038,RAILNODE_0029,,West Coast intermodal,Operating,Tacoma-inland,SRC_0395
+RAILLINK_0023,RAILNET_0012,RAILNODE_0039,RAILNODE_0029,,East Coast intermodal,Operating,Savannah-inland,SRC_0397
+RAILLINK_0024,RAILNET_0012,RAILNODE_0040,RAILNODE_0029,,East Coast intermodal,Operating,Charleston-inland,SRC_0397
+RAILLINK_0025,RAILNET_0013,RAILNODE_0031,RAILNODE_0041,US Southeast via CSX,Cross-border intermodal,Operating,SMX corridor,SRC_0392
+RAILLINK_0026,RAILNET_0014,RAILNODE_0043,RAILNODE_0044,Pietermaritzburg / Free State,Container corridor,Operating,Durban-Gauteng,SRC_0398
+RAILLINK_0027,RAILNET_0015,RAILNODE_0045,RAILNODE_0044,Mpumalanga / Limpopo,Export mineral corridor,Operating,Coal/minerals to Richards Bay,SRC_0399
+RAILLINK_0028,RAILNET_0016,RAILNODE_0046,RAILNODE_0047,,Automotive,Operating,Tanger Med-Kenitra,SRC_0400
+RAILLINK_0029,RAILNET_0016,RAILNODE_0048,RAILNODE_0046,,Automotive,Operating,Renault-Tanger Med,SRC_0400
+RAILLINK_0030,RAILNET_0017,RAILNODE_0049,RAILNODE_0051,Hamburg-Prague,Port-hinterland shuttle,Operating,METRANS,SRC_0402
+RAILLINK_0031,RAILNET_0017,RAILNODE_0057,RAILNODE_0051,Bremerhaven-Prague,Port-hinterland shuttle,Operating,METRANS,SRC_0402
+RAILLINK_0032,RAILNET_0017,RAILNODE_0056,RAILNODE_0051,Rotterdam-Prague,Port-hinterland shuttle,Operating,METRANS,SRC_0402
+RAILLINK_0033,RAILNET_0017,RAILNODE_0055,RAILNODE_0054,Trieste-Budapest,Adriatic shuttle,Operating,METRANS,SRC_0402
+RAILLINK_0034,RAILNET_0018,RAILNODE_0050,RAILNODE_0049,,Port terminal rail,Operating,CTA-Hamburg Port Railway,SRC_0403
+RAILLINK_0035,RAILNET_0019,RAILNODE_0058,RAILNODE_0059,Vadodara; Palanpur; Rewari,Dedicated freight trunk,Operating / final works,JNPT-Dadri,SRC_0406
+RAILLINK_0036,RAILNET_0020,RAILNODE_0061,RAILNODE_0059,Western India / NCR,Container rail,Operating,Mundra-inland,SRC_0405
+RAILLINK_0037,RAILNET_0020,RAILNODE_0062,RAILNODE_0059,Western India / NCR,Container rail,Operating,Pipavav-inland,SRC_0405
+RAILLINK_0038,RAILNET_0020,RAILNODE_0058,RAILNODE_0059,WDFC / inland terminals,Container rail,Operating,JNPT-inland,SRC_0405

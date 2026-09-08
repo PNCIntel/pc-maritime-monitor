@@ -28,9 +28,9 @@ RQ_0026,Shipyards,Current merchant orderbook,High,"Expand builder layer across C
 RQ_0027,Event entity resolution,Fleet incidents,High,"Use IMO/name matching plus manual review to link all piracy, conflict, port, weather and cyber observations to vessel/company/asset entities.",Not started
 RQ_0028,IMO enrichment,ADNOC L&S / AW Shipping newbuilds,High,"Resolve public IMOs for remaining Ruwais LNG hulls, VLAC/VLEC newbuilds and the unnamed molten-sulphur newbuild as identities become public.",In progress
 RQ_0029,IMO enrichment,Fleet-wide maintenance,High,Require IMO capture and checksum validation whenever a new individual merchant vessel is added to the canonical model.,Ongoing
-RQ_0030,Ferry vessels,BC Ferries,High,"Populate all 39 ferries with IMO where applicable, Canadian Official Number, MMSI, class, capacity, build year/yard, propulsion, route assignment and current status.",Not started
-RQ_0031,Ferry vessels,Washington State Ferries,High,"Populate all 21 ferries with USCG Official Number, IMO where assigned/applicable, MMSI, class, passenger/vehicle capacity, propulsion and route assignment.",Not started
-RQ_0032,Ferry routes / terminals,BC Ferries + WSF,High,"Build complete terminal and route network with latitude/longitude, terminal ownership, vehicle staging, reservations, dangerous-goods and multimodal connections.",Not started
+RQ_0030,Ferry vessels,BC Ferries,High,All 39 current BC Ferries public fleet entries canonicalized into Vessels and Ferry Vessel Staging. Continue IMO/Canadian Official Number/MMSI/yard enrichment.,In progress
+RQ_0031,Ferry vessels,Washington State Ferries,High,"All 21 WSF ferries canonicalized with class, year, passenger/vehicle capacity and propulsion. Continue USCG Official Number/MMSI enrichment.",In progress
+RQ_0032,Ferry routes / terminals,BC Ferries + WSF,High,"Expanded BC Ferries to the full 47-terminal network and WSF to 20 terminals, plus route-network completion; coordinates and terminal-specific staging/DG detail remain.",In progress
 RQ_0033,Ferry operations,BC Ferries + WSF,High,Ingest delay/cancellation/performance data using normalized cause taxonomy; preserve sailing-level observations separately from aggregate performance.,Not started
 RQ_0034,Ferry vessels,Alaska Marine Highway + Marine Atlantic,High,"Resolve IMO/USCG/Canadian identifiers, capacities, fleet status and shipyards; connect maintenance/overhaul to yards and service reductions.",Not started
 RQ_0035,Ferry Europe,P&O Ferries / DFDS / CalMac,High,"Populate vessel fleets, IMO, Ro-Pax capacity, lane metres, routes, terminals, freight corridors, labour/weather/mechanical disruptions and parent-company relationships.",Not started
@@ -86,3 +86,16 @@ RQ_0084,Integrated logistics,Amazon Air / contracted airlines,High,"Map Amazon A
 RQ_0085,Integrated logistics,Amazon Global Logistics ocean exposure,High,"Resolve ocean carriers, origin ports, U.S. gateways and customs/fulfilment dependencies used by Amazon Global Logistics.",Not started
 RQ_0086,Integrated logistics,Aramex global network,High,"Populate major hubs, warehouses, air/ocean freight gateways, free-zone facilities and current country/region operating structure.",Not started
 RQ_0087,Ownership / capital,ADQ transport & logistics platform,High,"Connect Aramex, AD Ports, Q Logistics and other ADQ transport/logistics holdings to physical assets, capital strategy and corridor exposure.",In progress
+RQ_0078,Aircraft identity,Amazon Air,High,"Maintain one row per registration/MSN and resolve legal operator, owner/lessor, network customer, status and event exposure for the 100+ aircraft network.",In progress
+RQ_0079,Aircraft identity,FedEx / UPS,High,Import current tail-by-tail registration/MSN identities for the large FedEx and UPS fleets while retaining official fleet denominators separately from tracker snapshots.,Not started
+RQ_0080,Virtual airline fleet,DHL Aviation,High,Resolve DHL's >275 dedicated aircraft through the 19 operating partner airlines; do not assign all aircraft to a single legal DHL carrier.,Not started
+RQ_0081,Air cargo fleets,CMA CGM / Cargolux / Maersk / MSC,High,"Maintain registration-level identities, operating airline, owner/lessor, delivery/exit dates and hub/network exposure; current smaller fleets are seeded in v1.14.",In progress
+RQ_0082,Aircraft-event resolution,Global aviation,High,"Link disruptions, accidents, strikes, airport closures and security events to registration-level aircraft, operator, customer/network and airport/hub entities.",Not started
+RQ_0093,Ports / Port Terminals,Yemen port network,High,"Populate operators, UN/LOCODE, coordinates, berth/depth/cargo/control history for Hodeidah, Ras Isa, Salif, Mokha, Aden, Mukalla, Balhaf, Nishtun, Qana and Socotra.",Not started
+RQ_0094,Companies / Infrastructure,TLG / Southern Africa,High,"Resolve TLG subsidiaries and exact terminal/rail/warehouse assets at Durban, Beira, Maputo/Matola, Saldanha Bay, Nacala and Namibia; then link to IDEAL_0013.",Not started
+RQ_0095,Vessels / Vessel Identifiers,New vessel identities,High,"Verify IMO, MMSI, legal owner and manager for Span Asia 39, SMF Ixora, Alpha Crux, Valentin Pikul, Conquista II and OM2 where public registries permit.",Not started
+RQ_0096,Companies / Port Governance,Korea port governance,Medium,"Confirm implementation status, legal structure and effective date of any Korea Port Authority integration before updating canonical ownership/control.",Not started
+RQ_0097,,,High,,In progress
+RQ_0098,,,High,,In progress
+RQ_0099,,,High,,In progress
+RQ_0100,,,High,,Ongoing

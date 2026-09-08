@@ -69,3 +69,20 @@ port_berths,berth_record_id,"Berth/interface-level quay length, depth, use and s
 port_equipment,equipment_record_id,"Row-wise cargo-handling equipment including STS, RTG, RMG, ASC, straddles and support equipment",terminal_id + equipment_type
 port_ownership,ownership_id,"Equity, concession, minority investment, operator-control and JV relationships for physical terminals",terminal_id + company_id + relationship
 port_news,news_id,"Terminal-linked current developments with live URLs, separate from static infrastructure",terminal_id + date + source_asset_id
+news_registry,news_id,"Generic news/article registry separate from canonical events, projects and assets",news_id + source_id + canonical_event_id when resolved
+news_entity_links,news_link_id,"Many-to-many links from news records to companies, ports, vessels, terminals and assets",news_id + entity_id + relationship
+monitoring,monitoring_id,Ongoing analytical watch objects that aggregate developing events and indicators,monitoring_id + linked events/entities + review fields
+monitoring_event_links,monitoring_link_id,Links canonical events into ongoing monitoring objects,monitoring_id + canonical_event_id
+source_feeds,feed_id,Standing media/official source feeds used for continuous intake,feed_url + coverage + deduplication rule
+asset_control_history,control_record_id,Time-stamped nominal/de-facto control history for conflict-exposed ports/assets,asset_id + controller + effective dates
+asset_constraints,constraint_id,"Physical or operational constraints such as draft, turning basin, bridge, berth and fender limits",asset_id + constraint_type + related work
+transaction_asset_links,transaction_link_id,"Links M&A/deal records to the specific companies, yards, terminals, ports and other assets affected",deal_id + entity_or_asset_id
+port_operator_coverage,operator_company_id,Operator-network QA and coverage summary for canonical port-terminal expansion,operator_company_id -> companies.company_id; counts derive from port_terminals
+rail_operators,rail_operator_id,Rail operator/company layer,company_id -> companies
+rail_networks,rail_network_id,Named rail network/corridor with start/end,lead_operator_company_id -> companies
+rail_nodes,rail_node_id,Physical rail nodes,linked_port_id -> ports where applicable
+rail_links,rail_link_id,Rail origin-destination edges,rail_network_id + rail node IDs
+rail_relationships,rail_relationship_id,Rail ownership/operator/JV edges,company_id + rail_network_id
+rail_fleet,rail_fleet_record_id,Rolling-stock aggregates,company_id + rail_network_id
+rail_connections,rail_connection_id,Cross-domain rail-to-port/asset links,connected_entity_id -> canonical P&C entity
+rail_news,rail_news_id,Rail news/development layer,company/network -> rail graph

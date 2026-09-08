@@ -1,4 +1,8 @@
-﻿Universe ID,Company ID,Company,Parent / Group,Segment,Relationship Basis,Fleet Count,Owned Count,Chartered / Managed Count,Orderbook Count,Metric Scope,Tradeability Scope,Sanctions Treatment,As Of,Confidence,Source ID,Source URL,Notes
+﻿"Tanker Fleet Universe — Ownership, Control, Tradeability & Orderbook",,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,
+"Model rule: fleet count is time- and methodology-bounded. Record owned, operated, beneficially controlled, technically managed, chartered and commercially deployed fleets separately; attach sanctions/restrictions at vessel level rather than deleting restricted vessels from the canonical universe.",,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,
+Universe ID,Company ID,Company,Parent / Group,Segment,Relationship Basis,Fleet Count,Owned Count,Chartered / Managed Count,Orderbook Count,Metric Scope,Tradeability Scope,Sanctions Treatment,As Of,Confidence,Source ID,Source URL,Notes
 TFU_0001,COMP_SINOKOR,SINOKOR Merchant Marine,,VLCC / crude tanker,Ranking-defined beneficial/commercial control,93,,,,Benchmark VLCC count,Tradeable ranking,Excluded if sanctioned vessel,2026-09,Medium,SRC_0213,https://www.gosships.com/,"Large gap versus earlier operating-fleet headline demonstrates need to reconcile legal owner, commercial operator and beneficial-control entities."
 TFU_0002,COMP_CMES,China Merchants Energy Shipping,China Merchants Group,VLCC / crude tanker,Owned/operated fleet,51,,,10,Benchmark VLCC count,Tradeable ranking,Sanctioned tonnage excluded by ranking methodology,2026-H1,Medium,SRC_0213,https://www.gosships.com/,2026 H1 reporting also notes 10 newly ordered VLCCs among broader order activity; vessel-level orderbook to populate.
 TFU_0003,COMP_BAHRI,Bahri,,VLCC / crude tanker,Owned and operated,50,50,,,Current corporate fleet fact,All canonical vessels,Restrictions modeled separately,2026-09-07,High,SRC_0214,https://www.bahri.sa/en/,Official current site shows 50 VLCCs; benchmark graphic showed 49 at its source date.

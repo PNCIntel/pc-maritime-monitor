@@ -624,3 +624,125 @@ VREL_000622,VESSEL_00357,Badger,COMP_LAKE_MICHIGAN_CARFERRY,OWNER,,,High,SRC_016
 VREL_000623,VESSEL_00357,Badger,COMP_LAKE_MICHIGAN_CARFERRY,OPERATOR,,,High,SRC_0167,Generated from canonical vessel owner/operator field during v1.9 branch merge.
 VREL_000624,VESSEL_00358,Florence Spirit,COMP_MCKEIL,OWNER,,,High,SRC_0177,Generated from canonical vessel owner/operator field during v1.9 branch merge.
 VREL_000625,VESSEL_00358,Florence Spirit,COMP_MCKEIL,OPERATOR,,,High,SRC_0177,Generated from canonical vessel owner/operator field during v1.9 branch merge.
+VREL_000626,VESSEL_00359,Baynes Sound Connector,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0319,Canonical ferry fleet relationship.
+VREL_000627,VESSEL_00359,Baynes Sound Connector,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0319,Canonical ferry fleet relationship.
+VREL_000628,VESSEL_00360,Coastal Celebration,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000629,VESSEL_00360,Coastal Celebration,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000630,VESSEL_00361,Coastal Inspiration,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000631,VESSEL_00361,Coastal Inspiration,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000632,VESSEL_00362,Coastal Renaissance,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000633,VESSEL_00362,Coastal Renaissance,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000634,VESSEL_00363,Island Aurora,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000635,VESSEL_00363,Island Aurora,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000636,VESSEL_00364,Island Discovery,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000637,VESSEL_00364,Island Discovery,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000638,VESSEL_00365,Island Gwawis,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000639,VESSEL_00365,Island Gwawis,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000640,VESSEL_00366,Island Kwigwis,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000641,VESSEL_00366,Island Kwigwis,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000642,VESSEL_00367,Island K’ulut’a,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000643,VESSEL_00367,Island K’ulut’a,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000644,VESSEL_00368,Island Nagalis,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000645,VESSEL_00368,Island Nagalis,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000646,VESSEL_00369,Island sarlequun,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000647,VESSEL_00369,Island sarlequun,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000648,VESSEL_00370,Island xwsaĺux̌ul,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000649,VESSEL_00370,Island xwsaĺux̌ul,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0321,Canonical ferry fleet relationship.
+VREL_000650,VESSEL_00371,Kahloke,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0319,Canonical ferry fleet relationship.
+VREL_000651,VESSEL_00371,Kahloke,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0319,Canonical ferry fleet relationship.
+VREL_000652,VESSEL_00372,Klitsa,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0319,Canonical ferry fleet relationship.
+VREL_000653,VESSEL_00372,Klitsa,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0319,Canonical ferry fleet relationship.
+VREL_000654,VESSEL_00373,Pune’luxutth,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000655,VESSEL_00373,Pune’luxutth,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000656,VESSEL_00374,Kwuna,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000657,VESSEL_00374,Kwuna,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000658,VESSEL_00375,Malaspina Sky,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000659,VESSEL_00375,Malaspina Sky,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000660,VESSEL_00376,Northern Adventure,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000661,VESSEL_00376,Northern Adventure,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000662,VESSEL_00377,Northern Expedition,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000663,VESSEL_00377,Northern Expedition,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000664,VESSEL_00378,Northern Sea Wolf,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000665,VESSEL_00378,Northern Sea Wolf,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000666,VESSEL_00379,Quadra Queen II,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0319,Canonical ferry fleet relationship.
+VREL_000667,VESSEL_00379,Quadra Queen II,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0319,Canonical ferry fleet relationship.
+VREL_000668,VESSEL_00380,Queen of Alberni,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000669,VESSEL_00380,Queen of Alberni,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000670,VESSEL_00381,Queen of Capilano,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000671,VESSEL_00381,Queen of Capilano,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000672,VESSEL_00382,Queen of Coquitlam,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000673,VESSEL_00382,Queen of Coquitlam,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000674,VESSEL_00383,Queen of Cowichan,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000675,VESSEL_00383,Queen of Cowichan,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000676,VESSEL_00384,Queen of Cumberland,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000677,VESSEL_00384,Queen of Cumberland,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000678,VESSEL_00385,Queen of New Westminster,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000679,VESSEL_00385,Queen of New Westminster,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000680,VESSEL_00386,Queen of Oak Bay,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000681,VESSEL_00386,Queen of Oak Bay,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000682,VESSEL_00387,Queen of Surrey,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000683,VESSEL_00387,Queen of Surrey,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000684,VESSEL_00388,Quinitsa,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000685,VESSEL_00388,Quinitsa,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000686,VESSEL_00389,Quinsam,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000687,VESSEL_00389,Quinsam,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000688,VESSEL_00390,Salish Eagle,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000689,VESSEL_00390,Salish Eagle,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000690,VESSEL_00391,Salish Heron,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000691,VESSEL_00391,Salish Heron,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000692,VESSEL_00392,Salish Orca,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000693,VESSEL_00392,Salish Orca,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000694,VESSEL_00393,Salish Raven,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000695,VESSEL_00393,Salish Raven,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000696,VESSEL_00394,Skeena Queen,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000697,VESSEL_00394,Skeena Queen,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000698,VESSEL_00395,Spirit of British Columbia,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000699,VESSEL_00395,Spirit of British Columbia,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000700,VESSEL_00396,Spirit of Vancouver Island,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000701,VESSEL_00396,Spirit of Vancouver Island,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0320,Canonical ferry fleet relationship.
+VREL_000702,VESSEL_00397,Tachek,COMP_BC_FERRIES,OWNER / PUBLIC OPERATOR,,,High,SRC_0319,Canonical ferry fleet relationship.
+VREL_000703,VESSEL_00397,Tachek,COMP_BC_FERRIES,OPERATOR,,,High,SRC_0319,Canonical ferry fleet relationship.
+VREL_000704,VESSEL_00398,Puyallup,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000705,VESSEL_00398,Puyallup,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000706,VESSEL_00399,Tacoma,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000707,VESSEL_00399,Tacoma,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000708,VESSEL_00400,Wenatchee,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000709,VESSEL_00400,Wenatchee,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000710,VESSEL_00401,Spokane,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000711,VESSEL_00401,Spokane,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000712,VESSEL_00402,Walla Walla,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000713,VESSEL_00402,Walla Walla,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000714,VESSEL_00403,Kaleetan,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000715,VESSEL_00403,Kaleetan,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000716,VESSEL_00404,Yakima,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000717,VESSEL_00404,Yakima,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000718,VESSEL_00405,Chimacum,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000719,VESSEL_00405,Chimacum,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000720,VESSEL_00406,Samish,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000721,VESSEL_00406,Samish,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000722,VESSEL_00407,Suquamish,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000723,VESSEL_00407,Suquamish,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000724,VESSEL_00408,Tokitae,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000725,VESSEL_00408,Tokitae,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000726,VESSEL_00409,Cathlamet,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000727,VESSEL_00409,Cathlamet,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000728,VESSEL_00410,Chelan,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000729,VESSEL_00410,Chelan,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000730,VESSEL_00411,Issaquah,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000731,VESSEL_00411,Issaquah,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000732,VESSEL_00412,Kitsap,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000733,VESSEL_00412,Kitsap,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000734,VESSEL_00413,Kittitas,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000735,VESSEL_00413,Kittitas,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000736,VESSEL_00414,Sealth,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000737,VESSEL_00414,Sealth,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000738,VESSEL_00415,Tillikum,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000739,VESSEL_00415,Tillikum,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000740,VESSEL_00416,Chetzemoka,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000741,VESSEL_00416,Chetzemoka,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000742,VESSEL_00417,Kennewick,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000743,VESSEL_00417,Kennewick,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000744,VESSEL_00418,Salish,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000745,VESSEL_00418,Salish,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
+VREL_000746,VESSEL_00423,ALPHA CRUX,COMP_VODOLEY,OWNER,,,High,SRC_0377,News-linked ownership/operator enrichment v1.16
+VREL_000747,VESSEL_00423,ALPHA CRUX,COMP_VODOLEY,OPERATOR,,,High,SRC_0377,News-linked ownership/operator enrichment v1.16

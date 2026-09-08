@@ -191,3 +191,15 @@ EQ00189,TERM0239,STS crane,19,Tallest cranes in Port of Los Angeles,Operating,AP
 EQ00190,TERM0155,eRTG,18,,Operating,APM Terminals,https://www2.apmterminals.com/en/miami/about/our-terminal,APM-MIAMI-FL
 EQ00191,TERM0240,Super Post-Panamax STS,6,23-container reach,Operating,APM Terminals,https://www2.apmterminals.com/en/mobile/about/our-terminal,APM-MOBILE-AL
 EQ00192,TERM0241,STS crane,14,,Operating,APM Terminals,https://www2.apmterminals.com/en/port-elizabeth/about/our-terminal,APM-ELIZABETH-NJ
+EQ00193,TERM0247,Megamax / super post-Panamax STS quay crane,2,New cranes ordered under terminal renewal program,Ordered / delivery by end-2027,CHCL,https://splash247.com/port-louis-advances-58m-plus-terminal-upgrade/,
+EQ00194,TERM0247,Hybrid RTG,5,New hybrid yard cranes,Ordered / delivery by end-2027,CHCL,https://splash247.com/port-louis-advances-58m-plus-terminal-upgrade/,
+EQ00195,TERM0248,Crude oil storage tank,14,"30,000 tonnes each",Operating,Rosneft,https://splash247.com/russia-opens-giant-new-arctic-oil-export-terminal/,
+EQUIP00001,TERM0515,Container gantry crane,14,Operational data from HHLA,Operating,HHLA,https://hhla.de/en/company/subsidiaries/seaport-terminals,
+EQUIP00002,TERM0515,Rail-mounted gantry crane,4,Rail terminal,Operating,HHLA,https://hhla.de/en/company/subsidiaries/seaport-terminals,
+EQUIP00003,TERM0516,Container gantry crane,23,Operational data from HHLA,Operating,HHLA,https://hhla.de/en/company/subsidiaries/seaport-terminals,
+EQUIP00004,TERM0516,Rail-mounted gantry crane,4,Rail terminal,Operating,HHLA,https://hhla.de/en/company/subsidiaries/seaport-terminals,
+EQUIP00005,TERM0517,Container gantry crane,14,Operational data from HHLA,Operating,HHLA,https://hhla.de/en/company/subsidiaries/seaport-terminals,
+EQUIP00006,TERM0517,Rail-mounted gantry crane,3,Rail terminal,Operating,HHLA,https://hhla.de/en/company/subsidiaries/seaport-terminals,
+EQUIP00007,TERM0504,Gantry crane,21,Ocean container gantry cranes,Operating,EUROGATE,https://www.hafen-hamburg.de/en/address/eurogate-container-terminal-hamburg-gmbh-7975/,
+EQUIP00008,TERM0504,Van carrier / straddle carrier,150,Yard equipment,Operating,EUROGATE,https://www.hafen-hamburg.de/en/address/eurogate-container-terminal-hamburg-gmbh-7975/,
+EQUIP00009,TERM0504,Rail gantry crane,7,10 rail tracks; ~700 m track length,Operating,EUROGATE,https://www.hafen-hamburg.de/en/address/eurogate-container-terminal-hamburg-gmbh-7975/,
