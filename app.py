@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.22"
+APP_VERSION = "v1.24"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(
@@ -112,12 +112,45 @@ button[data-baseweb="tab"][aria-selected="true"] p { color:var(--pc-text) !impor
 """, unsafe_allow_html=True)
 
 # ---------- Data helpers ----------
+def _detect_embedded_header(path, max_scan_rows=15):
+    """Return the most likely real header row when a CSV starts with title/metadata rows."""
+    try:
+        raw = pd.read_csv(path, header=None, dtype=str, keep_default_na=False, nrows=max_scan_rows)
+    except Exception:
+        return None
+
+    candidates = []
+    for i, row in raw.iterrows():
+        vals = [str(v).strip() for v in row.tolist()]
+        nonempty = [v for v in vals if v]
+        if len(nonempty) < 3:
+            continue
+
+        structural = sum(
+            1 for v in nonempty
+            if re.search(r'(^|\s)(ID|Date|Company|Investor|Vessel|Port|Terminal|Carrier|Segment|Type|Status|Country|IMO|Source|Priority|Mode|Origin|Destination|Name|Relationship)(\s|/|$)', v, re.I)
+        )
+        id_fields = sum(1 for v in nonempty if re.search(r'\bIDs?\b', v, re.I))
+        # Real headers are field-name dense. Summary/metric rows can contain a few
+        # structural words, so score every candidate and select the strongest one.
+        if structural >= 3:
+            score = structural * 3 + id_fields * 2 + min(len(nonempty), 12)
+            candidates.append((score, int(i)))
+
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
 @st.cache_data(show_spinner=False)
 def load_csv(name):
     path = DATA_DIR / name
     if not path.exists():
         return pd.DataFrame()
     try:
+        header_row = _detect_embedded_header(path)
+        if header_row is not None and header_row > 0:
+            return pd.read_csv(path, dtype=str, keep_default_na=False, header=header_row)
         return pd.read_csv(path, dtype=str, keep_default_na=False)
     except Exception:
         return pd.DataFrame()
@@ -605,6 +638,22 @@ def build_graph_edges():
         for _, r in rel.iterrows():
             add(r.get("Source Entity",""), r.get("Target Entity",""), r.get("Relationship","related to"), "Corporate", "relationships")
 
+    # Explicit investor/holding links are part of the corporate/control graph too.
+    ih = D.get("infra_holdings", pd.DataFrame())
+    if not ih.empty:
+        for _, r in ih.iterrows():
+            reltxt = r.get("Interest Type", "holds interest in")
+            pct = str(r.get("Interest %", "")).strip()
+            if pct:
+                reltxt = f"{reltxt} ({pct}%)"
+            add(r.get("Investor Company ID", ""), r.get("Target Entity / Asset ID", ""), reltxt, "Ownership", "infrastructure_holdings")
+
+    # Registry parentage lets parent companies expose subsidiary/platform assets.
+    er = D.get("entity_registry", pd.DataFrame())
+    if not er.empty and "Parent Entity ID" in er.columns and "Entity ID" in er.columns:
+        for _, r in er.iterrows():
+            add(r.get("Parent Entity ID", ""), r.get("Entity ID", ""), "parent of", "Corporate", "entity_registry")
+
     vr = D.get("vessel_relationships", pd.DataFrame())
     if not vr.empty:
         for _, r in vr.iterrows():
@@ -676,6 +725,43 @@ def build_graph_edges():
 
 ENTITY_INDEX = build_entity_index()
 GRAPH_EDGES = build_graph_edges()
+
+OWNERSHIP_REL_WORDS = (
+    "own", "hold", "parent", "subsidi", "control", "manage", "sponsor",
+    "invest", "majority", "minority", "stake", "interest", "part of", "part_of"
+)
+
+def related_company_ids(root_id, max_depth=3):
+    """Follow ownership/control chains outward so parent entities inherit operating-platform exposure."""
+    root_id = str(root_id).strip()
+    if not root_id or GRAPH_EDGES.empty:
+        return {root_id: 0}
+    companies = set(D.get("companies", pd.DataFrame()).get("Company ID", pd.Series(dtype=str)).astype(str))
+    found = {root_id: 0}
+    frontier = [root_id]
+    for depth in range(1, max_depth + 1):
+        nxt = []
+        for src in frontier:
+            rows = GRAPH_EDGES[GRAPH_EDGES["source"].astype(str) == src]
+            for _, r in rows.iterrows():
+                rel = str(r.get("relationship", "")).lower().replace("_", " ")
+                dst = str(r.get("target", "")).strip()
+                if dst in companies and any(w in rel for w in OWNERSHIP_REL_WORDS) and dst not in found:
+                    found[dst] = depth
+                    nxt.append(dst)
+        frontier = nxt
+        if not frontier:
+            break
+    return found
+
+def _with_exposure_path(df, id_col, company_depths, direct_label="Direct", indirect_label="Via related company"):
+    if df.empty or id_col not in df.columns:
+        return df
+    out = df[df[id_col].astype(str).isin(company_depths.keys())].copy()
+    if out.empty:
+        return out
+    out.insert(0, "Exposure", out[id_col].astype(str).map(lambda x: direct_label if company_depths.get(str(x), 99) == 0 else f"{indirect_label}: {entity_label(x)}"))
+    return out
 
 def entity_label(entity_id):
     meta = ENTITY_INDEX.get(str(entity_id), {})
@@ -812,7 +898,7 @@ def watch_area_bundle(corridor_id):
 # ---------- Sidebar ----------
 st.sidebar.markdown("### P&C Trade System")
 st.sidebar.caption("Intelligence Model v1.17 • App v1.21")
-st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.22</div>", unsafe_allow_html=True)
+st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.23</div>", unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Navigate",
     [
@@ -905,34 +991,73 @@ elif page == "Companies":
             safe_display(rel[mask])
         else: st.info("No relationship table.")
     with tabs[2]:
+        company_depths = related_company_ids(cid, max_depth=3)
+        related_ids = list(company_depths.keys())
+        if len(related_ids) > 1:
+            chain_names = [entity_label(x) for x in related_ids if x != cid]
+            st.caption("Includes indirect exposure through related companies/platforms: " + ", ".join(chain_names))
+
+        sections_shown = 0
         assets = D["assets"]
-        safe_display(assets[assets.get("Company ID","") == cid] if not assets.empty else assets)
+        linked_assets = _with_exposure_path(assets, "Company ID", company_depths) if not assets.empty else assets
+        if not linked_assets.empty:
+            st.markdown("#### Assets")
+            safe_display(linked_assets)
+            sections_shown += 1
+
+        ports_all = D["ports"]
+        if not ports_all.empty and "Operator Company ID" in ports_all.columns:
+            linked_ports = _with_exposure_path(ports_all, "Operator Company ID", company_depths)
+            if not linked_ports.empty:
+                st.markdown("#### Ports / facilities")
+                safe_display(linked_ports)
+                sections_shown += 1
+
         ptc = D["terminals"]
         if not ptc.empty and "Primary Operator Company ID" in ptc.columns:
-            linked_t = ptc[ptc["Primary Operator Company ID"].astype(str) == cid]
+            linked_t = _with_exposure_path(ptc, "Primary Operator Company ID", company_depths)
             if not linked_t.empty:
                 st.markdown("#### Port / terminal assets")
                 safe_display(linked_t)
+                sections_shown += 1
+
         ftc = D["ferry_terminals"]
         if not ftc.empty and "Operator Company ID" in ftc.columns:
-            linked_ft = ftc[ftc["Operator Company ID"].astype(str) == cid]
+            linked_ft = _with_exposure_path(ftc, "Operator Company ID", company_depths)
             if not linked_ft.empty:
                 st.markdown("#### Ferry terminals")
                 safe_display(linked_ft)
+                sections_shown += 1
+
         rr = D["rail_relationships"]
         rn = D["rail_networks"]
         if not rr.empty and "Company ID" in rr.columns and "Rail Network ID" in rr.columns:
-            rids = rr[rr["Company ID"].astype(str) == cid]["Rail Network ID"].dropna().astype(str).unique().tolist()
-            linked_rn = rn[rn["Rail Network ID"].isin(rids)] if not rn.empty and "Rail Network ID" in rn.columns else pd.DataFrame()
+            rrel = rr[rr["Company ID"].astype(str).isin(related_ids)].copy()
+            rids = rrel["Rail Network ID"].dropna().astype(str).unique().tolist()
+            linked_rn = rn[rn["Rail Network ID"].isin(rids)].copy() if not rn.empty and "Rail Network ID" in rn.columns else pd.DataFrame()
             if not linked_rn.empty:
                 st.markdown("#### Rail networks / corridors")
                 safe_display(linked_rn)
+                sections_shown += 1
+
         rnodes = D["rail_nodes"]
         if not rnodes.empty and "Primary Company ID" in rnodes.columns:
-            linked_nodes = rnodes[rnodes["Primary Company ID"].astype(str) == cid]
+            linked_nodes = _with_exposure_path(rnodes, "Primary Company ID", company_depths)
             if not linked_nodes.empty:
                 st.markdown("#### Rail terminals / nodes")
                 safe_display(linked_nodes)
+                sections_shown += 1
+
+        holdings = D["infra_holdings"]
+        if not holdings.empty and "Investor Company ID" in holdings.columns:
+            h = holdings[holdings["Investor Company ID"].astype(str) == str(cid)].copy()
+            if not h.empty:
+                st.markdown("#### Direct holdings / investment platforms")
+                safe_display(h)
+                sections_shown += 1
+
+        if sections_shown == 0:
+            st.info("No matching direct or relationship-linked assets in the current model.")
     with tabs[3]:
         vessel_rel = D["vessel_relationships"]
         vessels = D["vessels"]
