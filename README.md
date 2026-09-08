@@ -45,3 +45,7 @@ Blank values mean not yet verified — never zero.
 
 ## App v1.19 visualization upgrade
 The Streamlit application now includes an Entity Explorer, relationship graphs on company/port/vessel/rail views, and dynamic Watch Areas assembled from the canonical corridor and relationship model. The underlying data baseline remains Model v1.17.
+
+
+## v1.22 map layer
+The Streamlit interface includes map views for canonical ports, geolocated event observations, rail-linked ports, ferry terminals and corridor/watch-area gateway ports. Maps use only coordinates already present in the model.

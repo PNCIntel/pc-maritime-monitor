@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.20"
+APP_VERSION = "v1.22"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(
@@ -446,6 +446,35 @@ def safe_display(df, max_rows=250):
         column_config=cfg,
     )
 
+
+
+def render_map(df, title=None, latitude_col="Latitude", longitude_col="Longitude", max_points=1000, zoom=None):
+    """Render a coordinate map from model rows without exposing internal IDs.
+
+    Only rows with valid latitude/longitude values are plotted.  The underlying
+    dataframe is not modified and no coordinates are invented for entities that
+    do not yet have them.
+    """
+    if df is None or df.empty or latitude_col not in df.columns or longitude_col not in df.columns:
+        st.info("No mapped coordinates are available for these records yet.")
+        return
+    m = df.copy()
+    m[latitude_col] = pd.to_numeric(m[latitude_col], errors="coerce")
+    m[longitude_col] = pd.to_numeric(m[longitude_col], errors="coerce")
+    m = m.dropna(subset=[latitude_col, longitude_col]).head(max_points)
+    m = m[m[latitude_col].between(-90, 90) & m[longitude_col].between(-180, 180)]
+    if m.empty:
+        st.info("No mapped coordinates are available for these records yet.")
+        return
+    if title:
+        st.markdown(f"#### {title}")
+    pts = m[[latitude_col, longitude_col]].rename(columns={latitude_col:"latitude", longitude_col:"longitude"})
+    kwargs = {"use_container_width": True}
+    if zoom is not None:
+        kwargs["zoom"] = zoom
+    st.map(pts, **kwargs)
+    st.caption(f"Mapped {len(pts):,} model record{'s' if len(pts) != 1 else ''} with verified coordinates.")
+
 def entity_news(entity_id):
     nl = D["news_links"]
     n = D["news"]
@@ -783,7 +812,7 @@ def watch_area_bundle(corridor_id):
 # ---------- Sidebar ----------
 st.sidebar.markdown("### P&C Trade System")
 st.sidebar.caption("Intelligence Model v1.17 • App v1.21")
-st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.21</div>", unsafe_allow_html=True)
+st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.22</div>", unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Navigate",
     [
@@ -841,6 +870,8 @@ if page == "Operating Picture":
         if dc:
             eo = eo.sort_values(dc, ascending=False)
         safe_display(eo.head(12), max_rows=12)
+        with st.expander("Map recent geolocated events", expanded=False):
+            render_map(eo.head(250), max_points=250)
     with b:
         st.markdown("### Active monitoring")
         safe_display(D["monitoring"], max_rows=20)
@@ -981,6 +1012,8 @@ elif page == "Ports & Terminals":
         ("Country","Country"),("Facility type","Facility Type"),("Operator","Operator"),
         ("Key role","Key Role"),("Coverage","Coverage Note"),
     ]), 3)
+    with st.expander("Map", expanded=True):
+        render_map(pd.DataFrame([row]), title=selected, zoom=10)
     with st.expander("System relationship graph", expanded=False):
         render_relationship_graph(pid, key_prefix=f"port_{pid}", default_depth=2, max_nodes_default=40)
 
@@ -1116,6 +1149,8 @@ elif page == "News & Events":
         if q2: eo = text_search(eo,q2)
         dc = col(eo,["Date"])
         if dc: eo = eo.sort_values(dc, ascending=False)
+        with st.expander("Event map", expanded=True):
+            render_map(eo, max_points=1000)
         safe_display(eo,500)
 
 elif page == "Monitoring":
@@ -1200,37 +1235,47 @@ elif page == "Rail Networks":
                 rlabels = {f"{r[rn_name]} — {r['Rail Network ID']}":r['Rail Network ID'] for _,r in D["rail_networks"].iterrows()}
                 rpick = st.selectbox("Network / corridor", sorted(rlabels.keys()), key="rail_graph_pick")
                 render_relationship_graph(rlabels[rpick], key_prefix=f"rail_{rlabels[rpick]}", default_depth=2, max_nodes_default=55)
-    tabs=st.tabs(["Networks","Nodes","Links","Operators","Fleet","Port / asset connections","News"])
+    tabs=st.tabs(["Map","Networks","Nodes","Links","Operators","Fleet","Port / asset connections","News"])
     with tabs[0]:
+        rc = D["rail_connections"]
+        ports_map = D["ports"]
+        if not rc.empty and not ports_map.empty and "Connected Entity ID" in rc.columns and "Port ID" in ports_map.columns:
+            rail_port_ids = set(rc["Connected Entity ID"].dropna().astype(str))
+            mapped_ports = ports_map[ports_map["Port ID"].astype(str).isin(rail_port_ids)]
+            render_map(mapped_ports, title="Rail-linked ports captured in the model", max_points=500)
+        else:
+            st.info("No rail-linked port coordinates are available yet.")
+    with tabs[1]:
         q=st.text_input("Search rail network / corridor",key="railnetq")
         safe_display(text_search(D["rail_networks"],q) if q else D["rail_networks"],500)
-    with tabs[1]:
+    with tabs[2]:
         q=st.text_input("Search rail node / terminal / port",key="railnodeq")
         safe_display(text_search(D["rail_nodes"],q) if q else D["rail_nodes"],500)
-    with tabs[2]:
+    with tabs[3]:
         q=st.text_input("Search origin, destination or corridor",key="raillinkq")
         safe_display(text_search(D["rail_links"],q) if q else D["rail_links"],500)
-    with tabs[3]:
+    with tabs[4]:
         safe_display(D["rail_operators"],300)
         st.markdown("#### Network ownership / operating relationships")
         safe_display(D["rail_relationships"],500)
-    with tabs[4]:
-        safe_display(D["rail_fleet"],300)
     with tabs[5]:
-        safe_display(D["rail_connections"],500)
+        safe_display(D["rail_fleet"],300)
     with tabs[6]:
+        safe_display(D["rail_connections"],500)
+    with tabs[7]:
         rn=D["rail_news"].copy()
         if not rn.empty and "Date" in rn.columns: rn=rn.sort_values("Date",ascending=False)
         safe_display(rn,300)
 
 elif page == "Ferry Systems":
     page_header("Ferry Systems", "Systems, routes, terminals, fleet status and service-performance observations.")
-    tabs=st.tabs(["Systems","Routes","Terminals","Fleet status","Performance"])
-    with tabs[0]: safe_display(D["ferry_systems"],200)
-    with tabs[1]: safe_display(D["ferry_routes"],500)
-    with tabs[2]: safe_display(D["ferry_terminals"],500)
-    with tabs[3]: safe_display(D["ferry_status"],300)
-    with tabs[4]: safe_display(D["ferry_performance"],300)
+    tabs=st.tabs(["Map","Systems","Routes","Terminals","Fleet status","Performance"])
+    with tabs[0]: render_map(D["ferry_terminals"], title="Ferry terminal network", max_points=1000)
+    with tabs[1]: safe_display(D["ferry_systems"],200)
+    with tabs[2]: safe_display(D["ferry_routes"],500)
+    with tabs[3]: safe_display(D["ferry_terminals"],500)
+    with tabs[4]: safe_display(D["ferry_status"],300)
+    with tabs[5]: safe_display(D["ferry_performance"],300)
 
 elif page == "Great Lakes":
     page_header("Great Lakes", "Ports, vessel staging, cargo corridors, cruise and disruption coverage.")
@@ -1315,8 +1360,10 @@ elif page == "Watch Areas":
                     if r.get("Source Asset ID","") and r.get("Target Entity / Asset ID",""):
                         watch_edges.append({"source":r.get("Source Asset ID",""),"target":r.get("Target Entity / Asset ID",""),"relationship":r.get("Relationship","connected to"),"category":"Watch Area","source_table":"infrastructure_connections"})
         wedge = pd.DataFrame(watch_edges)
-        tabs = st.tabs(["System View","Gateway Ports & Terminals","Connections","Intelligence Evidence","What to Monitor"])
+        tabs = st.tabs(["Map","System View","Gateway Ports & Terminals","Connections","Intelligence Evidence","What to Monitor"])
         with tabs[0]:
+            render_map(ports_w, title=f"{chosen} gateway map", max_points=100)
+        with tabs[1]:
             if wedge.empty:
                 # Fall back to canonical graph relationships around the corridor.
                 gedges,_ = graph_subgraph(cid, depth=2, categories=None, max_nodes=55)
@@ -1326,19 +1373,19 @@ elif page == "Watch Areas":
             else:
                 st.graphviz_chart(graph_dot(wedge, cid), use_container_width=True)
                 st.caption("The system view is assembled from canonical corridor, port, terminal, company and infrastructure relationships already in the model.")
-        with tabs[1]:
+        with tabs[2]:
             st.markdown("#### Gateway ports")
             safe_display(ports_w, 200)
             st.markdown("#### Terminals")
             safe_display(terms_w, 300)
-        with tabs[2]:
-            safe_display(connections_w, 300)
         with tabs[3]:
+            safe_display(connections_w, 300)
+        with tabs[4]:
             if evidence_w.empty:
                 st.info("No corridor-specific event/news evidence is currently linked or text-matched in the local model.")
             else:
                 safe_display(evidence_w, 300)
-        with tabs[4]:
+        with tabs[5]:
             st.markdown("""
             **Operational indicators:** chokepoint restrictions, draft/slot changes, closures, congestion, queues, lock/bridge outages and navigation warnings.  
             **Gateway indicators:** berth/crane outages, terminal congestion, labour action, customs delays, landside access and intermodal disruption.  
