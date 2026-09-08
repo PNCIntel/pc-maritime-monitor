@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.18"
+APP_VERSION = "v1.20"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(
@@ -21,33 +21,93 @@ st.markdown("""
   --pc-bg:#07111f;
   --pc-panel:#0d1a2b;
   --pc-panel2:#101f33;
-  --pc-border:#233852;
-  --pc-text:#e9eef5;
-  --pc-muted:#9fb0c4;
-  --pc-gold:#c8a45b;
-  --pc-blue:#4aa3df;
+  --pc-border:#2a415e;
+  --pc-text:#f2f5f9;
+  --pc-muted:#b7c4d3;
+  --pc-gold:#d7b66a;
+  --pc-blue:#76bde8;
+  --pc-sidebar:#091725;
 }
+
+/* App surfaces */
 .stApp { background:var(--pc-bg); color:var(--pc-text); }
-[data-testid="stSidebar"] { background:#081523; border-right:1px solid var(--pc-border); }
-h1,h2,h3 { color:var(--pc-text); }
+[data-testid="stAppViewContainer"], [data-testid="stMain"] { background:var(--pc-bg); }
+[data-testid="stSidebar"] {
+  background:var(--pc-sidebar) !important;
+  border-right:1px solid var(--pc-border);
+}
+[data-testid="stSidebar"] > div { background:var(--pc-sidebar) !important; }
+
+/* Force readable text in the dark theme, especially after Streamlit upgrades */
+h1,h2,h3,h4,h5,h6,p,li,span,label { color:var(--pc-text); }
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] div { color:var(--pc-text) !important; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p,
+[data-testid="stSidebar"] small { color:var(--pc-muted) !important; }
+[data-testid="stSidebar"] [role="radiogroup"] label p { color:var(--pc-text) !important; }
+[data-testid="stSidebar"] [role="radiogroup"] label { opacity:1 !important; }
+[data-testid="stSidebar"] input[type="radio"] { accent-color:var(--pc-gold); }
+/* Streamlit/BaseWeb radio markup can override inherited colors; target every text layer. */
+[data-testid="stSidebar"] [role="radiogroup"] * { color:var(--pc-text) !important; }
+[data-testid="stSidebar"] [role="radiogroup"] [data-testid="stMarkdownContainer"] p {
+  color:var(--pc-text) !important; opacity:1 !important; font-weight:500;
+}
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3 {
+  color:#ffffff !important; opacity:1 !important;
+}
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] { opacity:1 !important; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color:#c8d4e3 !important; }
+
+/* Widget labels and controls */
+[data-testid="stWidgetLabel"] p,
+[data-testid="stSelectbox"] label,
+[data-testid="stMultiSelect"] label,
+[data-testid="stTextInput"] label,
+[data-testid="stNumberInput"] label,
+[data-testid="stCheckbox"] label,
+[data-testid="stRadio"] label { color:var(--pc-text) !important; }
+[data-baseweb="select"] > div,
+[data-baseweb="input"] > div,
+.stTextInput input,
+.stNumberInput input {
+  background:var(--pc-panel) !important;
+  color:var(--pc-text) !important;
+  border-color:var(--pc-border) !important;
+}
+
 .pc-kicker { color:var(--pc-gold); font-size:.78rem; letter-spacing:.14em; text-transform:uppercase; font-weight:700; }
-.pc-title { font-size:2rem; font-weight:800; margin:.2rem 0 .1rem; }
+.pc-title { color:var(--pc-text); font-size:2rem; font-weight:800; margin:.2rem 0 .1rem; }
 .pc-sub { color:var(--pc-muted); margin-bottom:1.1rem; }
 .pc-card {
   background:linear-gradient(180deg,var(--pc-panel),var(--pc-panel2));
   border:1px solid var(--pc-border);
-  border-radius:12px; padding:15px 17px; min-height:96px;
+  border-radius:12px; padding:15px 17px; min-height:104px;
 }
-.pc-label { color:var(--pc-muted); font-size:.77rem; text-transform:uppercase; letter-spacing:.08em; }
+.pc-label { color:var(--pc-muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.07em; }
 .pc-value { color:var(--pc-text); font-size:1.45rem; font-weight:760; margin-top:3px; }
-.pc-small { color:var(--pc-muted); font-size:.86rem; }
+.pc-small { color:var(--pc-muted); font-size:.84rem; line-height:1.35; }
 .pc-rule { border-top:1px solid var(--pc-border); margin:1rem 0; }
+
 div[data-testid="stMetric"] {
   background:var(--pc-panel); border:1px solid var(--pc-border);
   border-radius:10px; padding:10px 13px;
 }
 .stDataFrame { border:1px solid var(--pc-border); border-radius:9px; }
-a { color:#7cc3ef !important; }
+a { color:var(--pc-blue) !important; }
+
+/* Keep tables and cards inside the available width */
+[data-testid="stHorizontalBlock"] { gap:.75rem; }
+[data-testid="column"] { min-width:0; }
+
+/* Better contrast for tabs and expanders */
+button[data-baseweb="tab"] p { color:var(--pc-muted) !important; }
+button[data-baseweb="tab"][aria-selected="true"] p { color:var(--pc-text) !important; }
+[data-testid="stExpander"] summary p { color:var(--pc-text) !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -152,7 +212,14 @@ def text_search(df, q):
     ).any(axis=1)
     return df[mask]
 
-def safe_display(df, max_rows=250, height=None):
+def safe_display(df, max_rows=250):
+    """Display a bounded dataframe without passing an explicit height.
+
+    Streamlit Cloud versions validate dataframe height strictly. Historically the
+    app used the second positional argument as a row limit (for example 12), and
+    an earlier helper accidentally forwarded that value as a pixel height. Keeping
+    this helper height-free removes that failure mode entirely.
+    """
     if df.empty:
         st.info("No matching records in the current model.")
         return
@@ -162,7 +229,12 @@ def safe_display(df, max_rows=250, height=None):
         lc = c.lower()
         if lc in {"url","source url","feed url","source reference"} or "url" in lc:
             cfg[c] = st.column_config.LinkColumn(c, display_text="Open")
-    st.dataframe(show, use_container_width=True, hide_index=True, height=height, column_config=cfg)
+    st.dataframe(
+        show,
+        use_container_width=True,
+        hide_index=True,
+        column_config=cfg,
+    )
 
 def entity_news(entity_id):
     nl = D["news_links"]
@@ -501,6 +573,7 @@ def watch_area_bundle(corridor_id):
 # ---------- Sidebar ----------
 st.sidebar.markdown("### P&C Trade System")
 st.sidebar.caption("Intelligence Model v1.17")
+st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.20</div>", unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Navigate",
     [
@@ -527,7 +600,6 @@ st.sidebar.caption("Trade infrastructure • fleets • rail • corridors • e
 # ---------- Pages ----------
 if page == "Operating Picture":
     page_header("Operating Picture", "A cross-domain view of companies, assets, ports, fleets, events and developing situations.")
-    c = st.columns(7)
     vals = [
         ("Companies", len(D["companies"]), "canonical organizations"),
         ("Ports", len(D["ports"]), "canonical port/facility records"),
@@ -537,15 +609,19 @@ if page == "Operating Picture":
         ("News", len(D["news"]), "entity-linked current stories"),
         ("Monitoring", len(D["monitoring"]), "active analytical watches"),
     ]
-    for x,(label,val,note) in zip(c, vals):
-        with x: metric_card(label, f"{val:,}", note)
+    # Two rows stay readable on normal laptop widths; seven equal columns forced labels to wrap vertically.
+    for row_vals in (vals[:4], vals[4:]):
+        c = st.columns(len(row_vals))
+        for x,(label,val,note) in zip(c, row_vals):
+            with x:
+                metric_card(label, f"{val:,}", note)
 
     st.markdown("### Latest news")
     news = D["news"].copy()
     dc = col(news, ["Published Date","Date"])
     if dc:
         news = news.sort_values(dc, ascending=False)
-    safe_display(news.head(12), 12)
+    safe_display(news.head(12), max_rows=12)
 
     a,b = st.columns(2)
     with a:
@@ -554,10 +630,10 @@ if page == "Operating Picture":
         dc = col(eo, ["Date"])
         if dc:
             eo = eo.sort_values(dc, ascending=False)
-        safe_display(eo.head(12), 12)
+        safe_display(eo.head(12), max_rows=12)
     with b:
         st.markdown("### Active monitoring")
-        safe_display(D["monitoring"], 20)
+        safe_display(D["monitoring"], max_rows=20)
 
 elif page == "Companies":
     page_header("Companies", "Corporate ecosystems, ownership, assets, fleets, transactions and related reporting.")

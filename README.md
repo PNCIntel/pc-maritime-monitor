@@ -43,5 +43,5 @@ Ask P&C searches rail networks, nodes, links and rail news.
 Blank values mean not yet verified — never zero.
 
 
-## App v1.18 visualization upgrade
+## App v1.19 visualization upgrade
 The Streamlit application now includes an Entity Explorer, relationship graphs on company/port/vessel/rail views, and dynamic Watch Areas assembled from the canonical corridor and relationship model. The underlying data baseline remains Model v1.17.
