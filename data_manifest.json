@@ -1,5 +1,5 @@
 {
-  "version": "1.30",
+  "version": "1.30.2",
   "sheet_to_file": {
     "Companies": "01_core_entities.xlsx",
     "Entity Registry": "01_core_entities.xlsx",
@@ -293,5 +293,5 @@
       "Sources"
     ]
   },
-  "model": "Canonical sanctions vessels + owner/manager integration + vessel profiles"
+  "model": "Canonical sanctions vessels + rich vessel object profiles"
 }

@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.30.1"
+APP_VERSION = "v1.30.2"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -1735,6 +1735,100 @@ def render_sanction_link_cards(df):
             else:
                 st.caption("Not canonical")
 
+
+def vessel_value(r, *cols):
+    for c in cols:
+        v=str(r.get(c,"")).strip()
+        if v and v.lower() not in {"nan","none"}:
+            return pretty_enum(v)
+    return ""
+
+def vessel_summary_cards(r):
+    cards=[
+        ("IMO",vessel_value(r,"IMO")),
+        ("Type",vessel_value(r,"Vessel Type")),
+        ("Flag",vessel_value(r,"Flag")),
+        ("Built",vessel_value(r,"Year Built")),
+        ("DWT",vessel_value(r,"DWT")),
+        ("GT",vessel_value(r,"Gross Tonnage (GT)")),
+    ]
+    cols=st.columns(3)
+    for i,(lab,val) in enumerate(cards):
+        if not val:
+            val="—"
+        with cols[i%3]:
+            st.markdown(
+                f"<div class='pc-card'><div class='pc-label'>{lab}</div>"
+                f"<div class='pc-big'>{val}</div></div>",
+                unsafe_allow_html=True
+            )
+
+def render_vessel_relationship_cards(vessel_id,vessel_name,rel):
+    if rel is None or rel.empty:
+        st.info("No linked owner/operator/manager records.")
+        return
+    for i,(_,rr) in enumerate(rel.iterrows()):
+        cid=str(rr.get("Company ID","")).strip()
+        cname=label(cid)
+        relationship=pretty_relationship(rr.get("Relationship Type",""))
+        notes=str(rr.get("Notes","")).strip()
+        c1,c2=st.columns([5,1])
+        with c1:
+            st.markdown(
+                f"<div class='pc-card pc-object-card'>"
+                f"<div class='pc-label'>{relationship}</div>"
+                f"<div class='pc-big'>{cname}</div>"
+                f"<div class='pc-small'>{notes}</div>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+        with c2:
+            if cid.startswith("COMP_"):
+                if st.button(f"Open {cname}",key=f"vrel_open_{vessel_id}_{i}_{cid}",use_container_width=True):
+                    request_nav("Companies","company_pick_id",cid,cname)
+                    st.rerun()
+
+def render_vessel_incident_cards(events,news):
+    frames=[]
+    if events is not None and not events.empty:
+        for _,r in events.iterrows():
+            frames.append({
+                "Date":str(r.get("Date","")).strip(),
+                "Title":str(r.get("Title","")).strip(),
+                "Type":str(r.get("Event Type","")).strip(),
+                "Location":str(r.get("Location","")).strip(),
+                "Impact":str(r.get("Operational Impact","")).strip(),
+                "Source URL":"",
+            })
+    if news is not None and not news.empty:
+        for _,r in news.iterrows():
+            # Avoid duplicating a news story already represented by same headline/date.
+            frames.append({
+                "Date":str(r.get("Published Date","")).strip(),
+                "Title":str(r.get("Headline","")).strip(),
+                "Type":str(r.get("Event Type","")).strip(),
+                "Location":str(r.get("Region","")).strip(),
+                "Impact":str(r.get("Summary","")).strip(),
+                "Source URL":str(r.get("URL","")).strip(),
+            })
+    if not frames:
+        st.info("No linked incident or enforcement history.")
+        return
+    df=pd.DataFrame(frames)
+    df["_dt"]=pd.to_datetime(df["Date"],errors="coerce")
+    df=df.sort_values("_dt",ascending=False).drop_duplicates(subset=["Date","Title"])
+    for i,(_,r) in enumerate(df.iterrows()):
+        src=str(r.get("Source URL","")).strip()
+        source_html=f"<div class='pc-source'><a href='{src}' target='_blank' rel='noopener noreferrer'>Open source ↗</a></div>" if src.startswith("http") else ""
+        st.markdown(
+            f"<div class='pc-card'>"
+            f"<div class='pc-label'>{r.get('Date','')} · {pretty_enum(r.get('Type',''))} · {r.get('Location','')}</div>"
+            f"<div class='pc-big'>{r.get('Title','')}</div>"
+            f"<div class='pc-small'>{r.get('Impact','')}</div>"
+            f"{source_html}</div>",
+            unsafe_allow_html=True
+        )
+
 def vessel_profile_data(vessel_id, vessel_name):
     commercial=TABLES.get(("Maritime","Vessels"),pd.DataFrame())
     vrel=TABLES.get(("Maritime","Vessel Relationships"),pd.DataFrame())
@@ -1767,73 +1861,123 @@ def render_vessel_profile(vessel_id,vessel_name):
     if row.empty:
         st.info("No canonical commercial-vessel record available.")
         return
+
     r=row.iloc[0]
+
+    # Header
     st.markdown(f"## {vessel_name}")
-    meta=[]
-    for c in ["IMO","Vessel Type","Subtype / Class","Flag","Year Built","DWT","Gross Tonnage (GT)","Status","Primary Service"]:
-        v=str(r.get(c,"")).strip()
-        if v and v.lower()!="nan":
-            meta.append(f"**{c}:** {pretty_enum(v)}")
-    if meta: st.markdown("  \n".join(meta))
+    subtitle_bits=[]
+    for c in ["Vessel Type","Subtype / Class","Flag","Status"]:
+        v=vessel_value(r,c)
+        if v: subtitle_bits.append(v)
+    if subtitle_bits:
+        st.caption(" · ".join(subtitle_bits))
 
-    c1,c2,c3,c4=st.columns(4)
+    vessel_summary_cards(r)
+
+    c1,c2,c3,c4,c5=st.columns(5)
     c1.metric("Sanctions",len(san))
-    c2.metric("News",len(news))
-    c3.metric("Events",len(events))
-    c4.metric("Relationships",len(rel))
+    c2.metric("Incidents",len(events))
+    c3.metric("News",len(news))
+    c4.metric("Companies",rel["Company ID"].nunique() if not rel.empty and "Company ID" in rel.columns else 0)
+    c5.metric("Evidence",len(evd))
 
-    tabs=st.tabs(["Overview","Ownership & Management","Sanctions & Compliance","News & Events","Evidence"])
+    tabs=st.tabs([
+        "Overview",
+        "Ownership & Management",
+        "Sanctions",
+        "Incidents",
+        "News",
+        "Evidence"
+    ])
 
     with tabs[0]:
-        display_df(row,20)
+        st.markdown("### Vessel profile")
+        fields=[
+            ("IMO","IMO"),
+            ("MMSI","MMSI"),
+            ("Call sign","Call Sign"),
+            ("Vessel type","Vessel Type"),
+            ("Class / subtype","Subtype / Class"),
+            ("Flag","Flag"),
+            ("Year built","Year Built"),
+            ("DWT","DWT"),
+            ("Gross tonnage","Gross Tonnage (GT)"),
+            ("Length","Length (m)"),
+            ("Beam","Beam (m)"),
+            ("Primary service","Primary Service"),
+            ("Status","Status"),
+            ("Owner / operator","Owner / Operator Text"),
+            ("Notes","Notes"),
+        ]
+        rows=[]
+        for lab,col in fields:
+            val=vessel_value(r,col)
+            if val:
+                rows.append({"Field":lab,"Value":val})
+        if rows:
+            display_df(pd.DataFrame(rows),100)
+
+        if not rel.empty:
+            st.markdown("### Connected companies")
+            render_vessel_relationship_cards(vessel_id,vessel_name,rel)
+
+        if not san.empty:
+            st.markdown("### Compliance flag")
+            st.warning(f"{len(san)} government sanctions designation record(s) are linked to this vessel.")
+
+        if not events.empty or not news.empty:
+            st.markdown("### Latest incident / reporting")
+            render_vessel_incident_cards(events.head(2) if not events.empty else events,
+                                         news.head(2) if not news.empty else news)
+
         if not bld.empty:
             st.markdown("### Build record")
             display_df(bld,20)
 
     with tabs[1]:
-        if rel.empty:
-            st.info("No linked owner/operator/manager records.")
-        else:
-            for i,(_,rr) in enumerate(rel.iterrows()):
-                cid=str(rr.get("Company ID","")).strip()
-                cname=label(cid)
-                relationship=pretty_relationship(rr.get("Relationship Type",""))
-                c1,c2=st.columns([5,1])
-                with c1:
-                    st.markdown(
-                        f"<div class='pc-rel'><b>{vessel_name}</b> → {relationship} → <b>{cname}</b></div>",
-                        unsafe_allow_html=True
-                    )
-                with c2:
-                    if cid.startswith("COMP_") and st.button(f"Open {cname}",key=f"vrel_{vessel_id}_{i}",use_container_width=True):
-                        request_nav("Companies","company_pick_id",cid,cname)
-                        st.rerun()
+        st.markdown("### Owner / operator / manager relationships")
+        render_vessel_relationship_cards(vessel_id,vessel_name,rel)
 
     with tabs[2]:
         if san.empty:
             st.info("No government sanctions designation linked to this canonical vessel.")
         else:
+            st.markdown("### Government designation records")
             display_df(humanize_sanctions_df(san),100)
 
+            # Related sanction-linked companies / entities
+            slinks=TABLES.get(("Trade Policy & Compliance","Sanctions Entity Links"),pd.DataFrame())
+            if not slinks.empty and "Designation ID" in slinks.columns and "Designation ID" in san.columns:
+                dids=set(san["Designation ID"].astype(str))
+                linked=slinks[slinks["Designation ID"].astype(str).isin(dids)].copy()
+                linked=linked[linked["Canonical Entity ID"].astype(str).ne(str(vessel_id))] if "Canonical Entity ID" in linked.columns else linked
+                if not linked.empty:
+                    st.markdown("### Related sanction-linked entities")
+                    render_sanction_link_cards(linked)
+
     with tabs[3]:
-        if not news.empty:
-            st.markdown("### Related reporting")
-            show_named_list(news,"Headline",["Published Date","Publisher","Event Type","Event Subtype"],source_col="URL",max_items=50)
-        if not events.empty:
-            st.markdown("### Strategic events")
-            display_df(events,50)
-        if news.empty and events.empty:
-            st.info("No linked news or strategic events.")
+        render_vessel_incident_cards(events,news)
 
     with tabs[4]:
-        if not evd.empty:
-            display_df(evd,100)
+        if not news.empty:
+            show_named_list(news,"Headline",["Published Date","Publisher","Region","Event Type"],source_col="URL",max_items=100)
         else:
-            st.info("No evidence records.")
+            st.info("No linked news reporting.")
+
+    with tabs[5]:
+        if not evd.empty:
+            st.markdown("### Vessel evidence")
+            display_df(evd,150)
+        else:
+            st.info("No vessel evidence records.")
+        if not bld.empty:
+            st.markdown("### Build evidence")
+            display_df(bld,50)
 
 # ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.30.1 · Sanctions UI helper fix")
+st.sidebar.caption("v1.30.2 · Vessel object profiles")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
@@ -1879,8 +2023,13 @@ if page=="Search":
                 with cols[n%3]:
                     st.markdown(f"<div class='pc-card'><div class='pc-label'>{r['kind']}</div><div class='pc-big'>{r['name']}</div></div>",unsafe_allow_html=True)
                     if st.button("Open",key=f"topopen_{r['id']}_{n}"):
-                        st.session_state["company_pick_id"]=r["id"]
-                        st.session_state["nav_request"]="Companies"
+                        eid=str(r["id"])
+                        kind=str(r["kind"])
+                        route_page,route_key,route_id=object_route(kind,eid,str(r["name"]))
+                        if route_page:
+                            request_nav(route_page,route_key,route_id,str(r["name"]))
+                        else:
+                            request_nav("Companies","company_pick_id",eid,str(r["name"]))
                         st.rerun()
 
         hits=ranked_search(q,limit=100)
@@ -2090,17 +2239,10 @@ elif page=="Vessels":
             mi=c.index[c["Vessel ID"].astype(str).eq(str(requested_vessel))].tolist()
             if mi: requested_index=int(mi[0])
 
-        if "vessel_select_idx" not in st.session_state:
-            st.session_state["vessel_select_idx"]=requested_index
-        else:
-            try:
-                vi=int(st.session_state["vessel_select_idx"])
-            except Exception:
-                vi=requested_index
-            if vi<0 or vi>=len(c): vi=requested_index
-            st.session_state["vessel_select_idx"]=vi
         if requested_vessel:
-            st.session_state["vessel_select_idx"]=requested_index
+            st.session_state["vessel_select_idx"]=int(requested_index)
+        else:
+            safe_index_state("vessel_select_idx",int(requested_index),len(c))
 
         pick=st.selectbox(
             "Commercial vessel",

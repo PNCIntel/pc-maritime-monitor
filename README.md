@@ -195,3 +195,21 @@ App-only update:
 - LADY MARIIA and SUN have linked incident/news records.
 - Vessels is now an object explorer with Ownership & Management, Sanctions & Compliance, News & Events and Evidence tabs.
 - Sanctions-linked canonical vessels can open directly into the Vessel profile.
+
+## v1.30.2 sanctions UI helper fix
+- App-only patch.
+- Restores missing sanctions presentation helpers used by the Sanctions & Compliance page.
+- Fixes NameError on sanctions_programme_counts.
+- Restores readable authority/programme labels and dark-theme programme bars.
+- Restores canonical Open actions from sanctions-linked vessels/companies.
+
+## v1.30.2 vessel object profiles
+App-only update:
+- Vessels now open as full object profiles rather than raw filtered tables.
+- Tabs: Overview, Ownership & Management, Sanctions, Incidents, News, Evidence.
+- Overview uses readable vessel cards and fields instead of exposing backend IDs.
+- Owner/operator/manager companies are clickable back into Company profiles.
+- Sanctions tab shows government designations and related sanction-linked entities.
+- Incidents tab combines canonical strategic events and linked reporting into a chronology.
+- Search entity results now route vessels to Vessels, ports to Ports, yards to Shipyards and systems to Systems.
+- Vessel selector state is hardened against stale Streamlit session state.
