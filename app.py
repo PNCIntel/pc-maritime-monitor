@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.30"
+APP_VERSION = "v1.30.1"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -21,6 +21,11 @@ a{color:var(--blue)!important}
 .pc-source{margin-top:7px;font-size:.82rem}.pc-source a{color:var(--blue)!important;text-decoration:none;font-weight:650}
 .pc-search-card{padding:16px 18px}.pc-search-details{margin-top:8px;line-height:1.65;color:var(--muted);font-size:.92rem}
 .pc-object-card{margin-bottom:.35rem;min-height:72px}
+.pc-bar-row{display:grid;grid-template-columns:minmax(220px,2fr) 5fr 52px;gap:12px;align-items:center;margin:8px 0}
+.pc-bar-label{color:#f3f6fa;font-size:.88rem;white-space:normal}
+.pc-bar-track{height:20px;background:#0d1a2b;border:1px solid #28415f;border-radius:5px;overflow:hidden}
+.pc-bar-fill{height:100%;background:#2f6fb5}
+.pc-bar-value{color:#d7b66a;font-weight:700;text-align:right}
 .pc-detail-label{color:#d7b66a!important;font-weight:700}.pc-detail-value{color:#f3f6fa!important}.pc-sep{color:#6f849d!important;margin:0 .2rem}
 /* top navigation */
 div[role="radiogroup"]{gap:.35rem;flex-wrap:wrap}
@@ -1606,6 +1611,130 @@ def safe_index_state(key, default_index, option_count):
     return current
 
 
+def sanctions_lookup_maps():
+    auth=TABLES.get(("Trade Policy & Compliance","Sanctions Authorities"),pd.DataFrame())
+    prog=TABLES.get(("Trade Policy & Compliance","Sanctions Programmes"),pd.DataFrame())
+    des=TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame())
+
+    auth_map={}
+    prog_map={}
+    des_map={}
+    if not auth.empty:
+        for _,r in auth.iterrows():
+            aid=str(r.get("Authority ID","")).strip()
+            if aid:
+                auth_map[aid]=str(r.get("Authority","")).strip()
+    if not prog.empty:
+        for _,r in prog.iterrows():
+            pid=str(r.get("Programme ID","")).strip()
+            name=str(r.get("Programme","")).strip()
+            legal=str(r.get("Legal Basis","")).strip()
+            if pid:
+                prog_map[pid]=f"{name} — {legal}" if legal else name
+    if not des.empty:
+        for _,r in des.iterrows():
+            did=str(r.get("Designation ID","")).strip()
+            target=str(r.get("Target Name","")).strip()
+            if did:
+                des_map[did]=target
+    return auth_map,prog_map,des_map
+
+SAN_AUTH_MAP,SAN_PROG_MAP,SAN_DES_MAP=sanctions_lookup_maps()
+
+def humanize_sanctions_df(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+    out=df.copy()
+
+    if "Authority ID" in out.columns:
+        out["Authority"]=out["Authority ID"].astype(str).map(lambda x:SAN_AUTH_MAP.get(x,x))
+    if "Programme ID" in out.columns:
+        out["Programme"]=out["Programme ID"].astype(str).map(lambda x:SAN_PROG_MAP.get(x,x))
+    if "Designation ID" in out.columns and "Target Name" not in out.columns:
+        out["Designation"]=out["Designation ID"].astype(str).map(lambda x:SAN_DES_MAP.get(x,x))
+
+    for c in list(out.columns):
+        if c in {"Status","Target Type","Entity Type","Coverage Status","Classification Rule","Legal / Analytical Effect","Authority Type","Class","Measure Type","Precedence"}:
+            out[c]=out[c].map(pretty_enum)
+
+    drop=[
+        "Designation ID","Authority ID","Programme ID","Link ID","Watch ID","Rule ID",
+        "Canonical Entity ID","Coverage ID","Measure ID","Party Link ID","Source ID"
+    ]
+    out=out.drop(columns=[c for c in drop if c in out.columns],errors="ignore")
+
+    preferred=[
+        "Designation Date","Target Type","Target Name","IMO / Identifier","Authority","Programme",
+        "Regime / Linkage","Status","Designation Basis / Link","Model Coverage Status","Source URL",
+        "Entity","Entity Type","Designation","Coverage Status","Confidence","Analytical Note",
+        "Class","Example","Authority Type","Classification Rule","Legal / Analytical Effect"
+    ]
+    cols=[c for c in preferred if c in out.columns]+[c for c in out.columns if c not in preferred]
+    return out[cols]
+
+def sanctions_programme_counts(designations):
+    if designations is None or designations.empty or "Programme ID" not in designations.columns:
+        return pd.DataFrame()
+    x=designations.copy()
+    x["Programme"]=x["Programme ID"].astype(str).map(lambda p:SAN_PROG_MAP.get(p,p))
+    return x["Programme"].value_counts().rename_axis("Programme").reset_index(name="Designations")
+
+def render_dark_bar_list(df,label_col,value_col,title):
+    st.markdown(f"### {title}")
+    if df is None or df.empty:
+        st.info("No records.")
+        return
+    maxv=max(float(pd.to_numeric(df[value_col],errors="coerce").fillna(0).max()),1.0)
+    for _,r in df.iterrows():
+        label_txt=str(r.get(label_col,""))
+        try: val=float(r.get(value_col,0))
+        except Exception: val=0.0
+        pct=max(2,min(100,(val/maxv)*100))
+        value_txt=str(int(val)) if float(val).is_integer() else str(val)
+        st.markdown(
+            f"<div class='pc-bar-row'>"
+            f"<div class='pc-bar-label'>{label_txt}</div>"
+            f"<div class='pc-bar-track'><div class='pc-bar-fill' style='width:{pct}%'></div></div>"
+            f"<div class='pc-bar-value'>{value_txt}</div>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+
+def render_sanction_link_cards(df):
+    if df is None or df.empty:
+        st.info("No sanction-linked entities.")
+        return
+    for i,(_,r) in enumerate(df.iterrows()):
+        entity=str(r.get("Entity","")).strip()
+        etype=str(r.get("Entity Type","")).strip()
+        canonical=str(r.get("Canonical Entity ID","")).strip()
+        status=str(r.get("Coverage Status","")).strip()
+        designation=str(r.get("Designation ID","")).strip()
+        designation_name=SAN_DES_MAP.get(designation,designation)
+        note=str(r.get("Analytical Note","")).strip()
+
+        c1,c2=st.columns([5,1])
+        with c1:
+            st.markdown(
+                f"<div class='pc-card pc-object-card'>"
+                f"<div class='pc-label'>{pretty_enum(etype)} · linked to {designation_name}</div>"
+                f"<div class='pc-big'>{entity}</div>"
+                f"<div class='pc-small'>{status}{(' · '+note) if note else ''}</div>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+        with c2:
+            if canonical:
+                page,key,_=object_route(etype,canonical,entity)
+                if page:
+                    if st.button("Open",key=f"sanopen_{i}_{canonical}",use_container_width=True):
+                        request_nav(page,key,canonical,entity)
+                        st.rerun()
+                else:
+                    st.caption("Linked")
+            else:
+                st.caption("Not canonical")
+
 def vessel_profile_data(vessel_id, vessel_name):
     commercial=TABLES.get(("Maritime","Vessels"),pd.DataFrame())
     vrel=TABLES.get(("Maritime","Vessel Relationships"),pd.DataFrame())
@@ -1704,7 +1833,7 @@ def render_vessel_profile(vessel_id,vessel_name):
 
 # ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.30 · Canonical sanctions vessel integration")
+st.sidebar.caption("v1.30.1 · Sanctions UI helper fix")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
