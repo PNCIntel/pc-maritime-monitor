@@ -49,7 +49,7 @@ The new graph tests:
 This adds marine-access infrastructure as a first-class facility category alongside berths,
 yards, rail sidings, locks, canals, warehouses and other infrastructure.
 
-## v1.28 interface fix
+## v1.28.3 interface fix
 The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
 - shipyards and yard facilities/capabilities
 - defence/coast guard sample vessels
@@ -114,3 +114,25 @@ Interface:
 - company profiles overlay linked events on assets
 - ports, shipyards and systems expose linked events and impact chains
 - Contracts combines government procurement with commercial/infrastructure transactions and sales routes
+
+## v1.28.1 navigation stability fix
+- Fixes `StreamlitWidgetAlreadyInstantiatedError` from Search → Open.
+- Page changes now use a deferred `nav_request`, applied before the top navigation widget is created on the next run.
+- Search can open a company profile without mutating the instantiated `top_nav` widget key.
+- Improves dark-theme contrast for ordinary Streamlit buttons.
+
+## v1.28.2 search readability fix
+App-only update:
+- Commercial / contract search cards use English titles such as `AD Ports Group → MBS Logistics`.
+- Raw transaction/deal IDs are no longer used as card titles.
+- Semicolon-delimited company IDs are resolved into company names.
+- Markdown `**...**` markers are no longer displayed literally inside HTML cards.
+- Commercial cards prioritize buyer/investor, target, type, value, status and dates.
+
+## v1.28.3 connected object navigation
+App-only update:
+- Event-linked assets, companies and systems are rendered as navigable object cards.
+- `Open` routes Zayed Port / Shanghai / Odesa to Ports, yards to Shipyards, companies to Companies, systems to Systems and vessels to Vessels.
+- Ports, Shipyards and Systems honor direct object selections from event links.
+- Technical enum values are humanized: `DIRECTLY_AFFECTED` → `Directly affected`, `COAST_GUARD_NEWBUILD` → `Coast guard newbuild`.
+- Internal Link / Event / Observation identifiers are suppressed from normal tables.

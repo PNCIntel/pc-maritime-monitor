@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.28"
+APP_VERSION = "v1.28.3"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -19,6 +19,9 @@ h1,h2,h3,h4,h5,h6,p,li,span,label{color:var(--text)}
 a{color:var(--blue)!important}
 .pc-kicker{color:var(--gold);font-size:.76rem;letter-spacing:.14em;text-transform:uppercase;font-weight:700}.pc-title{font-size:2rem;font-weight:800}.pc-sub{color:var(--muted);margin:.2rem 0 1.2rem}.pc-card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:8px}.pc-label{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.pc-big{font-size:1.3rem;font-weight:750}.pc-small{color:var(--muted);font-size:.88rem}.pc-rel{padding:8px 11px;border-left:3px solid var(--gold);background:var(--panel);margin:6px 0;border-radius:5px}.pc-chip{display:inline-block;border:1px solid var(--border);background:var(--panel);padding:3px 8px;border-radius:999px;font-size:.76rem;color:var(--muted);margin:2px 3px 2px 0}
 .pc-source{margin-top:7px;font-size:.82rem}.pc-source a{color:var(--blue)!important;text-decoration:none;font-weight:650}
+.pc-search-card{padding:16px 18px}.pc-search-details{margin-top:8px;line-height:1.65;color:var(--muted);font-size:.92rem}
+.pc-object-card{margin-bottom:.35rem;min-height:72px}
+.pc-detail-label{color:#d7b66a!important;font-weight:700}.pc-detail-value{color:#f3f6fa!important}.pc-sep{color:#6f849d!important;margin:0 .2rem}
 /* top navigation */
 div[role="radiogroup"]{gap:.35rem;flex-wrap:wrap}
 div[role="radiogroup"] label{background:#0d1a2b;border:1px solid #28415f;border-radius:9px;padding:.35rem .75rem}
@@ -54,6 +57,18 @@ div[role="dialog"],div[role="dialog"] *{
 }
 [data-testid="stAppDeployButton"],[data-testid="stStatusWidget"]{
   background:#0d1a2b!important;
+  color:#f3f6fa!important;
+}
+.stButton > button, .stDownloadButton > button{
+  background:#102238!important;
+  color:#f3f6fa!important;
+  border:1px solid #28415f!important;
+}
+.stButton > button:hover, .stDownloadButton > button:hover{
+  border-color:#d7b66a!important;
+  color:#ffffff!important;
+}
+.stButton > button p, .stDownloadButton > button p{
   color:#f3f6fa!important;
 }
 /* White BaseWeb/Streamlit detail boxes get dark text */
@@ -114,7 +129,7 @@ def all_tables():
 
 TABLES=all_tables()
 
-ID_RE=re.compile(r"(^|\s)(id|entity id|company id|programme id|program id|yard id|vessel id|facility id|source id|relationship id|contract id|route id|news id|event id|port id|terminal id|asset id)(\s|$)",re.I)
+ID_RE=re.compile(r"(^|\s)(id|entity id|company id|programme id|program id|yard id|vessel id|facility id|source id|relationship id|contract id|route id|news id|event id|port id|terminal id|asset id|link id|event link id|news link id|location record|status record|chain id|impact id|observation id|canonical event id|external event id|approval id|status history id|control record id)(\s|$)",re.I)
 
 # Internal IDs are required for joins, but never need to be the normal user interface.
 ID_FRIENDLY_NAMES={
@@ -169,7 +184,11 @@ def humanize_df(df, keep_urls=True, show_internal_ids=False):
             # Also translate exact entity-key values that happen to live in non-ID columns.
             def trans(v):
                 s=str(v).strip()
-                return label(s) if s in LABELS else v
+                if s in LABELS:
+                    return label(s)
+                if cstr.lower() in {"relationship","link type","capability","event type","event family","asset type","control type","status","yard model"}:
+                    return pretty_relationship(s) if cstr.lower() in {"relationship","link type"} else pretty_enum(s)
+                return pretty_enum(s)
             out[cstr]=vals.map(trans)
 
     # Prefer populated human-readable columns and drop duplicate column names.
@@ -227,6 +246,50 @@ LABELS=build_label_index()
 
 def label(x):
     s=str(x).strip(); return LABELS.get(s,s)
+
+def pretty_enum(v):
+    """Turn implementation taxonomy into ordinary English for the UI."""
+    s=str(v).strip()
+    if not s:
+        return ""
+    # Do not touch URLs or normal prose.
+    if s.startswith("http://") or s.startswith("https://"):
+        return s
+    # Resolve canonical IDs first.
+    if s in LABELS:
+        return LABELS[s]
+    # ALL_CAPS_ENUM / SNAKE_CASE_ENUM -> title-like English.
+    if "_" in s and re.fullmatch(r"[A-Z0-9_ /+-]+",s):
+        s=s.replace("_"," ").strip()
+        # Preserve common acronyms.
+        words=[]
+        keep={"MRO","JV","UAE","US","USA","UK","EU","IMO","OPV","LNG","TEU","CG","SAR","RFI","RFP"}
+        for w in s.split():
+            words.append(w if w in keep else w.lower())
+        if words:
+            words[0]=words[0] if words[0] in keep else words[0].capitalize()
+        return " ".join(words)
+    return s
+
+def pretty_relationship(v):
+    s=pretty_enum(v)
+    replacements={
+        "Directly affected":"Directly affected",
+        "Connected network":"Connected network",
+        "Indirect hinterland impact":"Indirect hinterland impact",
+        "Affected network":"Affected network",
+        "Project milestone":"Project milestone",
+        "Connected project":"Connected project",
+        "Temporary alternative":"Temporary alternative",
+        "Negotiation target":"Negotiation target",
+        "Connected gateway":"Connected gateway",
+        "Investment target":"Investment target",
+        "Infrastructure event":"Infrastructure event",
+        "Commercial event":"Commercial event",
+        "Commissioning event":"Commissioning event",
+        "Regional security context":"Regional security context",
+    }
+    return replacements.get(s,s)
 
 # ---------- global search ----------
 SEARCH_PRIORITY={
@@ -974,6 +1037,15 @@ def render_company_profile(entity_id, entity_name):
             st.markdown("### Impact propagation")
             display_df(prof["impact_chains"],100)
 
+        if not prof["events"].empty:
+            event_ids=set(prof["events"]["Event ID"].astype(str).tolist())
+            eal=TABLES.get(("Events & Hazards","Event Asset Links"),pd.DataFrame())
+            if not eal.empty and "Event ID" in eal.columns:
+                eal=eal[eal["Event ID"].astype(str).isin(event_ids)]
+                if not eal.empty:
+                    st.markdown("### Affected / connected assets")
+                    render_linked_objects(eal,"Asset Type","Asset ID","Asset","Relationship","Confidence",100)
+
     with tabs[7]:
         if not prof["announcements"].empty:
             st.markdown("### Announced activity")
@@ -1021,15 +1093,246 @@ def go_entity(eid):
     st.session_state["entity_pick"]=eid
     st.session_state["nav_page"]="Entity Explorer"
 
+
+def _is_technical_value(v):
+    s=str(v).strip()
+    if not s:
+        return True
+    return bool(re.match(r"^(TXN|IDEAL|COMP|SRC|NEWS|REL|PROG|YARD|VESSEL|PORT|TERM|ASSET|EVENT|EVT|OBS|ELINK|NLINK|TALINK|APPROVAL|TXNST|VTX|CTRL)[_-]", s, re.I))
+
+def _pretty_field_name(c):
+    c=str(c)
+    replacements={
+        "Buyer Company":"Buyer",
+        "Buyer Company ID":"Buyer",
+        "Seller / Owner IDs":"Seller / Owner",
+        "Investor / Buyer IDs":"Investor / Buyer",
+        "Co-Investor / Partner IDs":"Co-Investor / Partner",
+        "Target Company":"Target",
+        "Target / Asset":"Target / Asset",
+        "Announcement Date":"Announced",
+        "Announced Date":"Announced",
+        "Expected Close":"Expected close",
+        "Actual Close":"Closed",
+        "Completed / Effective Date":"Completed / effective",
+        "Transaction Type":"Type",
+        "Deal Type":"Type",
+        "Enterprise Value":"Value",
+        "Reported Value":"Value",
+        "Regulatory Status":"Regulatory status",
+        "Operating Control":"Operating control",
+    }
+    return replacements.get(c,c)
+
+def _split_and_resolve_ids(v):
+    """Resolve semicolon-delimited company/entity IDs into English labels."""
+    s=str(v).strip()
+    if not s: return ""
+    parts=[x.strip() for x in re.split(r"[;|]",s) if x.strip()]
+    if len(parts)>1:
+        resolved=[label(x) if label(x)!=x else x for x in parts]
+        return " · ".join(resolved)
+    return label(s) if label(s)!=s else s
+
+def readable_search_card(hit):
+    row=result_row(hit)
+    sheet=str(hit.sheet)
+
+    # Select a human title by record type instead of falling back to the row ID.
+    preferred_by_sheet={
+        "Transactions V125":["Target Company","Transaction Type"],
+        "Infra Deals":["Target / Asset","Deal Type"],
+        "Contracts":["Contract Type","Programme","Customer"],
+        "Sales & Delivery Routes":["Platform / Vessel","Programme","Customer"],
+        "Vessel Transactions":["Vessel Name","Transaction Type"],
+        "Events":["Title"],
+        "News Registry":["Headline"],
+        "Announcements":["Headline"],
+        "Port Terminals":["Terminal / Facility"],
+        "Ports":["Port / Facility"],
+        "Shipyards":["Shipyard"],
+        "Sample Vessels":["Vessel"],
+        "Vessels":["Vessel Name"],
+        "Systems":["System"],
+    }
+    title=""
+    for c in preferred_by_sheet.get(sheet,[]):
+        if c in row.index and str(row.get(c,"")).strip() and not _is_technical_value(row.get(c,"")):
+            title=str(row.get(c)).strip()
+            break
+    if not title:
+        title=label(str(hit.title)) if label(str(hit.title))!=str(hit.title) else str(hit.title)
+    if _is_technical_value(title):
+        # Last fallback: use first readable non-ID textual value.
+        for c,v in row.items():
+            if ID_RE.search(str(c)) or "url" in str(c).lower():
+                continue
+            sv=str(v).strip()
+            if sv and not _is_technical_value(sv):
+                title=sv
+                break
+
+    # Commercial-specific title enhancement.
+    if sheet=="Transactions V125":
+        buyer=_split_and_resolve_ids(row.get("Buyer Company ID",""))
+        target=str(row.get("Target Company","")).strip()
+        ttype=str(row.get("Transaction Type","")).strip()
+        if buyer and target:
+            title=f"{buyer} → {target}"
+        elif target:
+            title=target
+        if ttype:
+            subtitle=ttype
+        else:
+            subtitle="Corporate transaction"
+    elif sheet=="Infra Deals":
+        inv=_split_and_resolve_ids(row.get("Investor / Buyer IDs",""))
+        target=str(row.get("Target / Asset","")).strip()
+        dtype=str(row.get("Deal Type","")).strip()
+        title=f"{inv} → {target}" if inv and target else (target or inv or title)
+        subtitle=dtype or "Infrastructure deal"
+    else:
+        subtitle=sheet
+
+    # Build concise, fully readable fields.
+    pairs=[]
+    priority=[
+        "Buyer Company ID","Investor / Buyer IDs","Co-Investor / Partner IDs",
+        "Seller / Owner IDs","Target Company","Target / Asset",
+        "Transaction Type","Deal Type","Announcement Date","Announced Date",
+        "Expected Close","Completed / Effective Date","Enterprise Value","Reported Value",
+        "Currency","Stake %","Status","Regulatory Status","Operating Control",
+        "Country / Region","Country","Customer","Contract Value","Contract Currency",
+        "Programme","Platform / Vessel","Start Date","Event Family","Event Type",
+        "Severity","Location"
+    ]
+    seen=set()
+    for c in priority + list(row.index):
+        if c in seen or c not in row.index:
+            continue
+        seen.add(c)
+        if "url" in str(c).lower() or c in {"Transaction ID","Deal ID","Contract ID","Source ID","Event ID","News ID"}:
+            continue
+        v=str(row.get(c,"")).strip()
+        if not v:
+            continue
+        if ID_RE.search(str(c)) or " IDs" in str(c):
+            v=_split_and_resolve_ids(v)
+            if not v or _is_technical_value(v):
+                continue
+        elif _is_technical_value(v):
+            # raw implementation key in a non-ID field: omit
+            continue
+        fname=_pretty_field_name(c)
+        if fname in {"Target"} and v==title:
+            continue
+        pairs.append((fname,v))
+        if len(pairs)>=6:
+            break
+
+    # Clean HTML card; no markdown ** markers inside raw HTML.
+    details="".join(
+        f"<span class='pc-detail-label'>{c}:</span> <span class='pc-detail-value'>{v}</span>"
+        + (" <span class='pc-sep'>·</span> " if i < len(pairs)-1 else "")
+        for i,(c,v) in enumerate(pairs)
+    )
+
+    url=""
+    for c,v in row.items():
+        if "url" in str(c).lower() and str(v).strip().startswith("http"):
+            url=str(v).strip().split("|")[0].strip()
+            break
+    source_html=f"<div class='pc-source'><a href='{url}' target='_blank' rel='noopener noreferrer'>Open source ↗</a></div>" if url else ""
+
+    st.markdown(
+        f"<div class='pc-card pc-search-card'>"
+        f"<div class='pc-label'>{subtitle}</div>"
+        f"<div class='pc-big'>{title}</div>"
+        f"<div class='pc-search-details'>{details}</div>"
+        f"{source_html}</div>",
+        unsafe_allow_html=True
+    )
+
+
+def request_nav(page_name, object_key=None, object_id=None, object_name=None):
+    """Defer a page/object jump until the next Streamlit rerun."""
+    st.session_state["nav_request"]=page_name
+    if object_key and object_id:
+        st.session_state[object_key]=str(object_id)
+    if object_name:
+        st.session_state["object_name_hint"]=str(object_name)
+
+def object_route(entity_type, entity_id, entity_name):
+    et=str(entity_type).lower()
+    eid=str(entity_id).strip()
+    name=str(entity_name).strip()
+
+    if "port" in et or eid.startswith("PORT"):
+        return ("Ports","port_pick_id",eid)
+    if "terminal" in et or eid.startswith("TERM"):
+        # A terminal opens the Ports page; Ports will resolve its parent port.
+        return ("Ports","terminal_pick_id",eid)
+    if "shipyard" in et or eid.startswith("YARD"):
+        return ("Shipyards","yard_pick_id",eid)
+    if "company" in et or eid.startswith("COMP"):
+        return ("Companies","entity_pick",eid)
+    if "system" in et or eid.startswith("SYS") or eid.startswith("CORR"):
+        return ("Systems","system_pick_id",eid)
+    if "vessel" in et or eid.startswith("VESSEL") or eid.startswith("VES"):
+        return ("Vessels","vessel_pick_id",eid)
+    return (None,None,None)
+
+def render_linked_objects(df, object_type_col, object_id_col, object_name_col, relationship_col=None, confidence_col=None, max_items=100):
+    """Render linked graph objects as readable, navigable cards instead of dead dataframe rows."""
+    if df is None or df.empty:
+        st.info("No linked objects.")
+        return
+
+    for i,(_,r) in enumerate(df.head(max_items).iterrows()):
+        otype=str(r.get(object_type_col,"")).strip()
+        oid=str(r.get(object_id_col,"")).strip()
+        oname=str(r.get(object_name_col,"")).strip() or label(oid)
+        rel=pretty_relationship(r.get(relationship_col,"")) if relationship_col else ""
+        conf=str(r.get(confidence_col,"")).strip() if confidence_col else ""
+
+        route_page,route_key,route_id=object_route(otype,oid,oname)
+        meta=[x for x in [pretty_enum(otype),rel,(f"Confidence: {conf}" if conf else "")] if x]
+
+        c1,c2=st.columns([5,1])
+        with c1:
+            st.markdown(
+                f"<div class='pc-card pc-object-card'>"
+                f"<div class='pc-label'>{' · '.join(meta)}</div>"
+                f"<div class='pc-big'>{oname}</div>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+        with c2:
+            if route_page:
+                if st.button("Open",key=f"objopen_{route_page}_{oid}_{i}",use_container_width=True):
+                    request_nav(route_page,route_key,route_id,oname)
+                    st.rerun()
+            else:
+                st.caption("Linked object")
+
 # ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.28 · Events, Hazards & Impact Propagation")
+st.sidebar.caption("v1.28.3 · Connected object navigation")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
 pages=["Search","Companies","Ports","Shipyards","Vessels","Contracts","News & Events","Systems","Data"]
-if "top_nav" not in st.session_state:
+
+# Navigation requests are applied BEFORE the top-nav widget is instantiated.
+# This avoids StreamlitWidgetAlreadyInstantiatedError when a button changes pages.
+if "nav_request" in st.session_state:
+    requested=st.session_state.pop("nav_request")
+    if requested in pages:
+        st.session_state["top_nav"]=requested
+
+if "top_nav" not in st.session_state or st.session_state["top_nav"] not in pages:
     st.session_state["top_nav"]="Search"
+
 page=st.radio("Navigation",pages,horizontal=True,label_visibility="collapsed",key="top_nav")
 
 def page_company_selector():
@@ -1058,7 +1361,7 @@ if page=="Search":
                     st.markdown(f"<div class='pc-card'><div class='pc-label'>{r['kind']}</div><div class='pc-big'>{r['name']}</div></div>",unsafe_allow_html=True)
                     if st.button("Open",key=f"topopen_{r['id']}_{n}"):
                         st.session_state["entity_pick"]=r["id"]
-                        st.session_state["top_nav"]="Companies"
+                        st.session_state["nav_request"]="Companies"
                         st.rerun()
 
         hits=ranked_search(q,limit=100)
@@ -1074,12 +1377,7 @@ if page=="Search":
                 if sub.empty: continue
                 st.markdown(f"### {title}")
                 for _,h in sub.iterrows():
-                    row=humanize_df(pd.DataFrame([result_row(h)])).iloc[0]
-                    vals=[]
-                    for c,v in row.items():
-                        if not str(v).strip() or "url" in str(c).lower(): continue
-                        vals.append(f"**{c}:** {v}")
-                    st.markdown(f"<div class='pc-card'><div class='pc-big'>{h.title}</div><div class='pc-small'>{' · '.join(vals[:5])}</div></div>",unsafe_allow_html=True)
+                    readable_search_card(h)
         if em.empty and hits.empty:
             st.warning("No matching records found.")
 
@@ -1108,12 +1406,24 @@ elif page=="Ports":
     else:
         q=st.text_input("Find port",placeholder="Rotterdam, Shanghai, Odesa, Vancouver, Constanța...")
         p=ports.copy()
+
+        requested_port=st.session_state.pop("port_pick_id",None)
+        requested_terminal=st.session_state.pop("terminal_pick_id",None)
+        if requested_terminal and not terms.empty and "Terminal ID" in terms.columns:
+            tr=terms[terms["Terminal ID"].astype(str).eq(str(requested_terminal))]
+            if not tr.empty and "Port ID" in tr.columns:
+                requested_port=str(tr.iloc[0]["Port ID"])
+
         if q: p=_contains_any(p,[q],["Port / Facility","Country","Operator"])
         p=p.sort_values("Port / Facility").reset_index(drop=True)
         if p.empty:
             st.warning("No matching port.")
         else:
-            pick=st.selectbox("Port",range(len(p)),format_func=lambda i:f"{p.iloc[i].get('Port / Facility','')} — {p.iloc[i].get('Country','')}")
+            default_port=0
+            if requested_port and "Port ID" in p.columns:
+                match_idx=p.index[p["Port ID"].astype(str).eq(str(requested_port))].tolist()
+                if match_idx: default_port=int(match_idx[0])
+            pick=st.selectbox("Port",range(len(p)),index=default_port,format_func=lambda i:f"{p.iloc[i].get('Port / Facility','')} — {p.iloc[i].get('Country','')}")
             row=p.iloc[pick]; pid=str(row.get("Port ID","")); pname=str(row.get("Port / Facility",""))
             st.markdown(f"## {pname}")
             c1,c2,c3=st.columns(3)
@@ -1144,7 +1454,12 @@ elif page=="Shipyards":
         y=yards.copy()
         if q: y=_contains_any(y,[q],["Shipyard","Location","Country","Yard Model","Current / Representative Work"])
         y=y.sort_values("Shipyard").reset_index(drop=True)
-        pick=st.selectbox("Shipyard",range(len(y)),format_func=lambda i:f"{y.iloc[i]['Shipyard']} — {y.iloc[i]['Country']}")
+        requested_yard=st.session_state.pop("yard_pick_id",None)
+        default_yard=0
+        if requested_yard and "Yard ID" in y.columns:
+            mi=y.index[y["Yard ID"].astype(str).eq(str(requested_yard))].tolist()
+            if mi: default_yard=int(mi[0])
+        pick=st.selectbox("Shipyard",range(len(y)),index=default_yard,format_func=lambda i:f"{y.iloc[i]['Shipyard']} — {y.iloc[i]['Country']}")
         r=y.iloc[pick]; yid=str(r["Yard ID"]); cid=str(r["Company Entity ID"])
         st.markdown(f"## {r['Shipyard']}")
         st.caption(f"{label(cid)} · {r.get('Location','')} · {r.get('Yard Model','')}")
@@ -1168,7 +1483,17 @@ elif page=="Vessels":
     header("Vessels","Commercial, defence and Coast Guard vessels in one explorer.")
     commercial=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
     defence=TABLES.get(("Defence & Shipbuilding","Sample Vessels"),pd.DataFrame()).copy()
-    q=st.text_input("Find vessel / owner / customer / class",placeholder="Polar Max, Abu Dhabi, Seaspan, CMA CGM...")
+    requested_vessel=st.session_state.pop("vessel_pick_id",None)
+    default_vessel_query=""
+    if requested_vessel:
+        default_vessel_query=label(requested_vessel)
+        if default_vessel_query==requested_vessel:
+            for df,idc,namec in [(commercial,"Vessel ID","Vessel Name"),(defence,"Vessel ID","Vessel")]:
+                if idc in df.columns:
+                    m=df[df[idc].astype(str).eq(str(requested_vessel))]
+                    if not m.empty and namec in m.columns:
+                        default_vessel_query=str(m.iloc[0][namec]); break
+    q=st.text_input("Find vessel / owner / customer / class",value=default_vessel_query,placeholder="Polar Max, Abu Dhabi, Seaspan, CMA CGM...")
     t1,t2=st.tabs([f"Commercial · {len(commercial)}",f"Defence / Government · {len(defence)}"])
     with t1:
         c=commercial
@@ -1246,9 +1571,36 @@ elif page=="News & Events":
             cl=cl[cl["Event ID"].astype(str).isin(ids)]
             sl=sl[sl["Event ID"].astype(str).isin(ids)]
         a,b,c=st.tabs(["Assets","Companies","Systems"])
-        with a: display_df(al,200)
-        with b: display_df(cl,200)
-        with c: display_df(sl,200)
+        with a:
+            render_linked_objects(
+                al,
+                object_type_col="Asset Type",
+                object_id_col="Asset ID",
+                object_name_col="Asset",
+                relationship_col="Relationship",
+                confidence_col="Confidence",
+                max_items=200
+            )
+        with b:
+            render_linked_objects(
+                cl,
+                object_type_col="Relationship",
+                object_id_col="Company ID",
+                object_name_col="Company",
+                relationship_col="Relationship",
+                confidence_col="Confidence",
+                max_items=200
+            )
+        with c:
+            render_linked_objects(
+                sl,
+                object_type_col="Relationship",
+                object_id_col="System ID",
+                object_name_col="System",
+                relationship_col="Relationship",
+                confidence_col="Confidence",
+                max_items=200
+            )
 
 elif page=="Systems":
     header("Systems & Corridors","Connected port, rail, waterway and corridor systems with linked events.")
@@ -1256,7 +1608,13 @@ elif page=="Systems":
     if systems.empty:
         st.info("Systems workbook not available.")
     else:
-        names=systems["System"].tolist(); name=st.selectbox("System",names)
+        systems=systems.reset_index(drop=True)
+        requested_system=st.session_state.pop("system_pick_id",None)
+        default_system=0
+        if requested_system and "System ID" in systems.columns:
+            mi=systems.index[systems["System ID"].astype(str).eq(str(requested_system))].tolist()
+            if mi: default_system=int(mi[0])
+        names=systems["System"].tolist(); name=st.selectbox("System",names,index=default_system)
         srow=systems[systems["System"]==name].iloc[0]; sid=srow["System ID"]
         st.markdown(f"## {name}")
         st.caption(f"{srow.get('Geography','')} · {srow.get('Archetype','')}")
