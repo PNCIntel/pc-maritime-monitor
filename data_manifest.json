@@ -1,5 +1,5 @@
 {
-  "version": "1.26.1",
+  "version": "1.27",
   "sheet_to_file": {
     "Companies": "01_core_entities.xlsx",
     "Entity Registry": "01_core_entities.xlsx",
@@ -70,7 +70,7 @@
     "Integrated Logistics Networks": "06_infrastructure.xlsx",
     "Dry Ports": "06_infrastructure.xlsx",
     "Economic Zones": "06_infrastructure.xlsx",
-    "Shipyards": "06_infrastructure.xlsx",
+    "Shipyards": "12_defence_shipbuilding.xlsx",
     "Facilities": "11_systems_waterways_governance.xlsx",
     "Corridors": "06_infrastructure.xlsx",
     "Regional Systems": "06_infrastructure.xlsx",
@@ -122,7 +122,18 @@
     "Waterway Systems": "11_systems_waterways_governance.xlsx",
     "Locks & Canals": "11_systems_waterways_governance.xlsx",
     "Network Interfaces": "11_systems_waterways_governance.xlsx",
-    "Stress Tests": "11_systems_waterways_governance.xlsx"
+    "Stress Tests": "11_systems_waterways_governance.xlsx",
+    "Defence Overview": "12_defence_shipbuilding.xlsx",
+    "Defence Companies": "12_defence_shipbuilding.xlsx",
+    "Yard Facilities": "12_defence_shipbuilding.xlsx",
+    "Yard Capabilities": "12_defence_shipbuilding.xlsx",
+    "Programmes": "12_defence_shipbuilding.xlsx",
+    "Programme Participants": "12_defence_shipbuilding.xlsx",
+    "Sample Vessels": "12_defence_shipbuilding.xlsx",
+    "Contracts": "12_defence_shipbuilding.xlsx",
+    "Sales & Delivery Routes": "12_defence_shipbuilding.xlsx",
+    "Announcements": "12_defence_shipbuilding.xlsx",
+    "Defence Sources": "12_defence_shipbuilding.xlsx"
   },
   "files": {
     "01_core_entities.xlsx": [
@@ -266,7 +277,21 @@
       "Network Interfaces",
       "Stress Tests",
       "Sources"
+    ],
+    "12_defence_shipbuilding.xlsx": [
+      "Overview",
+      "Defence Companies",
+      "Shipyards",
+      "Yard Facilities",
+      "Yard Capabilities",
+      "Programmes",
+      "Programme Participants",
+      "Sample Vessels",
+      "Contracts",
+      "Sales & Delivery Routes",
+      "Announcements",
+      "Sources"
     ]
   },
-  "model": "Global Systems Stress Test + Genoa Marine Access"
+  "model": "Global Trade, Infrastructure & Defence Industrial Systems"
 }
