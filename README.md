@@ -49,7 +49,7 @@ The new graph tests:
 This adds marine-access infrastructure as a first-class facility category alongside berths,
 yards, rail sidings, locks, canals, warehouses and other infrastructure.
 
-## v1.28.5 interface fix
+## v1.28.6 interface fix
 The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
 - shipyards and yard facilities/capabilities
 - defence/coast guard sample vessels
@@ -154,3 +154,12 @@ App-only update:
 - Fincantieri Infrastructure Opere Marittime therefore inherits the Genoa breakwater article through its PerGenova consortium participation.
 - News counts include related canonical-event coverage.
 - Overview now shows latest linked reporting so relevant news is visible without opening the News tab.
+
+## v1.28.6 reliable cross-object navigation
+App-only update:
+- Fixes Open buttons that changed page but left the old selector value in place.
+- Company, Port, Shipyard and System selectors now use explicit keyed widget state that is updated before widget instantiation.
+- Cross-navigation clears stale search filters that would otherwise hide the requested object.
+- Relationship rows expose explicit `Open <Company>` actions for each linked company endpoint instead of guessing the opposite endpoint.
+- Fincantieri / EDGE / MAESTRAL relationship navigation now resolves predictably.
+- Vessel jumps populate the vessel search field before it is instantiated.

@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.28.5"
+APP_VERSION = "v1.28.6"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -809,25 +809,33 @@ def readable_relationships(df, entity_id):
     if df is None or df.empty:
         st.info("No relationship records.")
         return
-    for i,(_,r) in enumerate(df.iterrows()):
-        src=str(r.get("Source Entity",""))
-        tgt=str(r.get("Target Entity",""))
-        rel=pretty_relationship(r.get("Relationship",""))
 
-        c1,c2=st.columns([6,1])
-        with c1:
-            st.markdown(
-                f"<div class='pc-rel'><b>{label(src)}</b> → {rel} → <b>{label(tgt)}</b></div>",
-                unsafe_allow_html=True
-            )
-        with c2:
-            # Open the opposite company/entity in the relationship.
-            target=tgt if src==str(entity_id) else src
-            target_name=label(target)
-            if str(target).startswith("COMP_"):
-                if st.button("Open",key=f"relopen_{target}_{i}",use_container_width=True):
-                    request_nav("Companies","entity_pick",target,target_name)
-                    st.rerun()
+    for i,(_,r) in enumerate(df.iterrows()):
+        src=str(r.get("Source Entity","")).strip()
+        tgt=str(r.get("Target Entity","")).strip()
+        rel=pretty_relationship(r.get("Relationship",""))
+        src_name=label(src)
+        tgt_name=label(tgt)
+
+        st.markdown(
+            f"<div class='pc-rel'><b>{src_name}</b> → {rel} → <b>{tgt_name}</b></div>",
+            unsafe_allow_html=True
+        )
+
+        # Give explicit navigation to every company endpoint except the profile already open.
+        nav_cols=[]
+        if src.startswith("COMP_") and src != str(entity_id):
+            nav_cols.append(("Open "+src_name,src))
+        if tgt.startswith("COMP_") and tgt != str(entity_id):
+            nav_cols.append(("Open "+tgt_name,tgt))
+
+        if nav_cols:
+            cols=st.columns(min(len(nav_cols),3))
+            for j,(button_label,target) in enumerate(nav_cols):
+                with cols[j]:
+                    if st.button(button_label,key=f"relopen_{i}_{target}",use_container_width=True):
+                        request_nav("Companies","company_pick_id",target,label(target))
+                        st.rerun()
 
 def show_named_list(df, title_col, subtitle_cols=None, source_col="Source URL", max_items=100):
     """Readable cards with normal HTML links, never repeated Streamlit buttons."""
@@ -1463,9 +1471,13 @@ def readable_search_card(hit):
 
 
 def request_nav(page_name, object_key=None, object_id=None, object_name=None):
-    """Defer a page/object jump until the next Streamlit rerun."""
+    """Defer a page/object jump until the next Streamlit rerun.
+    Destination pages consume *_pick_id requests before their selector widget is created.
+    """
     st.session_state["nav_request"]=page_name
     if object_key and object_id:
+        # Never write directly into a selector widget key here.
+        # Store the requested canonical object ID separately.
         st.session_state[object_key]=str(object_id)
     if object_name:
         st.session_state["object_name_hint"]=str(object_name)
@@ -1483,7 +1495,7 @@ def object_route(entity_type, entity_id, entity_name):
     if "shipyard" in et or eid.startswith("YARD"):
         return ("Shipyards","yard_pick_id",eid)
     if "company" in et or eid.startswith("COMP"):
-        return ("Companies","entity_pick",eid)
+        return ("Companies","company_pick_id",eid)
     if "system" in et or eid.startswith("SYS") or eid.startswith("CORR"):
         return ("Systems","system_pick_id",eid)
     if "vessel" in et or eid.startswith("VESSEL") or eid.startswith("VES"):
@@ -1525,7 +1537,7 @@ def render_linked_objects(df, object_type_col, object_id_col, object_name_col, r
 
 # ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.28.5 · Related news traversal")
+st.sidebar.caption("v1.28.6 · Reliable cross-object navigation")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
@@ -1568,7 +1580,7 @@ if page=="Search":
                 with cols[n%3]:
                     st.markdown(f"<div class='pc-card'><div class='pc-label'>{r['kind']}</div><div class='pc-big'>{r['name']}</div></div>",unsafe_allow_html=True)
                     if st.button("Open",key=f"topopen_{r['id']}_{n}"):
-                        st.session_state["entity_pick"]=r["id"]
+                        st.session_state["company_pick_id"]=r["id"]
                         st.session_state["nav_request"]="Companies"
                         st.rerun()
 
@@ -1592,17 +1604,55 @@ if page=="Search":
 elif page=="Companies":
     header("Companies","Company-first view across assets, ports, shipyards, vessels, commercial relationships, programmes and events.")
     # honor direct navigation from Search
-    default_id=st.session_state.get("entity_pick","")
     companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
     opts=companies[["Company ID","Company"]].drop_duplicates().sort_values("Company").to_dict("records") if not companies.empty else []
-    q=st.text_input("Find company",placeholder="APM Terminals, AD Ports, Inocea, Seaspan...")
-    if q: opts=[x for x in opts if q.lower() in x["Company"].lower()]
+
+    # A cross-object jump should not be blocked by a stale search filter.
+    requested_company=st.session_state.pop("company_pick_id",None)
+    if requested_company:
+        st.session_state["company_search_text"]=""
+
+    q=st.text_input(
+        "Find company",
+        placeholder="APM Terminals, AD Ports, Inocea, Seaspan...",
+        key="company_search_text"
+    )
+    if q:
+        opts=[x for x in opts if q.lower() in x["Company"].lower()]
+
     if opts:
-        default=0
-        for i,x in enumerate(opts):
-            if x["Company ID"]==default_id: default=i; break
-        pick=st.selectbox("Company",range(len(opts)),index=default,format_func=lambda i:opts[i]["Company"])
-        ent=opts[pick]; st.session_state["entity_pick"]=ent["Company ID"]
+        requested_index=None
+        if requested_company:
+            for i,x in enumerate(opts):
+                if x["Company ID"]==str(requested_company):
+                    requested_index=i
+                    break
+
+        # Also honor prior selected canonical company if still available.
+        prior_id=st.session_state.get("entity_pick","")
+        prior_index=None
+        if prior_id:
+            for i,x in enumerate(opts):
+                if x["Company ID"]==prior_id:
+                    prior_index=i
+                    break
+
+        desired_index = requested_index if requested_index is not None else (prior_index if prior_index is not None else 0)
+
+        # Critical: apply selection BEFORE keyed selectbox creation.
+        if requested_index is not None:
+            st.session_state["company_select_idx"]=desired_index
+        elif "company_select_idx" not in st.session_state or st.session_state["company_select_idx"] >= len(opts):
+            st.session_state["company_select_idx"]=desired_index
+
+        pick=st.selectbox(
+            "Company",
+            range(len(opts)),
+            format_func=lambda i:opts[i]["Company"],
+            key="company_select_idx"
+        )
+        ent=opts[pick]
+        st.session_state["entity_pick"]=ent["Company ID"]
         render_company_profile(ent["Company ID"],ent["Company"])
 
 elif page=="Ports":
@@ -1612,11 +1662,15 @@ elif page=="Ports":
     if ports.empty:
         st.info("Port data unavailable.")
     else:
-        q=st.text_input("Find port",placeholder="Rotterdam, Shanghai, Odesa, Vancouver, Constanța...")
+        requested_port=st.session_state.pop("port_pick_id",None)
+        if requested_port:
+            st.session_state["port_search_text"]=""
+        q=st.text_input("Find port",placeholder="Rotterdam, Shanghai, Odesa, Vancouver, Constanța...",key="port_search_text")
         p=ports.copy()
 
-        requested_port=st.session_state.pop("port_pick_id",None)
         requested_terminal=st.session_state.pop("terminal_pick_id",None)
+        if requested_terminal:
+            st.session_state["port_search_text"]=""
         if requested_terminal and not terms.empty and "Terminal ID" in terms.columns:
             tr=terms[terms["Terminal ID"].astype(str).eq(str(requested_terminal))]
             if not tr.empty and "Port ID" in tr.columns:
@@ -1631,7 +1685,18 @@ elif page=="Ports":
             if requested_port and "Port ID" in p.columns:
                 match_idx=p.index[p["Port ID"].astype(str).eq(str(requested_port))].tolist()
                 if match_idx: default_port=int(match_idx[0])
-            pick=st.selectbox("Port",range(len(p)),index=default_port,format_func=lambda i:f"{p.iloc[i].get('Port / Facility','')} — {p.iloc[i].get('Country','')}")
+
+            if requested_port:
+                st.session_state["port_select_idx"]=default_port
+            elif "port_select_idx" not in st.session_state or st.session_state["port_select_idx"] >= len(p):
+                st.session_state["port_select_idx"]=default_port
+
+            pick=st.selectbox(
+                "Port",
+                range(len(p)),
+                format_func=lambda i:f"{p.iloc[i].get('Port / Facility','')} — {p.iloc[i].get('Country','')}",
+                key="port_select_idx"
+            )
             row=p.iloc[pick]; pid=str(row.get("Port ID","")); pname=str(row.get("Port / Facility",""))
             st.markdown(f"## {pname}")
             c1,c2,c3=st.columns(3)
@@ -1658,16 +1723,29 @@ elif page=="Shipyards":
     if yards.empty:
         st.info("Shipyard data unavailable.")
     else:
-        q=st.text_input("Find shipyard / country / company",placeholder="Lévis, Rauma, Antalya, Bollinger, Inocea...")
+        requested_yard=st.session_state.pop("yard_pick_id",None)
+        if requested_yard:
+            st.session_state["yard_search_text"]=""
+        q=st.text_input("Find shipyard / country / company",placeholder="Lévis, Rauma, Antalya, Bollinger, Inocea...",key="yard_search_text")
         y=yards.copy()
         if q: y=_contains_any(y,[q],["Shipyard","Location","Country","Yard Model","Current / Representative Work"])
         y=y.sort_values("Shipyard").reset_index(drop=True)
-        requested_yard=st.session_state.pop("yard_pick_id",None)
         default_yard=0
         if requested_yard and "Yard ID" in y.columns:
             mi=y.index[y["Yard ID"].astype(str).eq(str(requested_yard))].tolist()
             if mi: default_yard=int(mi[0])
-        pick=st.selectbox("Shipyard",range(len(y)),index=default_yard,format_func=lambda i:f"{y.iloc[i]['Shipyard']} — {y.iloc[i]['Country']}")
+
+        if requested_yard:
+            st.session_state["yard_select_idx"]=default_yard
+        elif "yard_select_idx" not in st.session_state or st.session_state["yard_select_idx"] >= len(y):
+            st.session_state["yard_select_idx"]=default_yard
+
+        pick=st.selectbox(
+            "Shipyard",
+            range(len(y)),
+            format_func=lambda i:f"{y.iloc[i]['Shipyard']} — {y.iloc[i]['Country']}",
+            key="yard_select_idx"
+        )
         r=y.iloc[pick]; yid=str(r["Yard ID"]); cid=str(r["Company Entity ID"])
         st.markdown(f"## {r['Shipyard']}")
         st.caption(f"{label(cid)} · {r.get('Location','')} · {r.get('Yard Model','')}")
@@ -1701,7 +1779,13 @@ elif page=="Vessels":
                     m=df[df[idc].astype(str).eq(str(requested_vessel))]
                     if not m.empty and namec in m.columns:
                         default_vessel_query=str(m.iloc[0][namec]); break
-    q=st.text_input("Find vessel / owner / customer / class",value=default_vessel_query,placeholder="Polar Max, Abu Dhabi, Seaspan, CMA CGM...")
+        st.session_state["vessel_search_text"]=default_vessel_query
+
+    q=st.text_input(
+        "Find vessel / owner / customer / class",
+        placeholder="Polar Max, Abu Dhabi, Seaspan, CMA CGM...",
+        key="vessel_search_text"
+    )
     t1,t2=st.tabs([f"Commercial · {len(commercial)}",f"Defence / Government · {len(defence)}"])
     with t1:
         c=commercial
@@ -1822,7 +1906,14 @@ elif page=="Systems":
         if requested_system and "System ID" in systems.columns:
             mi=systems.index[systems["System ID"].astype(str).eq(str(requested_system))].tolist()
             if mi: default_system=int(mi[0])
-        names=systems["System"].tolist(); name=st.selectbox("System",names,index=default_system)
+
+        names=systems["System"].tolist()
+        if requested_system:
+            st.session_state["system_select_name"]=names[default_system]
+        elif "system_select_name" not in st.session_state or st.session_state["system_select_name"] not in names:
+            st.session_state["system_select_name"]=names[default_system]
+
+        name=st.selectbox("System",names,key="system_select_name")
         srow=systems[systems["System"]==name].iloc[0]; sid=srow["System ID"]
         st.markdown(f"## {name}")
         st.caption(f"{srow.get('Geography','')} · {srow.get('Archetype','')}")
