@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.27.2"
+APP_VERSION = "v1.27.3"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -385,6 +385,70 @@ def build_company_profile(entity_id, entity_name):
             if c in news.columns: nm |= news[c].astype(str).str.contains(re.escape(entity_name),case=False,na=False)
     prof["news"]=news[nm].copy() if not news.empty else pd.DataFrame()
 
+    # Port / terminal assets from Maritime workbook
+    pt=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame())
+    po=TABLES.get(("Maritime","Port Ownership"),pd.DataFrame())
+    pb=TABLES.get(("Maritime","Port Berths"),pd.DataFrame())
+    pe=TABLES.get(("Maritime","Port Equipment"),pd.DataFrame())
+    pnews=TABLES.get(("Maritime","Port News"),pd.DataFrame())
+    ports=TABLES.get(("Maritime","Ports"),pd.DataFrame())
+
+    # direct operator rows
+    tm=pd.Series(False,index=pt.index) if not pt.empty else pd.Series(dtype=bool)
+    if not pt.empty:
+        if "Primary Operator Company ID" in pt.columns:
+            tm |= pt["Primary Operator Company ID"].astype(str).isin(scope_ids)
+        if "Operator / Network" in pt.columns:
+            for nm in prof.get("scope_names",[]):
+                tm |= pt["Operator / Network"].astype(str).str.contains(re.escape(nm),case=False,na=False)
+    direct_terms=pt[tm].copy() if not pt.empty else pd.DataFrame()
+
+    # ownership / JV rows can surface terminals even where primary operator differs
+    owned_term_ids=set()
+    if not po.empty and "Company ID" in po.columns:
+        porows=po[po["Company ID"].astype(str).isin(scope_ids)].copy()
+        prof["port_ownership"]=porows
+        if "Terminal ID" in porows.columns:
+            owned_term_ids.update(porows["Terminal ID"].astype(str).tolist())
+    else:
+        prof["port_ownership"]=pd.DataFrame()
+
+    term_ids=set()
+    if not direct_terms.empty and "Terminal ID" in direct_terms.columns:
+        term_ids.update(direct_terms["Terminal ID"].astype(str).tolist())
+    term_ids.update(owned_term_ids)
+
+    if not pt.empty and term_ids and "Terminal ID" in pt.columns:
+        extra_terms=pt[pt["Terminal ID"].astype(str).isin(term_ids)]
+        prof["port_terminals"]=pd.concat([direct_terms,extra_terms],ignore_index=True).drop_duplicates()
+    else:
+        prof["port_terminals"]=direct_terms
+
+    # parent ports
+    port_ids=set()
+    if not prof["port_terminals"].empty and "Port ID" in prof["port_terminals"].columns:
+        port_ids.update(prof["port_terminals"]["Port ID"].astype(str).tolist())
+    if not ports.empty and port_ids and "Port ID" in ports.columns:
+        prof["ports"]=ports[ports["Port ID"].astype(str).isin(port_ids)].copy()
+    else:
+        prof["ports"]=pd.DataFrame()
+
+    # terminal-level child assets
+    prof["port_berths"]=_match_any(pb,["Terminal ID"],term_ids)
+    prof["port_equipment"]=_match_any(pe,["Terminal ID"],term_ids)
+
+    # port/terminal news
+    pnids=set(term_ids)
+    pnm=pd.Series(False,index=pnews.index) if not pnews.empty else pd.Series(dtype=bool)
+    if not pnews.empty:
+        if "Terminal ID" in pnews.columns and pnids:
+            pnm |= pnews["Terminal ID"].astype(str).isin(pnids)
+        for nm in prof.get("scope_names",[]):
+            for c in ["Headline","Summary","Operator","Port","Terminal"]:
+                if c in pnews.columns:
+                    pnm |= pnews[c].astype(str).str.contains(re.escape(nm),case=False,na=False)
+    prof["port_news"]=pnews[pnm].copy() if not pnews.empty else pd.DataFrame()
+
     # Systems
     se=TABLES.get(("Systems & Waterways","System Entities"),pd.DataFrame())
     system_ids=set()
@@ -450,16 +514,21 @@ def render_company_profile(entity_id, entity_name):
         if group_names:
             st.markdown("**Included group / controlled entities:** " + " · ".join(group_names))
 
-    c1,c2,c3,c4,c5=st.columns(5)
-    c1.metric("Shipyards",profile_count(prof,"yards"))
+    c1,c2,c3,c4,c5,c6=st.columns(6)
+    c1.metric("Terminals",profile_count(prof,"port_terminals"))
+    c2.metric("Ports",profile_count(prof,"ports"))
+    c3.metric("Shipyards",profile_count(prof,"yards"))
     total_v=profile_count(prof,"defence_vessels")+profile_count(prof,"maritime_vessels")
-    c2.metric("Linked vessels",total_v)
-    c3.metric("Programmes",profile_count(prof,"programmes"))
-    c4.metric("Contracts",profile_count(prof,"contracts"))
-    c5.metric("News / Announcements",profile_count(prof,"news")+profile_count(prof,"announcements"))
+    c4.metric("Linked vessels",total_v)
+    c5.metric("Programmes",profile_count(prof,"programmes"))
+    c6.metric("News / Announcements",profile_count(prof,"news")+profile_count(prof,"announcements")+profile_count(prof,"port_news"))
 
-    tabs=st.tabs(["Overview","Shipyards & Facilities","Vessels","Programmes & Contracts","Sales Routes","News","Relationships & Systems","Evidence"])
+    tabs=st.tabs(["Overview","Port Assets","Shipyards & Facilities","Vessels","Programmes & Contracts","Sales Routes","News","Relationships & Systems","Evidence"])
     with tabs[0]:
+        if not prof["port_terminals"].empty:
+            st.markdown("### Port terminals / facilities")
+            t=prof["port_terminals"].copy()
+            show_named_list(t,"Terminal / Facility",["Parent Port","Country","City / Area","Primary Operator","Status","Ownership / Structure"])
         if not prof["yards"].empty:
             st.markdown("### Shipyards")
             y=prof["yards"].copy()
@@ -468,10 +537,30 @@ def render_company_profile(entity_id, entity_name):
         if not prof["programmes"].empty:
             st.markdown("### Active / relevant programmes")
             show_named_list(prof["programmes"],"Programme",["Customer","Platform / Class","Status","Build / Sales Route"])
-        if prof["yards"].empty and prof["programmes"].empty:
-            st.info("No shipyard/programme profile yet for this entity.")
+        if prof["port_terminals"].empty and prof["yards"].empty and prof["programmes"].empty:
+            st.info("No port, shipyard or programme profile yet for this entity.")
 
     with tabs[1]:
+        st.markdown("### Terminals / port facilities")
+        if not prof["port_terminals"].empty:
+            t=prof["port_terminals"].copy()
+            display_df(t,250)
+        else:
+            st.info("No terminal assets currently linked.")
+        if not prof["ports"].empty:
+            st.markdown("### Parent ports")
+            display_df(prof["ports"],150)
+        if not prof["port_ownership"].empty:
+            st.markdown("### Ownership / JV / operating-control relationships")
+            display_df(prof["port_ownership"],250)
+        if not prof["port_berths"].empty:
+            st.markdown("### Berths / marine interfaces")
+            display_df(prof["port_berths"],250)
+        if not prof["port_equipment"].empty:
+            st.markdown("### Terminal equipment")
+            display_df(prof["port_equipment"],300)
+
+    with tabs[2]:
         st.markdown("### Shipyards")
         y=prof["yards"].copy()
         if "Company Entity ID" in y.columns: y["Operating Company"]=y["Company Entity ID"].map(label)
@@ -490,7 +579,7 @@ def render_company_profile(entity_id, entity_name):
             st.markdown("### Other infrastructure facilities")
             display_df(prof["infrastructure_facilities"],100)
 
-    with tabs[2]:
+    with tabs[3]:
         if not prof["defence_vessels"].empty:
             st.markdown("### Defence / Coast Guard / Government vessels")
             dv=prof["defence_vessels"].copy()
@@ -505,7 +594,7 @@ def render_company_profile(entity_id, entity_name):
         if prof["defence_vessels"].empty and prof["maritime_vessels"].empty and prof["vessel_build_records"].empty:
             st.info("No vessel records currently linked to this entity. This is now shown explicitly rather than hidden in other tables.")
 
-    with tabs[3]:
+    with tabs[4]:
         st.markdown("### Programmes")
         pg=prof["programmes"].copy()
         if not pg.empty and "Prime / Lead Entity ID" in pg.columns:
@@ -517,27 +606,30 @@ def render_company_profile(entity_id, entity_name):
         st.markdown("### Contracts")
         display_df(prof["contracts"],150)
 
-    with tabs[4]:
+    with tabs[5]:
         display_df(prof["sales_routes"],150)
 
-    with tabs[5]:
+    with tabs[6]:
         if not prof["announcements"].empty:
             st.markdown("### Announced activity")
             show_named_list(prof["announcements"],"Headline",["Date","Event Type"])
         if not prof["news"].empty:
             st.markdown("### News")
             show_named_list(prof["news"],"Headline",["Published Date","Publisher","Country","Event Type"],source_col="URL")
-        if prof["announcements"].empty and prof["news"].empty:
+        if not prof["port_news"].empty:
+            st.markdown("### Port / terminal news")
+            show_named_list(prof["port_news"],"Headline",["Date","Port","Terminal","Event Type"],source_col="URL")
+        if prof["announcements"].empty and prof["news"].empty and prof["port_news"].empty:
             st.info("No linked news or announcements.")
 
-    with tabs[6]:
+    with tabs[7]:
         st.markdown("### Corporate relationships")
         readable_relationships(prof["relationships"],entity_id)
         if not prof["systems"].empty:
             st.markdown("### Trade systems / corridors")
             display_df(prof["systems"],50)
 
-    with tabs[7]:
+    with tabs[8]:
         if not prof["assets"].empty:
             st.markdown("### Direct assets")
             display_df(prof["assets"],100)
@@ -566,7 +658,7 @@ def go_entity(eid):
 
 # ---------- sidebar ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.27.2 · Group-aware Entity Explorer")
+st.sidebar.caption("v1.27.3 · Asset-aware Entity Explorer")
 pages=["Search P&C","Entity Explorer","Systems & Corridors","Shipyards & Defence","Intelligence","Data Explorer"]
 if "nav_page" not in st.session_state: st.session_state["nav_page"]="Search P&C"
 page=st.sidebar.radio("Navigate",pages,key="nav_page")

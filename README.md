@@ -49,7 +49,7 @@ The new graph tests:
 This adds marine-access infrastructure as a first-class facility category alongside berths,
 yards, rail sidings, locks, canals, warehouses and other infrastructure.
 
-## v1.27.2 interface fix
+## v1.27.3 interface fix
 The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
 - shipyards and yard facilities/capabilities
 - defence/coast guard sample vessels
@@ -68,3 +68,8 @@ This fixes parent-group profiles such as Inocea and EDGE:
 - Inocea now exposes Davie, Helsinki Shipyard and Davie Defense yards/programmes.
 - EDGE now exposes ADSB and MAESTRAL shipbuilding activity.
 The profile also labels the operating company on each yard and the prime/lead company on programmes.
+
+## v1.27.3 maritime asset traversal
+Company profiles now traverse the dedicated Maritime workbook:
+Company → Port Terminals → Parent Ports → Port Ownership/JV → Berths → Equipment → Port News.
+This fixes APM Terminals, DP World, PSA, Hutchison Ports and other terminal operators whose asset networks were already populated but hidden from the entity profile.
