@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.28.3"
+APP_VERSION = "v1.28.5"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -296,7 +296,7 @@ SEARCH_PRIORITY={
     "Companies":8,"Entity Registry":7,"Defence Companies":9,"Shipyards":10,"Programmes":10,"Contracts":9,
     "Sales & Delivery Routes":9,"Announcements":9,"News Registry":8,"System Entities":8,"Systems":8,"Facilities":7,
     "Yard Facilities":8,"Yard Capabilities":8,"Sample Vessels":9,"System Links":7,"Relationships":7,
-    "Events":12,"Event Asset Links":10,"Event Company Links":10,"Event System Links":10,"Impact Chains":11,
+    "Events":12,"Strategic Events":12,"Event Asset Links":10,"Event Company Links":10,"Event System Links":10,"Impact Chains":11,
     "Infra Deals":10,"Transactions V125":11,"Vessel Transactions":9,"Port Terminals":10,"Port Ownership":9,
 }
 
@@ -433,6 +433,52 @@ def company_scope_ids(entity_id, max_depth=3):
 def company_scope_names(scope_ids):
     return [label(x) for x in scope_ids if label(x)!=x]
 
+def company_investment_exposure_ids(scope_ids):
+    """Return portfolio / investment targets without classifying them as controlled subsidiaries."""
+    rel=TABLES.get(("Core Entities","Relationships"),pd.DataFrame())
+    if rel.empty:
+        return set()
+    exposure_terms=("PORTFOLIO_INVESTMENT","MINORITY_INVESTMENT","STRATEGIC_INVESTMENT","CONSORTIUM_ACQUIRED")
+    targets=set()
+    if "Source Entity" not in rel.columns or "Target Entity" not in rel.columns:
+        return targets
+    rows=rel[rel["Source Entity"].astype(str).isin(set(str(x) for x in scope_ids))]
+    for _,r in rows.iterrows():
+        relationship=str(r.get("Relationship","")).upper()
+        if any(term in relationship for term in exposure_terms):
+            tgt=str(r.get("Target Entity","")).strip()
+            if tgt:
+                targets.add(tgt)
+    return targets
+
+def company_news_scope_ids(scope_ids):
+    """Broaden news discovery through meaningful corporate/project relationships
+    without changing ownership/control scope.
+    Example: Fincantieri Infrastructure → participates in → PerGenova.
+    """
+    base=set(str(x) for x in scope_ids)
+    rel=TABLES.get(("Core Entities","Relationships"),pd.DataFrame())
+    if rel.empty or "Source Entity" not in rel.columns or "Target Entity" not in rel.columns:
+        return base
+
+    news_terms=(
+        "PARTICIPATES_IN","LEADS_CONSORTIUM","JV_PARTICIPANT_IN","PARENT_OF","OWNS",
+        "CONTROL","OPERATES","ADMINISTERS","COMMISSIONS","CONSTRUCTS","BUILDS",
+        "PORTFOLIO_INVESTMENT","STRATEGIC_INVESTMENT"
+    )
+    expanded=set(base)
+    for _,r in rel.iterrows():
+        src=str(r.get("Source Entity","")).strip()
+        tgt=str(r.get("Target Entity","")).strip()
+        relationship=str(r.get("Relationship","")).upper()
+        if not any(term in relationship for term in news_terms):
+            continue
+        if src in base and tgt:
+            expanded.add(tgt)
+        if tgt in base and src:
+            expanded.add(src)
+    return expanded
+
 def company_record(entity_id):
     df=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
     if "Company ID" in df.columns:
@@ -449,8 +495,14 @@ def build_company_profile(entity_id, entity_name):
     prof["company_id"]=entity_id
     prof["name"]=entity_name
     scope_ids=company_scope_ids(entity_id)
+    investment_ids=company_investment_exposure_ids(scope_ids)
+    asset_scope_ids=set(scope_ids) | set(investment_ids)
+
     prof["scope_ids"]=scope_ids
     prof["scope_names"]=company_scope_names(scope_ids)
+    prof["investment_ids"]=investment_ids
+    prof["investment_names"]=company_scope_names(investment_ids)
+    prof["asset_scope_ids"]=asset_scope_ids
 
     # Corporate relationships
     rel=TABLES.get(("Core Entities","Relationships"),pd.DataFrame())
@@ -551,19 +603,103 @@ def build_company_profile(entity_id, entity_name):
             am |= anns["Linked Entities / Topics"].astype(str).str.contains(re.escape(entity_name),case=False,na=False)
     prof["announcements"]=anns[am].copy() if not anns.empty else pd.DataFrame()
 
-    # News via explicit News Entity Links + fallback name match.
+    # News via explicit links, meaningful related entities, and fallback text match.
     news=TABLES.get(("Intelligence","News Registry"),pd.DataFrame())
     nel=TABLES.get(("Intelligence","News Entity Links"),pd.DataFrame())
+    news_scope_ids=company_news_scope_ids(asset_scope_ids)
+    prof["news_scope_ids"]=news_scope_ids
+
     nids=set()
     if not nel.empty and "Entity ID" in nel.columns:
-        linkrows=nel[nel["Entity ID"].astype(str).isin(scope_ids)]
-        if "News ID" in linkrows.columns: nids.update(linkrows["News ID"].astype(str).tolist())
+        linkrows=nel[nel["Entity ID"].astype(str).isin(news_scope_ids)]
+        if "News ID" in linkrows.columns:
+            nids.update(linkrows["News ID"].astype(str).tolist())
+
     nm=pd.Series(False,index=news.index) if not news.empty else pd.Series(dtype=bool)
     if not news.empty:
-        if nids and "News ID" in news.columns: nm |= news["News ID"].astype(str).isin(nids)
-        for c in ["Headline","Summary","Notes"]:
-            if c in news.columns: nm |= news[c].astype(str).str.contains(re.escape(entity_name),case=False,na=False)
+        if nids and "News ID" in news.columns:
+            nm |= news["News ID"].astype(str).isin(nids)
+        # exact company/group names remain a useful fallback for unlinked legacy rows.
+        for search_name in set([entity_name] + company_scope_names(news_scope_ids)):
+            if not search_name:
+                continue
+            for c in ["Headline","Summary","Notes"]:
+                if c in news.columns:
+                    nm |= news[c].astype(str).str.contains(re.escape(search_name),case=False,na=False)
     prof["news"]=news[nm].copy() if not news.empty else pd.DataFrame()
+
+    # Strategic event history can function as news/activity when a company is linked
+    # through a vessel or another canonical event entity. This is important for GFS Galaxy.
+    strategic=TABLES.get(("Intelligence","Strategic Events"),pd.DataFrame())
+    event_links=TABLES.get(("Intelligence","Event Entity Links"),pd.DataFrame())
+    observations=TABLES.get(("Intelligence","Event Observations"),pd.DataFrame())
+
+    strategic_ids=set()
+    observation_ids=set()
+
+    # Company/group/event scope.
+    event_asset_ids=set(news_scope_ids)
+    for key,col in [
+        ("maritime_vessels","Vessel ID"),
+        ("defence_vessels","Vessel ID"),
+        ("yards","Yard ID"),
+        ("port_terminals","Terminal ID"),
+        ("ports","Port ID"),
+        ("assets","Asset ID")
+    ]:
+        df=prof.get(key,pd.DataFrame())
+        if isinstance(df,pd.DataFrame) and not df.empty and col in df.columns:
+            event_asset_ids.update(df[col].astype(str).tolist())
+
+    if not event_links.empty and "Entity ID" in event_links.columns:
+        el=event_links[event_links["Entity ID"].astype(str).isin(event_asset_ids)].copy()
+        if "Canonical Event ID" in el.columns:
+            strategic_ids.update(x for x in el["Canonical Event ID"].astype(str).tolist() if x and x!="nan")
+        if "Observation ID" in el.columns:
+            observation_ids.update(x for x in el["Observation ID"].astype(str).tolist() if x and x!="nan")
+
+    # Strategic Events can also directly name a company or asset.
+    if not strategic.empty and "Subject Entity ID" in strategic.columns:
+        sd=strategic[strategic["Subject Entity ID"].astype(str).isin(event_asset_ids)]
+        if "Event ID" in sd.columns:
+            strategic_ids.update(sd["Event ID"].astype(str).tolist())
+
+    se_rows=strategic[strategic["Event ID"].astype(str).isin(strategic_ids)].copy() if (strategic_ids and not strategic.empty and "Event ID" in strategic.columns) else pd.DataFrame()
+
+    # Convert strategic events into a news-like dataframe for the normal News tab.
+    strategic_news=[]
+    for _,r in se_rows.iterrows():
+        eid=str(r.get("Event ID","")).strip()
+        url=""
+        # Prefer a URL-bearing observation for the canonical event.
+        if not observations.empty:
+            om=pd.Series(False,index=observations.index)
+            if "Canonical Event ID" in observations.columns:
+                om |= observations["Canonical Event ID"].astype(str).eq(eid)
+            if observation_ids and "Observation ID" in observations.columns:
+                om |= observations["Observation ID"].astype(str).isin(observation_ids)
+            ors=observations[om]
+            if not ors.empty and "Source Reference" in ors.columns:
+                for v in ors["Source Reference"].astype(str).tolist():
+                    if v.startswith("http"):
+                        url=v
+                        break
+        strategic_news.append({
+            "Published Date":str(r.get("Date","")).strip(),
+            "Headline":str(r.get("Title","")).strip(),
+            "Publisher":"Strategic event record",
+            "URL":url,
+            "Summary":str(r.get("Description","")).strip(),
+            "Region":str(r.get("Location","")).strip(),
+            "Country":"",
+            "Sector":"",
+            "Event Type":str(r.get("Event Type","")).strip(),
+            "Event Subtype":"",
+            "Verification Status":"Canonical event-linked",
+            "Notes":str(r.get("Financial / Strategic Impact","")).strip(),
+            "Strategic Event ID":eid,
+        })
+    prof["strategic_news"]=pd.DataFrame(strategic_news)
 
     # Port / terminal assets from Maritime workbook
     pt=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame())
@@ -573,20 +709,32 @@ def build_company_profile(entity_id, entity_name):
     pnews=TABLES.get(("Maritime","Port News"),pd.DataFrame())
     ports=TABLES.get(("Maritime","Ports"),pd.DataFrame())
 
-    # direct operator rows
+    # direct terminal operator rows
     tm=pd.Series(False,index=pt.index) if not pt.empty else pd.Series(dtype=bool)
     if not pt.empty:
         if "Primary Operator Company ID" in pt.columns:
-            tm |= pt["Primary Operator Company ID"].astype(str).isin(scope_ids)
+            tm |= pt["Primary Operator Company ID"].astype(str).isin(asset_scope_ids)
         if "Operator / Network" in pt.columns:
-            for nm in prof.get("scope_names",[]):
+            for nm in company_scope_names(asset_scope_ids):
                 tm |= pt["Operator / Network"].astype(str).str.contains(re.escape(nm),case=False,na=False)
     direct_terms=pt[tm].copy() if not pt.empty else pd.DataFrame()
+
+    # direct port operator/authority rows.
+    # Some networks (e.g. Associated British Ports) are modelled at port level rather than terminal level.
+    direct_ports=pd.DataFrame()
+    if not ports.empty:
+        pm=pd.Series(False,index=ports.index)
+        if "Operator Company ID" in ports.columns:
+            pm |= ports["Operator Company ID"].astype(str).isin(asset_scope_ids)
+        if "Operator" in ports.columns:
+            for nm in company_scope_names(asset_scope_ids):
+                pm |= ports["Operator"].astype(str).str.contains(re.escape(nm),case=False,na=False)
+        direct_ports=ports[pm].copy()
 
     # ownership / JV rows can surface terminals even where primary operator differs
     owned_term_ids=set()
     if not po.empty and "Company ID" in po.columns:
-        porows=po[po["Company ID"].astype(str).isin(scope_ids)].copy()
+        porows=po[po["Company ID"].astype(str).isin(asset_scope_ids)].copy()
         prof["port_ownership"]=porows
         if "Terminal ID" in porows.columns:
             owned_term_ids.update(porows["Terminal ID"].astype(str).tolist())
@@ -604,12 +752,15 @@ def build_company_profile(entity_id, entity_name):
     else:
         prof["port_terminals"]=direct_terms
 
-    # parent ports
+    # parent ports + ports directly administered/operated by the company/network
     port_ids=set()
     if not prof["port_terminals"].empty and "Port ID" in prof["port_terminals"].columns:
         port_ids.update(prof["port_terminals"]["Port ID"].astype(str).tolist())
-    if not ports.empty and port_ids and "Port ID" in ports.columns:
-        prof["ports"]=ports[ports["Port ID"].astype(str).isin(port_ids)].copy()
+
+    terminal_parent_ports=ports[ports["Port ID"].astype(str).isin(port_ids)].copy() if (not ports.empty and port_ids and "Port ID" in ports.columns) else pd.DataFrame()
+    port_frames=[x for x in [direct_ports,terminal_parent_ports] if isinstance(x,pd.DataFrame) and not x.empty]
+    if port_frames:
+        prof["ports"]=pd.concat(port_frames,ignore_index=True).drop_duplicates()
     else:
         prof["ports"]=pd.DataFrame()
 
@@ -623,7 +774,7 @@ def build_company_profile(entity_id, entity_name):
     if not pnews.empty:
         if "Terminal ID" in pnews.columns and pnids:
             pnm |= pnews["Terminal ID"].astype(str).isin(pnids)
-        for nm in prof.get("scope_names",[]):
+        for nm in company_scope_names(asset_scope_ids):
             for c in ["Headline","Summary","Operator","Port","Terminal"]:
                 if c in pnews.columns:
                     pnm |= pnews[c].astype(str).str.contains(re.escape(nm),case=False,na=False)
@@ -634,7 +785,7 @@ def build_company_profile(entity_id, entity_name):
     system_ids=set()
     if not se.empty:
         sem=pd.Series(False,index=se.index)
-        if "Entity ID" in se.columns: sem |= se["Entity ID"].astype(str).isin(scope_ids)
+        if "Entity ID" in se.columns: sem |= se["Entity ID"].astype(str).isin(asset_scope_ids)
         if "Entity" in se.columns: sem |= se["Entity"].astype(str).str.contains(re.escape(entity_name),case=False,na=False)
         serows=se[sem]
         if "System ID" in serows.columns: system_ids.update(serows["System ID"].astype(str).tolist())
@@ -643,7 +794,7 @@ def build_company_profile(entity_id, entity_name):
 
     # Unified events / hazards / project announcements
     event_assets=entity_asset_ids_from_profile(prof)
-    ev,eloc,ech=event_bundle_for_entities(scope_ids,event_assets,system_ids)
+    ev,eloc,ech=event_bundle_for_entities(asset_scope_ids,event_assets,system_ids)
     prof["events"]=ev
     prof["event_locations"]=eloc
     prof["impact_chains"]=ech
@@ -658,14 +809,25 @@ def readable_relationships(df, entity_id):
     if df is None or df.empty:
         st.info("No relationship records.")
         return
-    for _,r in df.iterrows():
+    for i,(_,r) in enumerate(df.iterrows()):
         src=str(r.get("Source Entity",""))
         tgt=str(r.get("Target Entity",""))
-        rel=str(r.get("Relationship","")).replace("_"," ").title()
-        st.markdown(
-            f"<div class='pc-rel'><b>{label(src)}</b> → {rel} → <b>{label(tgt)}</b></div>",
-            unsafe_allow_html=True
-        )
+        rel=pretty_relationship(r.get("Relationship",""))
+
+        c1,c2=st.columns([6,1])
+        with c1:
+            st.markdown(
+                f"<div class='pc-rel'><b>{label(src)}</b> → {rel} → <b>{label(tgt)}</b></div>",
+                unsafe_allow_html=True
+            )
+        with c2:
+            # Open the opposite company/entity in the relationship.
+            target=tgt if src==str(entity_id) else src
+            target_name=label(target)
+            if str(target).startswith("COMP_"):
+                if st.button("Open",key=f"relopen_{target}_{i}",use_container_width=True):
+                    request_nav("Companies","entity_pick",target,target_name)
+                    st.rerun()
 
 def show_named_list(df, title_col, subtitle_cols=None, source_col="Source URL", max_items=100):
     """Readable cards with normal HTML links, never repeated Streamlit buttons."""
@@ -784,10 +946,18 @@ def port_map_data(prof):
 
 def render_port_visuals(prof):
     terms=prof.get("port_terminals",pd.DataFrame())
+    ports=prof.get("ports",pd.DataFrame())
     m=port_map_data(prof)
     if not m.empty:
         st.markdown("### Geographic footprint")
         st.map(m,latitude="lat",longitude="lon",size=70)
+
+    # Direct port portfolios such as ABP should still produce a useful figure.
+    if isinstance(ports,pd.DataFrame) and not ports.empty and "Country" in ports.columns:
+        pc=ports["Country"].astype(str).replace("",pd.NA).dropna().value_counts().head(15)
+        if not pc.empty:
+            st.markdown("### Ports by country")
+            st.bar_chart(pc,horizontal=True)
 
     if terms is None or terms.empty:
         return
@@ -795,7 +965,7 @@ def render_port_visuals(prof):
     # Country footprint
     if "Country" in terms.columns:
         counts=terms["Country"].astype(str).replace("",pd.NA).dropna().value_counts().head(15)
-        if len(counts)>1:
+        if not counts.empty:
             st.markdown("### Terminals by country")
             st.bar_chart(counts,horizontal=True)
 
@@ -924,6 +1094,10 @@ def render_company_profile(entity_id, entity_name):
         if group_names:
             st.markdown("**Included group / controlled entities:** " + " · ".join(group_names))
 
+    investment_names=[x for x in prof.get("investment_names",[]) if x and x != entity_name]
+    if investment_names:
+        st.markdown("**Portfolio / investment exposure:** " + " · ".join(investment_names))
+
     c1,c2,c3,c4,c5,c6,c7=st.columns(7)
     c1.metric("Terminals",profile_count(prof,"port_terminals"))
     c2.metric("Ports",profile_count(prof,"ports"))
@@ -932,18 +1106,22 @@ def render_company_profile(entity_id, entity_name):
     c4.metric("Linked vessels",total_v)
     c5.metric("Programmes",profile_count(prof,"programmes"))
     c6.metric("Events",profile_count(prof,"events"))
-    c7.metric("News",profile_count(prof,"news")+profile_count(prof,"announcements")+profile_count(prof,"port_news"))
+    c7.metric("News",profile_count(prof,"news")+profile_count(prof,"announcements")+profile_count(prof,"port_news")+profile_count(prof,"strategic_news"))
 
     tabs=st.tabs(["Overview","Port Assets","Shipyards & Facilities","Vessels","Programmes & Contracts","Sales Routes","Events & Impact","News","Relationships & Systems","Evidence"])
     with tabs[0]:
         # Visual intelligence first
-        if not prof["port_terminals"].empty:
+        if not prof["port_terminals"].empty or not prof["ports"].empty:
             render_port_visuals(prof)
         if not prof["yards"].empty:
             render_shipyard_visuals(prof)
         render_market_visuals(entity_id)
         if not prof["events"].empty:
             render_event_map(prof["events"],prof["event_locations"],"Linked events & announced activity")
+
+        if not prof["ports"].empty:
+            st.markdown("### Ports")
+            show_named_list(prof["ports"],"Port / Facility",["Country","Operator","Facility Type","Key Role"])
 
         if not prof["port_terminals"].empty:
             st.markdown("### Port terminals / facilities")
@@ -957,8 +1135,29 @@ def render_company_profile(entity_id, entity_name):
         if not prof["programmes"].empty:
             st.markdown("### Active / relevant programmes")
             show_named_list(prof["programmes"],"Programme",["Customer","Platform / Class","Status","Build / Sales Route"])
-        if prof["port_terminals"].empty and prof["yards"].empty and prof["programmes"].empty:
-            st.info("No port, shipyard or programme profile yet for this entity.")
+
+        # A profile should never hide relevant linked reporting merely because the
+        # company is connected through a vessel, consortium or project entity.
+        latest_frames=[]
+        if not prof["news"].empty:
+            x=prof["news"].copy()
+            x["_source_kind"]="News"
+            latest_frames.append(x)
+        if not prof["strategic_news"].empty:
+            x=prof["strategic_news"].copy()
+            x["_source_kind"]="Strategic event"
+            latest_frames.append(x)
+        if latest_frames:
+            latest=pd.concat(latest_frames,ignore_index=True,sort=False)
+            date_col="Published Date" if "Published Date" in latest.columns else None
+            if date_col:
+                latest["_dt"]=pd.to_datetime(latest[date_col],errors="coerce")
+                latest=latest.sort_values("_dt",ascending=False)
+            st.markdown("### Latest linked reporting")
+            show_named_list(latest.head(5),"Headline",["Published Date","Publisher","Event Type"],source_col="URL",max_items=5)
+
+        if prof["port_terminals"].empty and prof["ports"].empty and prof["yards"].empty and prof["programmes"].empty:
+            st.info("No mapped asset, shipyard or programme profile yet for this entity.")
 
     with tabs[1]:
         st.markdown("### Terminals / port facilities")
@@ -1056,8 +1255,17 @@ def render_company_profile(entity_id, entity_name):
         if not prof["port_news"].empty:
             st.markdown("### Port / terminal news")
             show_named_list(prof["port_news"],"Headline",["Date","Port","Terminal","Event Type"],source_col="URL")
-        if prof["announcements"].empty and prof["news"].empty and prof["port_news"].empty:
-            st.info("No linked news or announcements.")
+        if not prof["strategic_news"].empty:
+            st.markdown("### Strategic event / incident coverage")
+            show_named_list(
+                prof["strategic_news"],
+                "Headline",
+                ["Published Date","Publisher","Event Type","Region"],
+                source_col="URL",
+                max_items=100
+            )
+        if prof["announcements"].empty and prof["news"].empty and prof["port_news"].empty and prof["strategic_news"].empty:
+            st.info("No linked news, announcements or canonical event coverage.")
 
     with tabs[8]:
         st.markdown("### Corporate relationships")
@@ -1317,7 +1525,7 @@ def render_linked_objects(df, object_type_col, object_id_col, object_name_col, r
 
 # ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.28.3 · Connected object navigation")
+st.sidebar.caption("v1.28.5 · Related news traversal")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
@@ -1369,7 +1577,7 @@ if page=="Search":
             groups=[
                 ("Commercial / contracts",["Contracts","Infra Deals","Transactions V125","Sales & Delivery Routes","Vessel Transactions"]),
                 ("Assets",["Port Terminals","Ports","Shipyards","Yard Facilities","Sample Vessels","Vessels","Assets"]),
-                ("News & events",["Events","Announcements","News Registry","Impact Chains"]),
+                ("News & events",["Events","Strategic Events","Announcements","News Registry","Impact Chains"]),
                 ("Systems & relationships",["Systems","System Entities","System Links","Relationships","Port Ownership"]),
             ]
             for title,sheets in groups:

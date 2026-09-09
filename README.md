@@ -49,7 +49,7 @@ The new graph tests:
 This adds marine-access infrastructure as a first-class facility category alongside berths,
 yards, rail sidings, locks, canals, warehouses and other infrastructure.
 
-## v1.28.3 interface fix
+## v1.28.5 interface fix
 The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
 - shipyards and yard facilities/capabilities
 - defence/coast guard sample vessels
@@ -136,3 +136,21 @@ App-only update:
 - Ports, Shipyards and Systems honor direct object selections from event links.
 - Technical enum values are humanized: `DIRECTLY_AFFECTED` → `Directly affected`, `COAST_GUARD_NEWBUILD` → `Coast guard newbuild`.
 - Internal Link / Event / Observation identifiers are suppressed from normal tables.
+
+## v1.28.4 portfolio + direct-port traversal
+App-only update:
+- Company profiles now read ports directly from the Maritime `Ports` operator mapping, not only through terminal rows.
+- Associated British Ports therefore exposes its UK port portfolio instead of showing Ports = 0.
+- Portfolio investments are distinguished from controlled subsidiaries.
+- OMERS / OMERS Infrastructure can expose Associated British Ports as portfolio/investment exposure without treating ABP as controlled.
+- Direct port networks get port-country figures even when no terminal-level records are present.
+- Corporate relationship cards now provide an Open action to navigate to the related company.
+
+## v1.28.5 related-news traversal
+App-only update:
+- GFS Ship Management now surfaces the canonical GFS GALAXY attack through its linked vessel/event records.
+- Strategic Events are rendered in the normal News tab as incident/reporting coverage.
+- Company news discovery expands through meaningful project/corporate relationships such as `PARTICIPATES_IN`.
+- Fincantieri Infrastructure Opere Marittime therefore inherits the Genoa breakwater article through its PerGenova consortium participation.
+- News counts include related canonical-event coverage.
+- Overview now shows latest linked reporting so relevant news is visible without opening the News tab.
