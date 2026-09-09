@@ -49,7 +49,7 @@ The new graph tests:
 This adds marine-access infrastructure as a first-class facility category alongside berths,
 yards, rail sidings, locks, canals, warehouses and other infrastructure.
 
-## v1.28.7 interface fix
+## v1.29 interface fix
 The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
 - shipyards and yard facilities/capabilities
 - defence/coast guard sample vessels
@@ -170,3 +170,11 @@ App-only update:
 - Company, Port and Shipyard selector state is coerced to a valid integer before comparison/use.
 - System selector state is validated against available names.
 - Cross-object navigation remains compatible with sessions created by older app versions.
+
+
+## v1.29 — Trade Policy, Market Access & Sanctions Compliance
+New workbook: `data/14_trade_policy_compliance.xlsx`.
+
+Adds first-class layers for CEPAs/FTAs/customs unions, agreement parties, asset/company exposure, tariff coverage, HS-level test structure, rules of origin, customs/procurement, trade remedies, sanctions authorities/programmes/designations, sanctions entity links, watchlist taxonomy and policy precedence.
+
+Top navigation now includes Trade Policy and Sanctions. Company profiles include a Policy & Compliance tab.

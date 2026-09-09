@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.28.7"
+APP_VERSION = "v1.29"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -102,6 +102,7 @@ WORKBOOKS = {
     "Systems & Waterways": "11_systems_waterways_governance.xlsx",
     "Defence & Shipbuilding": "12_defence_shipbuilding.xlsx",
     "Events & Hazards": "13_events_hazards.xlsx",
+    "Trade Policy & Compliance": "14_trade_policy_compliance.xlsx",
 }
 
 @st.cache_data(show_spinner=False)
@@ -297,6 +298,8 @@ SEARCH_PRIORITY={
     "Sales & Delivery Routes":9,"Announcements":9,"News Registry":8,"System Entities":8,"Systems":8,"Facilities":7,
     "Yard Facilities":8,"Yard Capabilities":8,"Sample Vessels":9,"System Links":7,"Relationships":7,
     "Events":12,"Strategic Events":12,"Event Asset Links":10,"Event Company Links":10,"Event System Links":10,"Impact Chains":11,
+    "Trade Agreements":14,"Agreement Asset Links":12,"Agreement Company Links":12,"Tariff Coverage":13,"HS Product Tests":12,
+    "Rules of Origin":11,"Customs & Procurement":11,"Trade Remedies & Restrictions":12,"Sanctions Designations":14,"Sanctions Entity Links":13,
     "Infra Deals":10,"Transactions V125":11,"Vessel Transactions":9,"Port Terminals":10,"Port Ownership":9,
 }
 
@@ -799,6 +802,37 @@ def build_company_profile(entity_id, entity_name):
     prof["event_locations"]=eloc
     prof["impact_chains"]=ech
 
+    # Trade policy / sanctions exposure
+    acl=TABLES.get(("Trade Policy & Compliance","Agreement Company Links"),pd.DataFrame())
+    aal=TABLES.get(("Trade Policy & Compliance","Agreement Asset Links"),pd.DataFrame())
+    agr=TABLES.get(("Trade Policy & Compliance","Trade Agreements"),pd.DataFrame())
+    san=TABLES.get(("Trade Policy & Compliance","Sanctions Entity Links"),pd.DataFrame())
+    des=TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame())
+
+    policy_ids=set()
+    if not acl.empty and "Company ID" in acl.columns:
+        pcl=acl[acl["Company ID"].astype(str).isin(asset_scope_ids)].copy()
+        prof["agreement_company_links"]=pcl
+        if "Agreement ID" in pcl.columns: policy_ids.update(pcl["Agreement ID"].astype(str))
+    else:
+        prof["agreement_company_links"]=pd.DataFrame()
+    if not aal.empty and "Asset / Entity ID" in aal.columns:
+        pal=aal[aal["Asset / Entity ID"].astype(str).isin(event_assets | asset_scope_ids)].copy()
+        prof["agreement_asset_links"]=pal
+        if "Agreement ID" in pal.columns: policy_ids.update(pal["Agreement ID"].astype(str))
+    else:
+        prof["agreement_asset_links"]=pd.DataFrame()
+    prof["trade_agreements"]=agr[agr["Agreement ID"].astype(str).isin(policy_ids)].copy() if (policy_ids and not agr.empty and "Agreement ID" in agr.columns) else pd.DataFrame()
+
+    sanc_ids=set()
+    if not san.empty and "Canonical Entity ID" in san.columns:
+        sl=san[san["Canonical Entity ID"].astype(str).isin(event_assets | asset_scope_ids)].copy()
+        prof["sanctions_links"]=sl
+        if "Designation ID" in sl.columns: sanc_ids.update(sl["Designation ID"].astype(str))
+    else:
+        prof["sanctions_links"]=pd.DataFrame()
+    prof["sanctions_designations"]=des[des["Designation ID"].astype(str).isin(sanc_ids)].copy() if (sanc_ids and not des.empty and "Designation ID" in des.columns) else pd.DataFrame()
+
     return prof
 
 def profile_count(prof,key):
@@ -1116,7 +1150,7 @@ def render_company_profile(entity_id, entity_name):
     c6.metric("Events",profile_count(prof,"events"))
     c7.metric("News",profile_count(prof,"news")+profile_count(prof,"announcements")+profile_count(prof,"port_news")+profile_count(prof,"strategic_news"))
 
-    tabs=st.tabs(["Overview","Port Assets","Shipyards & Facilities","Vessels","Programmes & Contracts","Sales Routes","Events & Impact","News","Relationships & Systems","Evidence"])
+    tabs=st.tabs(["Overview","Port Assets","Shipyards & Facilities","Vessels","Programmes & Contracts","Sales Routes","Events & Impact","News","Relationships & Systems","Policy & Compliance","Evidence"])
     with tabs[0]:
         # Visual intelligence first
         if not prof["port_terminals"].empty or not prof["ports"].empty:
@@ -1283,6 +1317,22 @@ def render_company_profile(entity_id, entity_name):
             display_df(prof["systems"],50)
 
     with tabs[9]:
+        if not prof["trade_agreements"].empty:
+            st.markdown("### Trade agreements / market-access exposure")
+            display_df(prof["trade_agreements"],100)
+        if not prof["agreement_company_links"].empty:
+            st.markdown("### Company exposure")
+            display_df(prof["agreement_company_links"],100)
+        if not prof["agreement_asset_links"].empty:
+            st.markdown("### Asset / corridor exposure")
+            display_df(prof["agreement_asset_links"],100)
+        if not prof["sanctions_designations"].empty:
+            st.markdown("### Sanctions designations")
+            display_df(prof["sanctions_designations"],100)
+        if prof["trade_agreements"].empty and prof["sanctions_designations"].empty:
+            st.info("No direct trade-policy or sanctions link has been mapped for this entity yet.")
+
+    with tabs[10]:
         if not prof["assets"].empty:
             st.markdown("### Direct assets")
             display_df(prof["assets"],100)
@@ -1553,11 +1603,11 @@ def safe_index_state(key, default_index, option_count):
 
 # ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.28.7 · Session-safe cross-object navigation")
+st.sidebar.caption("v1.29 · Trade Policy & Sanctions")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
-pages=["Search","Companies","Ports","Shipyards","Vessels","Contracts","News & Events","Systems","Data"]
+pages=["Search","Companies","Ports","Shipyards","Vessels","Contracts","Trade Policy","Sanctions","News & Events","Systems","Data"]
 
 # Navigation requests are applied BEFORE the top-nav widget is instantiated.
 # This avoids StreamlitWidgetAlreadyInstantiatedError when a button changes pages.
@@ -1608,6 +1658,7 @@ if page=="Search":
             groups=[
                 ("Commercial / contracts",["Contracts","Infra Deals","Transactions V125","Sales & Delivery Routes","Vessel Transactions"]),
                 ("Assets",["Port Terminals","Ports","Shipyards","Yard Facilities","Sample Vessels","Vessels","Assets"]),
+                ("Trade policy & compliance",["Trade Agreements","Tariff Coverage","HS Product Tests","Rules of Origin","Customs & Procurement","Trade Remedies & Restrictions","Sanctions Designations"]),
                 ("News & events",["Events","Strategic Events","Announcements","News Registry","Impact Chains"]),
                 ("Systems & relationships",["Systems","System Entities","System Links","Relationships","Port Ownership"]),
             ]
@@ -1832,6 +1883,94 @@ elif page=="Contracts":
     with t2: display_df(tx,250)
     with t3: display_df(deals,250)
     with t4: display_df(routes,250)
+
+elif page=="Trade Policy":
+    header("Trade Policy & Market Access","CEPAs, FTAs, customs unions, tariffs, rules of origin, procurement and trade remedies tied back to P&C assets and companies.")
+    agreements=TABLES.get(("Trade Policy & Compliance","Trade Agreements"),pd.DataFrame()).copy()
+    if agreements.empty:
+        st.info("Trade-policy workbook not available.")
+    else:
+        q=st.text_input("Find agreement / country / corridor",placeholder="Georgia, Azerbaijan, Congo, DRC, Türkiye, Middle Corridor...")
+        statuses=sorted([x for x in agreements["Status"].astype(str).unique().tolist() if x.strip()]) if "Status" in agreements.columns else []
+        status_sel=st.multiselect("Status",statuses,default=[])
+        a=agreements.copy()
+        if q: a=_contains_any(a,[q])
+        if status_sel: a=a[a["Status"].isin(status_sel)]
+
+        c1,c2=st.columns(2)
+        with c1:
+            if not a.empty and "Status" in a.columns:
+                st.markdown("### Agreements by status")
+                st.bar_chart(a["Status"].value_counts(),horizontal=True)
+        with c2:
+            if not a.empty and "Agreement Type" in a.columns:
+                st.markdown("### Agreement types")
+                st.bar_chart(a["Agreement Type"].value_counts(),horizontal=True)
+
+        opts=a.sort_values("Agreement").reset_index(drop=True)
+        if opts.empty:
+            st.warning("No matching agreements.")
+        else:
+            pick=st.selectbox("Agreement",range(len(opts)),format_func=lambda i:f"{opts.iloc[i]['Agreement']} — {opts.iloc[i]['Status']}")
+            r=opts.iloc[pick]; aid=str(r["Agreement ID"])
+            st.markdown(f"## {r['Agreement']}")
+            st.caption(f"{r.get('Status','')} · {r.get('Strategic Geography','')}")
+            st.markdown(f"**Tariff coverage:** {r.get('Tariff Coverage Summary','')}  ")
+            st.markdown(f"**P&C relevance:** {r.get('P&C Relevance','')}")
+            src=str(r.get("Source URL","")).strip()
+            if src.startswith("http"): st.markdown(f"[Open official / primary source ↗]({src})")
+
+            aal=TABLES.get(("Trade Policy & Compliance","Agreement Asset Links"),pd.DataFrame())
+            acl=TABLES.get(("Trade Policy & Compliance","Agreement Company Links"),pd.DataFrame())
+            tc=TABLES.get(("Trade Policy & Compliance","Tariff Coverage"),pd.DataFrame())
+            hs=TABLES.get(("Trade Policy & Compliance","HS Product Tests"),pd.DataFrame())
+            roo=TABLES.get(("Trade Policy & Compliance","Rules of Origin"),pd.DataFrame())
+            cp=TABLES.get(("Trade Policy & Compliance","Customs & Procurement"),pd.DataFrame())
+            tr=TABLES.get(("Trade Policy & Compliance","Trade Remedies & Restrictions"),pd.DataFrame())
+            filt=lambda df: df[df["Agreement ID"].astype(str).eq(aid)].copy() if (not df.empty and "Agreement ID" in df.columns) else pd.DataFrame()
+            tabs=st.tabs(["Linked Assets","Companies","Tariffs / HS Tests","Origin & Customs","Remedies / Restrictions"])
+            with tabs[0]: display_df(filt(aal),200)
+            with tabs[1]: display_df(filt(acl),200)
+            with tabs[2]:
+                display_df(filt(tc),100)
+                display_df(filt(hs),150)
+            with tabs[3]:
+                display_df(filt(roo),100)
+                display_df(filt(cp),100)
+            with tabs[4]:
+                # include global interaction rules as well
+                x=filt(tr)
+                global_rows=tr[tr.get("Agreement ID / Scope",pd.Series(dtype=str)).astype(str).eq("GLOBAL_RULE")].copy() if not tr.empty else pd.DataFrame()
+                display_df(pd.concat([x,global_rows],ignore_index=True) if not global_rows.empty else x,100)
+
+elif page=="Sanctions":
+    header("Sanctions & Compliance","Government sanctions, programmes, designations and watchlist distinctions. Government sanctions remain separate from analytical watchlists.")
+    des=TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame()).copy()
+    auth=TABLES.get(("Trade Policy & Compliance","Sanctions Authorities"),pd.DataFrame())
+    progs=TABLES.get(("Trade Policy & Compliance","Sanctions Programmes"),pd.DataFrame())
+    links=TABLES.get(("Trade Policy & Compliance","Sanctions Entity Links"),pd.DataFrame())
+    watch=TABLES.get(("Trade Policy & Compliance","Watchlist Taxonomy"),pd.DataFrame())
+    rules=TABLES.get(("Trade Policy & Compliance","Policy Interaction Rules"),pd.DataFrame())
+    if des.empty:
+        st.info("Sanctions data unavailable.")
+    else:
+        q=st.text_input("Find vessel / company / IMO / programme",placeholder="LADY MARIIA, SUN, 9220641, Iran, Russia...")
+        d=des.copy()
+        if q: d=_contains_any(d,[q])
+        if not d.empty and "Programme ID" in d.columns:
+            st.markdown("### Designations by programme")
+            st.bar_chart(d["Programme ID"].map(label).value_counts(),horizontal=True)
+        tabs=st.tabs(["Designations","Entity Links","Authorities & Programmes","Watchlist Taxonomy","Policy Precedence"])
+        with tabs[0]: display_df(d,250)
+        with tabs[1]:
+            l=links
+            if q: l=_contains_any(l,[q])
+            display_df(l,250)
+        with tabs[2]:
+            display_df(auth,100)
+            display_df(progs,100)
+        with tabs[3]: display_df(watch,100)
+        with tabs[4]: display_df(rules,100)
 
 elif page=="News & Events":
     header("News & Events","Map assets and systems affected by war, weather, natural hazards, labour, operational incidents and announced commercial activity.")
