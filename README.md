@@ -49,7 +49,7 @@ The new graph tests:
 This adds marine-access infrastructure as a first-class facility category alongside berths,
 yards, rail sidings, locks, canals, warehouses and other infrastructure.
 
-## v1.29 interface fix
+## v1.30 interface fix
 The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
 - shipyards and yard facilities/capabilities
 - defence/coast guard sample vessels
@@ -178,3 +178,20 @@ New workbook: `data/14_trade_policy_compliance.xlsx`.
 Adds first-class layers for CEPAs/FTAs/customs unions, agreement parties, asset/company exposure, tariff coverage, HS-level test structure, rules of origin, customs/procurement, trade remedies, sanctions authorities/programmes/designations, sanctions entity links, watchlist taxonomy and policy precedence.
 
 Top navigation now includes Trade Policy and Sanctions. Company profiles include a Policy & Compliance tab.
+
+## v1.29.1 sanctions readability fix
+App-only update:
+- Sanctions charts use programme names rather than internal programme IDs.
+- Default white Streamlit sanctions bar chart is replaced by dark-theme native HTML bars.
+- Designation, authority, programme, link and watchlist implementation IDs are hidden in the normal UI.
+- Sanctions tables show OFAC / UK / EU names and legal programme names.
+- Linked sanctioned entities render as cards and can open canonical vessels/companies when a canonical entity exists.
+- Watchlists explicitly remain separate from government sanctions designations.
+
+## v1.30 canonical sanctions-vessel integration
+- Adds canonical vessel records for LADY MARIIA, SUN, ELOISE, AL SAFA and ANSHUN II.
+- Adds canonical owner/manager companies: MG-FLOT, Wavewhisper Shipping, Vroom Marine Venture FZE, Manarat Alkhaleej Marine Services FZE and Laurel Shipping Ltd.
+- Sanctions designation rows now point to canonical vessel/company IDs.
+- LADY MARIIA and SUN have linked incident/news records.
+- Vessels is now an object explorer with Ownership & Management, Sanctions & Compliance, News & Events and Evidence tabs.
+- Sanctions-linked canonical vessels can open directly into the Vessel profile.

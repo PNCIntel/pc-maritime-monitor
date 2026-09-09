@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.29"
+APP_VERSION = "v1.30"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -1326,10 +1326,14 @@ def render_company_profile(entity_id, entity_name):
         if not prof["agreement_asset_links"].empty:
             st.markdown("### Asset / corridor exposure")
             display_df(prof["agreement_asset_links"],100)
+        if not prof["sanctions_links"].empty:
+            st.markdown("### Sanctions / designation-linked exposure")
+            st.caption("A linked company may be an owner, operator or manager named in a designation record; this does not automatically mean every linked party is itself separately designated.")
+            display_df(prof["sanctions_links"],100)
         if not prof["sanctions_designations"].empty:
-            st.markdown("### Sanctions designations")
-            display_df(prof["sanctions_designations"],100)
-        if prof["trade_agreements"].empty and prof["sanctions_designations"].empty:
+            st.markdown("### Related government designation records")
+            display_df(humanize_sanctions_df(prof["sanctions_designations"]),100)
+        if prof["trade_agreements"].empty and prof["sanctions_designations"].empty and prof["sanctions_links"].empty:
             st.info("No direct trade-policy or sanctions link has been mapped for this entity yet.")
 
     with tabs[10]:
@@ -1601,9 +1605,106 @@ def safe_index_state(key, default_index, option_count):
     st.session_state[key]=current
     return current
 
+
+def vessel_profile_data(vessel_id, vessel_name):
+    commercial=TABLES.get(("Maritime","Vessels"),pd.DataFrame())
+    vrel=TABLES.get(("Maritime","Vessel Relationships"),pd.DataFrame())
+    evid=TABLES.get(("Maritime","Vessel Evidence"),pd.DataFrame())
+    build=TABLES.get(("Maritime","Vessel Build Records"),pd.DataFrame())
+    news=TABLES.get(("Intelligence","News Registry"),pd.DataFrame())
+    nlinks=TABLES.get(("Intelligence","News Entity Links"),pd.DataFrame())
+    events=TABLES.get(("Intelligence","Strategic Events"),pd.DataFrame())
+    sanctions=TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame())
+
+    row=commercial[commercial["Vessel ID"].astype(str).eq(str(vessel_id))].copy() if not commercial.empty and "Vessel ID" in commercial.columns else pd.DataFrame()
+    rel=vrel[vrel["Vessel ID"].astype(str).eq(str(vessel_id))].copy() if not vrel.empty and "Vessel ID" in vrel.columns else pd.DataFrame()
+    evd=evid[evid["Vessel ID"].astype(str).eq(str(vessel_id))].copy() if not evid.empty and "Vessel ID" in evid.columns else pd.DataFrame()
+    bld=build[build["Vessel ID"].astype(str).eq(str(vessel_id))].copy() if not build.empty and "Vessel ID" in build.columns else pd.DataFrame()
+
+    nids=set()
+    if not nlinks.empty and "Entity ID" in nlinks.columns:
+        nl=nlinks[nlinks["Entity ID"].astype(str).eq(str(vessel_id))]
+        if "News ID" in nl.columns: nids.update(nl["News ID"].astype(str).tolist())
+    n=news[news["News ID"].astype(str).isin(nids)].copy() if nids and not news.empty and "News ID" in news.columns else pd.DataFrame()
+
+    ev=events[events["Subject Entity ID"].astype(str).eq(str(vessel_id))].copy() if not events.empty and "Subject Entity ID" in events.columns else pd.DataFrame()
+
+    san=sanctions[sanctions["Canonical Entity ID"].astype(str).eq(str(vessel_id))].copy() if not sanctions.empty and "Canonical Entity ID" in sanctions.columns else pd.DataFrame()
+
+    return row,rel,evd,bld,n,ev,san
+
+def render_vessel_profile(vessel_id,vessel_name):
+    row,rel,evd,bld,news,events,san=vessel_profile_data(vessel_id,vessel_name)
+    if row.empty:
+        st.info("No canonical commercial-vessel record available.")
+        return
+    r=row.iloc[0]
+    st.markdown(f"## {vessel_name}")
+    meta=[]
+    for c in ["IMO","Vessel Type","Subtype / Class","Flag","Year Built","DWT","Gross Tonnage (GT)","Status","Primary Service"]:
+        v=str(r.get(c,"")).strip()
+        if v and v.lower()!="nan":
+            meta.append(f"**{c}:** {pretty_enum(v)}")
+    if meta: st.markdown("  \n".join(meta))
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Sanctions",len(san))
+    c2.metric("News",len(news))
+    c3.metric("Events",len(events))
+    c4.metric("Relationships",len(rel))
+
+    tabs=st.tabs(["Overview","Ownership & Management","Sanctions & Compliance","News & Events","Evidence"])
+
+    with tabs[0]:
+        display_df(row,20)
+        if not bld.empty:
+            st.markdown("### Build record")
+            display_df(bld,20)
+
+    with tabs[1]:
+        if rel.empty:
+            st.info("No linked owner/operator/manager records.")
+        else:
+            for i,(_,rr) in enumerate(rel.iterrows()):
+                cid=str(rr.get("Company ID","")).strip()
+                cname=label(cid)
+                relationship=pretty_relationship(rr.get("Relationship Type",""))
+                c1,c2=st.columns([5,1])
+                with c1:
+                    st.markdown(
+                        f"<div class='pc-rel'><b>{vessel_name}</b> → {relationship} → <b>{cname}</b></div>",
+                        unsafe_allow_html=True
+                    )
+                with c2:
+                    if cid.startswith("COMP_") and st.button(f"Open {cname}",key=f"vrel_{vessel_id}_{i}",use_container_width=True):
+                        request_nav("Companies","company_pick_id",cid,cname)
+                        st.rerun()
+
+    with tabs[2]:
+        if san.empty:
+            st.info("No government sanctions designation linked to this canonical vessel.")
+        else:
+            display_df(humanize_sanctions_df(san),100)
+
+    with tabs[3]:
+        if not news.empty:
+            st.markdown("### Related reporting")
+            show_named_list(news,"Headline",["Published Date","Publisher","Event Type","Event Subtype"],source_col="URL",max_items=50)
+        if not events.empty:
+            st.markdown("### Strategic events")
+            display_df(events,50)
+        if news.empty and events.empty:
+            st.info("No linked news or strategic events.")
+
+    with tabs[4]:
+        if not evd.empty:
+            display_df(evd,100)
+        else:
+            st.info("No evidence records.")
+
 # ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.29 · Trade Policy & Sanctions")
+st.sidebar.caption("v1.30 · Canonical sanctions vessel integration")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
@@ -1836,32 +1937,54 @@ elif page=="Shipyards":
         with tabs[4]: display_df(pd.DataFrame([r]),20)
 
 elif page=="Vessels":
-    header("Vessels","Commercial, defence and Coast Guard vessels in one explorer.")
+    header("Vessels","Commercial, defence and Coast Guard vessels with ownership, sanctions, incidents and reporting linked to the same canonical object.")
     commercial=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
     defence=TABLES.get(("Defence & Shipbuilding","Sample Vessels"),pd.DataFrame()).copy()
+
     requested_vessel=st.session_state.pop("vessel_pick_id",None)
-    default_vessel_query=""
     if requested_vessel:
-        default_vessel_query=label(requested_vessel)
-        if default_vessel_query==requested_vessel:
-            for df,idc,namec in [(commercial,"Vessel ID","Vessel Name"),(defence,"Vessel ID","Vessel")]:
-                if idc in df.columns:
-                    m=df[df[idc].astype(str).eq(str(requested_vessel))]
-                    if not m.empty and namec in m.columns:
-                        default_vessel_query=str(m.iloc[0][namec]); break
-        st.session_state["vessel_search_text"]=default_vessel_query
+        st.session_state["vessel_search_text"]=label(requested_vessel)
 
     q=st.text_input(
-        "Find vessel / owner / customer / class",
-        placeholder="Polar Max, Abu Dhabi, Seaspan, CMA CGM...",
+        "Find vessel / IMO / owner / customer / class",
+        placeholder="LADY MARIIA, SUN, 9220641, Polar Max, CMA CGM...",
         key="vessel_search_text"
     )
-    t1,t2=st.tabs([f"Commercial · {len(commercial)}",f"Defence / Government · {len(defence)}"])
-    with t1:
-        c=commercial
-        if q: c=_contains_any(c,[q])
-        display_df(c,400)
-    with t2:
+
+    c=commercial.copy()
+    if q: c=_contains_any(c,[q])
+    c=c.reset_index(drop=True)
+
+    if not c.empty:
+        requested_index=0
+        if requested_vessel and "Vessel ID" in c.columns:
+            mi=c.index[c["Vessel ID"].astype(str).eq(str(requested_vessel))].tolist()
+            if mi: requested_index=int(mi[0])
+
+        if "vessel_select_idx" not in st.session_state:
+            st.session_state["vessel_select_idx"]=requested_index
+        else:
+            try:
+                vi=int(st.session_state["vessel_select_idx"])
+            except Exception:
+                vi=requested_index
+            if vi<0 or vi>=len(c): vi=requested_index
+            st.session_state["vessel_select_idx"]=vi
+        if requested_vessel:
+            st.session_state["vessel_select_idx"]=requested_index
+
+        pick=st.selectbox(
+            "Commercial vessel",
+            range(len(c)),
+            format_func=lambda i:f"{c.iloc[i].get('Vessel Name','')} — IMO {c.iloc[i].get('IMO','')}",
+            key="vessel_select_idx"
+        )
+        vr=c.iloc[pick]
+        render_vessel_profile(str(vr.get("Vessel ID","")),str(vr.get("Vessel Name","")))
+    else:
+        st.info("No matching canonical commercial vessel.")
+
+    with st.expander(f"Defence / Government vessel catalogue · {len(defence)}"):
         d=defence
         if q: d=_contains_any(d,[q])
         display_df(d,250)
@@ -1944,33 +2067,101 @@ elif page=="Trade Policy":
                 display_df(pd.concat([x,global_rows],ignore_index=True) if not global_rows.empty else x,100)
 
 elif page=="Sanctions":
-    header("Sanctions & Compliance","Government sanctions, programmes, designations and watchlist distinctions. Government sanctions remain separate from analytical watchlists.")
+    header(
+        "Sanctions & Compliance",
+        "Government sanctions, programmes and designations. Government sanctions remain separate from analytical and operational watchlists."
+    )
     des=TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame()).copy()
-    auth=TABLES.get(("Trade Policy & Compliance","Sanctions Authorities"),pd.DataFrame())
-    progs=TABLES.get(("Trade Policy & Compliance","Sanctions Programmes"),pd.DataFrame())
-    links=TABLES.get(("Trade Policy & Compliance","Sanctions Entity Links"),pd.DataFrame())
-    watch=TABLES.get(("Trade Policy & Compliance","Watchlist Taxonomy"),pd.DataFrame())
-    rules=TABLES.get(("Trade Policy & Compliance","Policy Interaction Rules"),pd.DataFrame())
+    auth=TABLES.get(("Trade Policy & Compliance","Sanctions Authorities"),pd.DataFrame()).copy()
+    progs=TABLES.get(("Trade Policy & Compliance","Sanctions Programmes"),pd.DataFrame()).copy()
+    links=TABLES.get(("Trade Policy & Compliance","Sanctions Entity Links"),pd.DataFrame()).copy()
+    watch=TABLES.get(("Trade Policy & Compliance","Watchlist Taxonomy"),pd.DataFrame()).copy()
+    rules=TABLES.get(("Trade Policy & Compliance","Policy Interaction Rules"),pd.DataFrame()).copy()
+
     if des.empty:
         st.info("Sanctions data unavailable.")
     else:
-        q=st.text_input("Find vessel / company / IMO / programme",placeholder="LADY MARIIA, SUN, 9220641, Iran, Russia...")
+        q=st.text_input(
+            "Find vessel / company / IMO / authority / programme",
+            placeholder="LADY MARIIA, SUN, 9220641, OFAC, Iran, Russia..."
+        )
+
+        # Search raw data so IDs/names/programmes all remain discoverable,
+        # but never expose implementation IDs in the normal presentation.
         d=des.copy()
-        if q: d=_contains_any(d,[q])
-        if not d.empty and "Programme ID" in d.columns:
-            st.markdown("### Designations by programme")
-            st.bar_chart(d["Programme ID"].map(label).value_counts(),horizontal=True)
-        tabs=st.tabs(["Designations","Entity Links","Authorities & Programmes","Watchlist Taxonomy","Policy Precedence"])
-        with tabs[0]: display_df(d,250)
+        l=links.copy()
+        if q:
+            d=_contains_any(d,[q])
+            l=_contains_any(l,[q])
+
+            # If the query matches an entity-link record, include its designation.
+            if not l.empty and "Designation ID" in l.columns and "Designation ID" in des.columns:
+                linked_ids=set(l["Designation ID"].astype(str))
+                extra=des[des["Designation ID"].astype(str).isin(linked_ids)]
+                d=pd.concat([d,extra],ignore_index=True).drop_duplicates()
+
+            # If the query matches a designation, include its entity link.
+            if not d.empty and "Designation ID" in d.columns and "Designation ID" in links.columns:
+                dids=set(d["Designation ID"].astype(str))
+                extra_links=links[links["Designation ID"].astype(str).isin(dids)]
+                l=pd.concat([l,extra_links],ignore_index=True).drop_duplicates()
+
+        # Compact headline metrics.
+        m1,m2,m3,m4=st.columns(4)
+        m1.metric("Designations",len(d))
+        m2.metric("Vessels",int((d.get("Target Type",pd.Series(dtype=str)).astype(str).str.lower()=="vessel").sum()) if not d.empty else 0)
+        m3.metric("Authorities",d["Authority ID"].nunique() if not d.empty and "Authority ID" in d.columns else 0)
+        m4.metric("Programmes",d["Programme ID"].nunique() if not d.empty and "Programme ID" in d.columns else 0)
+
+        counts=sanctions_programme_counts(d)
+        if not counts.empty:
+            render_dark_bar_list(counts,"Programme","Designations","Designations by programme")
+
+        tabs=st.tabs([
+            "Designations",
+            "Linked Entities",
+            "Authorities & Programmes",
+            "Watchlists",
+            "Policy Precedence"
+        ])
+
+        with tabs[0]:
+            st.markdown("### Government sanctions designations")
+            display_df(humanize_sanctions_df(d),250)
+
         with tabs[1]:
-            l=links
-            if q: l=_contains_any(l,[q])
-            display_df(l,250)
+            st.markdown("### Designated / linked entities")
+            if l.empty:
+                st.info("No linked entities for this filter.")
+            else:
+                render_sanction_link_cards(l)
+
         with tabs[2]:
-            display_df(auth,100)
-            display_df(progs,100)
-        with tabs[3]: display_df(watch,100)
-        with tabs[4]: display_df(rules,100)
+            a=auth.copy()
+            if not a.empty:
+                # Authority IDs are backend keys; show names and jurisdiction.
+                a=a.drop(columns=[c for c in ["Authority ID"] if c in a.columns],errors="ignore")
+                st.markdown("### Authorities")
+                display_df(a,100)
+            if not progs.empty:
+                pp=progs.copy()
+                if "Authority ID" in pp.columns:
+                    pp["Authority"]=pp["Authority ID"].astype(str).map(lambda x:SAN_AUTH_MAP.get(x,x))
+                pp=pp.drop(columns=[c for c in ["Programme ID","Authority ID"] if c in pp.columns],errors="ignore")
+                st.markdown("### Programmes")
+                display_df(pp,100)
+
+        with tabs[3]:
+            st.markdown("### Watchlist taxonomy")
+            st.caption("These categories are intentionally separate: a security advisory, shadow-fleet flag or IUU listing is not automatically a government sanctions designation.")
+            display_df(humanize_sanctions_df(watch),100)
+
+        with tabs[4]:
+            st.markdown("### Policy precedence")
+            st.caption("Trade preferences never override sanctions, prohibitions or export-control requirements.")
+            rr=rules.copy()
+            rr=rr.drop(columns=[c for c in ["Rule ID"] if c in rr.columns],errors="ignore")
+            display_df(rr,100)
 
 elif page=="News & Events":
     header("News & Events","Map assets and systems affected by war, weather, natural hazards, labour, operational incidents and announced commercial activity.")
