@@ -49,7 +49,7 @@ The new graph tests:
 This adds marine-access infrastructure as a first-class facility category alongside berths,
 yards, rail sidings, locks, canals, warehouses and other infrastructure.
 
-## v1.27.5 interface fix
+## v1.28 interface fix
 The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
 - shipyards and yard facilities/capabilities
 - defence/coast guard sample vessels
@@ -92,3 +92,25 @@ This fixes APM Terminals, DP World, PSA, Hutchison Ports and other terminal oper
 - Keeps white detail/popover surfaces readable with dark text.
 - Adds shipyard footprint maps for the detailed stress-test yards.
 - Moves maps/charts to the top of company Overview pages.
+
+## v1.28 — Events, Hazards & Impact Propagation
+
+New data workbook:
+- `data/13_events_hazards.xlsx`
+
+New model layers:
+- unified events
+- event locations
+- event-to-asset links
+- event-to-company links
+- event-to-system/corridor links
+- impact chains
+- event status history
+- event taxonomy
+
+Interface:
+- top navigation: Search | Companies | Ports | Shipyards | Vessels | Contracts | News & Events | Systems | Data
+- News & Events is map-first
+- company profiles overlay linked events on assets
+- ports, shipyards and systems expose linked events and impact chains
+- Contracts combines government procurement with commercial/infrastructure transactions and sales routes

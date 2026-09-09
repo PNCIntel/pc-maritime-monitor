@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.27.5"
+APP_VERSION = "v1.28"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -19,6 +19,11 @@ h1,h2,h3,h4,h5,h6,p,li,span,label{color:var(--text)}
 a{color:var(--blue)!important}
 .pc-kicker{color:var(--gold);font-size:.76rem;letter-spacing:.14em;text-transform:uppercase;font-weight:700}.pc-title{font-size:2rem;font-weight:800}.pc-sub{color:var(--muted);margin:.2rem 0 1.2rem}.pc-card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:8px}.pc-label{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.pc-big{font-size:1.3rem;font-weight:750}.pc-small{color:var(--muted);font-size:.88rem}.pc-rel{padding:8px 11px;border-left:3px solid var(--gold);background:var(--panel);margin:6px 0;border-radius:5px}.pc-chip{display:inline-block;border:1px solid var(--border);background:var(--panel);padding:3px 8px;border-radius:999px;font-size:.76rem;color:var(--muted);margin:2px 3px 2px 0}
 .pc-source{margin-top:7px;font-size:.82rem}.pc-source a{color:var(--blue)!important;text-decoration:none;font-weight:650}
+/* top navigation */
+div[role="radiogroup"]{gap:.35rem;flex-wrap:wrap}
+div[role="radiogroup"] label{background:#0d1a2b;border:1px solid #28415f;border-radius:9px;padding:.35rem .75rem}
+div[role="radiogroup"] label:has(input:checked){border-color:#d7b66a;background:#102238}
+[data-baseweb="tab-list"]{gap:.25rem}[data-baseweb="tab"]{color:#f3f6fa!important}
 [data-baseweb="select"]>div,[data-baseweb="input"]>div,.stTextInput input{background:var(--panel)!important;color:var(--text)!important;border-color:var(--border)!important}
 .stDataFrame{border:1px solid var(--border);border-radius:8px}
 /* Streamlit popovers, detail boxes, dialogs, expanders and tooltips must remain readable in dark mode */
@@ -81,6 +86,7 @@ WORKBOOKS = {
     "Sources": "10_sources_evidence.xlsx",
     "Systems & Waterways": "11_systems_waterways_governance.xlsx",
     "Defence & Shipbuilding": "12_defence_shipbuilding.xlsx",
+    "Events & Hazards": "13_events_hazards.xlsx",
 }
 
 @st.cache_data(show_spinner=False)
@@ -206,6 +212,10 @@ def build_label_index():
         (("Maritime","Vessels"),"Vessel ID","Vessel Name"),
         (("Infrastructure","Assets"),"Asset ID","Asset"),
         (("Systems & Waterways","Systems"),"System ID","System"),
+        (("Events & Hazards","Events"),"Event ID","Title"),
+        (("Events & Hazards","Event Asset Links"),"Asset ID","Asset"),
+        (("Events & Hazards","Event Company Links"),"Company ID","Company"),
+        (("Events & Hazards","Event System Links"),"System ID","System"),
     ]
     for key,idc,namec in candidates:
         df=TABLES.get(key,pd.DataFrame())
@@ -223,6 +233,8 @@ SEARCH_PRIORITY={
     "Companies":8,"Entity Registry":7,"Defence Companies":9,"Shipyards":10,"Programmes":10,"Contracts":9,
     "Sales & Delivery Routes":9,"Announcements":9,"News Registry":8,"System Entities":8,"Systems":8,"Facilities":7,
     "Yard Facilities":8,"Yard Capabilities":8,"Sample Vessels":9,"System Links":7,"Relationships":7,
+    "Events":12,"Event Asset Links":10,"Event Company Links":10,"Event System Links":10,"Impact Chains":11,
+    "Infra Deals":10,"Transactions V125":11,"Vessel Transactions":9,"Port Terminals":10,"Port Ownership":9,
 }
 
 @st.cache_data(show_spinner=False)
@@ -566,6 +578,13 @@ def build_company_profile(entity_id, entity_name):
     systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame())
     prof["systems"]=systems[systems["System ID"].astype(str).isin(system_ids)].copy() if system_ids and "System ID" in systems.columns else pd.DataFrame()
 
+    # Unified events / hazards / project announcements
+    event_assets=entity_asset_ids_from_profile(prof)
+    ev,eloc,ech=event_bundle_for_entities(scope_ids,event_assets,system_ids)
+    prof["events"]=ev
+    prof["event_locations"]=eloc
+    prof["impact_chains"]=ech
+
     return prof
 
 def profile_count(prof,key):
@@ -612,6 +631,29 @@ def show_named_list(df, title_col, subtitle_cols=None, source_col="Source URL", 
 def _numeric(s):
     return pd.to_numeric(s.astype(str).str.replace(",","",regex=False),errors="coerce")
 
+PORT_CITY_COORDS={
+    "Port of Rotterdam":(51.95,4.14),"Rotterdam":(51.95,4.14),
+    "Port of Shanghai":(31.2304,121.4737),"Shanghai":(31.2304,121.4737),
+    "Port of Genoa":(44.4056,8.9463),"Genoa":(44.4056,8.9463),
+    "Port of Constanța":(44.1598,28.6348),"Constanța":(44.1598,28.6348),
+    "Port of Odesa":(46.49,30.74),"Odesa":(46.49,30.74),
+    "Zayed Port":(24.515,54.375),"Khalifa Port":(24.799,54.651),
+    "Port of Poti":(42.15,41.67),"Poti":(42.15,41.67),
+    "Port of Batumi":(41.65,41.64),"Batumi":(41.65,41.64),
+    "Port of Itaqui":(-2.57,-44.37),"Itaqui":(-2.57,-44.37),
+    "Port of Vancouver":(49.29,-123.11),"Vancouver":(49.29,-123.11),
+    "Port of Prince Rupert":(54.31,-130.32),"Prince Rupert":(54.31,-130.32),
+    "Port of Singapore":(1.264,103.84),"Singapore":(1.264,103.84),
+    "Port of Gothenburg":(57.70,11.95),"Gothenburg":(57.70,11.95),
+    "Port of Klaipėda":(55.70,21.13),"Klaipėda":(55.70,21.13),
+    "Port of Gdańsk":(54.35,18.66),"Gdańsk":(54.35,18.66),
+    "Port of South Louisiana":(30.05,-90.55),"Port of New Orleans":(29.95,-90.07),
+    "Port of Thunder Bay":(48.38,-89.25),"Port of Duluth-Superior":(46.78,-92.10),
+    "Port of Montreal":(45.50,-73.55),"Montréal / Contrecœur":(45.50,-73.55),
+    "Port of Kuryk":(43.20,51.65),"Badagry Deep Sea Port":(6.415,2.886),
+    "SimFer Morebaya Port":(9.45,-13.55)
+}
+
 YARD_CITY_COORDS={
     ("Abu Dhabi","UAE"):(24.4539,54.3773),
     ("Halifax, Nova Scotia","Canada"):(44.6488,-63.5752),
@@ -651,16 +693,31 @@ def shipyard_map_data(prof):
     return pd.DataFrame(rows)
 
 def port_map_data(prof):
-    """Use canonical parent-port coordinates for a company's terminal network."""
+    """Canonical parent-port coordinates with stress-test fallback locations."""
     ports=prof.get("ports",pd.DataFrame()).copy()
-    if ports.empty or "Latitude" not in ports.columns or "Longitude" not in ports.columns:
-        return pd.DataFrame()
-    ports["lat"]=_numeric(ports["Latitude"])
-    ports["lon"]=_numeric(ports["Longitude"])
-    ports=ports.dropna(subset=["lat","lon"])
-    name_col="Port / Facility" if "Port / Facility" in ports.columns else None
-    if not name_col: return ports[["lat","lon"]]
-    return ports[[name_col,"Country","lat","lon"]].rename(columns={name_col:"name"})
+    terms=prof.get("port_terminals",pd.DataFrame()).copy()
+    rows=[]
+    if not ports.empty:
+        for _,r in ports.iterrows():
+            nm=str(r.get("Port / Facility","")).strip()
+            country=str(r.get("Country","")).strip()
+            lat=pd.to_numeric(pd.Series([r.get("Latitude","")]),errors="coerce").iloc[0] if "Latitude" in ports.columns else None
+            lon=pd.to_numeric(pd.Series([r.get("Longitude","")]),errors="coerce").iloc[0] if "Longitude" in ports.columns else None
+            if pd.isna(lat) or pd.isna(lon):
+                xy=PORT_CITY_COORDS.get(nm)
+                if xy: lat,lon=xy
+            if lat is not None and lon is not None and not pd.isna(lat) and not pd.isna(lon):
+                rows.append({"name":nm,"country":country,"lat":float(lat),"lon":float(lon)})
+    # fallback from parent-port names where canonical port rows are missing
+    if not terms.empty:
+        for _,r in terms.iterrows():
+            nm=str(r.get("Parent Port","")).strip()
+            if not nm: continue
+            xy=PORT_CITY_COORDS.get(nm) or PORT_CITY_COORDS.get("Port of "+nm)
+            if xy:
+                rows.append({"name":nm,"country":str(r.get("Country","")).strip(),"lat":xy[0],"lon":xy[1]})
+    if not rows: return pd.DataFrame()
+    return pd.DataFrame(rows).drop_duplicates(subset=["name","lat","lon"])
 
 def render_port_visuals(prof):
     terms=prof.get("port_terminals",pd.DataFrame())
@@ -721,6 +778,71 @@ def render_market_visuals(entity_id):
         st.markdown("### Market price")
         st.line_chart(p.set_index("Date")["Close Numeric"])
 
+
+def event_bundle_for_entities(entity_ids=None, asset_ids=None, system_ids=None):
+    entity_ids=set(str(x) for x in (entity_ids or []) if str(x))
+    asset_ids=set(str(x) for x in (asset_ids or []) if str(x))
+    system_ids=set(str(x) for x in (system_ids or []) if str(x))
+    events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame())
+    ecl=TABLES.get(("Events & Hazards","Event Company Links"),pd.DataFrame())
+    eal=TABLES.get(("Events & Hazards","Event Asset Links"),pd.DataFrame())
+    esl=TABLES.get(("Events & Hazards","Event System Links"),pd.DataFrame())
+    loc=TABLES.get(("Events & Hazards","Event Locations"),pd.DataFrame())
+    chains=TABLES.get(("Events & Hazards","Impact Chains"),pd.DataFrame())
+    ids=set()
+    if entity_ids and not ecl.empty and "Company ID" in ecl.columns:
+        x=ecl[ecl["Company ID"].astype(str).isin(entity_ids)]
+        if "Event ID" in x.columns: ids.update(x["Event ID"].astype(str))
+    if asset_ids and not eal.empty and "Asset ID" in eal.columns:
+        x=eal[eal["Asset ID"].astype(str).isin(asset_ids)]
+        if "Event ID" in x.columns: ids.update(x["Event ID"].astype(str))
+    if system_ids and not esl.empty and "System ID" in esl.columns:
+        x=esl[esl["System ID"].astype(str).isin(system_ids)]
+        if "Event ID" in x.columns: ids.update(x["Event ID"].astype(str))
+    ev=events[events["Event ID"].astype(str).isin(ids)].copy() if ids and not events.empty else pd.DataFrame()
+    eloc=loc[loc["Event ID"].astype(str).isin(ids)].copy() if ids and not loc.empty else pd.DataFrame()
+    ech=chains[chains["Event ID"].astype(str).isin(ids)].copy() if ids and not chains.empty else pd.DataFrame()
+    return ev,eloc,ech
+
+def render_event_map(events, locations, title="Event map"):
+    if locations is None or locations.empty:
+        st.info("No mapped event locations in this stress-test set.")
+        return
+    mp=locations.copy()
+    mp["lat"]=_numeric(mp["Latitude"]); mp["lon"]=_numeric(mp["Longitude"])
+    mp=mp.dropna(subset=["lat","lon"])
+    if mp.empty:
+        st.info("No mapped event locations.")
+        return
+    st.markdown(f"### {title}")
+    st.map(mp,latitude="lat",longitude="lon",size=90)
+    if events is not None and not events.empty and "Event Family" in events.columns:
+        fam=events["Event Family"].astype(str).replace("",pd.NA).dropna().value_counts()
+        if not fam.empty:
+            st.markdown("### Event mix")
+            st.bar_chart(fam,horizontal=True)
+
+def render_event_cards(events,max_items=40):
+    if events is None or events.empty:
+        st.info("No linked events.")
+        return
+    e=events.copy()
+    if "Start Date" in e.columns:
+        e["_dt"]=pd.to_datetime(e["Start Date"],errors="coerce")
+        e=e.sort_values("_dt",ascending=False)
+    show_named_list(e,"Title",["Start Date","Event Family","Event Type","Severity","Status","Location"],source_col="Primary Source URL",max_items=max_items)
+
+def entity_asset_ids_from_profile(prof):
+    ids=set()
+    for key,col in [
+        ("port_terminals","Terminal ID"),("ports","Port ID"),("yards","Yard ID"),
+        ("assets","Asset ID"),("defence_vessels","Vessel ID"),("maritime_vessels","Vessel ID")
+    ]:
+        df=prof.get(key,pd.DataFrame())
+        if isinstance(df,pd.DataFrame) and not df.empty and col in df.columns:
+            ids.update(df[col].astype(str).tolist())
+    return ids
+
 def render_company_profile(entity_id, entity_name):
     prof=build_company_profile(entity_id,entity_name)
     rec=company_record(entity_id)
@@ -739,16 +861,17 @@ def render_company_profile(entity_id, entity_name):
         if group_names:
             st.markdown("**Included group / controlled entities:** " + " · ".join(group_names))
 
-    c1,c2,c3,c4,c5,c6=st.columns(6)
+    c1,c2,c3,c4,c5,c6,c7=st.columns(7)
     c1.metric("Terminals",profile_count(prof,"port_terminals"))
     c2.metric("Ports",profile_count(prof,"ports"))
     c3.metric("Shipyards",profile_count(prof,"yards"))
     total_v=profile_count(prof,"defence_vessels")+profile_count(prof,"maritime_vessels")
     c4.metric("Linked vessels",total_v)
     c5.metric("Programmes",profile_count(prof,"programmes"))
-    c6.metric("News / Announcements",profile_count(prof,"news")+profile_count(prof,"announcements")+profile_count(prof,"port_news"))
+    c6.metric("Events",profile_count(prof,"events"))
+    c7.metric("News",profile_count(prof,"news")+profile_count(prof,"announcements")+profile_count(prof,"port_news"))
 
-    tabs=st.tabs(["Overview","Port Assets","Shipyards & Facilities","Vessels","Programmes & Contracts","Sales Routes","News","Relationships & Systems","Evidence"])
+    tabs=st.tabs(["Overview","Port Assets","Shipyards & Facilities","Vessels","Programmes & Contracts","Sales Routes","Events & Impact","News","Relationships & Systems","Evidence"])
     with tabs[0]:
         # Visual intelligence first
         if not prof["port_terminals"].empty:
@@ -756,6 +879,8 @@ def render_company_profile(entity_id, entity_name):
         if not prof["yards"].empty:
             render_shipyard_visuals(prof)
         render_market_visuals(entity_id)
+        if not prof["events"].empty:
+            render_event_map(prof["events"],prof["event_locations"],"Linked events & announced activity")
 
         if not prof["port_terminals"].empty:
             st.markdown("### Port terminals / facilities")
@@ -842,6 +967,14 @@ def render_company_profile(entity_id, entity_name):
         display_df(prof["sales_routes"],150)
 
     with tabs[6]:
+        render_event_map(prof["events"],prof["event_locations"],"Event / activity map")
+        st.markdown("### Linked events")
+        render_event_cards(prof["events"],50)
+        if not prof["impact_chains"].empty:
+            st.markdown("### Impact propagation")
+            display_df(prof["impact_chains"],100)
+
+    with tabs[7]:
         if not prof["announcements"].empty:
             st.markdown("### Announced activity")
             show_named_list(prof["announcements"],"Headline",["Date","Event Type"])
@@ -854,14 +987,14 @@ def render_company_profile(entity_id, entity_name):
         if prof["announcements"].empty and prof["news"].empty and prof["port_news"].empty:
             st.info("No linked news or announcements.")
 
-    with tabs[7]:
+    with tabs[8]:
         st.markdown("### Corporate relationships")
         readable_relationships(prof["relationships"],entity_id)
         if not prof["systems"].empty:
             st.markdown("### Trade systems / corridors")
             display_df(prof["systems"],50)
 
-    with tabs[8]:
+    with tabs[9]:
         if not prof["assets"].empty:
             st.markdown("### Direct assets")
             display_df(prof["assets"],100)
@@ -888,157 +1021,275 @@ def go_entity(eid):
     st.session_state["entity_pick"]=eid
     st.session_state["nav_page"]="Entity Explorer"
 
-# ---------- sidebar ----------
+# ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.27.5 · Stable visual Entity Explorer")
-pages=["Search P&C","Entity Explorer","Systems & Corridors","Shipyards & Defence","Intelligence","Data Explorer"]
-if "nav_page" not in st.session_state: st.session_state["nav_page"]="Search P&C"
-page=st.sidebar.radio("Navigate",pages,key="nav_page")
+st.sidebar.caption("v1.28 · Events, Hazards & Impact Propagation")
+st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
-st.sidebar.caption("Search and company/entity profiles are primary. Tables are now the evidence layer.")
 
-if page=="Search P&C":
-    header("Search P&C","Search for a company or subject, then open the connected profile instead of hunting through tables.")
-    q=st.text_input("Search",placeholder="Try: Seaspan, Inocea, Fincantieri UAE, Bollinger, AD Ports Black Sea, Simandou")
-    st.caption("For the clearest results, start with a company/entity name. The profile then exposes yards, vessels, programmes, contracts, routes and news.")
+pages=["Search","Companies","Ports","Shipyards","Vessels","Contracts","News & Events","Systems","Data"]
+if "top_nav" not in st.session_state:
+    st.session_state["top_nav"]="Search"
+page=st.radio("Navigation",pages,horizontal=True,label_visibility="collapsed",key="top_nav")
+
+def page_company_selector():
+    companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
+    if companies.empty: return None,None
+    opts=companies[["Company ID","Company"]].drop_duplicates().sort_values("Company").to_dict("records")
+    q=st.text_input("Find company",placeholder="APM Terminals, AD Ports, Inocea, Seaspan, Fincantieri, EDGE...")
     if q:
-        em=entity_search_matches(q)
+        opts=[x for x in opts if q.lower() in str(x["Company"]).lower()]
+    if not opts:
+        st.warning("No matching company.")
+        return None,None
+    pick=st.selectbox("Company",range(len(opts)),format_func=lambda i:opts[i]["Company"])
+    return opts[pick]["Company ID"],opts[pick]["Company"]
+
+if page=="Search":
+    header("Search P&C","One query across companies, ports, shipyards, vessels, contracts, transactions, news, events and systems.")
+    q=st.text_input("Query",placeholder="Try: APM Africa terminals, Seaspan US Coast Guard, AD Ports Black Sea, Rotterdam strike, Fincantieri UAE contracts")
+    if q:
+        em=entity_search_matches(q,20)
         if not em.empty:
-            st.markdown("### Entities")
-            cols=st.columns(2)
-            for n,(_,r) in enumerate(em.head(10).iterrows()):
-                with cols[n%2]:
+            st.markdown("### Best entity matches")
+            cols=st.columns(3)
+            for n,(_,r) in enumerate(em.head(9).iterrows()):
+                with cols[n%3]:
                     st.markdown(f"<div class='pc-card'><div class='pc-label'>{r['kind']}</div><div class='pc-big'>{r['name']}</div></div>",unsafe_allow_html=True)
-                    st.button("Open full profile",key=f"open_{r['id']}_{n}",on_click=go_entity,args=(r["id"],))
-        hits=ranked_search(q,limit=40)
+                    if st.button("Open",key=f"topopen_{r['id']}_{n}"):
+                        st.session_state["entity_pick"]=r["id"]
+                        st.session_state["top_nav"]="Companies"
+                        st.rerun()
+
+        hits=ranked_search(q,limit=100)
         if not hits.empty:
-            st.markdown("### Other matching records")
-            # Group matches so a query does not feel like a flat table dump.
-            for sheet in ["Programmes","Sample Vessels","Shipyards","Contracts","Sales & Delivery Routes","Announcements","News Registry","Systems","System Entities"]:
-                sub=hits[hits["sheet"]==sheet].head(8)
+            groups=[
+                ("Commercial / contracts",["Contracts","Infra Deals","Transactions V125","Sales & Delivery Routes","Vessel Transactions"]),
+                ("Assets",["Port Terminals","Ports","Shipyards","Yard Facilities","Sample Vessels","Vessels","Assets"]),
+                ("News & events",["Events","Announcements","News Registry","Impact Chains"]),
+                ("Systems & relationships",["Systems","System Entities","System Links","Relationships","Port Ownership"]),
+            ]
+            for title,sheets in groups:
+                sub=hits[hits["sheet"].isin(sheets)].head(20)
                 if sub.empty: continue
-                with st.expander(f"{sheet} · {len(sub)} match(es)",expanded=sheet in {"Programmes","Sample Vessels","Shipyards"}):
-                    for _,h in sub.iterrows():
-                        row=result_row(h)
-                        st.markdown(f"**{h.title}**")
-                        pairs=[]
-                        for c,v in row.items():
-                            if ID_RE.search(str(c)) or not str(v).strip() or "url" in str(c).lower(): continue
-                            pairs.append(f"{c}: {v}")
-                        st.caption(" · ".join(pairs[:5]))
+                st.markdown(f"### {title}")
+                for _,h in sub.iterrows():
+                    row=humanize_df(pd.DataFrame([result_row(h)])).iloc[0]
+                    vals=[]
+                    for c,v in row.items():
+                        if not str(v).strip() or "url" in str(c).lower(): continue
+                        vals.append(f"**{c}:** {v}")
+                    st.markdown(f"<div class='pc-card'><div class='pc-big'>{h.title}</div><div class='pc-small'>{' · '.join(vals[:5])}</div></div>",unsafe_allow_html=True)
         if em.empty and hits.empty:
             st.warning("No matching records found.")
 
-elif page=="Entity Explorer":
-    header("Entity Explorer","A single connected profile: shipyards, facilities, vessels, programmes, contracts, sales routes, news and relationships.")
-    if ECAT.empty:
-        st.info("No entity catalog available.")
-    else:
-        search=st.text_input("Find entity",placeholder="Seaspan, Inocea, Bollinger, MAESTRAL, Fincantieri, AD Ports...")
-        pool=ECAT.copy()
-        if search:
-            m=entity_search_matches(search,100)
-            if not m.empty: pool=ECAT[ECAT["id"].isin(m["id"].tolist())]
-        pool=pool.sort_values(["kind","name"]).reset_index(drop=True)
-        default_id=st.session_state.get("entity_pick","")
-        opts=pool.to_dict("records")
-        if not opts:
-            st.warning("No matching entity.")
-        else:
-            default=0
-            for i,x in enumerate(opts):
-                if x["id"]==default_id: default=i; break
-            pick=st.selectbox("Entity",range(len(opts)),index=default,format_func=lambda i:f"{opts[i]['name']} — {opts[i]['kind']}")
-            ent=opts[pick]; st.session_state["entity_pick"]=ent["id"]
-            if ent["kind"] in {"Company","Defence / Shipbuilding"} or ent["id"].startswith("COMP_"):
-                render_company_profile(ent["id"],ent["name"])
-            else:
-                st.markdown(f"## {ent['name']}")
-                rels=related_tables(ent["id"],ent["name"])
-                priority=["Shipyards","Programmes","Sample Vessels","Contracts","Sales & Delivery Routes","Announcements","News Registry","Relationships","System Links","Facilities","Assets"]
-                rels.sort(key=lambda x: priority.index(x[0][1]) if x[0][1] in priority else 99)
-                for (wb_label,sheet),sub in rels:
-                    if sheet in {"Sources","Overview"}: continue
-                    with st.expander(f"{sheet} · {len(sub)} record(s)",expanded=sheet in {"Programmes","Sample Vessels","Shipyards","Relationships"}):
-                        display_df(sub,150)
+elif page=="Companies":
+    header("Companies","Company-first view across assets, ports, shipyards, vessels, commercial relationships, programmes and events.")
+    # honor direct navigation from Search
+    default_id=st.session_state.get("entity_pick","")
+    companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
+    opts=companies[["Company ID","Company"]].drop_duplicates().sort_values("Company").to_dict("records") if not companies.empty else []
+    q=st.text_input("Find company",placeholder="APM Terminals, AD Ports, Inocea, Seaspan...")
+    if q: opts=[x for x in opts if q.lower() in x["Company"].lower()]
+    if opts:
+        default=0
+        for i,x in enumerate(opts):
+            if x["Company ID"]==default_id: default=i; break
+        pick=st.selectbox("Company",range(len(opts)),index=default,format_func=lambda i:opts[i]["Company"])
+        ent=opts[pick]; st.session_state["entity_pick"]=ent["Company ID"]
+        render_company_profile(ent["Company ID"],ent["Company"])
 
-elif page=="Systems & Corridors":
-    header("Systems & Corridors","Explore ports, waterways, rail interfaces, governance and project lifecycle as connected trade systems.")
+elif page=="Ports":
+    header("Ports","Port / terminal explorer with operators, facilities, geography and linked events.")
+    ports=TABLES.get(("Maritime","Ports"),pd.DataFrame())
+    terms=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame())
+    if ports.empty:
+        st.info("Port data unavailable.")
+    else:
+        q=st.text_input("Find port",placeholder="Rotterdam, Shanghai, Odesa, Vancouver, Constanța...")
+        p=ports.copy()
+        if q: p=_contains_any(p,[q],["Port / Facility","Country","Operator"])
+        p=p.sort_values("Port / Facility").reset_index(drop=True)
+        if p.empty:
+            st.warning("No matching port.")
+        else:
+            pick=st.selectbox("Port",range(len(p)),format_func=lambda i:f"{p.iloc[i].get('Port / Facility','')} — {p.iloc[i].get('Country','')}")
+            row=p.iloc[pick]; pid=str(row.get("Port ID","")); pname=str(row.get("Port / Facility",""))
+            st.markdown(f"## {pname}")
+            c1,c2,c3=st.columns(3)
+            pt=terms[terms["Port ID"].astype(str).eq(pid)].copy() if not terms.empty and "Port ID" in terms.columns else pd.DataFrame()
+            c1.metric("Terminals",len(pt))
+            c2.markdown(f"<div class='pc-card'><div class='pc-label'>Country</div><div class='pc-big'>{row.get('Country','')}</div></div>",unsafe_allow_html=True)
+            c3.markdown(f"<div class='pc-card'><div class='pc-label'>Operator</div><div class='pc-big'>{row.get('Operator','') or 'Multiple / authority-led'}</div></div>",unsafe_allow_html=True)
+            xy=PORT_CITY_COORDS.get(pname)
+            if xy:
+                st.map(pd.DataFrame([{"name":pname,"lat":xy[0],"lon":xy[1]}]),latitude="lat",longitude="lon",size=100)
+            ev,loc,chains=event_bundle_for_entities(asset_ids=[pid])
+            if not ev.empty:
+                render_event_map(ev,loc,"Events affecting this port")
+            tabs=st.tabs(["Terminals","Events & Impact","Evidence"])
+            with tabs[0]: display_df(pt,300)
+            with tabs[1]:
+                render_event_cards(ev,50)
+                if not chains.empty: display_df(chains,100)
+            with tabs[2]: display_df(pd.DataFrame([row]),20)
+
+elif page=="Shipyards":
+    header("Shipyards","Physical shipyard assets: ownership, capabilities, facilities, programmes, vessels and events.")
+    yards=TABLES.get(("Defence & Shipbuilding","Shipyards"),pd.DataFrame())
+    if yards.empty:
+        st.info("Shipyard data unavailable.")
+    else:
+        q=st.text_input("Find shipyard / country / company",placeholder="Lévis, Rauma, Antalya, Bollinger, Inocea...")
+        y=yards.copy()
+        if q: y=_contains_any(y,[q],["Shipyard","Location","Country","Yard Model","Current / Representative Work"])
+        y=y.sort_values("Shipyard").reset_index(drop=True)
+        pick=st.selectbox("Shipyard",range(len(y)),format_func=lambda i:f"{y.iloc[i]['Shipyard']} — {y.iloc[i]['Country']}")
+        r=y.iloc[pick]; yid=str(r["Yard ID"]); cid=str(r["Company Entity ID"])
+        st.markdown(f"## {r['Shipyard']}")
+        st.caption(f"{label(cid)} · {r.get('Location','')} · {r.get('Yard Model','')}")
+        sm=shipyard_map_data({"yards":pd.DataFrame([r])})
+        if not sm.empty: st.map(sm,latitude="lat",longitude="lon",size=100)
+        fac=TABLES.get(("Defence & Shipbuilding","Yard Facilities"),pd.DataFrame())
+        caps=TABLES.get(("Defence & Shipbuilding","Yard Capabilities"),pd.DataFrame())
+        vessels=TABLES.get(("Defence & Shipbuilding","Sample Vessels"),pd.DataFrame())
+        yf=_match_any(fac,["Yard ID"],[yid]); yc=_match_any(caps,["Yard ID"],[yid]); yv=_match_any(vessels,["Build Yard ID"],[yid])
+        ev,loc,chains=event_bundle_for_entities([cid],[yid],[])
+        tabs=st.tabs(["Facilities","Capabilities","Vessels","Events","Evidence"])
+        with tabs[0]: display_df(yf,150)
+        with tabs[1]: display_df(yc,150)
+        with tabs[2]: display_df(yv,150)
+        with tabs[3]:
+            render_event_map(ev,loc,"Shipyard-linked events")
+            render_event_cards(ev,50)
+        with tabs[4]: display_df(pd.DataFrame([r]),20)
+
+elif page=="Vessels":
+    header("Vessels","Commercial, defence and Coast Guard vessels in one explorer.")
+    commercial=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
+    defence=TABLES.get(("Defence & Shipbuilding","Sample Vessels"),pd.DataFrame()).copy()
+    q=st.text_input("Find vessel / owner / customer / class",placeholder="Polar Max, Abu Dhabi, Seaspan, CMA CGM...")
+    t1,t2=st.tabs([f"Commercial · {len(commercial)}",f"Defence / Government · {len(defence)}"])
+    with t1:
+        c=commercial
+        if q: c=_contains_any(c,[q])
+        display_df(c,400)
+    with t2:
+        d=defence
+        if q: d=_contains_any(d,[q])
+        display_df(d,250)
+
+elif page=="Contracts":
+    header("Contracts & Commercial","Government procurement, commercial transactions, infrastructure deals, vessel sales and delivery routes.")
+    q=st.text_input("Filter",placeholder="AD Ports, UAE, Coast Guard, CLI, port terminals, icebreakers...")
+    defence=TABLES.get(("Defence & Shipbuilding","Contracts"),pd.DataFrame())
+    tx=TABLES.get(("Transactions","Transactions V125"),pd.DataFrame())
+    deals=TABLES.get(("Transactions","Infra Deals"),pd.DataFrame())
+    routes=TABLES.get(("Defence & Shipbuilding","Sales & Delivery Routes"),pd.DataFrame())
+    if q:
+        defence=_contains_any(defence,[q]); tx=_contains_any(tx,[q]); deals=_contains_any(deals,[q]); routes=_contains_any(routes,[q])
+    # simple commercial composition figure
+    counts=pd.Series({"Defence / government":len(defence),"Corporate transactions":len(tx),"Infrastructure deals":len(deals),"Sales / delivery routes":len(routes)})
+    st.bar_chart(counts,horizontal=True)
+    t1,t2,t3,t4=st.tabs([f"Defence / Government · {len(defence)}",f"Transactions · {len(tx)}",f"Infrastructure Deals · {len(deals)}",f"Sales / Delivery · {len(routes)}"])
+    with t1: display_df(defence,250)
+    with t2: display_df(tx,250)
+    with t3: display_df(deals,250)
+    with t4: display_df(routes,250)
+
+elif page=="News & Events":
+    header("News & Events","Map assets and systems affected by war, weather, natural hazards, labour, operational incidents and announced commercial activity.")
+    events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+    locations=TABLES.get(("Events & Hazards","Event Locations"),pd.DataFrame()).copy()
+    q=st.text_input("Search events / location / company / system",placeholder="Rotterdam, strike, Black Sea, AD Ports, typhoon, Genoa...")
+    families=sorted([x for x in events.get("Event Family",pd.Series(dtype=str)).unique().tolist() if str(x).strip()])
+    selected=st.multiselect("Event families",families,default=[])
+    e=events
+    if q:
+        e=_contains_any(e,[q])
+        # also expand through company/asset/system link names
+        ids=set(e["Event ID"].astype(str).tolist()) if not e.empty else set()
+        for key in [("Events & Hazards","Event Company Links"),("Events & Hazards","Event Asset Links"),("Events & Hazards","Event System Links")]:
+            df=TABLES.get(key,pd.DataFrame())
+            if not df.empty:
+                m=_contains_any(df,[q])
+                if "Event ID" in m.columns: ids.update(m["Event ID"].astype(str).tolist())
+        e=events[events["Event ID"].astype(str).isin(ids)] if ids else events.iloc[0:0]
+    if selected:
+        e=e[e["Event Family"].isin(selected)]
+    ids=set(e["Event ID"].astype(str)) if not e.empty else set()
+    loc=locations[locations["Event ID"].astype(str).isin(ids)] if ids else locations.iloc[0:0]
+    render_event_map(e,loc,"Event & activity map")
+    # severity / family figures
+    if not e.empty:
+        c1,c2=st.columns(2)
+        with c1:
+            fam=e["Event Family"].value_counts()
+            if not fam.empty:
+                st.markdown("### Events by family"); st.bar_chart(fam,horizontal=True)
+        with c2:
+            sev=e["Severity"].value_counts()
+            if not sev.empty:
+                st.markdown("### Events by severity"); st.bar_chart(sev,horizontal=True)
+    t1,t2,t3=st.tabs(["Event Feed","Impact Chains","Linked Assets / Companies"])
+    with t1: render_event_cards(e,100)
+    with t2:
+        chains=TABLES.get(("Events & Hazards","Impact Chains"),pd.DataFrame())
+        if ids: chains=chains[chains["Event ID"].astype(str).isin(ids)]
+        display_df(chains,200)
+    with t3:
+        al=TABLES.get(("Events & Hazards","Event Asset Links"),pd.DataFrame())
+        cl=TABLES.get(("Events & Hazards","Event Company Links"),pd.DataFrame())
+        sl=TABLES.get(("Events & Hazards","Event System Links"),pd.DataFrame())
+        if ids:
+            al=al[al["Event ID"].astype(str).isin(ids)]
+            cl=cl[cl["Event ID"].astype(str).isin(ids)]
+            sl=sl[sl["Event ID"].astype(str).isin(ids)]
+        a,b,c=st.tabs(["Assets","Companies","Systems"])
+        with a: display_df(al,200)
+        with b: display_df(cl,200)
+        with c: display_df(sl,200)
+
+elif page=="Systems":
+    header("Systems & Corridors","Connected port, rail, waterway and corridor systems with linked events.")
     systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame())
-    if systems.empty: st.info("Systems workbook not available.")
+    if systems.empty:
+        st.info("Systems workbook not available.")
     else:
         names=systems["System"].tolist(); name=st.selectbox("System",names)
         srow=systems[systems["System"]==name].iloc[0]; sid=srow["System ID"]
-        a,b=st.columns(2)
-        a.markdown(f"<div class='pc-card'><div class='pc-label'>Geography</div><div class='pc-big'>{srow.get('Geography','')}</div></div>",unsafe_allow_html=True)
-        b.markdown(f"<div class='pc-card'><div class='pc-label'>Archetype</div><div class='pc-big'>{srow.get('Archetype','')}</div></div>",unsafe_allow_html=True)
-        # Visual system summary
-        se_all=TABLES.get(("Systems & Waterways","System Entities"),pd.DataFrame())
-        se_vis=se_all[se_all["System ID"].astype(str).eq(str(sid))].copy() if "System ID" in se_all.columns else pd.DataFrame()
-        if not se_vis.empty:
-            vis1,vis2=st.columns(2)
-            with vis1:
-                if "Entity Type" in se_vis.columns:
-                    et=se_vis["Entity Type"].astype(str).replace("",pd.NA).dropna().value_counts()
-                    if not et.empty:
-                        st.markdown("### System composition")
-                        st.bar_chart(et,horizontal=True)
-            with vis2:
-                # Match named system ports against the canonical port table for coordinates.
-                allports=TABLES.get(("Maritime","Ports"),pd.DataFrame())
-                if not allports.empty and "Port / Facility" in allports.columns and "Entity" in se_vis.columns:
-                    names=set(se_vis["Entity"].astype(str))
-                    mp=allports[allports["Port / Facility"].astype(str).isin(names)].copy()
-                    if "Latitude" in mp.columns and "Longitude" in mp.columns:
-                        mp["lat"]=_numeric(mp["Latitude"]); mp["lon"]=_numeric(mp["Longitude"])
-                        mp=mp.dropna(subset=["lat","lon"])
-                        if not mp.empty:
-                            st.markdown("### System map")
-                            st.map(mp,latitude="lat",longitude="lon",size=70)
+        st.markdown(f"## {name}")
+        st.caption(f"{srow.get('Geography','')} · {srow.get('Archetype','')}")
+        se=TABLES.get(("Systems & Waterways","System Entities"),pd.DataFrame())
+        sl=TABLES.get(("Systems & Waterways","System Links"),pd.DataFrame())
+        sf=TABLES.get(("Systems & Waterways","Facilities"),pd.DataFrame())
+        si=TABLES.get(("Systems & Waterways","Network Interfaces"),pd.DataFrame())
+        sube=se[se["System ID"].astype(str).eq(str(sid))] if "System ID" in se.columns else pd.DataFrame()
+        subs=sl[sl["System ID"].astype(str).eq(str(sid))] if "System ID" in sl.columns else pd.DataFrame()
+        subf=sf[sf["System ID"].astype(str).eq(str(sid))] if "System ID" in sf.columns else pd.DataFrame()
+        subi=si[si["System ID"].astype(str).eq(str(sid))] if "System ID" in si.columns else pd.DataFrame()
+        ev,loc,chains=event_bundle_for_entities(system_ids=[sid])
+        if not ev.empty: render_event_map(ev,loc,"System events")
+        tabs=st.tabs(["Entities","Relationships","Facilities","Interfaces","Events"])
+        with tabs[0]: display_df(sube,200)
+        with tabs[1]:
+            for _,r in subs.iterrows():
+                st.markdown(f"<div class='pc-rel'><b>{label(r['Source Entity ID'])}</b> → {str(r['Relationship']).replace('_',' ').title()} → <b>{label(r['Target Entity ID'])}</b></div>",unsafe_allow_html=True)
+        with tabs[2]: display_df(subf,200)
+        with tabs[3]: display_df(subi,200)
+        with tabs[4]:
+            render_event_cards(ev,50)
+            if not chains.empty: display_df(chains,100)
 
-        tabs=st.tabs(["Relationships","Entities","Facilities","Interfaces","Stress Test"])
-        keys=["System Links","System Entities","Facilities","Network Interfaces","Stress Tests"]
-        for tab,sheet in zip(tabs,keys):
-            with tab:
-                df=TABLES.get(("Systems & Waterways",sheet),pd.DataFrame())
-                if "System ID" in df.columns: df=df[df["System ID"]==sid]
-                if sheet=="System Links" and not df.empty:
-                    for _,r in df.iterrows():
-                        st.markdown(f"<div class='pc-rel'><b>{label(r['Source Entity ID'])}</b> → {str(r['Relationship']).replace('_',' ').title()} → <b>{label(r['Target Entity ID'])}</b></div>",unsafe_allow_html=True)
-                else: display_df(df,150)
-
-elif page=="Shipyards & Defence":
-    header("Shipyards & Defence","Start with a company and immediately see its yards, vessels, programmes, contracts and delivery routes.")
-    dc=TABLES.get(("Defence & Shipbuilding","Defence Companies"),pd.DataFrame())
-    if dc.empty:
-        st.info("Defence & shipbuilding workbook not available.")
-    else:
-        names=dc[["Entity ID","Entity"]].drop_duplicates().sort_values("Entity")
-        choices=names.to_dict("records")
-        pick=st.selectbox("Company / industrial group",range(len(choices)),format_func=lambda i:choices[i]["Entity"])
-        ent=choices[pick]
-        render_company_profile(ent["Entity ID"],ent["Entity"])
-
-elif page=="Intelligence":
-    header("Intelligence & Announcements","News and announced activity tied to companies, assets, shipyards, programmes, vessels and systems.")
-    q=st.text_input("Filter",placeholder="e.g. Seaspan, Davie, UAE, icebreaker, Simandou, Genoa")
-    news=TABLES.get(("Intelligence","News Registry"),pd.DataFrame())
-    anns=TABLES.get(("Defence & Shipbuilding","Announcements"),pd.DataFrame())
-    if q:
-        news=_contains_any(news,[q]); anns=_contains_any(anns,[q])
-    t1,t2=st.tabs([f"News · {len(news)}",f"Announcements · {len(anns)}"])
-    with t1: show_named_list(news,"Headline",["Published Date","Publisher","Country","Event Type"],source_col="URL",max_items=150)
-    with t2: show_named_list(anns,"Headline",["Date","Event Type"],max_items=150)
-
-elif page=="Data Explorer":
-    header("Data Explorer","Raw evidence and debugging tables. Use Search or Entity Explorer for normal analysis.")
+elif page=="Data":
+    header("Data Explorer","Raw evidence and debugging tables. Internal IDs remain hidden unless explicitly enabled.")
     wb_label=st.selectbox("Workbook",list(WORKBOOKS.keys()))
     sheet=st.selectbox("Sheet",workbook_sheets(wb_label))
     df=load_sheet(wb_label,sheet)
     q=st.text_input("Filter this table")
     if q: df=_contains_any(df,[q])
-    show_debug_ids=st.toggle("Show internal database IDs",value=False,help="Off by default. Turn on only for schema/debug work.")
-    display_df(df,500,show_ids=show_debug_ids)
+    show_debug_ids=st.toggle("Show internal database IDs",value=False)
+    display_df(df,600,show_ids=show_debug_ids)
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"{APP_TITLE} {APP_VERSION} · {len(TABLES):,} loaded tables")
