@@ -23,3 +23,10 @@ The Streamlit app reads each logical table from the appropriate Excel workbook a
 The CSV fallback remains temporarily for backwards compatibility.
 
 This is the v1.25 theory/stress-test model before Supabase migration.
+
+## v1.25.1 enrichment
+- Inocea: Davie, Helsinki Shipyard, Gulf Copper, Sata Shipbuilding, Davie Defense and Federal Fleet Services.
+- CLI: Itaqui added as a canonical port; CLI Norte and CLI Sul added as actual terminal records linked to Itaqui and Santos.
+- Seaspan: searchable company/alias handling, Entity Registry coverage, fleet portfolio and ten official operating-fleet examples.
+- News: additional entity-linked Inocea, Seaspan, CLI, Macquarie/Qube and AD Ports records.
+- AD Ports Group: 24 official monthly share-price observations for 2024–2025 plus an in-app price chart.

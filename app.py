@@ -1110,8 +1110,8 @@ def watch_area_bundle(corridor_id):
 
 # ---------- Sidebar ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("Intelligence Model v1.25 Theory • Split Excel deployment")
-st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.25</div>", unsafe_allow_html=True)
+st.sidebar.caption("Intelligence Model v1.25.1 Enriched • Split Excel deployment")
+st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.25.1</div>", unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Navigate",
     [
@@ -1184,7 +1184,20 @@ elif page == "Companies":
         st.warning("companies.csv is missing.")
         st.stop()
     namec = col(df, ["Company","Company Name"])
-    options = sorted([x for x in df[namec].unique() if x]) if namec else []
+    aliases_df = D.get("company_aliases", pd.DataFrame())
+    cq = st.text_input("Search company or alias", placeholder="e.g. Seaspan, Inocea, CLI, Macquarie, OMERS")
+    view = df.copy()
+    if cq and namec:
+        qlow = cq.strip().lower()
+        direct_ids = set(view[view[namec].astype(str).str.lower().str.contains(re.escape(qlow), na=False)]["Company ID"].astype(str))
+        if not aliases_df.empty and "Alias" in aliases_df.columns and "Entity ID" in aliases_df.columns:
+            alias_ids = set(aliases_df[aliases_df["Alias"].astype(str).str.lower().str.contains(re.escape(qlow), na=False)]["Entity ID"].astype(str))
+            direct_ids |= alias_ids
+        view = view[view["Company ID"].astype(str).isin(direct_ids)]
+    options = sorted([x for x in view[namec].unique() if x]) if namec else []
+    if not options:
+        st.info("No company matched that search.")
+        st.stop()
     selected = st.selectbox("Company", options)
     row = df[df[namec] == selected].iloc[0]
     cid = row.get("Company ID","")
@@ -1393,6 +1406,13 @@ elif page == "Companies":
             ph = prices[prices["Company ID"].astype(str) == str(cid)]
             if not ph.empty:
                 st.markdown("#### Market-price history / milestones")
+                if "Month End" in ph.columns and "Close" in ph.columns:
+                    chart_df = ph.copy()
+                    chart_df["Month End"] = pd.to_datetime(chart_df["Month End"], errors="coerce")
+                    chart_df["Close"] = pd.to_numeric(chart_df["Close"], errors="coerce")
+                    chart_df = chart_df.dropna(subset=["Month End","Close"]).sort_values("Month End")
+                    if len(chart_df) >= 3:
+                        st.line_chart(chart_df.set_index("Month End")[["Close"]])
                 safe_display(ph)
     with tabs[6]:
         safe_display(entity_events(cid))
