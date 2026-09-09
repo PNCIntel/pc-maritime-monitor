@@ -49,7 +49,7 @@ The new graph tests:
 This adds marine-access infrastructure as a first-class facility category alongside berths,
 yards, rail sidings, locks, canals, warehouses and other infrastructure.
 
-## v1.28.6 interface fix
+## v1.28.7 interface fix
 The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
 - shipyards and yard facilities/capabilities
 - defence/coast guard sample vessels
@@ -163,3 +163,10 @@ App-only update:
 - Relationship rows expose explicit `Open <Company>` actions for each linked company endpoint instead of guessing the opposite endpoint.
 - Fincantieri / EDGE / MAESTRAL relationship navigation now resolves predictably.
 - Vessel jumps populate the vessel search field before it is instantiated.
+
+## v1.28.7 session-state safety
+App-only update:
+- Fixes TypeError when old Streamlit sessions retain string values in numeric selector state.
+- Company, Port and Shipyard selector state is coerced to a valid integer before comparison/use.
+- System selector state is validated against available names.
+- Cross-object navigation remains compatible with sessions created by older app versions.

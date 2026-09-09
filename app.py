@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.28.6"
+APP_VERSION = "v1.28.7"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -1535,9 +1535,25 @@ def render_linked_objects(df, object_type_col, object_id_col, object_name_col, r
             else:
                 st.caption("Linked object")
 
+def safe_index_state(key, default_index, option_count):
+    """Normalize stale Streamlit widget state from older app versions.
+    Selectbox index widgets must always contain an int in range.
+    """
+    try:
+        current=st.session_state.get(key,default_index)
+        current=int(current)
+    except (TypeError,ValueError):
+        current=int(default_index)
+
+    if current < 0 or current >= int(option_count):
+        current=int(default_index)
+
+    st.session_state[key]=current
+    return current
+
 # ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.28.6 · Reliable cross-object navigation")
+st.sidebar.caption("v1.28.7 · Session-safe cross-object navigation")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
@@ -1554,6 +1570,9 @@ if "top_nav" not in st.session_state or st.session_state["top_nav"] not in pages
     st.session_state["top_nav"]="Search"
 
 page=st.radio("Navigation",pages,horizontal=True,label_visibility="collapsed",key="top_nav")
+
+# Old Streamlit sessions can retain widget values from previous app versions.
+# Numeric selectors are normalized again on their destination page.
 
 def page_company_selector():
     companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
@@ -1641,9 +1660,9 @@ elif page=="Companies":
 
         # Critical: apply selection BEFORE keyed selectbox creation.
         if requested_index is not None:
-            st.session_state["company_select_idx"]=desired_index
-        elif "company_select_idx" not in st.session_state or st.session_state["company_select_idx"] >= len(opts):
-            st.session_state["company_select_idx"]=desired_index
+            st.session_state["company_select_idx"]=int(desired_index)
+        else:
+            safe_index_state("company_select_idx",int(desired_index),len(opts))
 
         pick=st.selectbox(
             "Company",
@@ -1687,9 +1706,9 @@ elif page=="Ports":
                 if match_idx: default_port=int(match_idx[0])
 
             if requested_port:
-                st.session_state["port_select_idx"]=default_port
-            elif "port_select_idx" not in st.session_state or st.session_state["port_select_idx"] >= len(p):
-                st.session_state["port_select_idx"]=default_port
+                st.session_state["port_select_idx"]=int(default_port)
+            else:
+                safe_index_state("port_select_idx",int(default_port),len(p))
 
             pick=st.selectbox(
                 "Port",
@@ -1736,9 +1755,9 @@ elif page=="Shipyards":
             if mi: default_yard=int(mi[0])
 
         if requested_yard:
-            st.session_state["yard_select_idx"]=default_yard
-        elif "yard_select_idx" not in st.session_state or st.session_state["yard_select_idx"] >= len(y):
-            st.session_state["yard_select_idx"]=default_yard
+            st.session_state["yard_select_idx"]=int(default_yard)
+        else:
+            safe_index_state("yard_select_idx",int(default_yard),len(y))
 
         pick=st.selectbox(
             "Shipyard",
@@ -1910,8 +1929,10 @@ elif page=="Systems":
         names=systems["System"].tolist()
         if requested_system:
             st.session_state["system_select_name"]=names[default_system]
-        elif "system_select_name" not in st.session_state or st.session_state["system_select_name"] not in names:
-            st.session_state["system_select_name"]=names[default_system]
+        else:
+            current_system=st.session_state.get("system_select_name",names[default_system])
+            if not isinstance(current_system,str) or current_system not in names:
+                st.session_state["system_select_name"]=names[default_system]
 
         name=st.selectbox("System",names,key="system_select_name")
         srow=systems[systems["System"]==name].iloc[0]; sid=srow["System ID"]
