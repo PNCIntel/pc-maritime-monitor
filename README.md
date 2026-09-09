@@ -196,7 +196,7 @@ App-only update:
 - Vessels is now an object explorer with Ownership & Management, Sanctions & Compliance, News & Events and Evidence tabs.
 - Sanctions-linked canonical vessels can open directly into the Vessel profile.
 
-## v1.31 sanctions UI helper fix
+## v1.32.1 sanctions UI helper fix
 - App-only patch.
 - Restores missing sanctions presentation helpers used by the Sanctions & Compliance page.
 - Fixes NameError on sanctions_programme_counts.
@@ -222,3 +222,23 @@ App-only update:
 - New `Platform Classes` and `Vessel Status History` sheets distinguish class, programme, vessel and lifecycle.
 - Vessels UI now has a Commercial vs Defence/Government domain switch and full defence-vessel profiles.
 - Defence vessel profiles expose programme, contracts, participants, builder/yard, milestone history, announcements and delivery route.
+
+## v1.32 — Gulf kinetic escalation & tanker incident integration
+- Adds canonical commercial vessel records for RIESCO, HORIZON 1, KAVIZ, CHARMINAR, DERYA and NEW ANDROS.
+- Adds ownership / sanctions / charter relationships where source-backed.
+- Creates a new `Persian Gulf / Hormuz / Gulf of Oman Security System` linking the Strait, Gulf of Oman, northern Gulf, Kharg, UAE gateways and affected vessels.
+- Adds 8–9 Sep 2026 CENTCOM tanker strikes, NEW ANDROS drone strike, Port Rashid listing-tanker report and wider regional multi-vessel attack wave to Intelligence and Events/Hazards.
+- Adds direct event-to-vessel, event-to-port, event-to-company and event-to-system links so affected objects can be opened from the News & Events view.
+- Adds source-backed OFAC records for CHARMINAR, RIESCO/AQUARIS and DERYA.
+- Preserves source disagreement: HORIZON 1 is a registry-identified LPG tanker even though CENTCOM grouped all five struck vessels as crude-oil carriers.
+- Unidentified Port Rashid tanker remains an incident object only; no invented vessel record.
+
+## v1.32.1 — live-event visibility / traversal fix
+App-only update:
+- News & Events now has a `Current / developing events` section above the map.
+- Gulf EVT132 live events are surfaced explicitly while the incident picture is developing.
+- Event Feed is sorted newest first.
+- Vessel profiles traverse Event Asset Links / Event Entity Links instead of only primary-subject events.
+- HORIZON 1, KAVIZ, CHARMINAR and DERYA now inherit the common CENTCOM strike event.
+- NEW ANDROS retains its own drone-strike event.
+- Unidentified Port Rashid tanker remains an event without an invented vessel object.

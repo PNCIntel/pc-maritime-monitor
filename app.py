@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.31"
+APP_VERSION = "v1.32.1"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -302,7 +302,7 @@ SEARCH_PRIORITY={
     "Companies":8,"Entity Registry":7,"Defence Companies":9,"Shipyards":10,"Programmes":10,"Contracts":9,
     "Sales & Delivery Routes":9,"Announcements":9,"News Registry":8,"System Entities":8,"Systems":8,"Facilities":7,
     "Yard Facilities":8,"Yard Capabilities":8,"Sample Vessels":12,"Platform Classes":10,"Vessel Status History":11,"System Links":7,"Relationships":7,
-    "Events":12,"Strategic Events":12,"Event Asset Links":10,"Event Company Links":10,"Event System Links":10,"Impact Chains":11,
+    "Events":14,"Strategic Events":14,"Event Asset Links":12,"Event Company Links":11,"Event System Links":12,"Impact Chains":13,
     "Trade Agreements":14,"Agreement Asset Links":12,"Agreement Company Links":12,"Tariff Coverage":13,"HS Product Tests":12,
     "Rules of Origin":11,"Customs & Procurement":11,"Trade Remedies & Restrictions":12,"Sanctions Designations":14,"Sanctions Entity Links":13,
     "Infra Deals":10,"Transactions V125":11,"Vessel Transactions":9,"Port Terminals":10,"Port Ownership":9,
@@ -1850,7 +1850,54 @@ def vessel_profile_data(vessel_id, vessel_name):
         if "News ID" in nl.columns: nids.update(nl["News ID"].astype(str).tolist())
     n=news[news["News ID"].astype(str).isin(nids)].copy() if nids and not news.empty and "News ID" in news.columns else pd.DataFrame()
 
-    ev=events[events["Subject Entity ID"].astype(str).eq(str(vessel_id))].copy() if not events.empty and "Subject Entity ID" in events.columns else pd.DataFrame()
+    # Strategic events can reach a vessel either as the primary subject OR through Event Entity Links.
+    event_ids=set()
+    if not events.empty and "Subject Entity ID" in events.columns and "Event ID" in events.columns:
+        direct=events[events["Subject Entity ID"].astype(str).eq(str(vessel_id))]
+        event_ids.update(direct["Event ID"].astype(str).tolist())
+
+    intel_links=TABLES.get(("Intelligence","Event Entity Links"),pd.DataFrame())
+    if not intel_links.empty and "Entity ID" in intel_links.columns:
+        linked=intel_links[intel_links["Entity ID"].astype(str).eq(str(vessel_id))].copy()
+        for c in ["Canonical Event ID","Event ID"]:
+            if c in linked.columns:
+                event_ids.update(x for x in linked[c].astype(str).tolist() if x and x!="nan")
+
+    ev=events[events["Event ID"].astype(str).isin(event_ids)].copy() if event_ids and not events.empty and "Event ID" in events.columns else pd.DataFrame()
+
+    # Unified Events & Hazards links are a second source of live-event attachment.
+    unified_events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame())
+    unified_links=TABLES.get(("Events & Hazards","Event Asset Links"),pd.DataFrame())
+    uids=set()
+    if not unified_links.empty and "Asset ID" in unified_links.columns and "Event ID" in unified_links.columns:
+        ul=unified_links[unified_links["Asset ID"].astype(str).eq(str(vessel_id))]
+        uids.update(ul["Event ID"].astype(str).tolist())
+
+    unified=pd.DataFrame()
+    if uids and not unified_events.empty and "Event ID" in unified_events.columns:
+        unified=unified_events[unified_events["Event ID"].astype(str).isin(uids)].copy()
+        if not unified.empty:
+            # Convert unified event rows into the Strategic Events shape used by the vessel UI.
+            mapped=[]
+            for _,ur in unified.iterrows():
+                mapped.append({
+                    "Event ID":str(ur.get("Event ID","")).strip(),
+                    "Date":str(ur.get("Date","")).strip(),
+                    "Event Type":str(ur.get("Event Family","")).strip() or str(ur.get("Event Type","")).strip(),
+                    "Subject Entity ID":str(vessel_id),
+                    "Location":str(ur.get("Location","")).strip(),
+                    "Title":str(ur.get("Title","")).strip(),
+                    "Description":str(ur.get("Description","")).strip(),
+                    "Operational Impact":str(ur.get("Direct Impact","")).strip(),
+                    "Financial / Strategic Impact":str(ur.get("Strategic / Commercial Outcome","")).strip(),
+                    "Source ID":str(ur.get("Source ID","")).strip(),
+                })
+            unified=pd.DataFrame(mapped)
+
+    if not unified.empty:
+        ev=pd.concat([ev,unified],ignore_index=True,sort=False)
+        if "Event ID" in ev.columns:
+            ev=ev.drop_duplicates(subset=["Event ID"])
 
     san=sanctions[sanctions["Canonical Entity ID"].astype(str).eq(str(vessel_id))].copy() if not sanctions.empty and "Canonical Entity ID" in sanctions.columns else pd.DataFrame()
 
@@ -2101,9 +2148,61 @@ def render_defence_vessel_profile(vessel_id,vessel_name):
             display_df(rt,50)
         display_df(row,20)
 
+
+def render_live_event_cluster(events, locations):
+    if events is None or events.empty:
+        return
+    e=events.copy()
+    if "Date" in e.columns:
+        e["_dt"]=pd.to_datetime(e["Date"],errors="coerce")
+        e=e.sort_values("_dt",ascending=False)
+
+    # Treat active/developing/investigating and very recent severe incidents as live.
+    live_mask=pd.Series(False,index=e.index)
+    for c in ["Status","Status / Phase"]:
+        if c in e.columns:
+            live_mask |= e[c].astype(str).str.contains(
+                r"active|developing|investigation|ongoing|occurred|damaged|disabled",
+                case=False,na=False,regex=True
+            )
+    if "Severity" in e.columns:
+        live_mask |= e["Severity"].astype(str).str.contains("severe|high",case=False,na=False)
+
+    # Explicit Gulf cluster remains live while it is the current operational picture.
+    if "Event ID" in e.columns:
+        live_mask |= e["Event ID"].astype(str).str.startswith("EVT132_")
+
+    live=e[live_mask].copy()
+    if live.empty:
+        return
+
+    st.markdown("### Current / developing events")
+    st.caption("Live operational picture. Events remain here while status, attribution or vessel-level details are still developing.")
+
+    for i,(_,r) in enumerate(live.head(12).iterrows()):
+        sev=str(r.get("Severity","")).strip()
+        status=str(r.get("Status","")).strip() or str(r.get("Status / Phase","")).strip()
+        date=str(r.get("Date","")).strip()
+        title=str(r.get("Title","")).strip()
+        loc=str(r.get("Location","")).strip()
+        desc=str(r.get("Description","")).strip()
+        direct=str(r.get("Direct Impact","")).strip()
+        src=str(r.get("Source URL","")).strip()
+        source_html=f"<div class='pc-source'><a href='{src}' target='_blank' rel='noopener noreferrer'>Open source ↗</a></div>" if src.startswith("http") else ""
+        st.markdown(
+            f"<div class='pc-card'>"
+            f"<div class='pc-label'>{date} · {pretty_enum(sev)} · {pretty_enum(status)}</div>"
+            f"<div class='pc-big'>{title}</div>"
+            f"<div class='pc-small'>{loc}</div>"
+            f"<div class='pc-small'>{desc}</div>"
+            f"<div class='pc-small'><b>Direct impact:</b> {direct}</div>"
+            f"{source_html}</div>",
+            unsafe_allow_html=True
+        )
+
 # ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.31 · AOPS & UAE fleet programme expansion")
+st.sidebar.caption("v1.32.1 · Live-event traversal fix")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
@@ -2615,6 +2714,8 @@ elif page=="News & Events":
         e=e[e["Event Family"].isin(selected)]
     ids=set(e["Event ID"].astype(str)) if not e.empty else set()
     loc=locations[locations["Event ID"].astype(str).isin(ids)] if ids else locations.iloc[0:0]
+
+    render_live_event_cluster(e,loc)
     render_event_map(e,loc,"Event & activity map")
     # severity / family figures
     if not e.empty:
@@ -2628,7 +2729,12 @@ elif page=="News & Events":
             if not sev.empty:
                 st.markdown("### Events by severity"); st.bar_chart(sev,horizontal=True)
     t1,t2,t3=st.tabs(["Event Feed","Impact Chains","Linked Assets / Companies"])
-    with t1: render_event_cards(e,100)
+    with t1:
+        feed=e.copy()
+        if not feed.empty and "Date" in feed.columns:
+            feed["_dt"]=pd.to_datetime(feed["Date"],errors="coerce")
+            feed=feed.sort_values("_dt",ascending=False)
+        render_event_cards(feed,100)
     with t2:
         chains=TABLES.get(("Events & Hazards","Impact Chains"),pd.DataFrame())
         if ids: chains=chains[chains["Event ID"].astype(str).isin(ids)]

@@ -1,5 +1,5 @@
 {
-  "version": "1.31",
+  "version": "1.32",
   "sheet_to_file": {
     "Companies": "01_core_entities.xlsx",
     "Entity Registry": "01_core_entities.xlsx",
@@ -293,5 +293,5 @@
       "Sources"
     ]
   },
-  "model": "AOPS + UAE programme-to-vessel fleet expansion"
+  "model": "Gulf kinetic escalation + canonical tanker incidents + Hormuz security system"
 }
