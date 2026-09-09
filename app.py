@@ -112,39 +112,233 @@ button[data-baseweb="tab"][aria-selected="true"] p { color:var(--pc-text) !impor
 """, unsafe_allow_html=True)
 
 # ---------- Data helpers ----------
+MODEL_FILES = {
+    "01_core_entities.xlsx": DATA_DIR / "01_core_entities.xlsx",
+    "02_maritime.xlsx": DATA_DIR / "02_maritime.xlsx",
+    "03_rail.xlsx": DATA_DIR / "03_rail.xlsx",
+    "04_road_trucking.xlsx": DATA_DIR / "04_road_trucking.xlsx",
+    "05_aviation.xlsx": DATA_DIR / "05_aviation.xlsx",
+    "06_infrastructure.xlsx": DATA_DIR / "06_infrastructure.xlsx",
+    "07_corporate_markets.xlsx": DATA_DIR / "07_corporate_markets.xlsx",
+    "08_transactions.xlsx": DATA_DIR / "08_transactions.xlsx",
+    "09_intelligence.xlsx": DATA_DIR / "09_intelligence.xlsx",
+    "10_sources_evidence.xlsx": DATA_DIR / "10_sources_evidence.xlsx",
+}
+
+SHEET_SOURCES = {
+    "Companies": "01_core_entities.xlsx",
+    "Entity Registry": "01_core_entities.xlsx",
+    "Relationships": "01_core_entities.xlsx",
+
+    "Ports": "02_maritime.xlsx",
+    "Port Terminals": "02_maritime.xlsx",
+    "Port Ownership": "02_maritime.xlsx",
+    "Port Operator Coverage": "02_maritime.xlsx",
+    "Port Berths": "02_maritime.xlsx",
+    "Port Equipment": "02_maritime.xlsx",
+    "Port News": "02_maritime.xlsx",
+    "Vessels": "02_maritime.xlsx",
+    "Vessel Relationships": "02_maritime.xlsx",
+    "Fleet Portfolios": "02_maritime.xlsx",
+    "Fleet Orders": "02_maritime.xlsx",
+    "Ferry Systems": "02_maritime.xlsx",
+    "Ferry Routes": "02_maritime.xlsx",
+    "Ferry Terminals": "02_maritime.xlsx",
+    "Ferry Fleet Status": "02_maritime.xlsx",
+    "Ferry Performance": "02_maritime.xlsx",
+    "Great Lakes Ports": "02_maritime.xlsx",
+    "Great Lakes Vessel Staging": "02_maritime.xlsx",
+    "Great Lakes Cargo Corridors": "02_maritime.xlsx",
+    "Great Lakes Cruise": "02_maritime.xlsx",
+    "Great Lakes Disruptions": "02_maritime.xlsx",
+
+    "Rail Operators": "03_rail.xlsx",
+    "Rail Networks": "03_rail.xlsx",
+    "Rail Nodes": "03_rail.xlsx",
+    "Rail Links": "03_rail.xlsx",
+    "Rail Relationships": "03_rail.xlsx",
+    "Rail Fleet": "03_rail.xlsx",
+    "Rail Connections": "03_rail.xlsx",
+    "Rail News": "03_rail.xlsx",
+
+    "Trucking Companies": "04_road_trucking.xlsx",
+    "Trucking Assets": "04_road_trucking.xlsx",
+    "Trucking Relationships": "04_road_trucking.xlsx",
+
+    "Aircraft Registry": "05_aviation.xlsx",
+    "Aircraft Relationships": "05_aviation.xlsx",
+    "Aviation Fleet Summary": "05_aviation.xlsx",
+
+    "Assets": "06_infrastructure.xlsx",
+    "Asset Constraints": "06_infrastructure.xlsx",
+    "Infrastructure Connections": "06_infrastructure.xlsx",
+    "Infrastructure Works": "06_infrastructure.xlsx",
+    "Integrated Logistics Networks": "06_infrastructure.xlsx",
+    "Shipyards": "06_infrastructure.xlsx",
+    "Facilities": "06_infrastructure.xlsx",
+    "Corridors": "06_infrastructure.xlsx",
+    "System Nodes": "06_infrastructure.xlsx",
+    "System Links": "06_infrastructure.xlsx",
+
+    "Infra Investors": "07_corporate_markets.xlsx",
+    "Infra Holdings": "07_corporate_markets.xlsx",
+    "Company Listings": "07_corporate_markets.xlsx",
+    "Company Market Prices": "07_corporate_markets.xlsx",
+    "Corporate Actions": "07_corporate_markets.xlsx",
+    "Ownership History": "07_corporate_markets.xlsx",
+    "Company Reports": "07_corporate_markets.xlsx",
+    "Company Financial Metrics": "07_corporate_markets.xlsx",
+    "Company Operating Metrics": "07_corporate_markets.xlsx",
+    "Investment Funds": "07_corporate_markets.xlsx",
+    "Portfolio Holdings V125": "07_corporate_markets.xlsx",
+    "Company Aliases": "07_corporate_markets.xlsx",
+
+    "Infra Deals": "08_transactions.xlsx",
+    "Transactions V125": "08_transactions.xlsx",
+    "Transaction Approvals": "08_transactions.xlsx",
+    "Transaction Status History": "08_transactions.xlsx",
+    "Transaction Asset Links": "08_transactions.xlsx",
+    "Asset Control History": "08_transactions.xlsx",
+
+    "News Registry": "09_intelligence.xlsx",
+    "News Entity Links": "09_intelligence.xlsx",
+    "Strategic Events": "09_intelligence.xlsx",
+    "Event Observations": "09_intelligence.xlsx",
+    "Event Entity Links": "09_intelligence.xlsx",
+    "Monitoring": "09_intelligence.xlsx",
+    "Monitoring Event Links": "09_intelligence.xlsx",
+
+    "Sources": "10_sources_evidence.xlsx",
+}
+
+@st.cache_data(show_spinner=False)
+def load_excel_sheet(sheet_name):
+    file_name = SHEET_SOURCES.get(sheet_name)
+    if not file_name:
+        return pd.DataFrame()
+    path = MODEL_FILES[file_name]
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_excel(path, sheet_name=sheet_name, dtype=str).fillna("")
+    except Exception:
+        return pd.DataFrame()
+
 def _detect_embedded_header(path, max_scan_rows=15):
-    """Return the most likely real header row when a CSV starts with title/metadata rows."""
+    """Fallback CSV parser for legacy deployments."""
     try:
         raw = pd.read_csv(path, header=None, dtype=str, keep_default_na=False, nrows=max_scan_rows)
     except Exception:
         return None
-
     candidates = []
     for i, row in raw.iterrows():
         vals = [str(v).strip() for v in row.tolist()]
         nonempty = [v for v in vals if v]
         if len(nonempty) < 3:
             continue
-
         structural = sum(
             1 for v in nonempty
             if re.search(r'(^|\s)(ID|Date|Company|Investor|Vessel|Port|Terminal|Carrier|Segment|Type|Status|Country|IMO|Source|Priority|Mode|Origin|Destination|Name|Relationship)(\s|/|$)', v, re.I)
         )
         id_fields = sum(1 for v in nonempty if re.search(r'\bIDs?\b', v, re.I))
-        # Real headers are field-name dense. Summary/metric rows can contain a few
-        # structural words, so score every candidate and select the strongest one.
         if structural >= 3:
             score = structural * 3 + id_fields * 2 + min(len(nonempty), 12)
             candidates.append((score, int(i)))
-
     if not candidates:
         return None
     candidates.sort(reverse=True)
     return candidates[0][1]
 
 @st.cache_data(show_spinner=False)
-def load_csv(name):
-    path = DATA_DIR / name
+def load_table(name):
+    """Load the v1.25 split Excel model, with CSV fallback for legacy deployments."""
+    aliases = {
+        "companies.csv": "Companies",
+        "relationships.csv": "Relationships",
+        "entity_registry.csv": "Entity Registry",
+        "corridors.csv": "Corridors",
+        "system_nodes.csv": "System Nodes",
+        "system_links.csv": "System Links",
+        "ports.csv": "Ports",
+        "port_terminals.csv": "Port Terminals",
+        "port_operator_coverage.csv": "Port Operator Coverage",
+        "port_berths.csv": "Port Berths",
+        "port_equipment.csv": "Port Equipment",
+        "port_ownership.csv": "Port Ownership",
+        "port_news.csv": "Port News",
+        "vessels.csv": "Vessels",
+        "vessel_relationships.csv": "Vessel Relationships",
+        "fleet_portfolios.csv": "Fleet Portfolios",
+        "fleet_orders.csv": "Fleet Orders",
+        "aircraft_registry.csv": "Aircraft Registry",
+        "aircraft_relationships.csv": "Aircraft Relationships",
+        "aviation_fleet_summary.csv": "Aviation Fleet Summary",
+        "assets.csv": "Assets",
+        "shipyards.csv": "Shipyards",
+        "infrastructure_works.csv": "Infrastructure Works",
+        "infrastructure_deals.csv": "Infra Deals",
+        "infrastructure_investors.csv": "Infra Investors",
+        "infrastructure_holdings.csv": "Infra Holdings",
+        "infrastructure_connections.csv": "Infrastructure Connections",
+        "integrated_logistics_networks.csv": "Integrated Logistics Networks",
+        "rail_operators.csv": "Rail Operators",
+        "rail_networks.csv": "Rail Networks",
+        "rail_nodes.csv": "Rail Nodes",
+        "rail_links.csv": "Rail Links",
+        "rail_relationships.csv": "Rail Relationships",
+        "rail_fleet.csv": "Rail Fleet",
+        "rail_connections.csv": "Rail Connections",
+        "rail_news.csv": "Rail News",
+        "strategic_events.csv": "Strategic Events",
+        "event_observations.csv": "Event Observations",
+        "event_entity_links.csv": "Event Entity Links",
+        "news_registry.csv": "News Registry",
+        "news_entity_links.csv": "News Entity Links",
+        "monitoring.csv": "Monitoring",
+        "monitoring_event_links.csv": "Monitoring Event Links",
+        "transaction_asset_links.csv": "Transaction Asset Links",
+        "asset_constraints.csv": "Asset Constraints",
+        "asset_control_history.csv": "Asset Control History",
+        "sources.csv": "Sources",
+        "ferry_systems.csv": "Ferry Systems",
+        "ferry_routes.csv": "Ferry Routes",
+        "ferry_terminals.csv": "Ferry Terminals",
+        "ferry_fleet_status.csv": "Ferry Fleet Status",
+        "ferry_performance.csv": "Ferry Performance",
+        "great_lakes_ports.csv": "Great Lakes Ports",
+        "great_lakes_vessel_staging.csv": "Great Lakes Vessel Staging",
+        "great_lakes_cargo_corridors.csv": "Great Lakes Cargo Corridors",
+        "great_lakes_cruise.csv": "Great Lakes Cruise",
+        "great_lakes_disruptions.csv": "Great Lakes Disruptions",
+
+        "trucking_companies": "Trucking Companies",
+        "trucking_assets": "Trucking Assets",
+        "trucking_relationships": "Trucking Relationships",
+        "company_listings": "Company Listings",
+        "company_market_prices": "Company Market Prices",
+        "corporate_actions": "Corporate Actions",
+        "ownership_history": "Ownership History",
+        "transactions_v125": "Transactions V125",
+        "transaction_approvals": "Transaction Approvals",
+        "transaction_status_history": "Transaction Status History",
+        "facilities": "Facilities",
+        "company_reports": "Company Reports",
+        "company_financial_metrics": "Company Financial Metrics",
+        "company_operating_metrics": "Company Operating Metrics",
+        "investment_funds": "Investment Funds",
+        "portfolio_holdings_v125": "Portfolio Holdings V125",
+        "company_aliases": "Company Aliases",
+    }
+
+    sheet_name = aliases.get(name)
+    if sheet_name:
+        df = load_excel_sheet(sheet_name)
+        if not df.empty:
+            return df
+
+    # Legacy CSV fallback
+    csv_name = name if str(name).endswith(".csv") else f"{name}.csv"
+    path = DATA_DIR / csv_name
     if not path.exists():
         return pd.DataFrame()
     try:
@@ -213,9 +407,28 @@ TABLES = {
     "great_lakes_corridors": "great_lakes_cargo_corridors.csv",
     "great_lakes_cruise": "great_lakes_cruise.csv",
     "great_lakes_disruptions": "great_lakes_disruptions.csv",
+
+    # v1.25 theory layers
+    "trucking_companies": "trucking_companies",
+    "trucking_assets": "trucking_assets",
+    "trucking_relationships": "trucking_relationships",
+    "company_listings": "company_listings",
+    "market_prices": "company_market_prices",
+    "corporate_actions": "corporate_actions",
+    "ownership_history": "ownership_history",
+    "transactions_v125": "transactions_v125",
+    "transaction_approvals": "transaction_approvals",
+    "transaction_status": "transaction_status_history",
+    "facilities": "facilities",
+    "company_reports": "company_reports",
+    "financial_metrics": "company_financial_metrics",
+    "operating_metrics": "company_operating_metrics",
+    "investment_funds": "investment_funds",
+    "portfolio_holdings_v125": "portfolio_holdings_v125",
+    "company_aliases": "company_aliases",
 }
 
-D = {k: load_csv(v) for k, v in TABLES.items()}
+D = {k: load_table(v) for k, v in TABLES.items()}
 
 def col(df, candidates):
     for c in candidates:
@@ -897,8 +1110,8 @@ def watch_area_bundle(corridor_id):
 
 # ---------- Sidebar ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("Intelligence Model v1.17 • App v1.21")
-st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.23</div>", unsafe_allow_html=True)
+st.sidebar.caption("Intelligence Model v1.25 Theory • Split Excel deployment")
+st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.25</div>", unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Navigate",
     [
@@ -907,6 +1120,8 @@ page = st.sidebar.radio(
         "Ports & Terminals",
         "Vessels",
         "Air Cargo",
+        "Road & Trucking",
+        "Corporate & Markets",
         "News & Events",
         "Monitoring",
         "Transactions & Projects",
@@ -920,7 +1135,7 @@ page = st.sidebar.radio(
     ],
 )
 st.sidebar.markdown("---")
-st.sidebar.caption("Trade infrastructure • fleets • rail • corridors • entity graphs • watch areas • intelligence")
+st.sidebar.caption("Maritime • rail • road • aviation • infrastructure • capital • markets • intelligence")
 
 # ---------- Pages ----------
 if page == "Operating Picture":
@@ -981,7 +1196,7 @@ elif page == "Companies":
         ("Scale / network","Scale / Network Notes"),
     ]), 3)
 
-    tabs = st.tabs(["Relationship Graph","Relationships","Assets","Fleet","Transactions","Events","News"])
+    tabs = st.tabs(["Relationship Graph","Relationships","Assets","Fleet","Transactions","Markets & Reports","Events","News"])
     with tabs[0]:
         render_relationship_graph(cid, key_prefix=f"company_{cid}", default_depth=2, max_nodes_default=55)
     with tabs[1]:
@@ -1056,6 +1271,22 @@ elif page == "Companies":
                 safe_display(h)
                 sections_shown += 1
 
+        road_assets = D.get("trucking_assets", pd.DataFrame())
+        if not road_assets.empty and "Company ID" in road_assets.columns:
+            linked_road = _with_exposure_path(road_assets, "Company ID", company_depths)
+            if not linked_road.empty:
+                st.markdown("#### Road / trucking assets & networks")
+                safe_display(linked_road)
+                sections_shown += 1
+
+        facilities = D.get("facilities", pd.DataFrame())
+        if not facilities.empty and "Owner / Operator Company ID" in facilities.columns:
+            linked_fac = _with_exposure_path(facilities, "Owner / Operator Company ID", company_depths)
+            if not linked_fac.empty:
+                st.markdown("#### Facilities / sub-assets")
+                safe_display(linked_fac)
+                sections_shown += 1
+
         if sections_shown == 0:
             st.info("No matching direct or relationship-linked assets in the current model.")
     with tabs[3]:
@@ -1104,9 +1335,68 @@ elif page == "Companies":
                 d_ids = tl[tl["Entity / Asset ID"] == cid]["Deal ID"].unique().tolist()
                 linked_deals = pd.concat([linked_deals, deals[deals["Deal ID"].isin(d_ids)]]).drop_duplicates()
             safe_display(linked_deals)
+
+        tx = D.get("transactions_v125", pd.DataFrame())
+        if not tx.empty:
+            mask = tx.astype(str).apply(lambda s: s.str.contains(re.escape(cid), case=False, na=False)).any(axis=1)
+            txhits = tx[mask]
+            if not txhits.empty:
+                st.markdown("#### Transaction lifecycle")
+                safe_display(txhits)
+                tids = txhits.get("Transaction ID", pd.Series(dtype=str)).tolist()
+                approvals = D.get("transaction_approvals", pd.DataFrame())
+                if not approvals.empty and "Transaction ID" in approvals.columns:
+                    ah = approvals[approvals["Transaction ID"].isin(tids)]
+                    if not ah.empty:
+                        st.markdown("#### Regulatory / approval status")
+                        safe_display(ah)
+                status_hist = D.get("transaction_status", pd.DataFrame())
+                if not status_hist.empty and "Transaction ID" in status_hist.columns:
+                    sh = status_hist[status_hist["Transaction ID"].isin(tids)]
+                    if not sh.empty:
+                        st.markdown("#### Status history")
+                        safe_display(sh)
+
     with tabs[5]:
-        safe_display(entity_events(cid))
+        listing = D.get("company_listings", pd.DataFrame())
+        if not listing.empty and "Company ID" in listing.columns:
+            lh = listing[listing["Company ID"].astype(str) == str(cid)]
+            if not lh.empty:
+                st.markdown("#### Listing / market status")
+                safe_display(lh)
+        actions = D.get("corporate_actions", pd.DataFrame())
+        if not actions.empty and "Company ID" in actions.columns:
+            ah = actions[actions["Company ID"].astype(str) == str(cid)]
+            if not ah.empty:
+                st.markdown("#### Corporate actions")
+                safe_display(ah)
+        reports = D.get("company_reports", pd.DataFrame())
+        if not reports.empty and "Company ID" in reports.columns:
+            rh = reports[reports["Company ID"].astype(str) == str(cid)]
+            if not rh.empty:
+                st.markdown("#### Reports")
+                safe_display(rh)
+        fm = D.get("financial_metrics", pd.DataFrame())
+        if not fm.empty and "Company ID" in fm.columns:
+            fh = fm[fm["Company ID"].astype(str) == str(cid)]
+            if not fh.empty:
+                st.markdown("#### Financial metrics")
+                safe_display(fh)
+        om = D.get("operating_metrics", pd.DataFrame())
+        if not om.empty and "Company ID" in om.columns:
+            oh = om[om["Company ID"].astype(str) == str(cid)]
+            if not oh.empty:
+                st.markdown("#### Operating metrics")
+                safe_display(oh)
+        prices = D.get("market_prices", pd.DataFrame())
+        if not prices.empty and "Company ID" in prices.columns:
+            ph = prices[prices["Company ID"].astype(str) == str(cid)]
+            if not ph.empty:
+                st.markdown("#### Market-price history / milestones")
+                safe_display(ph)
     with tabs[6]:
+        safe_display(entity_events(cid))
+    with tabs[7]:
         safe_display(entity_news(cid))
 
 elif page == "Ports & Terminals":
@@ -1251,6 +1541,51 @@ elif page == "Air Cargo":
     q = st.text_input("Search airline, registration, MSN or aircraft type")
     safe_display(text_search(D["aircraft"], q) if q else D["aviation_summary"], 300)
 
+elif page == "Road & Trucking":
+    page_header("Road & Trucking", "Trucking groups, parcel/courier networks, road assets and multimodal links.")
+    a,b,c = st.columns(3)
+    with a: metric_card("Road companies", f"{len(D.get('trucking_companies', pd.DataFrame())):,}", "canonical road / trucking seeds")
+    with b: metric_card("Road assets", f"{len(D.get('trucking_assets', pd.DataFrame())):,}", "networks, depots and intermodal road assets")
+    with c: metric_card("Relationships", f"{len(D.get('trucking_relationships', pd.DataFrame())):,}", "ownership / operating road edges")
+    tabs = st.tabs(["Companies","Assets / Networks","Relationships"])
+    with tabs[0]:
+        q = st.text_input("Search trucking / parcel company", key="road_company_q")
+        df = D.get("trucking_companies", pd.DataFrame())
+        safe_display(text_search(df,q) if q else df,300)
+    with tabs[1]:
+        q = st.text_input("Search road asset / network", key="road_asset_q")
+        df = D.get("trucking_assets", pd.DataFrame())
+        safe_display(text_search(df,q) if q else df,300)
+    with tabs[2]:
+        safe_display(D.get("trucking_relationships", pd.DataFrame()),300)
+
+elif page == "Corporate & Markets":
+    page_header("Corporate & Markets", "Listings, take-private actions, ownership history, investor funds, reports and operating/financial evidence.")
+    tabs = st.tabs(["Listings","Corporate actions","Ownership history","Reports","Metrics","Investor / fund holdings"])
+    with tabs[0]:
+        safe_display(D.get("company_listings", pd.DataFrame()),300)
+        if not D.get("market_prices", pd.DataFrame()).empty:
+            st.markdown("#### Market-price history / milestones")
+            safe_display(D["market_prices"],300)
+    with tabs[1]:
+        safe_display(D.get("corporate_actions", pd.DataFrame()),300)
+    with tabs[2]:
+        safe_display(D.get("ownership_history", pd.DataFrame()),500)
+    with tabs[3]:
+        safe_display(D.get("company_reports", pd.DataFrame()),500)
+    with tabs[4]:
+        a,b = st.columns(2)
+        with a:
+            st.markdown("#### Financial metrics")
+            safe_display(D.get("financial_metrics", pd.DataFrame()),500)
+        with b:
+            st.markdown("#### Operating metrics")
+            safe_display(D.get("operating_metrics", pd.DataFrame()),500)
+    with tabs[5]:
+        safe_display(D.get("investment_funds", pd.DataFrame()),300)
+        st.markdown("#### Portfolio holdings")
+        safe_display(D.get("portfolio_holdings_v125", pd.DataFrame()),500)
+
 elif page == "News & Events":
     page_header("News & Events", "Reporting is kept separate from the underlying canonical event, then linked back to affected entities.")
     tab1,tab2 = st.tabs(["News","Canonical / observed events"])
@@ -1316,6 +1651,16 @@ elif page == "Transactions & Projects":
         q = st.text_input("Search transactions", key="dealq")
         if q: deals = text_search(deals,q)
         safe_display(deals,500)
+        v125 = D.get("transactions_v125", pd.DataFrame()).copy()
+        if q and not v125.empty:
+            v125 = text_search(v125,q)
+        if not v125.empty:
+            st.markdown("#### v1.25 transaction lifecycle stress-test")
+            safe_display(v125,500)
+            st.markdown("#### Approval status")
+            safe_display(D.get("transaction_approvals", pd.DataFrame()),500)
+            st.markdown("#### Status history")
+            safe_display(D.get("transaction_status", pd.DataFrame()),500)
     with t2:
         works = D["infra_works"].copy()
         q = st.text_input("Search projects", key="workq")
@@ -1324,20 +1669,22 @@ elif page == "Transactions & Projects":
 
 elif page == "Infrastructure":
     page_header("Infrastructure", "Ports, rail, dry ports, economic zones, logistics real estate, shipyards and system connections.")
-    tabs = st.tabs(["Assets","Shipyards","Connections","Investors / holdings","Control & constraints"])
+    tabs = st.tabs(["Assets","Facilities","Shipyards","Connections","Investors / holdings","Control & constraints"])
     with tabs[0]:
         q=st.text_input("Search infrastructure assets",key="assetq")
         safe_display(text_search(D["assets"],q) if q else D["assets"],500)
     with tabs[1]:
-        safe_display(D["shipyards"],500)
+        safe_display(D.get("facilities", pd.DataFrame()),500)
     with tabs[2]:
-        safe_display(D["connections"],500)
+        safe_display(D["shipyards"],500)
     with tabs[3]:
+        safe_display(D["connections"],500)
+    with tabs[4]:
         safe_display(D["infra_investors"],300)
         if not D["infra_holdings"].empty:
             st.markdown("#### Holdings")
             safe_display(D["infra_holdings"],500)
-    with tabs[4]:
+    with tabs[5]:
         a,b=st.columns(2)
         with a:
             st.markdown("#### Asset control history")
@@ -1529,6 +1876,12 @@ elif page == "Ask P&C":
             "Transactions":D["infra_deals"],"Projects":D["infra_works"],
             "Assets":D["assets"],"Shipyards":D["shipyards"],
             "Rail networks":D["rail_networks"],"Rail nodes":D["rail_nodes"],"Rail links":D["rail_links"],"Rail news":D["rail_news"],
+            "Road companies":D.get("trucking_companies",pd.DataFrame()),"Road assets":D.get("trucking_assets",pd.DataFrame()),
+            "Listings":D.get("company_listings",pd.DataFrame()),"Corporate actions":D.get("corporate_actions",pd.DataFrame()),
+            "Ownership history":D.get("ownership_history",pd.DataFrame()),"Transaction lifecycle":D.get("transactions_v125",pd.DataFrame()),
+            "Facilities":D.get("facilities",pd.DataFrame()),"Reports":D.get("company_reports",pd.DataFrame()),
+            "Financial metrics":D.get("financial_metrics",pd.DataFrame()),"Operating metrics":D.get("operating_metrics",pd.DataFrame()),
+            "Portfolio holdings":D.get("portfolio_holdings_v125",pd.DataFrame()),
         }
         total=0
         for title,df in search_tables.items():
