@@ -30,3 +30,21 @@ This is the v1.25 theory/stress-test model before Supabase migration.
 - Seaspan: searchable company/alias handling, Entity Registry coverage, fleet portfolio and ten official operating-fleet examples.
 - News: additional entity-linked Inocea, Seaspan, CLI, Macquarie/Qube and AD Ports records.
 - AD Ports Group: 24 official monthly share-price observations for 2024–2025 plus an in-app price chart.
+
+
+## v1.26.1 — Genoa megaship-access stress test
+
+Added **Genoa Megaship Access / Rhine-Alpine Gateway** as the 11th systems test.
+
+The new graph tests:
+- Western Ligurian Sea Port Authority → Port of Genoa
+- Port authority → New Genoa Breakwater
+- PerGenova Breakwater consortium → construction programme
+- Webuild / Fincantieri Infrastructure / Fincosit / SIDRA → consortium participation
+- Breakwater → access channel / turning basin / megaship capability
+- Port of Genoa → Terzo Valico dei Giovi–Genoa Junction
+- Terzo Valico / Genoa → Rhine–Alpine Corridor
+- 8 Sep 2026 news → authority / port / asset / contractors / rail project / corridor
+
+This adds marine-access infrastructure as a first-class facility category alongside berths,
+yards, rail sidings, locks, canals, warehouses and other infrastructure.

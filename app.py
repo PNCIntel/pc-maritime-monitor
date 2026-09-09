@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.24"
+APP_VERSION = "v1.26.1"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(
@@ -123,6 +123,7 @@ MODEL_FILES = {
     "08_transactions.xlsx": DATA_DIR / "08_transactions.xlsx",
     "09_intelligence.xlsx": DATA_DIR / "09_intelligence.xlsx",
     "10_sources_evidence.xlsx": DATA_DIR / "10_sources_evidence.xlsx",
+    "11_systems_waterways_governance.xlsx": DATA_DIR / "11_systems_waterways_governance.xlsx",
 }
 
 SHEET_SOURCES = {
@@ -209,6 +210,17 @@ SHEET_SOURCES = {
     "Monitoring Event Links": "09_intelligence.xlsx",
 
     "Sources": "10_sources_evidence.xlsx",
+
+    "Systems V126": "11_systems_waterways_governance.xlsx",
+    "System Entities V126": "11_systems_waterways_governance.xlsx",
+    "System Links V126": "11_systems_waterways_governance.xlsx",
+    "Port Governance V126": "11_systems_waterways_governance.xlsx",
+    "Facilities V126": "11_systems_waterways_governance.xlsx",
+    "Waterway Systems V126": "11_systems_waterways_governance.xlsx",
+    "Locks & Canals V126": "11_systems_waterways_governance.xlsx",
+    "Network Interfaces V126": "11_systems_waterways_governance.xlsx",
+    "Stress Tests V126": "11_systems_waterways_governance.xlsx",
+    "Systems Sources V126": "11_systems_waterways_governance.xlsx",
 }
 
 @st.cache_data(show_spinner=False)
@@ -219,8 +231,20 @@ def load_excel_sheet(sheet_name):
     path = MODEL_FILES[file_name]
     if not path.exists():
         return pd.DataFrame()
+    actual_sheet = {
+        "Systems V126": "Systems",
+        "System Entities V126": "System Entities",
+        "System Links V126": "System Links",
+        "Port Governance V126": "Port Governance",
+        "Facilities V126": "Facilities",
+        "Waterway Systems V126": "Waterway Systems",
+        "Locks & Canals V126": "Locks & Canals",
+        "Network Interfaces V126": "Network Interfaces",
+        "Stress Tests V126": "Stress Tests",
+        "Systems Sources V126": "Sources",
+    }.get(sheet_name, sheet_name)
     try:
-        return pd.read_excel(path, sheet_name=sheet_name, dtype=str).fillna("")
+        return pd.read_excel(path, sheet_name=actual_sheet, dtype=str).fillna("")
     except Exception:
         return pd.DataFrame()
 
@@ -328,6 +352,16 @@ def load_table(name):
         "investment_funds": "Investment Funds",
         "portfolio_holdings_v125": "Portfolio Holdings V125",
         "company_aliases": "Company Aliases",
+        "systems_v126": "Systems V126",
+        "system_entities_v126": "System Entities V126",
+        "system_links_v126": "System Links V126",
+        "port_governance_v126": "Port Governance V126",
+        "facilities_v126": "Facilities V126",
+        "waterways_v126": "Waterway Systems V126",
+        "locks_canals_v126": "Locks & Canals V126",
+        "network_interfaces_v126": "Network Interfaces V126",
+        "stress_tests_v126": "Stress Tests V126",
+        "systems_sources_v126": "Systems Sources V126",
     }
 
     sheet_name = aliases.get(name)
@@ -426,6 +460,18 @@ TABLES = {
     "investment_funds": "investment_funds",
     "portfolio_holdings_v125": "portfolio_holdings_v125",
     "company_aliases": "company_aliases",
+
+    # v1.26 global systems / waterways / governance stress-test layer
+    "systems_v126": "systems_v126",
+    "system_entities_v126": "system_entities_v126",
+    "system_links_v126": "system_links_v126",
+    "port_governance_v126": "port_governance_v126",
+    "facilities_v126": "facilities_v126",
+    "waterways_v126": "waterways_v126",
+    "locks_canals_v126": "locks_canals_v126",
+    "network_interfaces_v126": "network_interfaces_v126",
+    "stress_tests_v126": "stress_tests_v126",
+    "systems_sources_v126": "systems_sources_v126",
 }
 
 D = {k: load_table(v) for k, v in TABLES.items()}
@@ -1110,8 +1156,8 @@ def watch_area_bundle(corridor_id):
 
 # ---------- Sidebar ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("Intelligence Model v1.25.1 Enriched • Split Excel deployment")
-st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.25.1</div>", unsafe_allow_html=True)
+st.sidebar.caption("Intelligence Model v1.26.1 • Global Systems Stress Test")
+st.sidebar.markdown("<div style=\"color:#d7b66a;font-weight:700;font-size:.78rem;letter-spacing:.08em;margin:.15rem 0 .8rem;\">APP BUILD v1.26.1</div>", unsafe_allow_html=True)
 page = st.sidebar.radio(
     "Navigate",
     [
@@ -1128,6 +1174,7 @@ page = st.sidebar.radio(
         "Infrastructure",
         "Rail Networks",
         "Ferry Systems",
+        "Systems & Waterways",
         "Great Lakes",
         "Entity Explorer",
         "Watch Areas",
@@ -1135,7 +1182,7 @@ page = st.sidebar.radio(
     ],
 )
 st.sidebar.markdown("---")
-st.sidebar.caption("Maritime • rail • road • aviation • infrastructure • capital • markets • intelligence")
+st.sidebar.caption("Systems • ports • rail • road • waterways • maritime • capital • intelligence")
 
 # ---------- Pages ----------
 if page == "Operating Picture":
@@ -1769,6 +1816,76 @@ elif page == "Ferry Systems":
     with tabs[4]: safe_display(D["ferry_status"],300)
     with tabs[5]: safe_display(D["ferry_performance"],300)
 
+elif page == "Systems & Waterways":
+    page_header("Systems & Waterways", "v1.26.1 stress-test: port governance, marine access, facilities, rail interfaces, inland waterways and cross-modal trade systems.")
+    systems = D.get("systems_v126", pd.DataFrame())
+    entities = D.get("system_entities_v126", pd.DataFrame())
+    links = D.get("system_links_v126", pd.DataFrame())
+    governance = D.get("port_governance_v126", pd.DataFrame())
+    facilities = D.get("facilities_v126", pd.DataFrame())
+    waterways = D.get("waterways_v126", pd.DataFrame())
+    locks = D.get("locks_canals_v126", pd.DataFrame())
+    interfaces = D.get("network_interfaces_v126", pd.DataFrame())
+    tests = D.get("stress_tests_v126", pd.DataFrame())
+    syssrc = D.get("systems_sources_v126", pd.DataFrame())
+
+    if systems.empty:
+        st.warning("v1.26.1 systems workbook is missing or could not be loaded.")
+    else:
+        names = systems["System"].tolist() if "System" in systems.columns else []
+        selected = st.selectbox("Trade system / stress-test area", names)
+        sr = systems[systems["System"] == selected].iloc[0]
+        sid = sr.get("System ID", "")
+        c1,c2,c3 = st.columns(3)
+        c1.metric("Entities", len(entities[entities.get("System ID","") == sid]) if not entities.empty else 0)
+        c2.metric("Relationships", len(links[links.get("System ID","") == sid]) if not links.empty else 0)
+        c3.metric("Facilities / interfaces", (len(facilities[facilities.get("System ID","") == sid]) if not facilities.empty else 0) + (len(interfaces[interfaces.get("System ID","") == sid]) if not interfaces.empty else 0))
+        st.caption(f"{sr.get('Geography','')} • {sr.get('Archetype','')}")
+
+        tabs = st.tabs(["Graph", "Entities", "Relationships", "Governance", "Facilities & Interfaces", "Waterways & Locks", "Stress Test", "Sources"])
+        eview = entities[entities["System ID"] == sid].copy() if not entities.empty and "System ID" in entities.columns else pd.DataFrame()
+        lview = links[links["System ID"] == sid].copy() if not links.empty and "System ID" in links.columns else pd.DataFrame()
+
+        with tabs[0]:
+            if eview.empty or lview.empty:
+                st.info("No graph records for this system yet.")
+            else:
+                label_map = dict(zip(eview["Entity ID"], eview["Entity"]))
+                dot = ["digraph G {", 'rankdir="LR";', 'node [shape=box, style="rounded,filled", fillcolor="#eef3f8", fontname="Arial"];']
+                for _,r in lview.head(80).iterrows():
+                    a = str(r.get("Source Entity ID","")); b = str(r.get("Target Entity ID","")); rel = str(r.get("Relationship",""))
+                    al = label_map.get(a,a).replace('"','\"'); bl = label_map.get(b,b).replace('"','\"'); rl=rel.replace('_',' ').replace('"','\"')
+                    dot.append(f'"{al}" -> "{bl}" [label="{rl}"];')
+                dot.append("}")
+                st.graphviz_chart("\n".join(dot), use_container_width=True)
+
+        with tabs[1]:
+            safe_display(eview)
+        with tabs[2]:
+            safe_display(lview)
+        with tabs[3]:
+            gv = governance[governance.apply(lambda r: sid in " ".join(r.astype(str).tolist()) or any(str(x) in set(eview.get("Entity ID", [])) for x in r.astype(str)), axis=1)] if not governance.empty else pd.DataFrame()
+            safe_display(gv)
+        with tabs[4]:
+            fv = facilities[facilities["System ID"] == sid] if not facilities.empty and "System ID" in facilities.columns else pd.DataFrame()
+            iv = interfaces[interfaces["System ID"] == sid] if not interfaces.empty and "System ID" in interfaces.columns else pd.DataFrame()
+            st.markdown("#### Facilities")
+            safe_display(fv)
+            st.markdown("#### Network interfaces")
+            safe_display(iv)
+        with tabs[5]:
+            entity_ids = set(eview.get("Entity ID", pd.Series(dtype=str)).astype(str))
+            wv = waterways[waterways["Waterway ID"].astype(str).isin(entity_ids)] if not waterways.empty and "Waterway ID" in waterways.columns else pd.DataFrame()
+            lv = locks[locks["System ID"] == sid] if not locks.empty and "System ID" in locks.columns else pd.DataFrame()
+            safe_display(wv)
+            st.markdown("#### Locks & canals")
+            safe_display(lv)
+        with tabs[6]:
+            tv = tests[tests["System ID"] == sid] if not tests.empty and "System ID" in tests.columns else pd.DataFrame()
+            safe_display(tv)
+        with tabs[7]:
+            safe_display(syssrc)
+
 elif page == "Great Lakes":
     page_header("Great Lakes", "Ports, vessel staging, cargo corridors, cruise and disruption coverage.")
     tabs=st.tabs(["Ports","Vessels","Cargo corridors","Cruise","Disruptions"])
@@ -1902,6 +2019,13 @@ elif page == "Ask P&C":
             "Facilities":D.get("facilities",pd.DataFrame()),"Reports":D.get("company_reports",pd.DataFrame()),
             "Financial metrics":D.get("financial_metrics",pd.DataFrame()),"Operating metrics":D.get("operating_metrics",pd.DataFrame()),
             "Portfolio holdings":D.get("portfolio_holdings_v125",pd.DataFrame()),
+            "Trade systems":D.get("systems_v126",pd.DataFrame()),
+            "System entities":D.get("system_entities_v126",pd.DataFrame()),
+            "System relationships":D.get("system_links_v126",pd.DataFrame()),
+            "Port governance":D.get("port_governance_v126",pd.DataFrame()),
+            "Waterways":D.get("waterways_v126",pd.DataFrame()),
+            "Locks and canals":D.get("locks_canals_v126",pd.DataFrame()),
+            "Network interfaces":D.get("network_interfaces_v126",pd.DataFrame()),
         }
         total=0
         for title,df in search_tables.items():
