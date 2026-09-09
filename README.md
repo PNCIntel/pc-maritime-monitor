@@ -1,51 +1,70 @@
-# P&C Trade System Intelligence Model v1.27
+# P&C Trade System v1.25 — GitHub / Streamlit Split-Excel Deployment
 
-**Global Trade, Infrastructure & Defence Industrial Systems — Stress-Test Build**
+Upload the contents of this package to the repository root.
 
-This build carries forward the v1.26.1 port, corridor, rail and waterway model and adds a first-class defence/commercial shipbuilding layer plus a redesigned Streamlit interface.
+Structure:
 
-## Interface
+- app.py
+- requirements.txt
+- data_manifest.json
+- data/
+  - 01_core_entities.xlsx
+  - 02_maritime.xlsx
+  - 03_rail.xlsx
+  - 04_road_trucking.xlsx
+  - 05_aviation.xlsx
+  - 06_infrastructure.xlsx
+  - 07_corporate_markets.xlsx
+  - 08_transactions.xlsx
+  - 09_intelligence.xlsx
+  - 10_sources_evidence.xlsx
 
-The primary UI is now:
+The Streamlit app reads each logical table from the appropriate Excel workbook and sheet.
+The CSV fallback remains temporarily for backwards compatibility.
 
-1. **Search P&C** — ranked cross-workbook search without needing table names.
-2. **Entity Explorer** — one profile across companies, assets, shipyards, programmes, contracts, vessels and news.
-3. **Systems & Corridors** — port / rail / waterway / governance systems.
-4. **Shipyards & Defence** — yard facilities, capabilities, programmes, contracts and sales routes.
-5. **Intelligence** — news and announced activities.
-6. **Data Explorer** — raw tables retained as evidence/debug layer.
+This is the v1.25 theory/stress-test model before Supabase migration.
 
-Internal IDs remain backend keys and are hidden from normal table display.
+## v1.25.1 enrichment
+- Inocea: Davie, Helsinki Shipyard, Gulf Copper, Sata Shipbuilding, Davie Defense and Federal Fleet Services.
+- CLI: Itaqui added as a canonical port; CLI Norte and CLI Sul added as actual terminal records linked to Itaqui and Santos.
+- Seaspan: searchable company/alias handling, Entity Registry coverage, fleet portfolio and ten official operating-fleet examples.
+- News: additional entity-linked Inocea, Seaspan, CLI, Macquarie/Qube and AD Ports records.
+- AD Ports Group: 24 official monthly share-price observations for 2024–2025 plus an in-app price chart.
 
-## v1.27 defence / shipbuilding stress tests
 
-Deep seeds include:
-- EDGE Group / ADSB / **MAESTRAL**
-- Fincantieri and UAE Navy / UAE Coast Guard sales routes
-- Irving Shipbuilding / Halifax Shipyard / River-class Destroyer / AOPS
-- Seaspan Shipyards / Vancouver / Victoria / Vancouver Drydock / JSS / CCG polar icebreaker
-- Inocea / Davie / Helsinki Shipyard / Davie Defense / US and Canadian icebreaker programmes
-- Bollinger Shipyards / Houma / Gulfport / Mississippi network
-- Rauma Marine Constructions / Rauma facilities
-- Damen / Antalya / Dutch Caribbean Coast Guard programme
-- RMK Marine and Sefine as Turkey dual-use/commercial shipbuilding seeds
+## v1.26.1 — Genoa megaship-access stress test
 
-The data model tests the chain:
+Added **Genoa Megaship Access / Rhine-Alpine Gateway** as the 11th systems test.
 
-`Company → Shipyard → Facility → Capability → Programme → Contract → Vessel → Customer → Sales/Delivery Route → Announcement`
+The new graph tests:
+- Western Ligurian Sea Port Authority → Port of Genoa
+- Port authority → New Genoa Breakwater
+- PerGenova Breakwater consortium → construction programme
+- Webuild / Fincantieri Infrastructure / Fincosit / SIDRA → consortium participation
+- Breakwater → access channel / turning basin / megaship capability
+- Port of Genoa → Terzo Valico dei Giovi–Genoa Junction
+- Terzo Valico / Genoa → Rhine–Alpine Corridor
+- 8 Sep 2026 news → authority / port / asset / contractors / rail project / corridor
 
-## New infrastructure lifecycle tests
+This adds marine-access infrastructure as a first-class facility category alongside berths,
+yards, rail sidings, locks, canals, warehouses and other infrastructure.
 
-The systems workbook also adds:
-- **Badagry / Lagos Gateway Development** — prospective APM Terminals involvement kept distinct from existing Apapa / Onne assets.
-- **Simandou / Morebaya** — mine → 70 km rail spur → Transguinean line → commissioning port → temporary WCS export gateway → China route.
+## v1.27.2 interface fix
+The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
+- shipyards and yard facilities/capabilities
+- defence/coast guard sample vessels
+- commercial maritime vessels from the maritime workbook
+- programmes and programme participation
+- contracts
+- sales/delivery routes
+- announcements and linked news
+- corporate relationships and system/corridor exposure
 
-## Evidence handling
+The Shipyards & Defence page is company-first, so selecting Seaspan, Inocea, Bollinger, MAESTRAL, Fincantieri, etc. immediately exposes the connected layers.
 
-Where official announcements create potentially overlapping or evolving programme records, records remain separate and carry evidence/status notes rather than being silently merged. This is intentional for stress testing temporal/source-aware modelling.
-
-## Deployment
-
-Upload the repository contents to GitHub and point Streamlit Community Cloud at `app.py`.
-
-`requirements.txt` contains the required Python packages.
+## v1.27.2 group traversal
+Company profiles now traverse controlled/owned subsidiaries and JVs up to three levels.
+This fixes parent-group profiles such as Inocea and EDGE:
+- Inocea now exposes Davie, Helsinki Shipyard and Davie Defense yards/programmes.
+- EDGE now exposes ADSB and MAESTRAL shipbuilding activity.
+The profile also labels the operating company on each yard and the prime/lead company on programmes.
