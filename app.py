@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.30.2"
+APP_VERSION = "v1.31"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -301,7 +301,7 @@ def pretty_relationship(v):
 SEARCH_PRIORITY={
     "Companies":8,"Entity Registry":7,"Defence Companies":9,"Shipyards":10,"Programmes":10,"Contracts":9,
     "Sales & Delivery Routes":9,"Announcements":9,"News Registry":8,"System Entities":8,"Systems":8,"Facilities":7,
-    "Yard Facilities":8,"Yard Capabilities":8,"Sample Vessels":9,"System Links":7,"Relationships":7,
+    "Yard Facilities":8,"Yard Capabilities":8,"Sample Vessels":12,"Platform Classes":10,"Vessel Status History":11,"System Links":7,"Relationships":7,
     "Events":12,"Strategic Events":12,"Event Asset Links":10,"Event Company Links":10,"Event System Links":10,"Impact Chains":11,
     "Trade Agreements":14,"Agreement Asset Links":12,"Agreement Company Links":12,"Tariff Coverage":13,"HS Product Tests":12,
     "Rules of Origin":11,"Customs & Procurement":11,"Trade Remedies & Restrictions":12,"Sanctions Designations":14,"Sanctions Entity Links":13,
@@ -1975,9 +1975,135 @@ def render_vessel_profile(vessel_id,vessel_name):
             st.markdown("### Build evidence")
             display_df(bld,50)
 
+
+def defence_vessel_profile_data(vessel_id):
+    vessels=TABLES.get(("Defence & Shipbuilding","Sample Vessels"),pd.DataFrame())
+    programmes=TABLES.get(("Defence & Shipbuilding","Programmes"),pd.DataFrame())
+    participants=TABLES.get(("Defence & Shipbuilding","Programme Participants"),pd.DataFrame())
+    contracts=TABLES.get(("Defence & Shipbuilding","Contracts"),pd.DataFrame())
+    yards=TABLES.get(("Defence & Shipbuilding","Shipyards"),pd.DataFrame())
+    announcements=TABLES.get(("Defence & Shipbuilding","Announcements"),pd.DataFrame())
+    routes=TABLES.get(("Defence & Shipbuilding","Sales & Delivery Routes"),pd.DataFrame())
+    classes=TABLES.get(("Defence & Shipbuilding","Platform Classes"),pd.DataFrame())
+    history=TABLES.get(("Defence & Shipbuilding","Vessel Status History"),pd.DataFrame())
+
+    row=vessels[vessels["Vessel ID"].astype(str).eq(str(vessel_id))].copy() if not vessels.empty and "Vessel ID" in vessels.columns else pd.DataFrame()
+    if row.empty:
+        return tuple(pd.DataFrame() for _ in range(9))
+
+    pid=str(row.iloc[0].get("Programme ID","")).strip()
+    yid=str(row.iloc[0].get("Build Yard ID","")).strip()
+
+    pg=programmes[programmes["Programme ID"].astype(str).eq(pid)].copy() if pid and not programmes.empty and "Programme ID" in programmes.columns else pd.DataFrame()
+    pp=participants[participants["Programme ID"].astype(str).eq(pid)].copy() if pid and not participants.empty and "Programme ID" in participants.columns else pd.DataFrame()
+    con=contracts[contracts["Programme ID"].astype(str).eq(pid)].copy() if pid and not contracts.empty and "Programme ID" in contracts.columns else pd.DataFrame()
+    yd=yards[yards["Yard ID"].astype(str).eq(yid)].copy() if yid and not yards.empty and "Yard ID" in yards.columns else pd.DataFrame()
+    an=announcements[announcements["Programme ID"].astype(str).eq(pid)].copy() if pid and not announcements.empty and "Programme ID" in announcements.columns else pd.DataFrame()
+    rt=routes[routes["Programme ID"].astype(str).eq(pid)].copy() if pid and not routes.empty and "Programme ID" in routes.columns else pd.DataFrame()
+    cl=classes[classes["Programme ID"].astype(str).eq(pid)].copy() if pid and not classes.empty and "Programme ID" in classes.columns else pd.DataFrame()
+    hs=history[history["Vessel ID"].astype(str).eq(str(vessel_id))].copy() if not history.empty and "Vessel ID" in history.columns else pd.DataFrame()
+    return row,pg,pp,con,yd,an,rt,cl,hs
+
+def render_defence_vessel_profile(vessel_id,vessel_name):
+    row,pg,pp,con,yd,ann,rt,cl,hist=defence_vessel_profile_data(vessel_id)
+    if row.empty:
+        st.info("No defence / government vessel record.")
+        return
+
+    r=row.iloc[0]
+    st.markdown(f"## {vessel_name}")
+    bits=[str(r.get("Class / Type","")).strip(),str(r.get("Customer / Operator","")).strip(),str(r.get("Status","")).strip()]
+    st.caption(" · ".join([pretty_enum(x) for x in bits if x]))
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Programme",1 if not pg.empty else 0)
+    c2.metric("Contracts",len(con))
+    c3.metric("Milestones",len(hist))
+    c4.metric("Announcements",len(ann))
+
+    tabs=st.tabs(["Overview","Programme & Contract","Builder & Yard","Status History","News / Announcements","Evidence"])
+
+    with tabs[0]:
+        fields=[
+            ("Class / type",r.get("Class / Type","")),
+            ("Customer / operator",r.get("Customer / Operator","")),
+            ("Status",r.get("Status","")),
+            ("Build / delivery route",r.get("Build / Delivery Route","")),
+        ]
+        display_df(pd.DataFrame([{"Field":a,"Value":pretty_enum(b)} for a,b in fields if str(b).strip()]),50)
+        if not cl.empty:
+            st.markdown("### Platform class")
+            display_df(cl,50)
+
+    with tabs[1]:
+        if not pg.empty:
+            st.markdown("### Programme")
+            display_df(pg,50)
+        if not con.empty:
+            st.markdown("### Contract")
+            display_df(con,50)
+        if not pp.empty:
+            st.markdown("### Programme participants")
+            for i,(_,pr) in enumerate(pp.iterrows()):
+                eid=str(pr.get("Entity ID","")).strip()
+                ename=label(eid)
+                role=pretty_enum(pr.get("Role",""))
+                notes=str(pr.get("Notes","")).strip()
+                c1,c2=st.columns([5,1])
+                with c1:
+                    st.markdown(
+                        f"<div class='pc-card pc-object-card'><div class='pc-label'>{role}</div>"
+                        f"<div class='pc-big'>{ename}</div><div class='pc-small'>{notes}</div></div>",
+                        unsafe_allow_html=True
+                    )
+                with c2:
+                    if eid.startswith("COMP_"):
+                        if st.button(f"Open {ename}",key=f"dvp_part_{vessel_id}_{i}_{eid}",use_container_width=True):
+                            request_nav("Companies","company_pick_id",eid,ename)
+                            st.rerun()
+
+    with tabs[2]:
+        if not yd.empty:
+            yr=yd.iloc[0]
+            st.markdown(f"### {yr.get('Shipyard','')}")
+            st.caption(f"{yr.get('Location','')} · {yr.get('Country','')} · {yr.get('Yard Model','')}")
+            if st.button("Open shipyard",key=f"dvp_yard_{vessel_id}",use_container_width=False):
+                request_nav("Shipyards","yard_pick_id",str(yr.get("Yard ID","")),str(yr.get("Shipyard","")))
+                st.rerun()
+            display_df(yd,20)
+        elif str(r.get("Build Yard ID","")).strip():
+            st.info("Build yard ID exists but the yard record is not populated.")
+        else:
+            st.info("Build yard has not yet been assigned at individual-hull level.")
+
+    with tabs[3]:
+        if not hist.empty:
+            h=hist.copy()
+            if "Date" in h.columns:
+                h["_dt"]=pd.to_datetime(h["Date"],errors="coerce")
+                h=h.sort_values("_dt")
+            display_df(h,100)
+        else:
+            st.info("No vessel-level milestone history has been populated yet.")
+
+    with tabs[4]:
+        if not ann.empty:
+            show_named_list(ann,"Headline",["Date","Event Type","Linked Entities / Topics"],source_col="Source URL",max_items=100)
+        else:
+            st.info("No programme announcement linked.")
+
+    with tabs[5]:
+        src=str(r.get("Source URL","")).strip()
+        if src.startswith("http"):
+            st.markdown(f"[Open vessel / programme source ↗]({src})")
+        if not rt.empty:
+            st.markdown("### Sales / delivery route")
+            display_df(rt,50)
+        display_df(row,20)
+
 # ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.30.2 · Vessel object profiles")
+st.sidebar.caption("v1.31 · AOPS & UAE fleet programme expansion")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
@@ -2036,7 +2162,7 @@ if page=="Search":
         if not hits.empty:
             groups=[
                 ("Commercial / contracts",["Contracts","Infra Deals","Transactions V125","Sales & Delivery Routes","Vessel Transactions"]),
-                ("Assets",["Port Terminals","Ports","Shipyards","Yard Facilities","Sample Vessels","Vessels","Assets"]),
+                ("Assets",["Port Terminals","Ports","Shipyards","Yard Facilities","Sample Vessels","Platform Classes","Vessel Status History","Vessels","Assets"]),
                 ("Trade policy & compliance",["Trade Agreements","Tariff Coverage","HS Product Tests","Rules of Origin","Customs & Procurement","Trade Remedies & Restrictions","Sanctions Designations"]),
                 ("News & events",["Events","Strategic Events","Announcements","News Registry","Impact Chains"]),
                 ("Systems & relationships",["Systems","System Entities","System Links","Relationships","Port Ownership"]),
@@ -2215,50 +2341,83 @@ elif page=="Shipyards":
         with tabs[4]: display_df(pd.DataFrame([r]),20)
 
 elif page=="Vessels":
-    header("Vessels","Commercial, defence and Coast Guard vessels with ownership, sanctions, incidents and reporting linked to the same canonical object.")
+    header("Vessels","Commercial, naval, Coast Guard and government vessels as linked intelligence objects.")
     commercial=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
     defence=TABLES.get(("Defence & Shipbuilding","Sample Vessels"),pd.DataFrame()).copy()
 
     requested_vessel=st.session_state.pop("vessel_pick_id",None)
+    requested_domain=None
     if requested_vessel:
+        if not defence.empty and "Vessel ID" in defence.columns and defence["Vessel ID"].astype(str).eq(str(requested_vessel)).any():
+            requested_domain="Defence / Government"
+        elif not commercial.empty and "Vessel ID" in commercial.columns and commercial["Vessel ID"].astype(str).eq(str(requested_vessel)).any():
+            requested_domain="Commercial"
         st.session_state["vessel_search_text"]=label(requested_vessel)
+        if requested_domain:
+            st.session_state["vessel_domain"]=requested_domain
+
+    domain=st.radio(
+        "Fleet domain",
+        ["Commercial","Defence / Government"],
+        horizontal=True,
+        key="vessel_domain"
+    )
 
     q=st.text_input(
-        "Find vessel / IMO / owner / customer / class",
-        placeholder="LADY MARIIA, SUN, 9220641, Polar Max, CMA CGM...",
+        "Find vessel / IMO / owner / customer / class / programme",
+        placeholder="HMCS Harry DeWolf, ALTAF, Bani Yas, P51MR, LADY MARIIA...",
         key="vessel_search_text"
     )
 
-    c=commercial.copy()
-    if q: c=_contains_any(c,[q])
-    c=c.reset_index(drop=True)
-
-    if not c.empty:
-        requested_index=0
-        if requested_vessel and "Vessel ID" in c.columns:
-            mi=c.index[c["Vessel ID"].astype(str).eq(str(requested_vessel))].tolist()
-            if mi: requested_index=int(mi[0])
-
-        if requested_vessel:
-            st.session_state["vessel_select_idx"]=int(requested_index)
+    if domain=="Commercial":
+        c=commercial.copy()
+        if q: c=_contains_any(c,[q])
+        c=c.reset_index(drop=True)
+        if c.empty:
+            st.info("No matching canonical commercial vessel.")
         else:
-            safe_index_state("vessel_select_idx",int(requested_index),len(c))
+            requested_index=0
+            if requested_vessel and "Vessel ID" in c.columns:
+                mi=c.index[c["Vessel ID"].astype(str).eq(str(requested_vessel))].tolist()
+                if mi: requested_index=int(mi[0])
+            if requested_vessel and requested_domain=="Commercial":
+                st.session_state["vessel_select_idx"]=requested_index
+            else:
+                safe_index_state("vessel_select_idx",requested_index,len(c))
 
-        pick=st.selectbox(
-            "Commercial vessel",
-            range(len(c)),
-            format_func=lambda i:f"{c.iloc[i].get('Vessel Name','')} — IMO {c.iloc[i].get('IMO','')}",
-            key="vessel_select_idx"
-        )
-        vr=c.iloc[pick]
-        render_vessel_profile(str(vr.get("Vessel ID","")),str(vr.get("Vessel Name","")))
+            pick=st.selectbox(
+                "Commercial vessel",
+                range(len(c)),
+                format_func=lambda i:f"{c.iloc[i].get('Vessel Name','')} — IMO {c.iloc[i].get('IMO','')}",
+                key="vessel_select_idx"
+            )
+            vr=c.iloc[pick]
+            render_vessel_profile(str(vr.get("Vessel ID","")),str(vr.get("Vessel Name","")))
+
     else:
-        st.info("No matching canonical commercial vessel.")
-
-    with st.expander(f"Defence / Government vessel catalogue · {len(defence)}"):
-        d=defence
+        d=defence.copy()
         if q: d=_contains_any(d,[q])
-        display_df(d,250)
+        d=d.reset_index(drop=True)
+        if d.empty:
+            st.info("No matching defence / government vessel.")
+        else:
+            requested_index=0
+            if requested_vessel and "Vessel ID" in d.columns:
+                mi=d.index[d["Vessel ID"].astype(str).eq(str(requested_vessel))].tolist()
+                if mi: requested_index=int(mi[0])
+            if requested_vessel and requested_domain=="Defence / Government":
+                st.session_state["defence_vessel_select_idx"]=requested_index
+            else:
+                safe_index_state("defence_vessel_select_idx",requested_index,len(d))
+
+            pick=st.selectbox(
+                "Defence / government vessel",
+                range(len(d)),
+                format_func=lambda i:f"{d.iloc[i].get('Vessel','')} — {d.iloc[i].get('Class / Type','')} — {d.iloc[i].get('Customer / Operator','')}",
+                key="defence_vessel_select_idx"
+            )
+            vr=d.iloc[pick]
+            render_defence_vessel_profile(str(vr.get("Vessel ID","")),str(vr.get("Vessel","")))
 
 elif page=="Contracts":
     header("Contracts & Commercial","Government procurement, commercial transactions, infrastructure deals, vessel sales and delivery routes.")

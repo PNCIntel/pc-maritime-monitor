@@ -196,7 +196,7 @@ App-only update:
 - Vessels is now an object explorer with Ownership & Management, Sanctions & Compliance, News & Events and Evidence tabs.
 - Sanctions-linked canonical vessels can open directly into the Vessel profile.
 
-## v1.30.2 sanctions UI helper fix
+## v1.31 sanctions UI helper fix
 - App-only patch.
 - Restores missing sanctions presentation helpers used by the Sanctions & Compliance page.
 - Fixes NameError on sanctions_programme_counts.
@@ -213,3 +213,12 @@ App-only update:
 - Incidents tab combines canonical strategic events and linked reporting into a chronology.
 - Search entity results now route vessels to Vessels, ports to Ports, yards to Shipyards and systems to Systems.
 - Vessel selector state is hardened against stale Streamlit session state.
+
+## v1.31 — AOPS and UAE fleet programme expansion
+- AOPS is now a parent programme with separate Royal Canadian Navy and Canadian Coast Guard branches.
+- All six RCN Harry DeWolf-class vessels and both CCG AOPS variants are individual vessel objects.
+- UAE fleet stress test expanded across FALAJ3, Baynunah, Bani Yas/Gowind, Falaj 2 and P51MR.
+- Named vessels are used where verified. Ordered hulls without confirmed names remain explicit `name pending` records rather than invented names.
+- New `Platform Classes` and `Vessel Status History` sheets distinguish class, programme, vessel and lifecycle.
+- Vessels UI now has a Commercial vs Defence/Government domain switch and full defence-vessel profiles.
+- Defence vessel profiles expose programme, contracts, participants, builder/yard, milestone history, announcements and delivery route.
