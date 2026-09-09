@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.32.1"
+APP_VERSION = "v1.32.2"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -1700,7 +1700,7 @@ def render_dark_bar_list(df,label_col,value_col,title):
             unsafe_allow_html=True
         )
 
-def render_sanction_link_cards(df):
+def render_sanction_link_cards(df,key_ns="san"):
     if df is None or df.empty:
         st.info("No sanction-linked entities.")
         return
@@ -1727,7 +1727,7 @@ def render_sanction_link_cards(df):
             if canonical:
                 page,key,_=object_route(etype,canonical,entity)
                 if page:
-                    if st.button("Open",key=f"sanopen_{i}_{canonical}",use_container_width=True):
+                    if st.button("Open",key=f"sanopen_{key_ns}_{i}_{canonical}",use_container_width=True):
                         request_nav(page,key,canonical,entity)
                         st.rerun()
                 else:
@@ -1763,7 +1763,7 @@ def vessel_summary_cards(r):
                 unsafe_allow_html=True
             )
 
-def render_vessel_relationship_cards(vessel_id,vessel_name,rel):
+def render_vessel_relationship_cards(vessel_id,vessel_name,rel,key_ns="rel"):
     if rel is None or rel.empty:
         st.info("No linked owner/operator/manager records.")
         return
@@ -1784,7 +1784,7 @@ def render_vessel_relationship_cards(vessel_id,vessel_name,rel):
             )
         with c2:
             if cid.startswith("COMP_"):
-                if st.button(f"Open {cname}",key=f"vrel_open_{vessel_id}_{i}_{cid}",use_container_width=True):
+                if st.button(f"Open {cname}",key=f"vrel_open_{key_ns}_{vessel_id}_{i}_{cid}",use_container_width=True):
                     request_nav("Companies","company_pick_id",cid,cname)
                     st.rerun()
 
@@ -1967,7 +1967,7 @@ def render_vessel_profile(vessel_id,vessel_name):
 
         if not rel.empty:
             st.markdown("### Connected companies")
-            render_vessel_relationship_cards(vessel_id,vessel_name,rel)
+            render_vessel_relationship_cards(vessel_id,vessel_name,rel,key_ns="overview")
 
         if not san.empty:
             st.markdown("### Compliance flag")
@@ -1984,7 +1984,7 @@ def render_vessel_profile(vessel_id,vessel_name):
 
     with tabs[1]:
         st.markdown("### Owner / operator / manager relationships")
-        render_vessel_relationship_cards(vessel_id,vessel_name,rel)
+        render_vessel_relationship_cards(vessel_id,vessel_name,rel,key_ns="ownership")
 
     with tabs[2]:
         if san.empty:
@@ -2001,7 +2001,7 @@ def render_vessel_profile(vessel_id,vessel_name):
                 linked=linked[linked["Canonical Entity ID"].astype(str).ne(str(vessel_id))] if "Canonical Entity ID" in linked.columns else linked
                 if not linked.empty:
                     st.markdown("### Related sanction-linked entities")
-                    render_sanction_link_cards(linked)
+                    render_sanction_link_cards(linked,key_ns=f"vessel_{vessel_id}")
 
     with tabs[3]:
         render_vessel_incident_cards(events,news)
@@ -2202,7 +2202,7 @@ def render_live_event_cluster(events, locations):
 
 # ---------- top navigation ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.32.1 · Live-event traversal fix")
+st.sidebar.caption("v1.32.2 · Vessel profile widget-key fix")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
