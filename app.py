@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.27.3"
+APP_VERSION = "v1.27.4"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -18,7 +18,22 @@ st.markdown("""
 h1,h2,h3,h4,h5,h6,p,li,span,label{color:var(--text)}
 a{color:var(--blue)!important}
 .pc-kicker{color:var(--gold);font-size:.76rem;letter-spacing:.14em;text-transform:uppercase;font-weight:700}.pc-title{font-size:2rem;font-weight:800}.pc-sub{color:var(--muted);margin:.2rem 0 1.2rem}.pc-card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:8px}.pc-label{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.pc-big{font-size:1.3rem;font-weight:750}.pc-small{color:var(--muted);font-size:.88rem}.pc-rel{padding:8px 11px;border-left:3px solid var(--gold);background:var(--panel);margin:6px 0;border-radius:5px}.pc-chip{display:inline-block;border:1px solid var(--border);background:var(--panel);padding:3px 8px;border-radius:999px;font-size:.76rem;color:var(--muted);margin:2px 3px 2px 0}
-[data-baseweb="select"]>div,[data-baseweb="input"]>div,.stTextInput input{background:var(--panel)!important;color:var(--text)!important;border-color:var(--border)!important}.stDataFrame{border:1px solid var(--border);border-radius:8px}
+[data-baseweb="select"]>div,[data-baseweb="input"]>div,.stTextInput input{background:var(--panel)!important;color:var(--text)!important;border-color:var(--border)!important}
+.stDataFrame{border:1px solid var(--border);border-radius:8px}
+/* Streamlit popovers, detail boxes, dialogs, expanders and tooltips must remain readable in dark mode */
+[data-baseweb="popover"],[data-baseweb="popover"] *,
+[data-baseweb="menu"],[data-baseweb="menu"] *,
+[data-testid="stPopoverBody"],[data-testid="stPopoverBody"] *,
+[data-testid="stDialog"],[data-testid="stDialog"] *,
+[data-testid="stExpander"] details,[data-testid="stExpander"] summary,
+div[role="dialog"],div[role="dialog"] *{
+  color:#101820!important;
+}
+[data-baseweb="popover"],[data-baseweb="menu"],[data-testid="stPopoverBody"],[data-testid="stDialog"],div[role="dialog"]{
+  background:#ffffff!important;
+}
+[data-baseweb="popover"] a,[data-baseweb="menu"] a,[data-testid="stPopoverBody"] a,div[role="dialog"] a{color:#145a8d!important}
+[data-testid="stAlert"] p,[data-testid="stAlert"] span{color:inherit!important}
 </style>
 """, unsafe_allow_html=True)
 
@@ -63,26 +78,80 @@ def all_tables():
 
 TABLES=all_tables()
 
-ID_RE=re.compile(r"(^|\s)(id|entity id|company id|programme id|program id|yard id|vessel id|facility id|source id|relationship id|contract id|route id|news id|event id)(\s|$)",re.I)
+ID_RE=re.compile(r"(^|\s)(id|entity id|company id|programme id|program id|yard id|vessel id|facility id|source id|relationship id|contract id|route id|news id|event id|port id|terminal id|asset id)(\s|$)",re.I)
+
+# Internal IDs are required for joins, but never need to be the normal user interface.
+ID_FRIENDLY_NAMES={
+    "Company ID":"Company","Company Entity ID":"Company","Entity ID":"Entity",
+    "Source Entity":"Source","Target Entity":"Target","Source Entity ID":"Source","Target Entity ID":"Target",
+    "Programme ID":"Programme","Program ID":"Programme","Yard ID":"Shipyard","Build Yard ID":"Shipyard",
+    "Vessel ID":"Vessel","Port ID":"Port","Terminal ID":"Terminal","Parent Entity ID":"Parent Entity",
+    "Asset/Facility Entity ID":"Asset / Facility","Asset / Facility Entity ID":"Asset / Facility",
+    "Prime / Lead Entity ID":"Prime / Lead","Contractor Entity ID":"Contractor",
+    "Seller / Builder Entity ID":"Seller / Builder","Primary Entity ID":"Primary Entity",
+    "Owner / Operator Company ID":"Owner / Operator","Primary Operator Company ID":"Primary Operator",
+    "Operator Company ID":"Operator","Owner Company ID":"Owner",
+}
+
+def _friendly_col_name(c):
+    c=str(c)
+    if c in ID_FRIENDLY_NAMES: return ID_FRIENDLY_NAMES[c]
+    if ID_RE.search(c):
+        s=re.sub(r"\bID\b","",c,flags=re.I).strip(" /_-")
+        return s or "Entity"
+    return c
+
+def humanize_df(df, keep_urls=True, show_internal_ids=False):
+    """Resolve internal keys to English names before presentation."""
+    if df is None or df.empty: return pd.DataFrame()
+    out=pd.DataFrame(index=df.index)
+    for c in df.columns:
+        cstr=str(c)
+        if not keep_urls and "url" in cstr.lower():
+            continue
+        vals=df[c].copy()
+
+        # Resolve ID-bearing fields into canonical English labels.
+        is_id_col=bool(ID_RE.search(cstr) or cstr in ID_FRIENDLY_NAMES)
+        if is_id_col:
+            friendly=_friendly_col_name(cstr)
+            resolved=vals.astype(str).map(label)
+            # Suppress raw source/news/etc IDs if they cannot be translated to something human.
+            unresolved=resolved.eq(vals.astype(str))
+            technical_prefix=vals.astype(str).str.match(r"^(SRC|REL|NEWS|NL|OWN|BERTH|EQ|PRICE|FIN|CON|SALE|ANN|FAC|LNK|CM|INT|GOV|TEST|SYS|PORT|TERM|COMP|DEF|YARD|PROG|VES|ASSET|WATER|RAIL|CORR)_?",case=False,na=False)
+            if technical_prefix.all() and unresolved.all() and not show_internal_ids:
+                continue
+            if friendly in out.columns:
+                # avoid duplicate English columns such as Primary Operator ID + Primary Operator
+                if out[friendly].astype(str).str.strip().eq("").all():
+                    out[friendly]=resolved
+                continue
+            out[friendly]=resolved
+            if show_internal_ids and friendly != cstr:
+                out[cstr]=vals
+        else:
+            # Also translate exact entity-key values that happen to live in non-ID columns.
+            def trans(v):
+                s=str(v).strip()
+                return label(s) if s in LABELS else v
+            out[cstr]=vals.map(trans)
+
+    # Prefer populated human-readable columns and drop duplicate column names.
+    out=out.loc[:,~out.columns.duplicated()].copy()
+    return out
 
 def hide_ids(df, keep_url=True):
-    if df is None or df.empty: return pd.DataFrame()
-    cols=[]
-    for c in df.columns:
-        s=str(c)
-        if ID_RE.search(s): continue
-        if not keep_url and "url" in s.lower(): continue
-        cols.append(c)
-    return df[cols].copy()
+    return humanize_df(df,keep_urls=keep_url,show_internal_ids=False)
 
-def display_df(df, max_rows=150):
+def display_df(df, max_rows=150, show_ids=False):
     if df is None or df.empty:
         st.info("No matching records.")
         return
-    show=hide_ids(df).head(max_rows)
+    show=humanize_df(df,show_internal_ids=show_ids).head(max_rows)
     cfg={}
     for c in show.columns:
-        if "url" in str(c).lower(): cfg[c]=st.column_config.LinkColumn(c,display_text="Open")
+        if "url" in str(c).lower():
+            cfg[c]=st.column_config.LinkColumn(str(c).replace("URLs","Sources").replace("URL","Source"),display_text="Open")
     st.dataframe(show,use_container_width=True,hide_index=True,column_config=cfg)
 
 def header(title,sub):
@@ -102,6 +171,11 @@ def build_label_index():
         (("Defence & Shipbuilding","Shipyards"),"Yard ID","Shipyard"),
         (("Defence & Shipbuilding","Programmes"),"Programme ID","Programme"),
         (("Defence & Shipbuilding","Sample Vessels"),"Vessel ID","Vessel"),
+        (("Maritime","Ports"),"Port ID","Port / Facility"),
+        (("Maritime","Port Terminals"),"Terminal ID","Terminal / Facility"),
+        (("Maritime","Vessels"),"Vessel ID","Vessel Name"),
+        (("Infrastructure","Assets"),"Asset ID","Asset"),
+        (("Systems & Waterways","Systems"),"System ID","System"),
     ]
     for key,idc,namec in candidates:
         df=TABLES.get(key,pd.DataFrame())
@@ -136,7 +210,8 @@ def search_index():
             title=""
             for c in preferred:
                 if c in r.index and str(r.get(c,"")).strip(): title=str(r[c]).strip(); break
-            if not title: title=vals[0]
+            if not title:
+                title=label(vals[0]) if vals[0] in LABELS else vals[0]
             rows.append({"wb":wb_label,"sheet":sheet,"row":int(i),"title":title,"text":txt})
     return pd.DataFrame(rows)
 SINDEX=search_index()
@@ -494,7 +569,80 @@ def show_named_list(df, title_col, subtitle_cols=None, source_col="Source URL", 
         sub=" · ".join(bits)
         st.markdown(f"<div class='pc-card'><div class='pc-big'>{title}</div><div class='pc-small'>{sub}</div></div>",unsafe_allow_html=True)
         u=str(r.get(source_col,"")).strip()
-        if u.startswith("http"): st.link_button("Source",u,key=f"src_{title_col}_{r.name}_{abs(hash(u))%100000}")
+        if u.startswith("http"):
+            unique_key=f"src_{abs(hash((title_col,str(r.name),u,title)))%1000000000}"
+            st.link_button("Source",u,key=unique_key)
+
+
+def _numeric(s):
+    return pd.to_numeric(s.astype(str).str.replace(",","",regex=False),errors="coerce")
+
+def port_map_data(prof):
+    """Use canonical parent-port coordinates for a company's terminal network."""
+    ports=prof.get("ports",pd.DataFrame()).copy()
+    if ports.empty or "Latitude" not in ports.columns or "Longitude" not in ports.columns:
+        return pd.DataFrame()
+    ports["lat"]=_numeric(ports["Latitude"])
+    ports["lon"]=_numeric(ports["Longitude"])
+    ports=ports.dropna(subset=["lat","lon"])
+    name_col="Port / Facility" if "Port / Facility" in ports.columns else None
+    if not name_col: return ports[["lat","lon"]]
+    return ports[[name_col,"Country","lat","lon"]].rename(columns={name_col:"name"})
+
+def render_port_visuals(prof):
+    terms=prof.get("port_terminals",pd.DataFrame())
+    m=port_map_data(prof)
+    if not m.empty:
+        st.markdown("### Geographic footprint")
+        st.map(m,latitude="lat",longitude="lon",size=70)
+
+    if terms is None or terms.empty:
+        return
+
+    # Country footprint
+    if "Country" in terms.columns:
+        counts=terms["Country"].astype(str).replace("",pd.NA).dropna().value_counts().head(15)
+        if len(counts)>1:
+            st.markdown("### Terminals by country")
+            st.bar_chart(counts,horizontal=True)
+
+    # Capacity where populated
+    if "Container Capacity TEU/yr" in terms.columns:
+        cap=terms[["Terminal / Facility","Container Capacity TEU/yr"]].copy()
+        cap["Container Capacity TEU/yr"]=_numeric(cap["Container Capacity TEU/yr"])
+        cap=cap.dropna().sort_values("Container Capacity TEU/yr",ascending=False).head(15)
+        if not cap.empty:
+            st.markdown("### Largest seeded terminal capacities")
+            st.bar_chart(cap.set_index("Terminal / Facility")["Container Capacity TEU/yr"],horizontal=True)
+
+def render_shipyard_visuals(prof):
+    yards=prof.get("yards",pd.DataFrame())
+    caps=prof.get("yard_capabilities",pd.DataFrame())
+    if yards is not None and not yards.empty and "Country" in yards.columns:
+        yc=yards["Country"].astype(str).replace("",pd.NA).dropna().value_counts()
+        if len(yc)>1:
+            st.markdown("### Shipyards by country")
+            st.bar_chart(yc,horizontal=True)
+    if caps is not None and not caps.empty and "Capability" in caps.columns:
+        cc=caps["Capability"].astype(str).replace("",pd.NA).dropna().value_counts().head(15)
+        if not cc.empty:
+            st.markdown("### Seeded yard capabilities")
+            st.bar_chart(cc,horizontal=True)
+
+def render_market_visuals(entity_id):
+    prices=TABLES.get(("Corporate & Markets","Company Market Prices"),pd.DataFrame())
+    if prices.empty or "Company ID" not in prices.columns:
+        return
+    scope=company_scope_ids(entity_id)
+    p=prices[prices["Company ID"].astype(str).isin(scope)].copy()
+    if p.empty or "Month End" not in p.columns or "Close" not in p.columns:
+        return
+    p["Date"]=pd.to_datetime(p["Month End"],errors="coerce")
+    p["Close Numeric"]=_numeric(p["Close"])
+    p=p.dropna(subset=["Date","Close Numeric"]).sort_values("Date")
+    if len(p)>=3:
+        st.markdown("### Market price")
+        st.line_chart(p.set_index("Date")["Close Numeric"])
 
 def render_company_profile(entity_id, entity_name):
     prof=build_company_profile(entity_id,entity_name)
@@ -537,6 +685,11 @@ def render_company_profile(entity_id, entity_name):
         if not prof["programmes"].empty:
             st.markdown("### Active / relevant programmes")
             show_named_list(prof["programmes"],"Programme",["Customer","Platform / Class","Status","Build / Sales Route"])
+        if not prof["port_terminals"].empty:
+            render_port_visuals(prof)
+        if not prof["yards"].empty:
+            render_shipyard_visuals(prof)
+        render_market_visuals(entity_id)
         if prof["port_terminals"].empty and prof["yards"].empty and prof["programmes"].empty:
             st.info("No port, shipyard or programme profile yet for this entity.")
 
@@ -658,7 +811,7 @@ def go_entity(eid):
 
 # ---------- sidebar ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.27.3 · Asset-aware Entity Explorer")
+st.sidebar.caption("v1.27.4 · Readable visual Entity Explorer")
 pages=["Search P&C","Entity Explorer","Systems & Corridors","Shipyards & Defence","Intelligence","Data Explorer"]
 if "nav_page" not in st.session_state: st.session_state["nav_page"]="Search P&C"
 page=st.sidebar.radio("Navigate",pages,key="nav_page")
@@ -740,6 +893,30 @@ elif page=="Systems & Corridors":
         a,b=st.columns(2)
         a.markdown(f"<div class='pc-card'><div class='pc-label'>Geography</div><div class='pc-big'>{srow.get('Geography','')}</div></div>",unsafe_allow_html=True)
         b.markdown(f"<div class='pc-card'><div class='pc-label'>Archetype</div><div class='pc-big'>{srow.get('Archetype','')}</div></div>",unsafe_allow_html=True)
+        # Visual system summary
+        se_all=TABLES.get(("Systems & Waterways","System Entities"),pd.DataFrame())
+        se_vis=se_all[se_all["System ID"].astype(str).eq(str(sid))].copy() if "System ID" in se_all.columns else pd.DataFrame()
+        if not se_vis.empty:
+            vis1,vis2=st.columns(2)
+            with vis1:
+                if "Entity Type" in se_vis.columns:
+                    et=se_vis["Entity Type"].astype(str).replace("",pd.NA).dropna().value_counts()
+                    if not et.empty:
+                        st.markdown("### System composition")
+                        st.bar_chart(et,horizontal=True)
+            with vis2:
+                # Match named system ports against the canonical port table for coordinates.
+                allports=TABLES.get(("Maritime","Ports"),pd.DataFrame())
+                if not allports.empty and "Port / Facility" in allports.columns and "Entity" in se_vis.columns:
+                    names=set(se_vis["Entity"].astype(str))
+                    mp=allports[allports["Port / Facility"].astype(str).isin(names)].copy()
+                    if "Latitude" in mp.columns and "Longitude" in mp.columns:
+                        mp["lat"]=_numeric(mp["Latitude"]); mp["lon"]=_numeric(mp["Longitude"])
+                        mp=mp.dropna(subset=["lat","lon"])
+                        if not mp.empty:
+                            st.markdown("### System map")
+                            st.map(mp,latitude="lat",longitude="lon",size=70)
+
         tabs=st.tabs(["Relationships","Entities","Facilities","Interfaces","Stress Test"])
         keys=["System Links","System Entities","Facilities","Network Interfaces","Stress Tests"]
         for tab,sheet in zip(tabs,keys):
@@ -781,7 +958,8 @@ elif page=="Data Explorer":
     df=load_sheet(wb_label,sheet)
     q=st.text_input("Filter this table")
     if q: df=_contains_any(df,[q])
-    display_df(df,500)
+    show_debug_ids=st.toggle("Show internal database IDs",value=False,help="Off by default. Turn on only for schema/debug work.")
+    display_df(df,500,show_ids=show_debug_ids)
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"{APP_TITLE} {APP_VERSION} · {len(TABLES):,} loaded tables")

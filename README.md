@@ -49,7 +49,7 @@ The new graph tests:
 This adds marine-access infrastructure as a first-class facility category alongside berths,
 yards, rail sidings, locks, canals, warehouses and other infrastructure.
 
-## v1.27.3 interface fix
+## v1.27.4 interface fix
 The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
 - shipyards and yard facilities/capabilities
 - defence/coast guard sample vessels
@@ -73,3 +73,14 @@ The profile also labels the operating company on each yard and the prime/lead co
 Company profiles now traverse the dedicated Maritime workbook:
 Company → Port Terminals → Parent Ports → Port Ownership/JV → Berths → Equipment → Port News.
 This fixes APM Terminals, DP World, PSA, Hutchison Ports and other terminal operators whose asset networks were already populated but hidden from the entity profile.
+
+## v1.27.4 readability + visuals
+- Fixes unreadable white Streamlit detail/popover boxes in dark mode.
+- Resolves internal company/entity/programme/yard/port/terminal/vessel keys to English names before display.
+- Internal IDs are hidden throughout the normal interface; Data Explorer has an explicit debug-only toggle.
+- Adds company port-footprint maps where canonical port coordinates exist.
+- Adds terminal-by-country and seeded terminal-capacity charts.
+- Adds shipyard country/capability charts.
+- Restores company market-price line charts where a time series exists.
+- Adds system composition charts and system maps where system ports have coordinates.
+- Also hardens Source link keys against StreamlitDuplicateElementKey.
