@@ -49,7 +49,7 @@ The new graph tests:
 This adds marine-access infrastructure as a first-class facility category alongside berths,
 yards, rail sidings, locks, canals, warehouses and other infrastructure.
 
-## v1.27.4 interface fix
+## v1.27.5 interface fix
 The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
 - shipyards and yard facilities/capabilities
 - defence/coast guard sample vessels
@@ -84,3 +84,11 @@ This fixes APM Terminals, DP World, PSA, Hutchison Ports and other terminal oper
 - Restores company market-price line charts where a time series exists.
 - Adds system composition charts and system maps where system ports have coordinates.
 - Also hardens Source link keys against StreamlitDuplicateElementKey.
+
+## v1.27.5 stability + visual fix
+- Eliminates repeated Streamlit link-button widgets that caused DuplicateElementKey crashes.
+- Source links are now ordinary HTML/markdown links.
+- Forces Streamlit Cloud header/toolbar into the dark app theme.
+- Keeps white detail/popover surfaces readable with dark text.
+- Adds shipyard footprint maps for the detailed stress-test yards.
+- Moves maps/charts to the top of company Overview pages.

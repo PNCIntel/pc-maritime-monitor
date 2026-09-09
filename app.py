@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v1.27.4"
+APP_VERSION = "v1.27.5"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -18,6 +18,7 @@ st.markdown("""
 h1,h2,h3,h4,h5,h6,p,li,span,label{color:var(--text)}
 a{color:var(--blue)!important}
 .pc-kicker{color:var(--gold);font-size:.76rem;letter-spacing:.14em;text-transform:uppercase;font-weight:700}.pc-title{font-size:2rem;font-weight:800}.pc-sub{color:var(--muted);margin:.2rem 0 1.2rem}.pc-card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:8px}.pc-label{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.pc-big{font-size:1.3rem;font-weight:750}.pc-small{color:var(--muted);font-size:.88rem}.pc-rel{padding:8px 11px;border-left:3px solid var(--gold);background:var(--panel);margin:6px 0;border-radius:5px}.pc-chip{display:inline-block;border:1px solid var(--border);background:var(--panel);padding:3px 8px;border-radius:999px;font-size:.76rem;color:var(--muted);margin:2px 3px 2px 0}
+.pc-source{margin-top:7px;font-size:.82rem}.pc-source a{color:var(--blue)!important;text-decoration:none;font-weight:650}
 [data-baseweb="select"]>div,[data-baseweb="input"]>div,.stTextInput input{background:var(--panel)!important;color:var(--text)!important;border-color:var(--border)!important}
 .stDataFrame{border:1px solid var(--border);border-radius:8px}
 /* Streamlit popovers, detail boxes, dialogs, expanders and tooltips must remain readable in dark mode */
@@ -34,6 +35,35 @@ div[role="dialog"],div[role="dialog"] *{
 }
 [data-baseweb="popover"] a,[data-baseweb="menu"] a,[data-testid="stPopoverBody"] a,div[role="dialog"] a{color:#145a8d!important}
 [data-testid="stAlert"] p,[data-testid="stAlert"] span{color:inherit!important}
+/* Streamlit Cloud / app chrome */
+[data-testid="stHeader"],header[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecoration"]{
+  background:#07111f!important;
+  color:#f3f6fa!important;
+}
+[data-testid="stHeader"] *,[data-testid="stToolbar"] *{
+  color:#f3f6fa!important;
+}
+[data-testid="stHeader"] svg,[data-testid="stToolbar"] svg{
+  fill:#f3f6fa!important;
+  color:#f3f6fa!important;
+}
+[data-testid="stAppDeployButton"],[data-testid="stStatusWidget"]{
+  background:#0d1a2b!important;
+  color:#f3f6fa!important;
+}
+/* White BaseWeb/Streamlit detail boxes get dark text */
+[data-baseweb="popover"],[data-baseweb="popover"] *,
+[data-baseweb="menu"],[data-baseweb="menu"] *,
+[data-testid="stPopoverBody"],[data-testid="stPopoverBody"] *,
+[data-testid="stDialog"],[data-testid="stDialog"] *,
+div[role="dialog"],div[role="dialog"] *,
+div[data-baseweb="tooltip"],div[data-baseweb="tooltip"] *{
+  color:#101820!important;
+}
+[data-baseweb="popover"],[data-baseweb="menu"],[data-testid="stPopoverBody"],
+[data-testid="stDialog"],div[role="dialog"],div[data-baseweb="tooltip"]{
+  background:#ffffff!important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -244,7 +274,7 @@ def show_result_detail(hit):
         pairs.append((str(c),str(v)))
     for c,v in pairs[:12]: st.markdown(f"**{c}:** {v}")
     urls=[str(v) for c,v in row.items() if "url" in str(c).lower() and str(v).startswith("http")]
-    for u in urls[:3]: st.link_button("Open source",u)
+    for u in urls[:3]: st.markdown(f"[Open source ↗]({u})")
 
 # ---------- entity resolver ----------
 
@@ -556,6 +586,7 @@ def readable_relationships(df, entity_id):
         )
 
 def show_named_list(df, title_col, subtitle_cols=None, source_col="Source URL", max_items=100):
+    """Readable cards with normal HTML links, never repeated Streamlit buttons."""
     if df is None or df.empty:
         st.info("No records.")
         return
@@ -565,17 +596,59 @@ def show_named_list(df, title_col, subtitle_cols=None, source_col="Source URL", 
         bits=[]
         for c in subtitle_cols:
             v=str(r.get(c,"")).strip()
-            if v: bits.append(v)
+            if v:
+                bits.append(str(label(v)) if v in LABELS else v)
         sub=" · ".join(bits)
-        st.markdown(f"<div class='pc-card'><div class='pc-big'>{title}</div><div class='pc-small'>{sub}</div></div>",unsafe_allow_html=True)
         u=str(r.get(source_col,"")).strip()
+        source_html=""
         if u.startswith("http"):
-            unique_key=f"src_{abs(hash((title_col,str(r.name),u,title)))%1000000000}"
-            st.link_button("Source",u,key=unique_key)
-
+            source_html=f"<div class='pc-source'><a href='{u}' target='_blank' rel='noopener noreferrer'>Open source ↗</a></div>"
+        st.markdown(
+            f"<div class='pc-card'><div class='pc-big'>{title}</div>"
+            f"<div class='pc-small'>{sub}</div>{source_html}</div>",
+            unsafe_allow_html=True
+        )
 
 def _numeric(s):
     return pd.to_numeric(s.astype(str).str.replace(",","",regex=False),errors="coerce")
+
+YARD_CITY_COORDS={
+    ("Abu Dhabi","UAE"):(24.4539,54.3773),
+    ("Halifax, Nova Scotia","Canada"):(44.6488,-63.5752),
+    ("North Vancouver, BC","Canada"):(49.3200,-123.0724),
+    ("Victoria, BC","Canada"):(48.4284,-123.3656),
+    ("Lévis, Québec","Canada"):(46.8033,-71.1779),
+    ("Helsinki","Finland"):(60.1699,24.9384),
+    ("Galveston, Texas","USA"):(29.3013,-94.7977),
+    ("Port Arthur, Texas","USA"):(29.8849,-93.9399),
+    ("Houma, Louisiana","USA"):(29.5958,-90.7195),
+    ("Gulfport, Mississippi","USA"):(30.3674,-89.0928),
+    ("Pascagoula, Mississippi","USA"):(30.3658,-88.5561),
+    ("Rauma","Finland"):(61.1272,21.5113),
+    ("Antalya","Turkey"):(36.8969,30.7133),
+    ("Tuzla, Istanbul","Turkey"):(40.8167,29.3000),
+    ("Altınova, Yalova","Turkey"):(40.6944,29.5097),
+    ("La Spezia","Italy"):(44.1025,9.8241),
+}
+
+def shipyard_map_data(prof):
+    yards=prof.get("yards",pd.DataFrame())
+    if yards is None or yards.empty:
+        return pd.DataFrame()
+    rows=[]
+    for _,r in yards.iterrows():
+        loc=str(r.get("Location","")).strip()
+        country=str(r.get("Country","")).strip()
+        shipyard=str(r.get("Shipyard","")).strip()
+        xy=YARD_CITY_COORDS.get((loc,country))
+        if not xy:
+            for (k_loc,k_country),coords in YARD_CITY_COORDS.items():
+                if loc and (loc.lower()==k_loc.lower() or loc.lower() in k_loc.lower() or k_loc.lower() in loc.lower()):
+                    xy=coords
+                    break
+        if xy:
+            rows.append({"name":shipyard,"location":loc,"country":country,"lat":xy[0],"lon":xy[1]})
+    return pd.DataFrame(rows)
 
 def port_map_data(prof):
     """Use canonical parent-port coordinates for a company's terminal network."""
@@ -618,9 +691,13 @@ def render_port_visuals(prof):
 def render_shipyard_visuals(prof):
     yards=prof.get("yards",pd.DataFrame())
     caps=prof.get("yard_capabilities",pd.DataFrame())
+    sm=shipyard_map_data(prof)
+    if not sm.empty:
+        st.markdown("### Shipyard footprint")
+        st.map(sm,latitude="lat",longitude="lon",size=85)
     if yards is not None and not yards.empty and "Country" in yards.columns:
         yc=yards["Country"].astype(str).replace("",pd.NA).dropna().value_counts()
-        if len(yc)>1:
+        if not yc.empty:
             st.markdown("### Shipyards by country")
             st.bar_chart(yc,horizontal=True)
     if caps is not None and not caps.empty and "Capability" in caps.columns:
@@ -673,6 +750,13 @@ def render_company_profile(entity_id, entity_name):
 
     tabs=st.tabs(["Overview","Port Assets","Shipyards & Facilities","Vessels","Programmes & Contracts","Sales Routes","News","Relationships & Systems","Evidence"])
     with tabs[0]:
+        # Visual intelligence first
+        if not prof["port_terminals"].empty:
+            render_port_visuals(prof)
+        if not prof["yards"].empty:
+            render_shipyard_visuals(prof)
+        render_market_visuals(entity_id)
+
         if not prof["port_terminals"].empty:
             st.markdown("### Port terminals / facilities")
             t=prof["port_terminals"].copy()
@@ -685,11 +769,6 @@ def render_company_profile(entity_id, entity_name):
         if not prof["programmes"].empty:
             st.markdown("### Active / relevant programmes")
             show_named_list(prof["programmes"],"Programme",["Customer","Platform / Class","Status","Build / Sales Route"])
-        if not prof["port_terminals"].empty:
-            render_port_visuals(prof)
-        if not prof["yards"].empty:
-            render_shipyard_visuals(prof)
-        render_market_visuals(entity_id)
         if prof["port_terminals"].empty and prof["yards"].empty and prof["programmes"].empty:
             st.info("No port, shipyard or programme profile yet for this entity.")
 
@@ -811,7 +890,7 @@ def go_entity(eid):
 
 # ---------- sidebar ----------
 st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption("v1.27.4 · Readable visual Entity Explorer")
+st.sidebar.caption("v1.27.5 · Stable visual Entity Explorer")
 pages=["Search P&C","Entity Explorer","Systems & Corridors","Shipyards & Defence","Intelligence","Data Explorer"]
 if "nav_page" not in st.session_state: st.session_state["nav_page"]="Search P&C"
 page=st.sidebar.radio("Navigate",pages,key="nav_page")
