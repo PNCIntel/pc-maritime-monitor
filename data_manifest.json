@@ -1,6 +1,6 @@
 {
-  "version": "1.33",
-  "implementation_version": "2.1.0",
+  "version": "1.34",
+  "implementation_version": "2.2.0",
   "sheet_to_file": {
     "Companies": "01_core_entities.xlsx",
     "Entity Registry": "01_core_entities.xlsx",
@@ -35,6 +35,7 @@
     "Imo Coverage": "02_maritime.xlsx",
     "Tanker Fleet Universe": "02_maritime.xlsx",
     "Tanker Corridor Exposure": "02_maritime.xlsx",
+    "Tanker Rate Observations": "02_maritime.xlsx",
     "Ferry Systems": "02_maritime.xlsx",
     "Ferry Routes": "02_maritime.xlsx",
     "Ferry Terminals": "02_maritime.xlsx",
@@ -129,6 +130,8 @@
     "Locks & Canals": "11_systems_waterways_governance.xlsx",
     "Network Interfaces": "11_systems_waterways_governance.xlsx",
     "Stress Tests": "11_systems_waterways_governance.xlsx",
+    "Hormuz Traffic Monthly": "11_systems_waterways_governance.xlsx",
+    "Hormuz API Endpoints": "11_systems_waterways_governance.xlsx",
     "Overview": "12_defence_shipbuilding.xlsx",
     "Defence Companies": "12_defence_shipbuilding.xlsx",
     "Yard Facilities": "12_defence_shipbuilding.xlsx",
@@ -139,6 +142,7 @@
     "Contracts": "12_defence_shipbuilding.xlsx",
     "Sales & Delivery Routes": "12_defence_shipbuilding.xlsx",
     "Announcements": "12_defence_shipbuilding.xlsx",
+    "Maritime Workforce": "12_defence_shipbuilding.xlsx",
     "Sources": "12_defence_shipbuilding.xlsx",
     "Platform Classes": "12_defence_shipbuilding.xlsx",
     "Vessel Status History": "12_defence_shipbuilding.xlsx",
@@ -202,6 +206,7 @@
       "Imo Coverage",
       "Tanker Fleet Universe",
       "Tanker Corridor Exposure",
+      "Tanker Rate Observations",
       "Ferry Systems",
       "Ferry Routes",
       "Ferry Terminals",
@@ -316,6 +321,8 @@
       "Locks & Canals",
       "Network Interfaces",
       "Stress Tests",
+      "Hormuz Traffic Monthly",
+      "Hormuz API Endpoints",
       "Sources"
     ],
     "12_defence_shipbuilding.xlsx": [
@@ -330,6 +337,7 @@
       "Contracts",
       "Sales & Delivery Routes",
       "Announcements",
+      "Maritime Workforce",
       "Sources",
       "Platform Classes",
       "Vessel Status History"
@@ -366,5 +374,5 @@
       "Overview"
     ]
   },
-  "model": "Gulf kinetic escalation + canonical tanker incidents + Hormuz security system"
+  "model": "Connected chokepoint traffic, tanker economics, maritime compliance, defence maintenance, workforce and sanctions-exposed shipbuilding"
 }

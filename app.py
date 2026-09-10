@@ -1,12 +1,15 @@
 from pathlib import Path
 import re
+import json
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from collections import defaultdict
 import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v2.1.0"
-RELEASE_NAME = "Cruise & Service Craft Expansion"
+APP_VERSION = "v2.2.0"
+RELEASE_NAME = "Hormuz, Contracts & Maritime Compliance"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -124,6 +127,24 @@ def load_sheet(label, sheet):
     if not path.exists(): return pd.DataFrame()
     try: return pd.read_excel(path, sheet_name=sheet, dtype=str).fillna("")
     except Exception: return pd.DataFrame()
+
+HORMUZ_API_BASE = "https://hormuz.data-tracking.net/api"
+HORMUZ_API_PATHS = {"summary", "crossings/daily", "ships/by_zone"}
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def load_hormuz_api(path, parameter_name="", parameter_value=""):
+    """Read only documented, allow-listed public endpoints; fail without breaking the app."""
+    if path not in HORMUZ_API_PATHS:
+        return None, "Unsupported endpoint"
+    url = f"{HORMUZ_API_BASE}/{path}"
+    if parameter_name and parameter_value:
+        url += f"?{parameter_name}={int(parameter_value)}"
+    try:
+        req = Request(url, headers={"User-Agent":"PC-Trade-System/2.2"})
+        with urlopen(req, timeout=8) as response:
+            return json.loads(response.read().decode("utf-8")), ""
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
+        return None, str(exc)
 
 @st.cache_data(show_spinner=False)
 def all_tables():
@@ -1783,7 +1804,7 @@ def vessel_summary_cards(r):
                 unsafe_allow_html=True
             )
 
-def render_vessel_relationship_cards(vessel_id,vessel_name,rel):
+def render_vessel_relationship_cards(vessel_id,vessel_name,rel,key_scope):
     if rel is None or rel.empty:
         st.info("No linked owner/operator/manager records.")
         return
@@ -1804,7 +1825,7 @@ def render_vessel_relationship_cards(vessel_id,vessel_name,rel):
             )
         with c2:
             if cid.startswith("COMP_"):
-                if st.button(f"Open {cname}",key=f"vrel_open_{vessel_id}_{i}_{cid}",use_container_width=True):
+                if st.button(f"Open {cname}",key=f"vrel_open_{key_scope}_{vessel_id}_{i}_{cid}",use_container_width=True):
                     request_nav("Companies","company_pick_id",cid,cname)
                     st.rerun()
 
@@ -1987,7 +2008,7 @@ def render_vessel_profile(vessel_id,vessel_name):
 
         if not rel.empty:
             st.markdown("### Connected companies")
-            render_vessel_relationship_cards(vessel_id,vessel_name,rel)
+            render_vessel_relationship_cards(vessel_id,vessel_name,rel,"overview")
 
         if not san.empty:
             st.markdown("### Compliance flag")
@@ -2004,7 +2025,7 @@ def render_vessel_profile(vessel_id,vessel_name):
 
     with tabs[1]:
         st.markdown("### Owner / operator / manager relationships")
-        render_vessel_relationship_cards(vessel_id,vessel_name,rel)
+        render_vessel_relationship_cards(vessel_id,vessel_name,rel,"ownership")
 
     with tabs[2]:
         if san.empty:
@@ -2226,7 +2247,7 @@ st.sidebar.caption(f"{APP_VERSION} · {RELEASE_NAME}")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
-pages=["Overview","Search","Companies","Ports","Shipyards","Vessels","Cruise & Service Craft","Contracts","Trade Policy","Sanctions","News & Events","Systems","Data"]
+pages=["Overview","Search","Companies","Ports","Shipyards","Vessels","Cruise & Service Craft","Contracts","Trade Policy","Sanctions","News & Events","Hormuz Monitor","Systems","Data"]
 
 # Navigation requests are applied BEFORE the top-nav widget is instantiated.
 # This avoids StreamlitWidgetAlreadyInstantiatedError when a button changes pages.
@@ -2877,6 +2898,57 @@ elif page=="News & Events":
                 confidence_col="Confidence",
                 max_items=200
             )
+
+elif page=="Hormuz Monitor":
+    header(
+        "Strait of Hormuz Monitor",
+        "AIS-derived traffic, tanker movements and energy-flow indicators. Counts are conservative lower bounds during wartime AIS disruption; the current month is partial."
+    )
+    monthly=TABLES.get(("Systems & Waterways","Hormuz Traffic Monthly"),pd.DataFrame()).copy()
+    endpoints=TABLES.get(("Systems & Waterways","Hormuz API Endpoints"),pd.DataFrame()).copy()
+    rates=TABLES.get(("Maritime","Tanker Rate Observations"),pd.DataFrame()).copy()
+
+    if monthly.empty:
+        st.info("Hormuz traffic snapshot is not available in this deployment.")
+    else:
+        for c in ["Crossings","Inbound","Outbound","Oil Tankers Outbound","Estimated Oil (M bbl)"]:
+            if c in monthly.columns:
+                monthly[c]=pd.to_numeric(monthly[c],errors="coerce")
+        current=monthly.iloc[-1]
+        complete=monthly[~monthly["Data Status"].astype(str).str.contains("partial",case=False,na=False)]
+        prior=complete.iloc[-1] if not complete.empty else current
+        m1,m2,m3,m4=st.columns(4)
+        m1.metric(f"{current.get('Month','')} crossings",int(current.get("Crossings",0)),help="Current month; partial")
+        m2.metric("Inbound / outbound",f"{int(current.get('Inbound',0))} / {int(current.get('Outbound',0))}",help="Current month; partial")
+        m3.metric("Outbound oil tankers",int(current.get("Oil Tankers Outbound",0)),help="Current month; partial")
+        m4.metric(f"Last complete month ({prior.get('Month','')})",int(prior.get("Crossings",0)))
+        st.warning("Interpret direction and trend, not exact totals: AIS jamming and upstream coverage gaps can suppress observed traffic.")
+
+        chart=monthly.set_index("Month")[["Crossings","Inbound","Outbound","Oil Tankers Outbound"]]
+        st.markdown("### Monthly traffic snapshot")
+        st.line_chart(chart)
+
+        t1,t2,t3=st.tabs(["Monthly Data","Tanker Economics","API & Live Summary"])
+        with t1:
+            display_df(monthly,100)
+            st.caption("Monitoring began 8 March 2026. September 2026 is an in-progress month and should not be compared with completed months.")
+        with t2:
+            if rates.empty:
+                st.info("No tanker-rate observations loaded.")
+            else:
+                display_df(rates,100)
+                st.caption("Rate observations are point-in-time market assessments, not a continuous freight index.")
+        with t3:
+            st.markdown("### Documented public endpoints")
+            display_df(endpoints,100)
+            st.markdown("[Open traffic statistics](https://hormuz.data-tracking.net/stats) · [Open API documentation](https://hormuz.data-tracking.net/api-docs)")
+            if st.toggle("Load live 24-hour API summary",value=False,key="hormuz_live_summary"):
+                payload,error=load_hormuz_api("summary","hours",24)
+                if error:
+                    st.warning(f"Live API unavailable; the stored monthly snapshot remains usable. {error}")
+                else:
+                    st.caption("Live public API response · cached for 30 minutes")
+                    st.json(payload,expanded=False)
 
 elif page=="Systems":
     header("Systems & Corridors","Connected port, rail, waterway and corridor systems with linked events.")

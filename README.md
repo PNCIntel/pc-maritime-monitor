@@ -1,4 +1,4 @@
-# P&C Trade System v2
+# P&C Trade System v2.2
 
 This is the clean XLSX-native implementation of the Power & Corridors Trade System. It preserves the connected company, port, vessel, infrastructure, rail, aviation, commercial, intelligence, compliance, events and defence model while removing the older CSV deployment assumptions.
 
@@ -25,3 +25,11 @@ python verify_deployment.py
 ```
 
 The verifier checks the Python syntax, required files, workbook readability, manifest-to-sheet routing, spreadsheet error markers, canonical primary keys and IMO uniqueness.
+
+## v2.2 additions
+
+- Strait of Hormuz monthly traffic snapshot plus documented public API endpoints and an optional live 24-hour summary in the app.
+- Tanker-rate observations connected to corridor, company, event and financial-dispute records.
+- Submarine-maintenance extension, maritime-workforce designations and Arctic LNG carrier programme/arbitration records.
+- MSC SAMIRA III environmental-enforcement event connected to vessel owner, manager and compliance reporting.
+- Streamlit vessel-profile relationship buttons now use tab-scoped keys, preventing duplicate-element failures when the same relationships appear in multiple tabs.
