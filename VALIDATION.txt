@@ -1,0 +1,13 @@
+P&C Intelligence complete setup validation
+
+01_core_entities.xlsx: OK
+02_maritime.xlsx: OK
+05_aviation.xlsx: OK
+06_infrastructure.xlsx: OK
+09_intelligence.xlsx: OK
+10_sources_evidence.xlsx: OK
+13_events_hazards.xlsx: OK
+14_trade_policy_compliance.xlsx: OK
+
+Events: 45
+Event Locations: 48

@@ -363,7 +363,7 @@ observations = xl("09_intelligence.xlsx", "Event Observations")
 monitoring = xl("09_intelligence.xlsx", "Monitoring")
 disruption = xl("09_intelligence.xlsx", "Disruption Watch")
 weather_labour = xl("09_intelligence.xlsx", "Weather Labour Events")
-security_view = xl("09_intelligence.xlsx", "Security Product View")
+security_view = pd.DataFrame()  # optional view not present in current workbook
 
 # Sources/evidence
 sources = xl("10_sources_evidence.xlsx", "Sources")
@@ -382,9 +382,9 @@ sanctions_authorities = xl("14_trade_policy_compliance.xlsx", "Sanctions Authori
 sanctions_programmes = xl("14_trade_policy_compliance.xlsx", "Sanctions Programmes")
 sanctions_designations = xl("14_trade_policy_compliance.xlsx", "Sanctions Designations")
 sanctions_links = xl("14_trade_policy_compliance.xlsx", "Sanctions Entity Links")
-compliance_regimes = xl("14_trade_policy_compliance.xlsx", "Compliance Regimes")
-compliance_designations = xl("14_trade_policy_compliance.xlsx", "Compliance Designations")
-compliance_exposure = xl("14_trade_policy_compliance.xlsx", "Compliance Exposure")
+compliance_regimes = pd.DataFrame()  # optional future normalized table
+compliance_designations = pd.DataFrame()  # optional future normalized table
+compliance_exposure = pd.DataFrame()  # optional future normalized table
 watchlist_taxonomy = xl("14_trade_policy_compliance.xlsx", "Watchlist Taxonomy")
 
 # -----------------------------------------------------------------------------
@@ -417,168 +417,47 @@ st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 st.sidebar.caption("Excel-backed v3.0 · shared P&C canonical data")
 
 with st.sidebar.expander("Data status", expanded=False):
-    _hazard_status = data_file_status("13_events_hazards.xlsx")
-    _intel_status = data_file_status("09_intelligence.xlsx")
+    _required_files = [
+        "01_core_entities.xlsx",
+        "02_maritime.xlsx",
+        "05_aviation.xlsx",
+        "06_infrastructure.xlsx",
+        "09_intelligence.xlsx",
+        "10_sources_evidence.xlsx",
+        "13_events_hazards.xlsx",
+        "14_trade_policy_compliance.xlsx",
+    ]
 
-    if _hazard_status["exists"]:
-        st.caption(
-            f"Events workbook: {len(hazard_events):,} events · "
-            f"{_hazard_status['size'] / 1024:.1f} KB · "
-            f"modified {_hazard_status['modified']}"
-        )
-        if not hazard_events.empty and "Start Date" in hazard_events.columns:
+    _missing_files = []
+    for _fn in _required_files:
+        _fs = data_file_status(_fn)
+        if _fs["exists"]:
+            st.caption(f"✓ {_fn} · {_fs['size'] / 1024:.1f} KB")
+        else:
+            st.error(f"✗ {_fn} missing")
+            _missing_files.append(_fn)
+
+    st.markdown("---")
+    if not hazard_events.empty:
+        st.caption(f"Events loaded: {len(hazard_events):,}")
+        st.caption(f"Mapped location records: {len(event_locations):,}")
+        if "Start Date" in hazard_events.columns:
             _latest_dt = pd.to_datetime(hazard_events["Start Date"], errors="coerce").max()
             if pd.notna(_latest_dt):
-                st.caption(f"Latest event date loaded: {_latest_dt.strftime('%Y-%m-%d')}")
+                st.caption(f"Latest event date: {_latest_dt.strftime('%Y-%m-%d')}")
+        if len(hazard_events) == 45:
+            st.success("Current 10 Sep security dataset loaded.")
+        else:
+            st.warning(
+                f"Expected 45 event records in the current deployment package; "
+                f"this app has loaded {len(hazard_events)}."
+            )
     else:
-        st.error("13_events_hazards.xlsx is missing from /data.")
-
-    if _intel_status["exists"]:
-        st.caption(f"Intelligence workbook: {_intel_status['size'] / 1024:.1f} KB")
-    else:
-        st.error("09_intelligence.xlsx is missing from /data.")
+        st.error("Events sheet did not load.")
 
     if st.button("Refresh Excel data", key="refresh_excel_data"):
         st.cache_data.clear()
         st.rerun()
-
-# Header
-st.markdown('<div class="pc-kicker">Power & Corridors Intelligence</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="pc-title">{page}</div>', unsafe_allow_html=True)
-st.markdown('<div class="pc-deck">Decision-useful intelligence on geopolitical disruption, maritime security, trade corridors, aviation, sanctions, critical infrastructure and operational risk.</div>', unsafe_allow_html=True)
-st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
-
-
-def _watch_tokens(v):
-    s=str(v or "").casefold()
-    words=re.findall(r"[a-z0-9]+",s)
-    stop={"and","the","of","to","in","for","with","from","area","region","ports","port","sea","gulf"}
-    return [w for w in words if len(w)>=4 and w not in stop]
-
-def watch_area_events(geography):
-    if hazard_events.empty:
-        return hazard_events
-    toks=_watch_tokens(geography)
-    if not toks:
-        return hazard_events.iloc[0:0]
-    mask=pd.Series(False,index=hazard_events.index)
-    for c in ["Country / Countries","Location","Title","Description","Operational Impact","Trade / Commercial Impact"]:
-        if c not in hazard_events.columns:
-            continue
-        s=hazard_events[c].fillna("").astype(str).str.casefold()
-        for t in toks:
-            mask |= s.str.contains(re.escape(t),na=False)
-    return hazard_events[mask].copy()
-
-def watch_area_related_assets(geography):
-    toks=_watch_tokens(geography)
-    out={}
-    for label,df,cols in [
-        ("Ports",ports,["Port / Facility","Country","Operator","Key Role"]),
-        ("Dry ports",dry_ports,["Hub Name","Country","City / Region","Linked Seaports / Gateways"]),
-    ]:
-        if df is None or df.empty:
-            continue
-        mask=pd.Series(False,index=df.index)
-        for c in cols:
-            if c not in df.columns:
-                continue
-            s=df[c].fillna("").astype(str).str.casefold()
-            for t in toks:
-                mask |= s.str.contains(re.escape(t),na=False)
-        hit=df[mask].head(12)
-        if not hit.empty:
-            out[label]=hit
-    return out
-
-def _split_indicators(v):
-    s=clean_display_text(v)
-    if not s:
-        return []
-    parts=re.split(r"[;•|]+",s)
-    return [p.strip(" -") for p in parts if p.strip(" -")]
-
-def render_watch_area_brief(rows,geography):
-    if rows.empty:
-        st.info("No active monitoring record for this area.")
-        return
-
-    rows=rows.reset_index(drop=True)
-    if len(rows)>1:
-        pick=st.selectbox(
-            "Monitoring lens",range(len(rows)),
-            format_func=lambda i:clean_display_text(rows.iloc[i].get("Title","Monitoring")),
-            key="intel_watch_lens"
-        )
-        r=rows.iloc[pick]
-    else:
-        r=rows.iloc[0]
-
-    st.markdown(f"## {clean_display_text(geography)}")
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("Status",clean_display_text(r.get("Status","")) or "—")
-    c2.metric("Confidence",clean_display_text(r.get("Confidence","")) or "—")
-    c3.metric("Horizon",clean_display_text(r.get("Time Horizon","")) or "—")
-    c4.metric("Last reviewed",clean_display_text(r.get("Last Reviewed","")) or "—")
-
-    focus=clean_display_text(r.get("What Is Being Monitored",""))
-    notes=clean_display_text(r.get("Notes",""))
-    trigger=clean_display_text(r.get("Trigger / Threshold",""))
-    next_review=clean_display_text(r.get("Next Review / Milestone",""))
-
-    st.markdown("### Current picture")
-    extra=f"<div style='margin-top:10px;'>{notes}</div>" if notes else ""
-    current_picture_html = (
-        "<div class='pc-card'>"
-        f"<div class='pc-label'>{clean_display_text(r.get('Family',''))}</div>"
-        f"<div class='pc-big'>{clean_display_text(r.get('Title',''))}</div>"
-        f"<div class='pc-search-details' style='margin-top:10px;'>{focus}</div>"
-        f"{extra}"
-        "</div>"
-    )
-    st.markdown(current_picture_html, unsafe_allow_html=True)
-
-    indicators=_split_indicators(r.get("Key Indicators",""))
-    lcol,rcol=st.columns([1.15,1])
-    with lcol:
-        st.markdown("### Priority indicators")
-        if indicators:
-            for n,item in enumerate(indicators[:8],1):
-                st.markdown(f"**{n}. {item}**")
-        else:
-            st.caption("No priority indicators have been structured yet.")
-    with rcol:
-        st.markdown("### What would change the judgement?")
-        review=f"<div class='pc-label' style='margin-top:12px;'>Next review</div><div>{next_review}</div>" if next_review else ""
-        judgement_html = (
-            "<div class='pc-card'>"
-            "<div class='pc-label'>Trigger / threshold</div>"
-            f"<div>{trigger or 'No explicit threshold has been recorded yet.'}</div>"
-            f"{review}"
-            "</div>"
-        )
-        st.markdown(judgement_html, unsafe_allow_html=True)
-
-    ev=watch_area_events(geography)
-    st.markdown("### Recent activity")
-    if ev.empty:
-        st.caption("No recent event records currently match this watch area.")
-    else:
-        if "Start Date" in ev.columns:
-            ev=ev.sort_values("Start Date",ascending=False)
-        show_df(ev,["Start Date","Event Type","Severity","Status","Location","Title","Operational Impact","Trade / Commercial Impact","Confidence"],300)
-
-    related=watch_area_related_assets(geography)
-    st.markdown("### Exposed / related coverage")
-    if not related:
-        st.caption("No canonical ports or inland hubs are yet mapped directly to this watch area.")
-    else:
-        if "Ports" in related:
-            st.markdown("**Ports**")
-            show_df(related["Ports"],["Port / Facility","Country","Operator","Facility Type","Key Role"],220)
-        if "Dry ports" in related:
-            st.markdown("**Dry ports / inland hubs**")
-            show_df(related["Dry ports"],["Hub Name","Country","City / Region","Status","Linked Seaports / Gateways"],180)
 
 
 # -----------------------------------------------------------------------------
@@ -597,9 +476,10 @@ REGIONAL_SECURITY_AREAS = {
     "Black Sea": {
         "center": (43.1, 34.0), "zoom": 4.3,
         "phrases": [
-            "black sea","ukraine","odesa","odessa","crimea","sevastopol",
-            "constanța","constanta","varna","burgas","novorossiysk",
-            "kerch","bosporus","bosphorus","turkish coast","danube delta"
+            "black sea","sea of azov","azov","ukraine","russia","azerbaijan",
+            "odesa","odessa","crimea","sevastopol","constanța","constanta",
+            "varna","burgas","novorossiysk","kerch","taganrog","mariupol",
+            "berdyansk","bosporus","bosphorus","turkish coast","danube delta"
         ],
     },
     "Mediterranean": {
@@ -1029,6 +909,14 @@ elif page == "Regional Security":
         )
 
     region_names=list(REGIONAL_SECURITY_AREAS.keys())
+
+    _black_sea_count = len(regional_events("Black Sea", operational_only=True))
+    if _black_sea_count == 0:
+        st.warning(
+            "No Black Sea security records are currently loaded. The latest dataset should include "
+            "Odesa, Natra/Zirkon in the Sea of Azov, and the Novorossiysk strike."
+        )
+
     region_tabs=st.tabs(region_names)
     for tab,region_name in zip(region_tabs,region_names):
         with tab:
