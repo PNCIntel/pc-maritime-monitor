@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -86,6 +87,32 @@ div.stButton > button:hover { border-color:var(--pc-gold); color:var(--pc-ivory)
 
 .pc-empty { border:1px dashed var(--pc-line); padding:1rem; color:var(--pc-muted); border-radius:4px; }
 .small-note { color:var(--pc-muted); font-size:.78rem; }
+
+/* Consistent dark external-link buttons */
+a[data-testid="stLinkButton"],
+div[data-testid="stLinkButton"] a,
+div[data-testid="stLinkButton"] > a,
+.stLinkButton a {
+    background: #121A22 !important;
+    color: #D8B45A !important;
+    border: 1px solid #3A4650 !important;
+    border-radius: 8px !important;
+    box-shadow: none !important;
+    text-decoration: none !important;
+}
+a[data-testid="stLinkButton"]:hover,
+div[data-testid="stLinkButton"] a:hover,
+.stLinkButton a:hover {
+    background: #19232D !important;
+    color: #F0D27A !important;
+    border-color: #D8B45A !important;
+}
+a[data-testid="stLinkButton"]:visited,
+div[data-testid="stLinkButton"] a:visited,
+.stLinkButton a:visited {
+    color: #D8B45A !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -129,14 +156,61 @@ def normalize_imo(v):
     return s
 
 
+def clean_display_text(v):
+    """Clean transport/database formatting before anything reaches the UI."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ""
+    s = str(v)
+    # Remove both escaped and real line breaks/tabs used by source data or earlier renderers.
+    s = s.replace("\\r\\n", " ").replace("\\n", " ").replace("\\r", " ").replace("\\t", " ")
+    s = s.replace("\r\n", " ").replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    return "" if s.lower() in {"nan", "none", "<na>"} else s
+
+
+RELATIONSHIP_LABELS = {
+    "REGIONAL_SECURITY_EXPOSURE": "Regional security exposure",
+    "NORTHERN_GULF_EXPOSURE": "Northern Gulf exposure",
+    "DIRECT_SYSTEM_IMPACT": "Direct system impact",
+    "REGIONAL_ESCALATION": "Regional escalation",
+    "SECURITY_ADVISORY": "Security advisory",
+    "RATE / ROUTE-RISK TRANSMISSION": "Rate / route-risk transmission",
+    "AFFECTED_ASSET": "Affected asset",
+    "AFFECTED_VESSEL": "Affected vessel",
+    "OCCURRED_IN": "Occurred in",
+    "DIRECTLY_AFFECTED": "Directly affected",
+    "EXPOSED": "Exposed",
+    "RELATED": "Related",
+}
+
+
+def humanize_relationship(v):
+    s = clean_display_text(v)
+    if not s:
+        return ""
+    if s in RELATIONSHIP_LABELS:
+        return RELATIONSHIP_LABELS[s]
+    # Internal enums become normal English while preserving slash/hyphen meaning.
+    if re.fullmatch(r"[A-Z0-9_ /-]+", s):
+        s = s.replace("_", " ").lower()
+        return s[:1].upper() + s[1:]
+    return s
+
+
 def show_df(df, cols=None, height=420):
     if df is None or df.empty:
         st.markdown('<div class="pc-empty">No matching records in the current Excel model.</div>', unsafe_allow_html=True)
         return
+    view = df.copy()
     if cols:
-        cols = [c for c in cols if c in df.columns]
-        df = df[cols]
-    st.dataframe(df, use_container_width=True, hide_index=True, height=height)
+        cols = [c for c in cols if c in view.columns]
+        view = view[cols]
+    for c in view.columns:
+        if str(c).lower() in {"relationship", "relationship type", "link type"}:
+            view[c] = view[c].map(humanize_relationship)
+        elif view[c].dtype == object:
+            view[c] = view[c].map(clean_display_text)
+    st.dataframe(view, use_container_width=True, hide_index=True, height=height)
 
 
 def section(kicker, title, copy=None):
@@ -147,10 +221,10 @@ def section(kicker, title, copy=None):
 
 
 def event_card(row):
-    title = str(row.get("Title", "Untitled event"))
+    title = clean_display_text(row.get("Title", "Untitled event"))
     date = row.get("Start Date", row.get("Date", ""))
     etype = row.get("Event Type", row.get("Event Family", "Event"))
-    sev = str(row.get("Severity", ""))
+    sev = clean_display_text(row.get("Severity", ""))
     loc = row.get("Location", row.get("Country / Countries", ""))
     body = row.get("Description", "")
     impact = row.get("Operational Impact", "")
@@ -177,10 +251,10 @@ def canonical_port_id(link_id, link_name):
     return ""
 
 def render_connected_context(event_id):
-    eid=str(event_id or "")
-    links=event_asset_links[text_col(event_asset_links,"Event ID").eq(eid)] if not event_asset_links.empty else pd.DataFrame()
-    clinks=event_company_links[text_col(event_company_links,"Event ID").eq(eid)] if not event_company_links.empty else pd.DataFrame()
-    slinks=event_system_links[text_col(event_system_links,"Event ID").eq(eid)] if not event_system_links.empty else pd.DataFrame()
+    eid = str(event_id or "")
+    links = event_asset_links[text_col(event_asset_links, "Event ID").eq(eid)] if not event_asset_links.empty else pd.DataFrame()
+    clinks = event_company_links[text_col(event_company_links, "Event ID").eq(eid)] if not event_company_links.empty else pd.DataFrame()
+    slinks = event_system_links[text_col(event_system_links, "Event ID").eq(eid)] if not event_system_links.empty else pd.DataFrame()
 
     if links.empty and clinks.empty and slinks.empty:
         st.markdown('<div class="pc-empty">No connected canonical coverage has been mapped yet.</div>', unsafe_allow_html=True)
@@ -188,46 +262,57 @@ def render_connected_context(event_id):
 
     if not links.empty:
         st.markdown("**Associated assets / ports**")
-        for _,r in links.iterrows():
-            name=str(r.get("Asset",""))
-            typ=str(r.get("Asset Type","Asset"))
-            rel=str(r.get("Relationship",""))
-            st.markdown(f"**{name}** · {typ}  \\n{rel}")
-            pid=canonical_port_id(r.get("Asset ID",""),name)
+        for _, r in links.iterrows():
+            name = clean_display_text(r.get("Asset", ""))
+            typ = clean_display_text(r.get("Asset Type", "Asset")) or "Asset"
+            rel = humanize_relationship(r.get("Relationship", ""))
+
+            st.markdown(f"**{name}** · {typ}")
+            if rel:
+                st.caption(rel)
+
+            pid = canonical_port_id(r.get("Asset ID", ""), name)
             if pid:
-                pr=ports[text_col(ports,"Port ID").eq(pid)]
+                pr = ports[text_col(ports, "Port ID").eq(pid)]
                 if not pr.empty:
-                    rr=pr.iloc[0]
-                    bits=[]
-                    for c in ["Country","Operator","Facility Type","Key Role"]:
-                        v=str(rr.get(c,"")).strip()
-                        if v and v.lower() != "nan":
+                    rr = pr.iloc[0]
+                    bits = []
+                    for c in ["Country", "Operator", "Facility Type", "Key Role"]:
+                        v = clean_display_text(rr.get(c, ""))
+                        if v:
                             bits.append(f"{c}: {v}")
                     if bits:
                         st.caption(" · ".join(bits[:4]))
 
     if not clinks.empty:
         st.markdown("**Associated companies**")
-        for _,r in clinks.iterrows():
-            cid=str(r.get("Company ID",""))
-            name=str(r.get("Company",""))
-            rel=str(r.get("Relationship",""))
-            st.markdown(f"**{name}**  \\n{rel}")
+        for _, r in clinks.iterrows():
+            cid = clean_display_text(r.get("Company ID", ""))
+            name = clean_display_text(r.get("Company", ""))
+            rel = humanize_relationship(r.get("Relationship", ""))
+
+            st.markdown(f"**{name}**")
+            if rel:
+                st.caption(rel)
+
             if cid and not companies.empty and "Company ID" in companies.columns:
-                cr=companies[text_col(companies,"Company ID").eq(cid)]
+                cr = companies[text_col(companies, "Company ID").eq(cid)]
                 if not cr.empty:
-                    rr=cr.iloc[0]
-                    bits=[]
-                    for c in ["HQ Country","Ownership","Business Segments","Status"]:
-                        v=str(rr.get(c,"")).strip()
-                        if v and v.lower() != "nan":
+                    rr = cr.iloc[0]
+                    bits = []
+                    for c in ["HQ Country", "Ownership", "Business Segments", "Status"]:
+                        v = clean_display_text(rr.get(c, ""))
+                        if v:
                             bits.append(f"{c}: {v}")
                     if bits:
                         st.caption(" · ".join(bits[:4]))
 
     if not slinks.empty:
         st.markdown("**Related systems / corridors**")
-        show_df(slinks,["System","Relationship","Confidence"],180)
+        view = slinks.copy()
+        if "Relationship" in view.columns:
+            view["Relationship"] = view["Relationship"].map(humanize_relationship)
+        show_df(view, ["System", "Relationship", "Confidence"], 180)
 
 
 # Core canonical datasets

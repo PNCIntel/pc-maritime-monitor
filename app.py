@@ -120,6 +120,32 @@ div[data-baseweb="tooltip"],div[data-baseweb="tooltip"] *{
 .pc-feed-health{display:inline-flex;align-items:center;gap:6px;border:1px solid #28415f;border-radius:999px;padding:4px 9px;font-size:.74rem;color:#b8c5d4;margin:2px 0}
 .pc-dot{width:7px;height:7px;border-radius:50%;background:#6a7c90;display:inline-block}.pc-dot-live{background:#75d6a4}.pc-dot-key{background:#d7b66a}.pc-dot-off{background:#7b8796}
 
+
+/* Consistent dark external-link buttons */
+a[data-testid="stLinkButton"],
+div[data-testid="stLinkButton"] a,
+div[data-testid="stLinkButton"] > a,
+.stLinkButton a {
+    background: #121A22 !important;
+    color: #D8B45A !important;
+    border: 1px solid #3A4650 !important;
+    border-radius: 8px !important;
+    box-shadow: none !important;
+    text-decoration: none !important;
+}
+a[data-testid="stLinkButton"]:hover,
+div[data-testid="stLinkButton"] a:hover,
+.stLinkButton a:hover {
+    background: #19232D !important;
+    color: #F0D27A !important;
+    border-color: #D8B45A !important;
+}
+a[data-testid="stLinkButton"]:visited,
+div[data-testid="stLinkButton"] a:visited,
+.stLinkButton a:visited {
+    color: #D8B45A !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
