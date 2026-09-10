@@ -1,6 +1,10 @@
 import streamlit as st
 import pandas as pd
 import re
+try:
+    import pydeck as pdk
+except Exception:
+    pdk = None
 from pathlib import Path
 from datetime import datetime
 
@@ -370,7 +374,7 @@ st.sidebar.markdown(
 NAV = {
     "INTELLIGENCE DESK": ["Operating Picture", "Alerts & Incidents"],
     "FORWARD MONITORING": ["Watch Areas", "Monitoring & Indicators"],
-    "DOMAIN INTELLIGENCE": ["Maritime Security", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
+    "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
     "DISCOVERY": ["Intelligence Search", "Source Monitor"],
 }
 
@@ -523,6 +527,285 @@ def render_watch_area_brief(rows,geography):
             st.markdown("**Dry ports / inland hubs**")
             show_df(related["Dry ports"],["Hub Name","Country","City / Region","Status","Linked Seaports / Gateways"],180)
 
+
+# -----------------------------------------------------------------------------
+# Regional security workspace helpers
+# -----------------------------------------------------------------------------
+REGIONAL_SECURITY_AREAS = {
+    "Middle East / Gulf": {
+        "center": (25.2, 51.5), "zoom": 4.2,
+        "phrases": [
+            "united arab emirates","uae","iran","iraq","saudi arabia","bahrain",
+            "qatar","kuwait","oman","persian gulf","arabian gulf","gulf of oman",
+            "strait of hormuz","hormuz","kharg","al-faw","dubai","abu dhabi",
+            "fujairah","doha","muscat","ras tanura"
+        ],
+    },
+    "Black Sea": {
+        "center": (43.1, 34.0), "zoom": 4.3,
+        "phrases": [
+            "black sea","ukraine","odesa","odessa","crimea","sevastopol",
+            "constanța","constanta","varna","burgas","novorossiysk",
+            "kerch","bosporus","bosphorus","turkish coast","danube delta"
+        ],
+    },
+    "Mediterranean": {
+        "center": (35.5, 18.0), "zoom": 3.4,
+        "phrases": [
+            "mediterranean","ionian","adriatic","aegean","crete","cyprus",
+            "malta","libya","tunisia","algeria","italy","genoa","sicily",
+            "greece","lebanon","israel","syria","levant","gibraltar",
+            "balearic","marseille","barcelona","taranto","trieste"
+        ],
+    },
+    "Baltic": {
+        "center": (57.0, 19.0), "zoom": 4.0,
+        "phrases": [
+            "baltic sea","baltic","estonia","latvia","lithuania","tallinn",
+            "riga","klaipeda","klaipėda","gdańsk","gdansk","gdynia",
+            "kiel","gotland","gulf of finland","gulf of riga","kaliningrad"
+        ],
+    },
+    "Caribbean": {
+        "center": (18.0, -72.0), "zoom": 3.8,
+        "phrases": [
+            "caribbean","bahamas","haiti","jamaica","dominican republic",
+            "puerto rico","cuba","trinidad","tobago","barbados","grenada",
+            "martinique","guadeloupe","aruba","curaçao","curacao",
+            "port-au-prince","varreux"
+        ],
+    },
+    "Asia-Pacific": {
+        "center": (18.0, 116.0), "zoom": 2.7,
+        "phrases": [
+            "asia-pacific","asia pacific","china","japan","taiwan","south korea",
+            "north korea","philippines","indonesia","malaysia","singapore",
+            "vietnam","thailand","australia","new zealand","hong kong",
+            "okinawa","shanghai","zhejiang","taiwan strait","incheon",
+            "sunda strait","jakarta","lampung","manila","south china sea",
+            "east china sea"
+        ],
+    },
+}
+
+REGIONAL_OPERATIONAL_TERMS = [
+    "security","conflict","attack","strike","drone","missile","mine","piracy",
+    "armed robbery","seizure","boarding","interdiction","detention","explosion",
+    "fire","casualty","grounding","collision","allision","capsiz","sinking",
+    "navigation","hazard","weather","typhoon","storm","earthquake","volcano",
+    "labour","industrial action","strike","closure","disruption","pollution",
+    "spill","sar","rescue","disabled","disabling fire","port incident",
+    "infrastructure incident","maritime"
+]
+
+def _regional_blob(df):
+    if df is None or df.empty:
+        return pd.Series(dtype="string")
+    blob = pd.Series("", index=df.index, dtype="string")
+    for c in [
+        "Country / Countries","Location","Title","Description","Event Family",
+        "Event Type","Mode","Operational Impact","Trade / Commercial Impact"
+    ]:
+        if c in df.columns:
+            blob = blob.str.cat(text_col(df,c), sep=" ")
+    return blob.str.casefold()
+
+def regional_events(region_name, operational_only=True):
+    """Return events relevant to a regional security theatre."""
+    if hazard_events.empty or region_name not in REGIONAL_SECURITY_AREAS:
+        return hazard_events.iloc[0:0].copy()
+    df=hazard_events.copy()
+    blob=_regional_blob(df)
+    phrases=REGIONAL_SECURITY_AREAS[region_name]["phrases"]
+    region_pattern="|".join(re.escape(p.casefold()) for p in phrases)
+    mask=blob.str.contains(region_pattern,regex=True,na=False)
+
+    if operational_only:
+        op_pattern="|".join(re.escape(t.casefold()) for t in REGIONAL_OPERATIONAL_TERMS)
+        mask &= blob.str.contains(op_pattern,regex=True,na=False)
+
+    return df[mask].copy()
+
+def regional_event_map_points(events):
+    """Join the regional event set to canonical Event Locations for map rendering."""
+    if events is None or events.empty or event_locations.empty:
+        return pd.DataFrame()
+
+    if "Event ID" not in events.columns or "Event ID" not in event_locations.columns:
+        return pd.DataFrame()
+
+    loc=event_locations.copy()
+    loc["Latitude"]=pd.to_numeric(loc.get("Latitude"),errors="coerce")
+    loc["Longitude"]=pd.to_numeric(loc.get("Longitude"),errors="coerce")
+    loc=loc[loc["Latitude"].notna() & loc["Longitude"].notna()].copy()
+    if loc.empty:
+        return pd.DataFrame()
+
+    cols=[
+        c for c in [
+            "Event ID","Start Date","Severity","Status","Event Family","Event Type",
+            "Title","Operational Impact","Trade / Commercial Impact","Confidence"
+        ] if c in events.columns
+    ]
+    pts=loc.merge(events[cols],on="Event ID",how="inner")
+    if pts.empty:
+        return pts
+
+    pts["Incident"]=pts.get("Title","").map(clean_display_text)
+    pts["Date"]=pts.get("Start Date","").astype(str).str[:10]
+    pts["Mapped Location"]=pts.get("Location","").map(clean_display_text)
+    pts["Severity Label"]=pts.get("Severity","").map(clean_display_text)
+    pts["Operational"]=pts.get("Operational Impact","").map(clean_display_text)
+    pts["Commercial"]=pts.get("Trade / Commercial Impact","").map(clean_display_text)
+    pts["Map Accuracy"]=pts.get("Accuracy","").map(clean_display_text)
+    return pts
+
+def render_regional_incident_map(region_name, events):
+    """Interactive incident map with hover details and a safe fallback."""
+    pts=regional_event_map_points(events)
+
+    st.markdown("### Incident map")
+    if pts.empty:
+        st.caption("No mapped coordinates are currently available for events in this regional view.")
+        return pts
+
+    cfg=REGIONAL_SECURITY_AREAS[region_name]
+    lat0,lon0=cfg["center"]
+
+    if pdk is not None:
+        layer=pdk.Layer(
+            "ScatterplotLayer",
+            data=pts,
+            get_position="[Longitude, Latitude]",
+            get_radius=45000,
+            radius_min_pixels=5,
+            radius_max_pixels=16,
+            pickable=True,
+            auto_highlight=True,
+            get_fill_color=[216,180,90,190],
+            get_line_color=[240,224,180,255],
+            line_width_min_pixels=1,
+        )
+        view=pdk.ViewState(
+            latitude=lat0,
+            longitude=lon0,
+            zoom=cfg["zoom"],
+            pitch=0,
+            bearing=0,
+        )
+        tooltip={
+            "html": (
+                "<div style='max-width:360px;'>"
+                "<b>{Incident}</b><br/>"
+                "{Date} · {Severity Label}<br/>"
+                "<b>Location:</b> {Mapped Location}<br/>"
+                "<b>Operational impact:</b> {Operational}<br/>"
+                "<span style='opacity:.75'>Map accuracy: {Map Accuracy}</span>"
+                "</div>"
+            ),
+            "style":{
+                "backgroundColor":"#101820",
+                "color":"#F4EFE5",
+                "fontSize":"12px"
+            }
+        }
+        deck=pdk.Deck(
+            layers=[layer],
+            initial_view_state=view,
+            tooltip=tooltip,
+            map_style=None,
+        )
+        st.pydeck_chart(deck,use_container_width=True,height=500)
+    else:
+        # Streamlit's native map is less descriptive but keeps coordinates visible.
+        fallback=pts.rename(columns={"Latitude":"lat","Longitude":"lon"})
+        st.map(fallback[["lat","lon"]],latitude="lat",longitude="lon",use_container_width=True)
+
+    st.caption(f"{len(pts)} mapped incident point{'s' if len(pts)!=1 else ''}. Hover over a point for incident details.")
+    return pts
+
+def render_regional_event_workspace(region_name):
+    events=regional_events(region_name,operational_only=True)
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Regional events",len(events))
+    severe=events[text_col(events,"Severity").str.contains("High|Severe|Critical",case=False,regex=True,na=False)] if not events.empty else events
+    c2.metric("High / severe",len(severe))
+    active=events[text_col(events,"Status").str.contains("Active|Developing|Ongoing|Warning",case=False,regex=True,na=False)] if not events.empty else events
+    c3.metric("Active / developing",len(active))
+    mapped=regional_event_map_points(events)
+    c4.metric("Mapped points",len(mapped))
+
+    mapped_pts=render_regional_incident_map(region_name,events)
+
+    st.markdown("### Regional incident record")
+    if events.empty:
+        st.markdown('<div class="pc-empty">No operational/security events currently match this regional theatre.</div>',unsafe_allow_html=True)
+        return
+
+    events=events.copy()
+    if "Start Date" in events.columns:
+        events["_regional_sort"]=pd.to_datetime(events["Start Date"],errors="coerce")
+        events=events.sort_values("_regional_sort",ascending=False)
+
+    q=st.text_input(
+        "Search this region",
+        placeholder="vessel, port, drone, piracy, grounding, sanctions...",
+        key=f"regional_search_{region_name}"
+    )
+    if q.strip():
+        mask=contains_any(
+            events,
+            ["Title","Description","Location","Country / Countries","Event Family","Event Type",
+             "Operational Impact","Trade / Commercial Impact"],
+            [re.escape(q.strip())]
+        )
+        events=events[mask].copy()
+
+    show_df(
+        events,
+        ["Start Date","Event Family","Event Type","Severity","Status","Country / Countries",
+         "Location","Title","Operational Impact","Confidence"],
+        320
+    )
+
+    if events.empty:
+        return
+
+    detail=events.reset_index(drop=True)
+    pick=st.selectbox(
+        "Open regional incident",
+        range(len(detail)),
+        format_func=lambda i:f"{detail.iloc[i].get('Start Date','')} · {detail.iloc[i].get('Title','')}",
+        key=f"regional_event_pick_{region_name}"
+    )
+    row=detail.iloc[pick]
+    eid=str(row.get("Event ID","") or "")
+
+    left,right=st.columns([1.15,1])
+    with left:
+        event_card(row)
+        locs=event_locations[text_col(event_locations,"Event ID").eq(eid)] if not event_locations.empty else event_locations
+        if not locs.empty:
+            st.markdown("**Mapped location detail**")
+            show_df(locs,["Location","Country","Latitude","Longitude","Accuracy","Notes"],180)
+
+    with right:
+        section("Connected coverage","Entities, assets, systems & impact chain")
+        render_connected_context(eid)
+        chains=impact_chains[text_col(impact_chains,"Event ID").eq(eid)] if not impact_chains.empty else impact_chains
+        if not chains.empty:
+            st.markdown("**Impact chain**")
+            show_df(chains,["Step","Trigger","Direct Impact","Secondary Impact","Tertiary Impact","Strategic / Commercial Outcome"],220)
+
+    # Preserve events with no coordinates: they remain visible in the incident record.
+    mapped_ids=set(mapped_pts["Event ID"].astype(str)) if not mapped_pts.empty and "Event ID" in mapped_pts.columns else set()
+    unmapped=events[~events["Event ID"].astype(str).isin(mapped_ids)].copy() if "Event ID" in events.columns else pd.DataFrame()
+    if not unmapped.empty:
+        with st.expander(f"Events without mapped coordinates ({len(unmapped)})"):
+            show_df(unmapped,["Start Date","Severity","Country / Countries","Location","Title","Operational Impact"],240)
+
+
 # -----------------------------------------------------------------------------
 # 1. OPERATING PICTURE
 # -----------------------------------------------------------------------------
@@ -623,6 +906,26 @@ elif page == "Alerts & Incidents":
                 if not chains.empty:
                     st.markdown("**Impact chain**")
                     show_df(chains, ["Step","Trigger","Direct Impact","Secondary Impact","Tertiary Impact","Strategic / Commercial Outcome"], 220)
+
+# -----------------------------------------------------------------------------
+# REGIONAL SECURITY
+# -----------------------------------------------------------------------------
+elif page == "Regional Security":
+    section(
+        "Regional Security",
+        "Security theatres",
+        "Regional operating picture built from the shared event, location, entity and impact-chain layers."
+    )
+    st.caption(
+        "Mapped points use known event coordinates from Event Locations. "
+        "Events without coordinates remain in the regional incident record below the map."
+    )
+
+    region_names=list(REGIONAL_SECURITY_AREAS.keys())
+    region_tabs=st.tabs(region_names)
+    for tab,region_name in zip(region_tabs,region_names):
+        with tab:
+            render_regional_event_workspace(region_name)
 
 # -----------------------------------------------------------------------------
 # 3. WATCH AREAS
