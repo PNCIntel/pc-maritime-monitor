@@ -3131,9 +3131,8 @@ st.sidebar.caption(f"{APP_VERSION} · Excel-backed test")
 NAV_GROUPS={
     "Command Center":["Overview","Search"],
     "Network":["Companies","Ports","Vessels","Aviation","Corridors & Systems","Cruise & Service Craft","Shipyards"],
-    "Operations":["Watch Areas","Port Activity","Hormuz Monitor","Live Feeds"],
-    "P&C Intelligence Test":["Operating Picture","MARSEC","Compliance & Exposure"],
-    "Markets & Policy":["Investments","Sanctions","Trade Policy","Contracts"],
+    "Operations":["Watch Areas","Maritime Disruptions","Port Activity","Hormuz Monitor","Live Feeds"],
+    "Markets & Policy":["Investments","Sanctions & Compliance","Trade Policy","Contracts"],
     "Intelligence":["News & Signals","News & Events"],
     "Data":["Data"],
 }
@@ -3211,6 +3210,22 @@ if page=="Overview":
     ]):
         box.metric(title,f"{value:,}")
 
+    st.markdown("### Risk & disruption snapshot")
+    compliance=TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()).copy()
+    restrictions=TABLES.get(("Maritime","Vessel Restrictions"),pd.DataFrame()).copy()
+    monitoring=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame()).copy()
+    security_events=events.copy()
+    if not security_events.empty and "Event Family" in security_events.columns:
+        security_events=security_events[security_events["Event Family"].astype(str).str.contains(
+            "Security|Conflict|Maritime|Port|Weather|Natural|Labour|Civil|Cyber",case=False,regex=True,na=False
+        )]
+    r1,r2,r3,r4=st.columns(4)
+    r1.metric("Security / disruption events",len(security_events))
+    r2.metric("Active monitoring",int(monitoring.get("Status",pd.Series(dtype=str)).astype(str).str.contains("Active",case=False,na=False).sum()) if not monitoring.empty else 0)
+    r3.metric("Vessel restrictions",len(restrictions))
+    r4.metric("Operational compliance",len(compliance))
+    st.caption("Security is shown here as trade exposure: disrupted assets, restricted vessels, watch areas and operational consequences. The dedicated P&C Intelligence app provides the deeper security workflow.")
+
     st.markdown("### Connected coverage")
     st.markdown("<div class='pc-section-note'>These are working entry points, not description cards. Search within a coverage family or open its full workspace.</div>",unsafe_allow_html=True)
     cov_tabs=st.tabs(["Commercial networks","Movement systems","Infrastructure","Intelligence","Compliance","Defence & shipbuilding"])
@@ -3240,7 +3255,7 @@ if page=="Overview":
     with cov_tabs[3]:
         coverage_search("intelligence","Rotterdam strike, typhoon, attack, disruption...",["Events","Strategic Events","Monitoring","Disruption Watch","Weather Labour Events","Impact Chains"],[("Watch Areas","Watch Areas"),("News & events","News & Events"),("News & signals","News & Signals")])
     with cov_tabs[4]:
-        coverage_search("compliance","OFAC, sanctions, export controls, trade agreement...",["Sanctions Designations","Sanctions Entity Links","Compliance Regimes","Compliance Designations","Compliance Exposure","Watchlist Taxonomy","Trade Agreements","Trade Remedies & Restrictions","Customs & Procurement"],[("Sanctions","Sanctions"),("Trade policy","Trade Policy")])
+        coverage_search("compliance","OFAC, sanctions, export controls, trade agreement...",["Sanctions Designations","Sanctions Entity Links","Compliance Regimes","Compliance Designations","Compliance Exposure","Watchlist Taxonomy","Trade Agreements","Trade Remedies & Restrictions","Customs & Procurement"],[("Sanctions & compliance","Sanctions & Compliance"),("Trade policy","Trade Policy")])
     with cov_tabs[5]:
         coverage_search("defence","Seaspan, Fincantieri, shipyard, submarine, delivery...",["Shipyards","Programmes","Contracts","Sales & Delivery Routes","Vessel Build Records","Fleet Orders"],[("Shipyards","Shipyards"),("Contracts","Contracts")])
 
@@ -3291,18 +3306,10 @@ elif page=="Search":
         if em.empty and hits.empty:
             st.warning("No matching records found.")
 
-elif page=="Operating Picture":
-    header("P&C Intelligence · Operating Picture","Security, disruption, compliance and monitoring over the same canonical P&C data.")
-    st.markdown("<div class='pc-section-note'>Test product lens only. No data is duplicated: vessels, companies, ports, events and sources are the same records used elsewhere in the Trade System.</div>",unsafe_allow_html=True)
-    render_security_operating_picture()
-
-elif page=="MARSEC":
-    header("MARSEC","Official-source maritime security, safety, casualty, SAR and disruption monitoring.")
+elif page=="Maritime Disruptions":
+    header("Maritime Disruptions","Operational maritime casualties, groundings, SAR, pollution, attacks and official-source MARSEC reporting that can affect trade flows, vessels, ports and corridors.")
+    st.markdown("<div class='pc-section-note'>This is the trade-facing operational view. It focuses on commercial consequence and linked assets; the dedicated P&C Intelligence app provides the deeper security workflow.</div>",unsafe_allow_html=True)
     render_marsec_workspace()
-
-elif page=="Compliance & Exposure":
-    header("Compliance & Exposure","PGSA and other operational compliance regimes, direct restrictions and secondary/counterparty exposure. Government sanctions remain separately identifiable.")
-    render_compliance_exposure_workspace()
 
 elif page=="Aviation":
     header("Aviation","Aircraft, carrier deployment and aviation-linked operational/security data from the shared model.")
@@ -3966,7 +3973,7 @@ elif page=="Trade Policy":
                 global_rows=tr[tr.get("Agreement ID / Scope",pd.Series(dtype=str)).astype(str).eq("GLOBAL_RULE")].copy() if not tr.empty else pd.DataFrame()
                 display_df(pd.concat([x,global_rows],ignore_index=True) if not global_rows.empty else x,100)
 
-elif page=="Sanctions":
+elif page=="Sanctions & Compliance":
     header(
         "Sanctions & Compliance",
         "Government sanctions, programmes and designations. Government sanctions remain separate from analytical and operational watchlists."
@@ -3977,8 +3984,11 @@ elif page=="Sanctions":
     links=TABLES.get(("Trade Policy & Compliance","Sanctions Entity Links"),pd.DataFrame()).copy()
     watch=TABLES.get(("Trade Policy & Compliance","Watchlist Taxonomy"),pd.DataFrame()).copy()
     rules=TABLES.get(("Trade Policy & Compliance","Policy Interaction Rules"),pd.DataFrame()).copy()
+    compliance_regimes=TABLES.get(("Trade Policy & Compliance","Compliance Regimes"),pd.DataFrame()).copy()
+    compliance_designations=TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()).copy()
+    compliance_exposure=TABLES.get(("Trade Policy & Compliance","Compliance Exposure"),pd.DataFrame()).copy()
 
-    if des.empty:
+    if des.empty and compliance_designations.empty:
         st.info("Sanctions data unavailable.")
     else:
         q=st.text_input(
@@ -4018,7 +4028,9 @@ elif page=="Sanctions":
             render_dark_bar_list(counts,"Programme","Designations","Designations by programme")
 
         tabs=st.tabs([
-            "Designations",
+            "Government Sanctions",
+            "Operational Compliance",
+            "Exposure & Counterparties",
             "Linked Entities",
             "Authorities & Programmes",
             "Watchlists",
@@ -4030,13 +4042,32 @@ elif page=="Sanctions":
             display_df(humanize_sanctions_df(d),250)
 
         with tabs[1]:
+            st.markdown("### Operational compliance regimes")
+            st.caption("PGSA and other operational regimes remain analytically distinct from OFAC, EU, UK, UN and other government sanctions authorities.")
+            if compliance_regimes.empty and compliance_designations.empty:
+                st.info("No operational compliance records loaded.")
+            else:
+                if not compliance_regimes.empty:
+                    display_df(compliance_regimes,100)
+                if not compliance_designations.empty:
+                    st.markdown("#### Designations / restrictions")
+                    display_df(compliance_designations,200)
+
+        with tabs[2]:
+            st.markdown("### Secondary exposure & counterparties")
+            if compliance_exposure.empty:
+                st.info("No counterparty exposure records loaded.")
+            else:
+                display_df(compliance_exposure,200)
+
+        with tabs[3]:
             st.markdown("### Designated / linked entities")
             if l.empty:
                 st.info("No linked entities for this filter.")
             else:
                 render_sanction_link_cards(l)
 
-        with tabs[2]:
+        with tabs[4]:
             a=auth.copy()
             if not a.empty:
                 # Authority IDs are backend keys; show names and jurisdiction.
@@ -4051,12 +4082,12 @@ elif page=="Sanctions":
                 st.markdown("### Programmes")
                 display_df(pp,100)
 
-        with tabs[3]:
+        with tabs[5]:
             st.markdown("### Watchlist taxonomy")
             st.caption("These categories are intentionally separate: a security advisory, shadow-fleet flag or IUU listing is not automatically a government sanctions designation.")
             display_df(humanize_sanctions_df(watch),100)
 
-        with tabs[4]:
+        with tabs[6]:
             st.markdown("### Policy precedence")
             st.caption("Trade preferences never override sanctions, prohibitions or export-control requirements.")
             rr=rules.copy()
