@@ -2528,6 +2528,35 @@ def readable_search_card(hit):
     )
 
 
+
+def linked_company_button(company_id, key, label_text="Open company"):
+    """Open a canonical company page when the referenced company exists."""
+    cid=str(company_id or "").strip()
+    if not cid:
+        return
+    companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
+    if companies.empty or "Company ID" not in companies.columns:
+        return
+    hit=companies[companies["Company ID"].astype(str).eq(cid)]
+    if hit.empty:
+        return
+    if st.button(label_text,key=key,use_container_width=True):
+        request_nav("Companies","company_pick_id",cid,str(hit.iloc[0].get("Company","")))
+        st.rerun()
+
+def clean_network_table(df, cols=None, height=280):
+    """Human-readable table wrapper for Network pages."""
+    if df is None or df.empty:
+        st.info("No matching records.")
+        return
+    v=humanize_df(df.copy())
+    if cols:
+        cols=[c for c in cols if c in v.columns]
+        if cols:
+            v=v[cols]
+    display_df(v,height)
+
+
 def request_nav(page_name, object_key=None, object_id=None, object_name=None):
     """Defer a page/object jump until the next Streamlit rerun.
     Destination pages consume *_pick_id requests before their selector widget is created.
@@ -3462,7 +3491,7 @@ st.sidebar.caption(f"{APP_VERSION} · Excel-backed test")
 
 NAV_GROUPS={
     "Command Center":["Overview","Search"],
-    "Network":["Companies","Ports","Vessels","Aviation","Corridors & Systems","Cruise & Service Craft","Shipyards"],
+    "Network":["Companies","Ports","Vessels","Rail","Aviation","Trucking","Ferries","Cruise","Corridors & Systems","Shipyards"],
     "Operations":["Watch Areas","Maritime Disruptions","Port Activity","Hormuz Monitor","Live Feeds"],
     "Markets & Policy":["Investments","Sanctions & Compliance","Trade Policy","Contracts"],
     "Intelligence":["News & Signals","News & Events"],
@@ -3858,6 +3887,177 @@ elif page=="Aviation":
         if not rel.empty:
             with st.expander("Aircraft relationships"):
                 display_df(rel,250)
+
+
+elif page=="Rail":
+    header("Rail","Operators, networks, terminals, intermodal nodes, fleet and port connections as a first-class trade infrastructure layer.")
+    operators=TABLES.get(("Rail","Rail Operators"),pd.DataFrame()).copy()
+    networks=TABLES.get(("Rail","Rail Networks"),pd.DataFrame()).copy()
+    nodes=TABLES.get(("Rail","Rail Nodes"),pd.DataFrame()).copy()
+    links=TABLES.get(("Rail","Rail Links"),pd.DataFrame()).copy()
+    rels=TABLES.get(("Rail","Rail Relationships"),pd.DataFrame()).copy()
+    fleet=TABLES.get(("Rail","Rail Fleet"),pd.DataFrame()).copy()
+    connections=TABLES.get(("Rail","Rail Connections"),pd.DataFrame()).copy()
+    news=TABLES.get(("Rail","Rail News"),pd.DataFrame()).copy()
+
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Operators",len(operators))
+    m2.metric("Networks / corridors",len(networks))
+    m3.metric("Rail nodes",len(nodes))
+    m4.metric("Port / intermodal links",len(connections))
+
+    q=st.text_input("Search rail network",placeholder="Etihad Rail, Hafeet Rail, CPKC, Georgia, Khalifa Port, intermodal...")
+    if q:
+        operators=_contains_any(operators,[q]); networks=_contains_any(networks,[q])
+        nodes=_contains_any(nodes,[q]); links=_contains_any(links,[q])
+        fleet=_contains_any(fleet,[q]); connections=_contains_any(connections,[q]); news=_contains_any(news,[q])
+
+    tabs=st.tabs(["Operators","Networks & Corridors","Nodes / Terminals","Port & Intermodal Connections","Fleet","News & Events"])
+    with tabs[0]:
+        clean_network_table(operators,["Operator","Operator Type","Jurisdiction","Role","Network Scale","Gauge","Electrification / Signalling","Status","Notes"],280)
+        if not operators.empty and "Operator" in operators.columns:
+            pick=st.selectbox("Inspect rail operator",range(len(operators)),format_func=lambda i:str(operators.iloc[i].get("Operator","")),key="rail_operator_pick")
+            rr=operators.iloc[pick]
+            linked_company_button(rr.get("Company ID",""),f"railop_company_{pick}")
+    with tabs[1]:
+        clean_network_table(networks,["Network / Corridor","Countries / Jurisdictions","Start Node","End Node","Length / Scale","Gauge","Status","Primary Cargo / Role","Notes"],320)
+    with tabs[2]:
+        clean_network_table(nodes,["Node","Country","Node Type","Status","Notes"],320)
+    with tabs[3]:
+        clean_network_table(connections,["Connected Entity Type","Connected Entity Name","Status","Notes"],320)
+        st.caption("These records connect rail nodes back to canonical ports, terminals, dry ports and other infrastructure in the Trade System.")
+    with tabs[4]:
+        clean_network_table(fleet,["Fleet Type","Count","Composition / Capacity","Status","Notes"],220)
+    with tabs[5]:
+        clean_network_table(news,["Date","Event Type","Headline","Summary"],260)
+
+elif page=="Trucking":
+    header("Trucking","Road operators, fleets/networks and intermodal relationships connecting ports, rail, warehouses and inland markets.")
+    operators=TABLES.get(("Road & Trucking","Trucking Companies"),pd.DataFrame()).copy()
+    assets=TABLES.get(("Road & Trucking","Trucking Assets"),pd.DataFrame()).copy()
+    rels=TABLES.get(("Road & Trucking","Trucking Relationships"),pd.DataFrame()).copy()
+
+    m1,m2,m3=st.columns(3)
+    m1.metric("Operators",len(operators))
+    m2.metric("Road / logistics assets",len(assets))
+    m3.metric("Corporate / operating links",len(rels))
+
+    q=st.text_input("Search trucking",placeholder="TFI, Canpar, Qube, Canada, Australia, intermodal...")
+    if q:
+        operators=_contains_any(operators,[q]); assets=_contains_any(assets,[q]); rels=_contains_any(rels,[q])
+
+    tabs=st.tabs(["Operators","Assets & Networks","Ownership & Relationships"])
+    with tabs[0]:
+        clean_network_table(operators,["Company","Road Segment","Primary Geography","Fleet / Network Notes","Public / Private","Status"],260)
+        if not operators.empty:
+            pick=st.selectbox("Inspect trucking operator",range(len(operators)),format_func=lambda i:str(operators.iloc[i].get("Company","")),key="truck_operator_pick")
+            rr=operators.iloc[pick]
+            st.markdown(f"### {rr.get('Company','')}")
+            st.caption(f"{rr.get('Road Segment','')} · {rr.get('Primary Geography','')}")
+            linked_company_button(rr.get("Company ID",""),f"truck_company_{pick}")
+            parent=str(rr.get("Parent Company ID","")).strip()
+            if parent:
+                st.markdown("**Parent company**")
+                st.write(label(parent))
+                linked_company_button(parent,f"truck_parent_{pick}","Open parent company")
+    with tabs[1]:
+        clean_network_table(assets,["Asset / Network","Asset Type","Country / Region","Location","Intermodal Links","Status","Notes"],300)
+    with tabs[2]:
+        clean_network_table(rels,["Relationship","Effective From","Effective To","Status","Confidence","Notes"],240)
+
+elif page=="Ferries":
+    header("Ferries","Scheduled passenger, vehicle and freight ferry systems, routes, terminals, fleets, performance and disruption.")
+    systems=TABLES.get(("Maritime","Ferry Systems"),pd.DataFrame()).copy()
+    routes=TABLES.get(("Maritime","Ferry Routes"),pd.DataFrame()).copy()
+    terminals=TABLES.get(("Maritime","Ferry Terminals"),pd.DataFrame()).copy()
+    status=TABLES.get(("Maritime","Ferry Fleet Status"),pd.DataFrame()).copy()
+    perf=TABLES.get(("Maritime","Ferry Performance"),pd.DataFrame()).copy()
+    obs=TABLES.get(("Maritime","Ferry Service Observations"),pd.DataFrame()).copy()
+    staging=TABLES.get(("Maritime","Ferry Vessel Staging"),pd.DataFrame()).copy()
+
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Ferry systems",len(systems))
+    m2.metric("Routes",len(routes))
+    m3.metric("Terminals",len(terminals))
+    m4.metric("Fleet / service records",len(status)+len(staging))
+
+    q=st.text_input("Search ferry network",placeholder="BC Ferries, Washington State, Alaska, Asia, freight, terminal...")
+    if q:
+        systems=_contains_any(systems,[q]); routes=_contains_any(routes,[q])
+        terminals=_contains_any(terminals,[q]); status=_contains_any(status,[q])
+        perf=_contains_any(perf,[q]); obs=_contains_any(obs,[q]); staging=_contains_any(staging,[q])
+
+    tabs=st.tabs(["Systems","Routes","Terminals","Fleet","Performance & Disruption"])
+    with tabs[0]:
+        clean_network_table(systems,["System Name","Region","Country / Jurisdiction","Service Model","Passenger Service","Vehicle / Freight Service","Network Type","Status","Research Status"],300)
+        if not systems.empty:
+            pick=st.selectbox("Inspect ferry system",range(len(systems)),format_func=lambda i:str(systems.iloc[i].get("System Name","")),key="ferry_system_pick")
+            rr=systems.iloc[pick]
+            st.markdown(f"### {rr.get('System Name','')}")
+            st.caption(f"{rr.get('Country / Jurisdiction','')} · {rr.get('Service Model','')}")
+            linked_company_button(rr.get("Operator Company ID",""),f"ferry_company_{pick}","Open operator company")
+    with tabs[1]:
+        clean_network_table(routes,["Route Name","Origin Terminal","Destination Terminal","Country 1","Country 2","Cross-Border","Service Type","Vehicle / Freight","Typical Duration","Frequency / Cadence","Seasonality","Route Status"],340)
+    with tabs[2]:
+        clean_network_table(terminals,["Terminal Name","Port / Harbour","City / Area","Country","Owner / Authority","Vehicle Staging","Freight / DG Capability","Road / Rail / Bus Connection","Status"],340)
+    with tabs[3]:
+        if not status.empty:
+            st.markdown("**Current / recent fleet status**")
+            clean_network_table(status,["As Of","Vessel Name","Fleet Status","Assignment / Location","Notes"],220)
+        if not staging.empty:
+            with st.expander("Ferry vessel staging / research universe"):
+                clean_network_table(staging,None,300)
+    with tabs[4]:
+        if not perf.empty:
+            st.markdown("**Performance**")
+            clean_network_table(perf,["Period Type","Period Start","Period End","Scheduled Sailings","Completed Sailings","Completion %","Cancelled Sailings","Weather","Mechanical / Vessel","Crew","Terminal","Ridership","Vehicle Traffic","On-Time %"],280)
+        if not obs.empty:
+            st.markdown("**Service observations / disruption**")
+            clean_network_table(obs,None,280)
+
+elif page=="Cruise":
+    header("Cruise","Global cruise operators, ships, destinations, routes and Great Lakes deployment as a dedicated passenger-shipping network.")
+    lines=TABLES.get(("Maritime","Cruise Lines"),pd.DataFrame()).copy()
+    ships=TABLES.get(("Maritime","Cruise Ships"),pd.DataFrame()).copy()
+    destinations=TABLES.get(("Maritime","Cruise Destinations"),pd.DataFrame()).copy()
+    routes=TABLES.get(("Maritime","Cruise Routes"),pd.DataFrame()).copy()
+    gl=TABLES.get(("Maritime","Great Lakes Cruise"),pd.DataFrame()).copy()
+
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Cruise brands",len(lines))
+    m2.metric("Cruise ships",len(ships))
+    m3.metric("Destinations",len(destinations))
+    m4.metric("Great Lakes records",len(gl))
+
+    q=st.text_input("Search cruise coverage",placeholder="Great Lakes, Germany, Caribbean, Alaska, Viking, MSC, AIDA...")
+    if q:
+        lines=_contains_any(lines,[q]); ships=_contains_any(ships,[q])
+        destinations=_contains_any(destinations,[q]); routes=_contains_any(routes,[q]); gl=_contains_any(gl,[q])
+
+    tabs=st.tabs(["Cruise Lines","Ships","Destinations","Routes","Great Lakes"])
+    with tabs[0]:
+        clean_network_table(lines,["Cruise Line / Brand","Parent Group","Market Segment","Fleet Profile","Primary Operating Regions","Private / Controlled Destinations","Route Pattern","Status","Notes"],320)
+        if not lines.empty:
+            pick=st.selectbox("Inspect cruise line",range(len(lines)),format_func=lambda i:str(lines.iloc[i].get("Cruise Line / Brand","")),key="cruise_line_pick")
+            rr=lines.iloc[pick]
+            st.markdown(f"### {rr.get('Cruise Line / Brand','')}")
+            st.caption(f"{rr.get('Market Segment','')} · {rr.get('Primary Operating Regions','')}")
+            linked_company_button(rr.get("Company ID",""),f"cruise_company_{pick}","Open cruise company")
+            parent=str(rr.get("Parent Group","")).strip()
+            if parent.startswith("COMP_"):
+                st.markdown("**Parent group**")
+                st.write(label(parent))
+                linked_company_button(parent,f"cruise_parent_{pick}","Open parent group")
+    with tabs[1]:
+        clean_network_table(ships,["Vessel Name","Ship Type / Class","Flag","Year Built","Passenger Capacity","Primary Deployment","Home Port / Turnaround","Route / Product Role","Status"],320)
+    with tabs[2]:
+        clean_network_table(destinations,["Destination","Country","Destination Type","Status","Region","Typical Line / Brand Use","Investment / Operating Note","Evidence Caveat"],300)
+    with tabs[3]:
+        clean_network_table(routes,["Route Family","Turnaround Ports","Representative Calls","Region","Typical Duration","Season","Strategic Role","Status"],280)
+    with tabs[4]:
+        st.caption("Great Lakes cruise is kept as a geographic deployment layer so operators, vessels, ports and locks can connect back into the wider Great Lakes system.")
+        clean_network_table(gl,["Vessel Name","Operating Area","Representative Ports / Infrastructure","Vessel / Service Type","Season","Status","Notes"],320)
+
 
 elif page=="Investments":
     header("Investments","Track capital deployment, acquisitions, equity investments and infrastructure commitments across companies, regions and years.")
@@ -4320,6 +4520,7 @@ elif page=="Vessels":
     header("Vessels","Commercial, naval, Coast Guard and government vessels as linked intelligence objects.")
     commercial=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
     defence=TABLES.get(("Defence & Shipbuilding","Sample Vessels"),pd.DataFrame()).copy()
+    service=TABLES.get(("Maritime","Service Craft"),pd.DataFrame()).copy()
 
     requested_vessel=st.session_state.pop("vessel_pick_id",None)
     requested_domain=None
@@ -4334,7 +4535,7 @@ elif page=="Vessels":
 
     domain=st.radio(
         "Fleet domain",
-        ["Commercial","Defence / Government"],
+        ["Commercial","Defence / Government","Service Craft"],
         horizontal=True,
         key="vessel_domain"
     )
@@ -4370,7 +4571,7 @@ elif page=="Vessels":
             vr=c.iloc[pick]
             render_vessel_profile(str(vr.get("Vessel ID","")),str(vr.get("Vessel Name","")))
 
-    else:
+    elif domain=="Defence / Government":
         d=defence.copy()
         if q: d=_contains_any(d,[q])
         d=d.reset_index(drop=True)
@@ -4395,45 +4596,34 @@ elif page=="Vessels":
             vr=d.iloc[pick]
             render_defence_vessel_profile(str(vr.get("Vessel ID","")),str(vr.get("Vessel","")))
 
-elif page=="Cruise & Service Craft":
-    header("Cruise & Service Craft","Cruise brands, ships, destinations and route families alongside tug, OSV and offshore-construction fleets.")
-    lines=TABLES.get(("Maritime","Cruise Lines"),pd.DataFrame()).copy()
-    ships=TABLES.get(("Maritime","Cruise Ships"),pd.DataFrame()).copy()
-    destinations=TABLES.get(("Maritime","Cruise Destinations"),pd.DataFrame()).copy()
-    routes=TABLES.get(("Maritime","Cruise Routes"),pd.DataFrame()).copy()
-    craft=TABLES.get(("Maritime","Service Craft"),pd.DataFrame()).copy()
 
-    m1,m2,m3,m4,m5=st.columns(5)
-    m1.metric("Cruise brands",len(lines))
-    m2.metric("Cruise ships",len(ships))
-    m3.metric("Private / controlled destinations",len(destinations))
-    m4.metric("Route families",len(routes))
-    m5.metric("Service craft",len(craft))
+    else:
+        s=service.copy()
+        if q:
+            s=_contains_any(s,[q])
+        s=s.reset_index(drop=True)
+        if s.empty:
+            st.info("No matching service craft.")
+        else:
+            pick=st.selectbox(
+                "Service craft",
+                range(len(s)),
+                format_func=lambda i:f"{s.iloc[i].get('Vessel Name','')} — {s.iloc[i].get('Craft Segment','')}",
+                key="service_craft_select_idx"
+            )
+            vr=s.iloc[pick]
+            st.markdown(f"## {vr.get('Vessel Name','')}")
+            c1,c2,c3=st.columns(3)
+            c1.markdown(f"<div class='pc-card'><div class='pc-label'>Segment</div><div class='pc-big'>{vr.get('Craft Segment','')}</div></div>",unsafe_allow_html=True)
+            c2.markdown(f"<div class='pc-card'><div class='pc-label'>Subtype / class</div><div class='pc-big'>{vr.get('Subtype / Class','')}</div></div>",unsafe_allow_html=True)
+            c3.markdown(f"<div class='pc-card'><div class='pc-label'>Home port</div><div class='pc-big'>{vr.get('Home Port','') or '—'}</div></div>",unsafe_allow_html=True)
+            op=str(vr.get("Operator Company ID","")).strip()
+            if op:
+                st.markdown("### Operator")
+                st.write(label(op))
+                linked_company_button(op,f"service_company_{pick}")
+            clean_network_table(pd.DataFrame([vr]),["Vessel Name","IMO","Flag","Year Built","DWT","Capacity / Scale","Primary Service","Fuel / Propulsion","Status","Completeness Note"],160)
 
-    q=st.text_input("Search cruise and service-craft coverage",placeholder="CocoCay, Great Lakes, SAFEEN, tug, offshore support...")
-    if q:
-        lines=_contains_any(lines,[q]); ships=_contains_any(ships,[q])
-        destinations=_contains_any(destinations,[q]); routes=_contains_any(routes,[q]); craft=_contains_any(craft,[q])
-
-    tabs=st.tabs(["Cruise Lines","Cruise Ships","Destinations","Routes","Tugs / OSVs / Service Craft"])
-    with tabs[0]:
-        st.caption("Brand and parent-group structure is separated so fleet and destination exposure can roll up without losing the operating line.")
-        display_df(humanize_df(lines),200)
-    with tabs[1]:
-        st.caption("Sector-specific cruise detail links back to the canonical vessel registry.")
-        display_df(humanize_df(ships),300)
-    with tabs[2]:
-        st.caption("Destination type distinguishes private islands, leased destinations, resort calls and partner beach clubs. Legal land ownership is not inferred.")
-        display_df(humanize_df(destinations),200)
-    with tabs[3]:
-        st.caption("Route families are representative operating patterns, not live sailing schedules.")
-        display_df(humanize_df(routes),200)
-    with tabs[4]:
-        segments=sorted([x for x in craft.get("Craft Segment",pd.Series(dtype=str)).unique().tolist() if str(x).strip()])
-        selected=st.multiselect("Craft segment",segments,default=[])
-        shown=craft[craft["Craft Segment"].isin(selected)] if selected else craft
-        st.caption("SAFEEN assets are connected through the AD Ports / Noatum group ecosystem; direct legal ownership is only shown when supported.")
-        display_df(humanize_df(shown),300)
 
 elif page=="Contracts":
     header("Contracts & Commercial","Government procurement, commercial transactions, infrastructure deals, vessel sales and delivery routes.")
