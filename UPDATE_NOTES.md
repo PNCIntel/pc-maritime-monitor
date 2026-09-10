@@ -31,3 +31,17 @@
 Commercial records use non-security event families and `Trade / Commercial` mode so they do not enter the P&C Intelligence regional security workspace.
 
 Duplicates in the supplied link list (Cochin/Drydocks World, Baltimore grain gateway, Ecuador interdiction) were ingested once.
+
+## Additional security update — Gulf News, 10 September 2026
+- Added a separate critical regional-security event for reported explosions at Qeshm, Sirik and Minab in Hormozgan, plus the Taif area in Saudi Arabia.
+- Added four city/island-level map locations. These are contextual markers, not claimed strike-point coordinates.
+- Linked the event to Strait of Hormuz regional security exposure and added an impact chain.
+- The previously added Houthi attack on Saudi Aramco's Jazan refinery remains in the dataset and was not duplicated.
+- Clarified the Jazan refinery event as a mapped location record in `Event Locations` for the Regional Security map.
+
+## Black Sea security update
+- Added Natra/Zirkon Sea of Azov merchant-vessel drone attack as a critical Black Sea security event.
+- Added Natra and Zirkon to the canonical vessel layer as provisional records pending IMO/ownership verification.
+- Added an approximate Sea of Azov theatre map marker; no strike-point precision is claimed.
+- Added 9 September Novorossiysk port/oil-export infrastructure strike as a critical Black Sea security event.
+- Added Novorossiysk city/port-level mapping and direct Black Sea energy-export impact chain.
