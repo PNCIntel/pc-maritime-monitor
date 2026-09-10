@@ -4132,8 +4132,11 @@ elif page=="Ferries":
             )
             rr=systems.iloc[pick]
             sid=str(rr.get("System ID","")).strip()
+            selected_ferry_system_name=str(rr.get("System Name","") or "")
+            st.session_state["selected_ferry_system_id"]=sid
+            st.session_state["selected_ferry_system_name"]=selected_ferry_system_name
 
-            st.markdown(f"## {rr.get('System Name','')}")
+            st.markdown(f"## {selected_ferry_system_name}")
             c1,c2,c3=st.columns(3)
             c1.metric("Jurisdiction",str(rr.get("Country / Jurisdiction","") or "—"))
             c2.metric("Service model",str(rr.get("Service Model","") or "—"))
@@ -4167,18 +4170,20 @@ elif page=="Ferries":
                     cross=str(route.get("Cross-Border","") or "—")
                     notes=str(route.get("Intermediate Stops / Corridor Notes","") or "").strip()
 
-                    st.markdown(
-                        f"""<div class='pc-card'>
-                        <div class='pc-label'>{status_text} · {service}</div>
-                        <div class='pc-big'>{route_name}</div>
-                        <div style='margin-top:10px;'><b>{origin}</b> → <b>{destination}</b></div>
-                        <div class='pc-search-details' style='margin-top:8px;'>
-                        {cadence} · {duration} · {season} · Cross-border: {cross}
-                        </div>
-                        {f"<div style='margin-top:8px;'>{notes}</div>" if notes and notes.lower()!='nan' else ""}
-                        </div>""",
-                        unsafe_allow_html=True
+                    notes_html = (
+                        f"<div style='margin-top:8px;'>{notes}</div>"
+                        if notes and notes.lower()!="nan" else ""
                     )
+                    route_html = (
+                        "<div class='pc-card'>"
+                        f"<div class='pc-label'>{status_text} · {service}</div>"
+                        f"<div class='pc-big'>{route_name}</div>"
+                        f"<div style='margin-top:10px;'><b>{origin}</b> → <b>{destination}</b></div>"
+                        f"<div class='pc-search-details' style='margin-top:8px;'>{cadence} · {duration} · {season} · Cross-border: {cross}</div>"
+                        f"{notes_html}"
+                        "</div>"
+                    )
+                    st.markdown(route_html, unsafe_allow_html=True)
 
             with st.expander("System record"):
                 clean_network_table(pd.DataFrame([rr]),[
@@ -4249,8 +4254,23 @@ elif page=="Ferries":
 
     with tabs[2]:
         term_view=terminals.copy()
+        selected_sid=str(st.session_state.get("selected_ferry_system_id","") or "")
+        selected_sname=str(st.session_state.get("selected_ferry_system_name","") or "")
+
         if not term_view.empty and "System ID" in term_view.columns:
             term_view["Ferry System"]=term_view["System ID"].astype(str).map(sys_name).fillna("")
+
+        show_all_terms=st.checkbox(
+            "Show terminals for all ferry systems",
+            value=False,
+            key="ferry_show_all_terminals"
+        )
+        if not show_all_terms and selected_sid and not term_view.empty and "System ID" in term_view.columns:
+            term_view=term_view[term_view["System ID"].astype(str).eq(selected_sid)].copy()
+
+        if selected_sname and not show_all_terms:
+            st.markdown(f"### {selected_sname} terminals")
+
         clean_network_table(term_view,[
             "Ferry System","Terminal Name","Port / Harbour","City / Area","Country",
             "Owner / Authority","Vehicle Staging","Freight / DG Capability",
@@ -4258,19 +4278,56 @@ elif page=="Ferries":
         ],420)
 
     with tabs[3]:
+        selected_sid=str(st.session_state.get("selected_ferry_system_id","") or "")
+        selected_sname=str(st.session_state.get("selected_ferry_system_name","") or "")
+
         fleet_view=staging.copy()
         if not fleet_view.empty and "System ID" in fleet_view.columns:
             fleet_view["Ferry System"]=fleet_view["System ID"].astype(str).map(sys_name).fillna("")
-        if not fleet_view.empty:
-            st.markdown("**Ferry fleet**")
+
+        show_all_fleets=st.checkbox(
+            "Show all ferry systems",
+            value=False,
+            key="ferry_show_all_fleets"
+        )
+
+        if not show_all_fleets and selected_sid and not fleet_view.empty and "System ID" in fleet_view.columns:
+            fleet_view=fleet_view[fleet_view["System ID"].astype(str).eq(selected_sid)].copy()
+
+        if selected_sname and not show_all_fleets:
+            st.markdown(f"### {selected_sname} fleet")
+        else:
+            st.markdown("### Ferry fleet")
+
+        if fleet_view.empty:
+            st.info("No fleet records are currently mapped to this ferry system.")
+        else:
             clean_network_table(fleet_view,[
                 "Ferry System","Vessel Name","IMO","Vessel Type","Subtype / Class","Flag",
                 "Passenger Capacity","Vehicle Capacity","Freight / Lane Metres","Year Built",
                 "Propulsion / Fuel","Current Status","Primary Route","Data Status"
             ],420)
-        if not status.empty:
+
+        # Filter current/recent status rows by vessel names in the selected fleet
+        # because this sheet may not carry System ID directly.
+        status_view=status.copy()
+        if not show_all_fleets and not fleet_view.empty and not status_view.empty:
+            vessel_col = "Vessel Name" if "Vessel Name" in fleet_view.columns else None
+            if vessel_col and "Vessel Name" in status_view.columns:
+                selected_vessels=set(
+                    fleet_view[vessel_col].dropna().astype(str).str.strip()
+                )
+                status_view=status_view[
+                    status_view["Vessel Name"].astype(str).str.strip().isin(selected_vessels)
+                ].copy()
+
+        if not status_view.empty:
             st.markdown("**Current / recent fleet status**")
-            clean_network_table(status,["As Of","Vessel Name","Fleet Status","Assignment / Location","Notes"],220)
+            clean_network_table(
+                status_view,
+                ["As Of","Vessel Name","Fleet Status","Assignment / Location","Notes"],
+                220
+            )
 
     with tabs[4]:
         if not perf.empty:
