@@ -1390,30 +1390,335 @@ elif page == "Maritime Security":
 # 6. PORTS & INFRASTRUCTURE
 # -----------------------------------------------------------------------------
 elif page == "Ports & Infrastructure":
-    section("Domain intelligence", "Ports & Critical Infrastructure", "Port incidents, attacks, explosions, weather, labour disruption and exposure across connected infrastructure.")
-    port_terms = ["Port","Terminal","Infrastructure","Explosion","Strike","Closure","Drone","Missile","Weather","Flood","Fire","Low water"]
-    pe = hazard_events[contains_any(hazard_events,["Event Family","Event Type","Mode","Title","Description"], port_terms)] if not hazard_events.empty else hazard_events
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Tracked ports", len(ports))
-    c2.metric("Infrastructure assets", len(infra_assets))
-    c3.metric("Port / infrastructure events", len(pe))
-    tab1,tab2,tab3 = st.tabs(["Events", "Port Drill-down", "Critical Infrastructure"])
-    with tab1:
-        show_df(pe, ["Start Date","Event Type","Severity","Country / Countries","Location","Title","Operational Impact","Trade / Commercial Impact","Confidence"], 470)
-    with tab2:
-        if not ports.empty:
-            pnames = sorted(ports["Port / Facility"].dropna().astype(str).unique().tolist())
-            pname = st.selectbox("Port / facility", pnames)
-            pr = ports[text_col(ports,"Port / Facility").eq(pname)]
-            show_df(pr, ["Port / Facility","Country","Operator","Facility Type","Key Role","Coverage Note"], 170)
-            pid = str(pr.iloc[0].get("Port ID", "")) if not pr.empty else ""
-            linked = event_asset_links[text_col(event_asset_links,"Asset ID").eq(pid)] if pid and not event_asset_links.empty else pd.DataFrame()
-            if linked.empty:
-                linked = event_asset_links[text_col(event_asset_links,"Asset").str.contains(pname, case=False, regex=False, na=False)] if not event_asset_links.empty else pd.DataFrame()
-            show_df(linked, ["Event ID","Asset","Asset Type","Relationship","Confidence","Notes"], 220)
-    with tab3:
-        show_df(infra_assets, ["Asset","Asset Type","Location","Country","Role / Function","Primary Mode","Status","Ownership / Operating Interest"], 350)
-        show_df(dry_ports, ["Hub Name","Country","City / Region","Hub Type","Status","Rail Access","Road Access","Air Access","Linked Seaports / Gateways"], 250)
+    section(
+        "Domain intelligence",
+        "Ports & Critical Infrastructure",
+        "Security and disruption picture for ports, terminals, energy nodes, logistics hubs and connected critical infrastructure."
+    )
+
+    port_terms = [
+        "Port","Terminal","Infrastructure","Explosion","Strike","Closure","Drone",
+        "Missile","Weather","Flood","Fire","Low water","Refinery","Pipeline",
+        "Tank farm","Berth","Channel","Anchorage","Labour","Power outage","Collision",
+        "Allision","Grounding"
+    ]
+
+    pe = (
+        hazard_events[
+            contains_any(
+                hazard_events,
+                ["Event Family","Event Type","Mode","Title","Description","Operational Impact"],
+                port_terms
+            )
+        ].copy()
+        if not hazard_events.empty else hazard_events.copy()
+    )
+
+    if not pe.empty and "Start Date" in pe.columns:
+        pe["_sort_date"] = pd.to_datetime(pe["Start Date"], errors="coerce")
+        pe = pe.sort_values("_sort_date", ascending=False)
+
+    # Infrastructure exposure should be driven by actual event links, not by
+    # dumping the whole asset registry into the intelligence product.
+    infra_links = event_asset_links.copy()
+    if not infra_links.empty:
+        infra_mask = (
+            text_col(infra_links,"Asset Type").str.contains(
+                "port|terminal|infrastructure|refinery|pipeline|tank|hub|airport|rail|energy",
+                case=False, regex=True, na=False
+            )
+            | text_col(infra_links,"Asset ID").str.startswith("PORT", na=False)
+            | text_col(infra_links,"Asset ID").str.startswith("ASSET", na=False)
+        )
+        infra_links = infra_links[infra_mask].copy()
+
+    active = (
+        text_col(pe,"Status").str.contains(
+            "active|developing|ongoing|warning|investigation|constrained|damaged|closed",
+            case=False, regex=True, na=False
+        )
+        if not pe.empty else pd.Series(dtype=bool)
+    )
+    severe = (
+        text_col(pe,"Severity").str.contains(
+            "critical|severe|high", case=False, regex=True, na=False
+        )
+        if not pe.empty else pd.Series(dtype=bool)
+    )
+
+    linked_asset_names = (
+        set(infra_links["Asset"].dropna().astype(str))
+        if not infra_links.empty and "Asset" in infra_links.columns else set()
+    )
+
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Infrastructure incidents", len(pe))
+    c2.metric("Active / developing", int(active.sum()) if len(active) else 0)
+    c3.metric("High / critical", int(severe.sum()) if len(severe) else 0)
+    c4.metric("Named assets affected", len(linked_asset_names))
+
+    tabs = st.tabs([
+        "Threat Picture",
+        "Incidents",
+        "Asset Exposure",
+        "Port Drill-down"
+    ])
+
+    with tabs[0]:
+        st.markdown("### Current infrastructure threat picture")
+
+        current = pe[
+            text_col(pe,"Status").str.contains(
+                "active|developing|ongoing|warning|investigation|damaged|constrained|closed",
+                case=False, regex=True, na=False
+            )
+        ].copy() if not pe.empty else pe
+
+        if current.empty and not pe.empty:
+            current = pe.head(8).copy()
+        elif not current.empty:
+            current = current.head(8)
+
+        if current.empty:
+            st.info("No active port or infrastructure-security events are currently loaded.")
+        else:
+            for _, row in current.iterrows():
+                title = clean_display_text(row.get("Title","")) or clean_display_text(row.get("Event Type",""))
+                date = str(row.get("Start Date",""))[:10]
+                severity = clean_display_text(row.get("Severity","")) or "—"
+                status = clean_display_text(row.get("Status","")) or "—"
+                location = clean_display_text(row.get("Location","")) or clean_display_text(row.get("Country / Countries","")) or "Location not specified"
+                impact = clean_display_text(row.get("Operational Impact","")) or clean_display_text(row.get("Description",""))
+
+                card = (
+                    "<div class='pc-card'>"
+                    f"<div class='pc-label'>{date} · {severity} · {status}</div>"
+                    f"<div class='pc-big'>{title}</div>"
+                    f"<div style='margin-top:8px;'><b>{location}</b></div>"
+                    f"<div class='pc-search-details' style='margin-top:8px;'>{impact}</div>"
+                    "</div>"
+                )
+                st.markdown(card, unsafe_allow_html=True)
+
+        a,b = st.columns(2)
+        with a:
+            st.markdown("#### Leading incident types")
+            if not pe.empty and "Event Type" in pe.columns:
+                types = (
+                    pe["Event Type"].dropna().astype(str)
+                    .value_counts().head(8)
+                    .rename_axis("Incident Type").reset_index(name="Events")
+                )
+                show_df(types, ["Incident Type","Events"], 250)
+
+        with b:
+            st.markdown("#### Leading affected areas")
+            if not pe.empty and "Country / Countries" in pe.columns:
+                areas = (
+                    pe["Country / Countries"].dropna().astype(str)
+                    .value_counts().head(8)
+                    .rename_axis("Area").reset_index(name="Events")
+                )
+                show_df(areas, ["Area","Events"], 250)
+
+    with tabs[1]:
+        st.markdown("### Port & infrastructure incident record")
+        q = st.text_input(
+            "Search infrastructure incidents",
+            placeholder="port, refinery, terminal, explosion, labour, weather...",
+            key="infra_incident_search"
+        )
+
+        incident_view = pe.copy()
+        if q.strip() and not incident_view.empty:
+            incident_view = incident_view[
+                contains_any(
+                    incident_view,
+                    ["Title","Description","Event Type","Country / Countries","Location","Operational Impact"],
+                    [q.strip()]
+                )
+            ].copy()
+
+        show_df(
+            incident_view,
+            ["Start Date","Severity","Status","Event Type","Country / Countries",
+             "Location","Title","Operational Impact","Confidence"],
+            360
+        )
+
+        if not incident_view.empty:
+            detail = incident_view.reset_index(drop=True)
+            pick = st.selectbox(
+                "Open infrastructure incident",
+                range(len(detail)),
+                format_func=lambda i: f"{str(detail.iloc[i].get('Start Date',''))[:10]} · {detail.iloc[i].get('Title','')}",
+                key="infra_incident_pick"
+            )
+
+            row = detail.iloc[pick]
+            eid = str(row.get("Event ID","") or "")
+
+            left,right = st.columns([1.15,1])
+            with left:
+                event_card(row)
+            with right:
+                section("Connected coverage","Ports, terminals, companies, systems & impact chain")
+                render_connected_context(eid)
+
+                chains = (
+                    impact_chains[text_col(impact_chains,"Event ID").eq(eid)]
+                    if not impact_chains.empty else impact_chains
+                )
+                if not chains.empty:
+                    st.markdown("**Impact chain**")
+                    show_df(
+                        chains,
+                        ["Trigger","Direct Impact","Secondary Impact",
+                         "Tertiary Impact","Strategic / Commercial Outcome"],
+                        220
+                    )
+
+    with tabs[2]:
+        st.markdown("### Infrastructure exposed to security events")
+        st.caption(
+            "This view is event-driven. It shows infrastructure actually connected to a "
+            "security/disruption event rather than the full infrastructure inventory."
+        )
+
+        event_lookup = (
+            pe.set_index("Event ID").to_dict("index")
+            if not pe.empty and "Event ID" in pe.columns else {}
+        )
+
+        exposure_rows = []
+        if not infra_links.empty:
+            for _, link in infra_links.iterrows():
+                eid = str(link.get("Event ID","") or "")
+                er = event_lookup.get(eid,{})
+                if not er:
+                    continue
+
+                exposure_rows.append({
+                    "Asset": clean_display_text(link.get("Asset","")),
+                    "Asset Type": clean_display_text(link.get("Asset Type","")),
+                    "Relationship": clean_display_text(link.get("Relationship","")),
+                    "Date": str(er.get("Start Date",""))[:10],
+                    "Severity": clean_display_text(er.get("Severity","")),
+                    "Status": clean_display_text(er.get("Status","")),
+                    "Location": clean_display_text(er.get("Location","")),
+                    "Incident": clean_display_text(er.get("Title","")),
+                })
+
+        exposure = pd.DataFrame(exposure_rows)
+
+        if exposure.empty:
+            st.info("No infrastructure assets are directly linked to current security events.")
+        else:
+            exposure = exposure.drop_duplicates(
+                subset=["Asset","Incident","Date"], keep="first"
+            )
+
+            show_df(
+                exposure,
+                ["Asset","Asset Type","Date","Severity","Status",
+                 "Relationship","Location","Incident"],
+                360
+            )
+
+            choices = sorted([
+                x for x in exposure["Asset"].dropna().astype(str).unique()
+                if x and x.lower() not in {"none","nan"}
+            ])
+            if choices:
+                chosen = st.selectbox(
+                    "Inspect exposed asset",
+                    choices,
+                    key="infra_exposed_asset"
+                )
+                hist = exposure[exposure["Asset"].eq(chosen)].copy()
+                st.markdown(f"### {chosen}")
+                show_df(
+                    hist,
+                    ["Date","Severity","Status","Location","Incident","Relationship"],
+                    220
+                )
+
+    with tabs[3]:
+        st.markdown("### Port drill-down")
+        st.caption(
+            "Local security context only. Deep commercial ownership, capacity and investment "
+            "analysis remains in P&C Trade."
+        )
+
+        if ports.empty or "Port / Facility" not in ports.columns:
+            st.info("No port records are currently loaded.")
+        else:
+            pnames = sorted(
+                ports["Port / Facility"].dropna().astype(str).unique().tolist()
+            )
+            pname = st.selectbox(
+                "Port / facility",
+                pnames,
+                key="intel_port_drilldown"
+            )
+
+            pr = ports[text_col(ports,"Port / Facility").eq(pname)].copy()
+            show_df(
+                pr,
+                ["Port / Facility","Country","Operator","Facility Type",
+                 "Key Role","Coverage Note"],
+                170
+            )
+
+            pid = str(pr.iloc[0].get("Port ID","")) if not pr.empty else ""
+
+            linked_terminals = (
+                port_terminals[text_col(port_terminals,"Port ID").eq(pid)].copy()
+                if pid and not port_terminals.empty else pd.DataFrame()
+            )
+            if not linked_terminals.empty:
+                st.markdown("**Linked terminals**")
+                show_df(
+                    linked_terminals,
+                    ["Terminal / Facility","City / Area","Asset Type","Cargo Profile",
+                     "Primary Operator","Status","Confidence","Notes"],
+                    220
+                )
+
+            related_ids = set()
+            if pid and not event_asset_links.empty:
+                related_ids |= set(
+                    event_asset_links[
+                        text_col(event_asset_links,"Asset ID").eq(pid)
+                    ]["Event ID"].dropna().astype(str)
+                )
+
+            if pname and not pe.empty:
+                name_hits = pe[
+                    contains_any(
+                        pe,
+                        ["Location","Title","Description"],
+                        [pname]
+                    )
+                ]
+                if "Event ID" in name_hits.columns:
+                    related_ids |= set(name_hits["Event ID"].dropna().astype(str))
+
+            related = (
+                pe[pe["Event ID"].astype(str).isin(related_ids)].copy()
+                if related_ids and not pe.empty and "Event ID" in pe.columns
+                else pd.DataFrame()
+            )
+
+            st.markdown("**Security & disruption history**")
+            if related.empty:
+                st.caption("No directly related security/disruption events are currently mapped to this port.")
+            else:
+                show_df(
+                    related,
+                    ["Start Date","Severity","Status","Event Type","Title","Operational Impact"],
+                    260
+                )
 
 # -----------------------------------------------------------------------------
 # 7. AVIATION & MOVEMENT
