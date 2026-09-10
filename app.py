@@ -4091,7 +4091,7 @@ elif page=="Trucking":
         clean_network_table(rels,["Relationship","Effective From","Effective To","Status","Confidence","Notes"],240)
 
 elif page=="Ferries":
-    header("Ferries","Scheduled passenger, vehicle and freight ferry systems, routes, terminals, fleets, performance and disruption.")
+    header("Ferries","Scheduled passenger, vehicle and freight ferry systems, their routes, terminals, vessels, performance and disruption.")
     systems=TABLES.get(("Maritime","Ferry Systems"),pd.DataFrame()).copy()
     routes=TABLES.get(("Maritime","Ferry Routes"),pd.DataFrame()).copy()
     terminals=TABLES.get(("Maritime","Ferry Terminals"),pd.DataFrame()).copy()
@@ -4100,45 +4100,194 @@ elif page=="Ferries":
     obs=TABLES.get(("Maritime","Ferry Service Observations"),pd.DataFrame()).copy()
     staging=TABLES.get(("Maritime","Ferry Vessel Staging"),pd.DataFrame()).copy()
 
+    # Build human-readable system lookup while retaining internal IDs only for joins.
+    sys_name={}
+    if not systems.empty and {"System ID","System Name"}.issubset(systems.columns):
+        sys_name=dict(zip(systems["System ID"].astype(str),systems["System Name"].astype(str)))
+
     m1,m2,m3,m4=st.columns(4)
     m1.metric("Ferry systems",len(systems))
     m2.metric("Routes",len(routes))
     m3.metric("Terminals",len(terminals))
     m4.metric("Fleet / service records",len(status)+len(staging))
 
-    q=st.text_input("Search ferry network",placeholder="BC Ferries, Washington State, Alaska, Asia, freight, terminal...")
+    q=st.text_input("Search ferry network",placeholder="BC Ferries, Washington State, Alaska, Auckland, Manila, freight, terminal...")
     if q:
         systems=_contains_any(systems,[q]); routes=_contains_any(routes,[q])
         terminals=_contains_any(terminals,[q]); status=_contains_any(status,[q])
         perf=_contains_any(perf,[q]); obs=_contains_any(obs,[q]); staging=_contains_any(staging,[q])
 
-    tabs=st.tabs(["Systems","Routes","Terminals","Fleet","Performance & Disruption"])
+    tabs=st.tabs(["Systems & Routes","All Routes","Terminals","Fleet","Performance & Disruption"])
+
     with tabs[0]:
-        clean_network_table(systems,["System Name","Region","Country / Jurisdiction","Service Model","Passenger Service","Vehicle / Freight Service","Network Type","Status","Research Status"],300)
-        if not systems.empty:
-            pick=st.selectbox("Inspect ferry system",range(len(systems)),format_func=lambda i:str(systems.iloc[i].get("System Name","")),key="ferry_system_pick")
+        if systems.empty:
+            st.info("No matching ferry systems.")
+        else:
+            systems=systems.reset_index(drop=True)
+            pick=st.selectbox(
+                "Ferry system",
+                range(len(systems)),
+                format_func=lambda i:str(systems.iloc[i].get("System Name","")),
+                key="ferry_system_pick"
+            )
             rr=systems.iloc[pick]
-            st.markdown(f"### {rr.get('System Name','')}")
-            st.caption(f"{rr.get('Country / Jurisdiction','')} · {rr.get('Service Model','')}")
+            sid=str(rr.get("System ID","")).strip()
+
+            st.markdown(f"## {rr.get('System Name','')}")
+            c1,c2,c3=st.columns(3)
+            c1.metric("Jurisdiction",str(rr.get("Country / Jurisdiction","") or "—"))
+            c2.metric("Service model",str(rr.get("Service Model","") or "—"))
+            c3.metric("Network type",str(rr.get("Network Type","") or "—"))
+
             linked_company_button(rr.get("Operator Company ID",""),f"ferry_company_{pick}","Open operator company")
+
+            system_routes=routes[routes["System ID"].astype(str).eq(sid)].copy() if sid and not routes.empty and "System ID" in routes.columns else pd.DataFrame()
+            system_terms=terminals[terminals["System ID"].astype(str).eq(sid)].copy() if sid and not terminals.empty and "System ID" in terminals.columns else pd.DataFrame()
+            system_fleet=staging[staging["System ID"].astype(str).eq(sid)].copy() if sid and not staging.empty and "System ID" in staging.columns else pd.DataFrame()
+
+            a,b,c=st.columns(3)
+            a.metric("Routes",len(system_routes))
+            b.metric("Terminals",len(system_terms))
+            c.metric("Fleet records",len(system_fleet))
+
+            st.markdown("### Routes")
+            if system_routes.empty:
+                st.caption("No routes are currently mapped to this ferry system.")
+            else:
+                system_routes=system_routes.reset_index(drop=True)
+                for n,(_,route) in enumerate(system_routes.iterrows()):
+                    route_name=str(route.get("Route Name","") or f"{route.get('Origin Terminal','')} – {route.get('Destination Terminal','')}")
+                    origin=str(route.get("Origin Terminal","") or "—")
+                    destination=str(route.get("Destination Terminal","") or "—")
+                    status_text=str(route.get("Route Status","") or "—")
+                    service=str(route.get("Service Type","") or "—")
+                    cadence=str(route.get("Frequency / Cadence","") or "—")
+                    duration=str(route.get("Typical Duration","") or "—")
+                    season=str(route.get("Seasonality","") or "—")
+                    cross=str(route.get("Cross-Border","") or "—")
+                    notes=str(route.get("Intermediate Stops / Corridor Notes","") or "").strip()
+
+                    st.markdown(
+                        f"""<div class='pc-card'>
+                        <div class='pc-label'>{status_text} · {service}</div>
+                        <div class='pc-big'>{route_name}</div>
+                        <div style='margin-top:10px;'><b>{origin}</b> → <b>{destination}</b></div>
+                        <div class='pc-search-details' style='margin-top:8px;'>
+                        {cadence} · {duration} · {season} · Cross-border: {cross}
+                        </div>
+                        {f"<div style='margin-top:8px;'>{notes}</div>" if notes and notes.lower()!='nan' else ""}
+                        </div>""",
+                        unsafe_allow_html=True
+                    )
+
+            with st.expander("System record"):
+                clean_network_table(pd.DataFrame([rr]),[
+                    "System Name","Parent / Public Owner","Region","Country / Jurisdiction",
+                    "Service Model","Passenger Service","Vehicle / Freight Service",
+                    "Network Type","Fleet Status Tracking","Alerts / Performance Data",
+                    "Research Status","Source URL"
+                ],180)
+
     with tabs[1]:
-        clean_network_table(routes,["Route Name","Origin Terminal","Destination Terminal","Country 1","Country 2","Cross-Border","Service Type","Vehicle / Freight","Typical Duration","Frequency / Cadence","Seasonality","Route Status"],340)
+        st.markdown("### Ferry route network")
+        route_view=routes.copy()
+        if route_view.empty:
+            st.info("No ferry routes available.")
+        else:
+            # Add system names for readable filtering/display; never expose System ID.
+            if "System ID" in route_view.columns:
+                route_view["Ferry System"]=route_view["System ID"].astype(str).map(sys_name).fillna("")
+
+            system_options=["All"]
+            if "Ferry System" in route_view.columns:
+                system_options += sorted([x for x in route_view["Ferry System"].dropna().astype(str).unique() if x])
+            selected_system=st.selectbox("Filter by ferry system",system_options,key="ferry_route_system_filter")
+            if selected_system!="All":
+                route_view=route_view[route_view["Ferry System"].eq(selected_system)].copy()
+
+            r1,r2=st.columns(2)
+            country_opts=["All"]
+            if "Country 1" in route_view.columns:
+                country_opts += sorted([x for x in route_view["Country 1"].dropna().astype(str).unique() if x])
+            country_pick=r1.selectbox("Country",country_opts,key="ferry_route_country_filter")
+            cross_pick=r2.selectbox("Cross-border",["All","Yes","No"],key="ferry_route_cross_filter")
+            if country_pick!="All":
+                route_view=route_view[
+                    route_view.get("Country 1",pd.Series(index=route_view.index,dtype=str)).astype(str).eq(country_pick)
+                    | route_view.get("Country 2",pd.Series(index=route_view.index,dtype=str)).astype(str).eq(country_pick)
+                ].copy()
+            if cross_pick!="All" and "Cross-Border" in route_view.columns:
+                route_view=route_view[route_view["Cross-Border"].astype(str).str.casefold().eq(cross_pick.casefold())].copy()
+
+            st.caption(f"{len(route_view)} route records")
+            clean_network_table(route_view,[
+                "Ferry System","Route Name","Origin Terminal","Destination Terminal",
+                "Country 1","Country 2","Cross-Border","Service Type","Vehicle / Freight",
+                "Typical Duration","Frequency / Cadence","Seasonality",
+                "Reservation / Booking","Route Status","Intermediate Stops / Corridor Notes"
+            ],420)
+
+            if not route_view.empty:
+                detail=route_view.reset_index(drop=True)
+                rp=st.selectbox(
+                    "Inspect route",
+                    range(len(detail)),
+                    format_func=lambda i:f"{detail.iloc[i].get('Route Name','')} — {detail.iloc[i].get('Ferry System','')}",
+                    key="ferry_route_pick"
+                )
+                r=detail.iloc[rp]
+                st.markdown(f"### {r.get('Route Name','')}")
+                st.markdown(f"**{r.get('Origin Terminal','')} → {r.get('Destination Terminal','')}**")
+                c1,c2,c3,c4=st.columns(4)
+                c1.metric("Status",str(r.get("Route Status","") or "—"))
+                c2.metric("Frequency",str(r.get("Frequency / Cadence","") or "—"))
+                c3.metric("Duration",str(r.get("Typical Duration","") or "—"))
+                c4.metric("Season",str(r.get("Seasonality","") or "—"))
+                if str(r.get("Intermediate Stops / Corridor Notes","")).strip():
+                    st.markdown("**Intermediate stops / corridor context**")
+                    st.write(r.get("Intermediate Stops / Corridor Notes",""))
+
     with tabs[2]:
-        clean_network_table(terminals,["Terminal Name","Port / Harbour","City / Area","Country","Owner / Authority","Vehicle Staging","Freight / DG Capability","Road / Rail / Bus Connection","Status"],340)
+        term_view=terminals.copy()
+        if not term_view.empty and "System ID" in term_view.columns:
+            term_view["Ferry System"]=term_view["System ID"].astype(str).map(sys_name).fillna("")
+        clean_network_table(term_view,[
+            "Ferry System","Terminal Name","Port / Harbour","City / Area","Country",
+            "Owner / Authority","Vehicle Staging","Freight / DG Capability",
+            "Customs / Border","Road / Rail / Bus Connection","Status","Notes"
+        ],420)
+
     with tabs[3]:
+        fleet_view=staging.copy()
+        if not fleet_view.empty and "System ID" in fleet_view.columns:
+            fleet_view["Ferry System"]=fleet_view["System ID"].astype(str).map(sys_name).fillna("")
+        if not fleet_view.empty:
+            st.markdown("**Ferry fleet**")
+            clean_network_table(fleet_view,[
+                "Ferry System","Vessel Name","IMO","Vessel Type","Subtype / Class","Flag",
+                "Passenger Capacity","Vehicle Capacity","Freight / Lane Metres","Year Built",
+                "Propulsion / Fuel","Current Status","Primary Route","Data Status"
+            ],420)
         if not status.empty:
             st.markdown("**Current / recent fleet status**")
             clean_network_table(status,["As Of","Vessel Name","Fleet Status","Assignment / Location","Notes"],220)
-        if not staging.empty:
-            with st.expander("Ferry vessel staging / research universe"):
-                clean_network_table(staging,None,300)
+
     with tabs[4]:
         if not perf.empty:
             st.markdown("**Performance**")
-            clean_network_table(perf,["Period Type","Period Start","Period End","Scheduled Sailings","Completed Sailings","Completion %","Cancelled Sailings","Weather","Mechanical / Vessel","Crew","Terminal","Ridership","Vehicle Traffic","On-Time %"],280)
+            clean_network_table(perf,[
+                "Period Type","Period Start","Period End","Scheduled Sailings","Completed Sailings",
+                "Completion %","Cancelled Sailings","Weather","Mechanical / Vessel","Crew",
+                "Terminal","Ridership","Vehicle Traffic","On-Time %","Capacity Utilization %","Notes"
+            ],300)
         if not obs.empty:
             st.markdown("**Service observations / disruption**")
-            clean_network_table(obs,None,280)
+            clean_network_table(obs,[
+                "Date","Vessel Name","Origin Terminal","Destination Terminal","Service Status",
+                "Delay Minutes","Trips / Sailings Affected","Cause Family","Cause Detail",
+                "Service Impact","Capacity / Wait Impact","Alternate Service / Response",
+                "Severity","Confidence","Notes"
+            ],340)
 
 elif page=="Cruise":
     header("Cruise","Global cruise operators, ships, destinations, routes and Great Lakes deployment as a dedicated passenger-shipping network.")
