@@ -1,15 +1,19 @@
 from pathlib import Path
+import os
 import re
 import json
+import html as html_lib
+import xml.etree.ElementTree as ET
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import urlencode
 from collections import defaultdict
 import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v2.2.0"
-RELEASE_NAME = "Hormuz, Contracts & Maritime Compliance"
+APP_VERSION = "v2.5.0"
+RELEASE_NAME = "Live Feeds + AIS / Intermodal Test"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -23,6 +27,7 @@ h1,h2,h3,h4,h5,h6,p,li,span,label{color:var(--text)}
 a{color:var(--blue)!important}
 .pc-kicker{color:var(--gold);font-size:.76rem;letter-spacing:.14em;text-transform:uppercase;font-weight:700}.pc-title{font-size:2rem;font-weight:800}.pc-sub{color:var(--muted);margin:.2rem 0 1.2rem}.pc-card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:8px}.pc-label{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.pc-big{font-size:1.3rem;font-weight:750}.pc-small{color:var(--muted);font-size:.88rem}.pc-rel{padding:8px 11px;border-left:3px solid var(--gold);background:var(--panel);margin:6px 0;border-radius:5px}.pc-chip{display:inline-block;border:1px solid var(--border);background:var(--panel);padding:3px 8px;border-radius:999px;font-size:.76rem;color:var(--muted);margin:2px 3px 2px 0}
 .pc-source{margin-top:7px;font-size:.82rem}.pc-source a{color:var(--blue)!important;text-decoration:none;font-weight:650}
+.pc-feed-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;margin:.5rem 0 1rem}.pc-feed{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:12px;padding:14px 16px}.pc-feed-title{font-weight:760;font-size:1rem;margin-bottom:3px}.pc-feed-meta{font-size:.78rem;color:var(--muted);line-height:1.5}.pc-status{display:inline-block;border-radius:999px;padding:2px 8px;font-size:.7rem;font-weight:750;letter-spacing:.05em;text-transform:uppercase;margin-top:7px;border:1px solid var(--border)}.pc-status-live{color:#9ee6c1;border-color:#39775c}.pc-status-key{color:#f5d58a;border-color:#806b36}.pc-status-trial{color:#f2c17e;border-color:#815b2d}.pc-status-off{color:#c2cad4;border-color:#526071}
 .pc-search-card{padding:16px 18px}.pc-search-details{margin-top:8px;line-height:1.65;color:var(--muted);font-size:.92rem}
 .pc-object-card{margin-bottom:.35rem;min-height:72px}
 .pc-bar-row{display:grid;grid-template-columns:minmax(220px,2fr) 5fr 52px;gap:12px;align-items:center;margin:8px 0}
@@ -140,11 +145,339 @@ def load_hormuz_api(path, parameter_name="", parameter_value=""):
     if parameter_name and parameter_value:
         url += f"?{parameter_name}={int(parameter_value)}"
     try:
-        req = Request(url, headers={"User-Agent":"PC-Trade-System/2.2"})
+        req = Request(url, headers={"User-Agent":"PC-Trade-System/2.5"})
         with urlopen(req, timeout=8) as response:
             return json.loads(response.read().decode("utf-8")), ""
     except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
         return None, str(exc)
+
+
+# ---------- USCG CGMIX XML web services ----------
+CGMIX_PSIX_URL = "https://cgmix.uscg.mil/xml/PSIXData.asmx"
+CGMIX_IIR_URL = "https://cgmix.uscg.mil/xml/IIRData.asmx"
+
+
+def _xml_local_name(tag):
+    return str(tag).split("}")[-1]
+
+
+def _cgmix_parse_rows(xml_text):
+    """Parse the escaped XML dataset returned inside the CGMIX SOAP response."""
+    if not xml_text:
+        return []
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    rows=[]
+    for node in root.iter():
+        children=list(node)
+        if not children:
+            continue
+        # DataSet row nodes contain scalar child fields. Skip schema/diffgram wrappers.
+        scalar=[c for c in children if len(list(c))==0]
+        if scalar and len(scalar)==len(children):
+            row={_xml_local_name(c.tag):(c.text or "") for c in children}
+            if row and any(str(v).strip() for v in row.values()):
+                rows.append(row)
+    # Deduplicate identical rows introduced by nested dataset wrappers.
+    out=[]; seen=set()
+    for row in rows:
+        key=tuple(sorted(row.items()))
+        if key not in seen:
+            seen.add(key); out.append(row)
+    return out
+
+
+def _cgmix_soap(endpoint, operation, namespace, params):
+    fields="".join(f"<{k}>{html_lib.escape(str(v or ''))}</{k}>" for k,v in params.items())
+    body=(
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+        'xmlns:xsd="http://www.w3.org/2001/XMLSchema" '
+        'xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">'
+        f'<soap:Body><{operation} xmlns="{namespace}">{fields}</{operation}></soap:Body></soap:Envelope>'
+    ).encode("utf-8")
+    action=namespace.rstrip("/") + ("/" if not namespace.endswith("/") else "") + operation
+    req=Request(endpoint,data=body,headers={
+        "User-Agent":"PC-Trade-System/2.5",
+        "Content-Type":"text/xml; charset=utf-8",
+        "SOAPAction":f'"{action}"'
+    },method="POST")
+    with urlopen(req,timeout=15) as response:
+        soap=response.read().decode("utf-8",errors="replace")
+    root=ET.fromstring(soap)
+    result=None
+    target=operation+"Result"
+    for node in root.iter():
+        if _xml_local_name(node.tag)==target:
+            result=node.text or ""
+            break
+    if result is None:
+        raise ValueError("CGMIX returned no result payload")
+    return _cgmix_parse_rows(html_lib.unescape(result))
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def cgmix_psix_vessel_search(vessel_name="", imo_or_id="", flag="", service="ALL"):
+    try:
+        rows=_cgmix_soap(CGMIX_PSIX_URL,"getVesselSummaryXMLString","https://cgmix.uscg.mil",{
+            "VesselID":"","VesselName":vessel_name,"CallSign":"","VIN":imo_or_id,"HIN":"",
+            "Flag":flag,"Service":service or "ALL","BuildYear":""
+        })
+        return pd.DataFrame(rows),""
+    except (HTTPError,URLError,TimeoutError,ValueError,OSError,ET.ParseError) as exc:
+        return pd.DataFrame(),str(exc)
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def cgmix_psix_cases(vessel_id):
+    try:
+        rows=_cgmix_soap(CGMIX_PSIX_URL,"getVesselCasesXMLString","https://cgmix.uscg.mil",{"VesselID":str(vessel_id),"MaxSearchDate":"","MinSearchDate":""})
+        return pd.DataFrame(rows),""
+    except (HTTPError,URLError,TimeoutError,ValueError,OSError,ET.ParseError) as exc:
+        return pd.DataFrame(),str(exc)
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def cgmix_psix_deficiencies(activity_id):
+    try:
+        rows=_cgmix_soap(CGMIX_PSIX_URL,"getVesselDeficienciesXMLString","https://cgmix.uscg.mil",{"ActivityNumber":str(activity_id)})
+        return pd.DataFrame(rows),""
+    except (HTTPError,URLError,TimeoutError,ValueError,OSError,ET.ParseError) as exc:
+        return pd.DataFrame(),str(exc)
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def cgmix_psix_controls(activity_id):
+    try:
+        rows=_cgmix_soap(CGMIX_PSIX_URL,"getOperationControlsXMLString","https://cgmix.uscg.mil",{"ActivityID":str(activity_id)})
+        return pd.DataFrame(rows),""
+    except (HTTPError,URLError,TimeoutError,ValueError,OSError,ET.ParseError) as exc:
+        return pd.DataFrame(),str(exc)
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def cgmix_iir_search(vessel_name="", org_name="", facility="", keyword=""):
+    try:
+        rows=_cgmix_soap(CGMIX_IIR_URL,"getIIRIncidentSearchXMLString","https://cgmix.uscg.mil/xml/",{
+            "ActivityId":"0","VesselService":"","VesselName":vessel_name,"OrgName":org_name,
+            "InvolvedFacility":facility,"KeyWord":keyword
+        })
+        return pd.DataFrame(rows),""
+    except (HTTPError,URLError,TimeoutError,ValueError,OSError,ET.ParseError) as exc:
+        return pd.DataFrame(),str(exc)
+
+
+# ---------- GDELT DOC 2.0 global signals ----------
+GDELT_DOC_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
+GDELT_GEO_URL = "https://api.gdeltproject.org/api/v2/geo/geo"
+
+@st.cache_data(show_spinner=False, ttl=900)
+def load_gdelt_articles(query, timespan="24h", maxrecords=50):
+    """Query GDELT DOC 2.0. Results are discovery signals, not verified P&C events."""
+    params={"query":query,"mode":"ArtList","format":"json","sort":"DateDesc",
+            "timespan":timespan,"maxrecords":max(1,min(int(maxrecords),250))}
+    url=GDELT_DOC_URL+"?"+urlencode(params)
+    try:
+        req=Request(url,headers={"User-Agent":"PC-Trade-System/2.5"})
+        with urlopen(req,timeout=20) as response:
+            raw=response.read().decode("utf-8",errors="replace")
+        try:
+            payload=json.loads(raw)
+        except json.JSONDecodeError:
+            raise ValueError(raw.strip()[:300] or "GDELT returned a non-JSON response")
+        arts=payload.get("articles",[]) if isinstance(payload,dict) else []
+        df=pd.DataFrame(arts)
+        if not df.empty and "seendate" in df.columns:
+            df["Seen"] = pd.to_datetime(df["seendate"],format="%Y%m%dT%H%M%SZ",errors="coerce",utc=True)
+        return df,""
+    except (HTTPError,URLError,TimeoutError,ValueError,OSError) as exc:
+        return pd.DataFrame(),str(exc)
+
+
+
+# ---------- optional live transport feeds ----------
+def _secret(name, default=""):
+    try:
+        return str(st.secrets.get(name, default) or default)
+    except Exception:
+        return str(os.environ.get(name, default) or default)
+
+AISHUB_URL = "https://data.aishub.net/ws.php"
+NAVITIA_BASE = "https://api.navitia.io/v1"
+
+@st.cache_data(show_spinner=False, ttl=60)
+def load_aishub(username, latmin=-90.0, latmax=90.0, lonmin=-180.0, lonmax=180.0, mmsi="", imo="", interval=30):
+    if not str(username).strip():
+        return pd.DataFrame(), "AISHub username is not configured."
+    params={
+        "username":str(username).strip(),"format":1,"output":"json","compress":0,
+        "latmin":float(latmin),"latmax":float(latmax),"lonmin":float(lonmin),"lonmax":float(lonmax),
+        "interval":max(1,min(int(interval),1440))
+    }
+    if str(mmsi).strip(): params["mmsi"]=str(mmsi).strip()
+    if str(imo).strip(): params["imo"]=str(imo).strip()
+    try:
+        req=Request(AISHUB_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.5"})
+        with urlopen(req,timeout=15) as response:
+            payload=json.loads(response.read().decode("utf-8",errors="replace"))
+        if isinstance(payload,list) and len(payload)>=2 and isinstance(payload[0],dict):
+            if payload[0].get("ERROR"):
+                return pd.DataFrame(), str(payload[0])
+            df=pd.DataFrame(payload[1] or [])
+        else:
+            return pd.DataFrame(), "Unexpected AISHub response format."
+        if not df.empty:
+            for c in ["LATITUDE","LONGITUDE","SOG","COG","DRAUGHT"]:
+                if c in df.columns: df[c]=pd.to_numeric(df[c],errors="coerce")
+        return df,""
+    except (HTTPError,URLError,TimeoutError,ValueError,OSError) as exc:
+        return pd.DataFrame(),str(exc)
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def navitia_get(token, path, params=None):
+    if not str(token).strip():
+        return None, "Navitia token is not configured."
+    url=NAVITIA_BASE+path
+    if params: url += "?"+urlencode(params,doseq=True)
+    try:
+        req=Request(url,headers={"Authorization":str(token).strip(),"User-Agent":"PC-Trade-System/2.5"})
+        with urlopen(req,timeout=15) as response:
+            return json.loads(response.read().decode("utf-8",errors="replace")),""
+    except (HTTPError,URLError,TimeoutError,ValueError,OSError) as exc:
+        return None,str(exc)
+
+def _navitia_places_frame(payload):
+    rows=[]
+    for item in (payload or {}).get("places",[]):
+        obj=item.get(item.get("embedded_type",""),{}) if isinstance(item,dict) else {}
+        coord=(obj or {}).get("coord",{}) or {}
+        rows.append({
+            "Name":item.get("name","") if isinstance(item,dict) else "",
+            "Type":item.get("embedded_type","") if isinstance(item,dict) else "",
+            "ID":item.get("id","") if isinstance(item,dict) else "",
+            "Latitude":pd.to_numeric(coord.get("lat"),errors="coerce"),
+            "Longitude":pd.to_numeric(coord.get("lon"),errors="coerce")
+        })
+    return pd.DataFrame(rows)
+
+def _navitia_disruptions_frame(payload):
+    rows=[]
+    for d in (payload or {}).get("disruptions",[]):
+        sev=(d.get("severity") or {}) if isinstance(d,dict) else {}
+        periods=d.get("application_periods") or [] if isinstance(d,dict) else []
+        p0=periods[0] if periods else {}
+        rows.append({
+            "Disruption":d.get("disruption_id",d.get("id","")),
+            "Severity":sev.get("name",sev.get("effect","")),
+            "Effect":sev.get("effect",""),
+            "Cause":d.get("cause",""),
+            "Updated":d.get("updated_at",""),
+            "Begins":p0.get("begin",""),
+            "Ends":p0.get("end","")
+        })
+    return pd.DataFrame(rows)
+
+# IMF PortWatch public ArcGIS Feature Service. The layer is capped at 1,000
+# records per response, so latest-day retrieval is explicitly paginated.
+PORTWATCH_QUERY_URL = "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Ports_Data/FeatureServer/0/query"
+PORTWATCH_PAGE_SIZE = 1000
+PORTWATCH_FIELDS = [
+    "date","year","month","day","portid","portname","country","ISO3",
+    "portcalls_container","portcalls_dry_bulk","portcalls_general_cargo","portcalls_roro","portcalls_tanker","portcalls_cargo","portcalls",
+    "import_container","import_dry_bulk","import_general_cargo","import_roro","import_tanker","import_cargo","import",
+    "export_container","export_dry_bulk","export_general_cargo","export_roro","export_tanker","export_cargo","export","ObjectId"
+]
+PORTWATCH_NUMERIC = [c for c in PORTWATCH_FIELDS if c.startswith(("portcalls","import","export"))] + ["year","month","day","ObjectId"]
+
+def _portwatch_request(params):
+    url = PORTWATCH_QUERY_URL + "?" + urlencode(params)
+    req = Request(url, headers={"User-Agent":"PC-Trade-System/2.5"})
+    with urlopen(req, timeout=12) as response:
+        payload=json.loads(response.read().decode("utf-8"))
+    if "error" in payload:
+        message=payload.get("error",{}).get("message","PortWatch API error")
+        details=payload.get("error",{}).get("details",[])
+        raise ValueError(message + (": " + "; ".join(details) if details else ""))
+    return payload
+
+def _portwatch_frame(features):
+    rows=[f.get("attributes",{}) for f in features or []]
+    df=pd.DataFrame(rows)
+    if df.empty:
+        return df
+    for c in PORTWATCH_NUMERIC:
+        if c in df.columns:
+            df[c]=pd.to_numeric(df[c],errors="coerce")
+    if {"year","month","day"}.issubset(df.columns):
+        df["Date"]=pd.to_datetime(dict(year=df["year"],month=df["month"],day=df["day"]),errors="coerce")
+    elif "date" in df.columns:
+        df["Date"]=pd.to_datetime(df["date"],errors="coerce")
+    return df
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def load_portwatch_latest():
+    """Return the newest complete PortWatch day available, with ArcGIS pagination."""
+    try:
+        newest=_portwatch_request({
+            "where":"1=1",
+            "outFields":"date,year,month,day,ObjectId",
+            "orderByFields":"date DESC,ObjectId DESC",
+            "resultRecordCount":1,
+            "returnGeometry":"false",
+            "f":"json",
+        })
+        features=newest.get("features",[])
+        if not features:
+            return pd.DataFrame(), "No PortWatch records returned", ""
+        a=features[0].get("attributes",{})
+        y,m,d=(int(a.get("year")),int(a.get("month")),int(a.get("day")))
+        where=f"year={y} AND month={m} AND day={d}"
+        all_features=[]
+        offset=0
+        while True:
+            payload=_portwatch_request({
+                "where":where,
+                "outFields":",".join(PORTWATCH_FIELDS),
+                "orderByFields":"ObjectId ASC",
+                "resultOffset":offset,
+                "resultRecordCount":PORTWATCH_PAGE_SIZE,
+                "returnGeometry":"false",
+                "f":"json",
+            })
+            batch=payload.get("features",[])
+            all_features.extend(batch)
+            exceeded=bool(payload.get("exceededTransferLimit",False))
+            if len(batch) < PORTWATCH_PAGE_SIZE and not exceeded:
+                break
+            if not batch:
+                break
+            offset += len(batch)
+            if offset >= 25000:
+                raise ValueError("PortWatch pagination safety limit reached")
+        return _portwatch_frame(all_features), "", f"{y:04d}-{m:02d}-{d:02d}"
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError, TypeError) as exc:
+        return pd.DataFrame(), str(exc), ""
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def load_portwatch_history(portid, observations=90):
+    """Load recent daily observations for a single PortWatch port."""
+    if not str(portid).strip():
+        return pd.DataFrame(), "Missing port identifier"
+    safe=str(portid).replace("'","''")
+    try:
+        payload=_portwatch_request({
+            "where":f"portid='{safe}'",
+            "outFields":",".join(PORTWATCH_FIELDS),
+            "orderByFields":"date DESC,ObjectId DESC",
+            "resultRecordCount":max(7,min(int(observations),365)),
+            "returnGeometry":"false",
+            "f":"json",
+        })
+        return _portwatch_frame(payload.get("features",[])), ""
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError, TypeError) as exc:
+        return pd.DataFrame(), str(exc)
 
 @st.cache_data(show_spinner=False)
 def all_tables():
@@ -2247,7 +2580,7 @@ st.sidebar.caption(f"{APP_VERSION} · {RELEASE_NAME}")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
-pages=["Overview","Search","Companies","Ports","Shipyards","Vessels","Cruise & Service Craft","Contracts","Trade Policy","Sanctions","News & Events","Hormuz Monitor","Systems","Data"]
+pages=["Overview","Search","Companies","Ports","Port Activity","Live Feeds","Shipyards","Vessels","Cruise & Service Craft","Contracts","Trade Policy","Sanctions","USCG Safety & Compliance","News & Events","Global Signals","Hormuz Monitor","Systems","Data"]
 
 # Navigation requests are applied BEFORE the top-nav widget is instantiated.
 # This avoids StreamlitWidgetAlreadyInstantiatedError when a button changes pages.
@@ -2470,6 +2803,215 @@ elif page=="Ports":
                 render_event_cards(ev,50)
                 if not chains.empty: display_df(chains,100)
             with tabs[2]: display_df(pd.DataFrame([row]),20)
+
+elif page=="Port Activity":
+    header(
+        "Global Port Activity",
+        "Live daily port calls, imports and exports from IMF PortWatch. This operational layer is queried on demand and is not stored in the canonical XLSX model."
+    )
+    st.caption("Source: IMF PortWatch Daily Ports Data · public ArcGIS Feature Service · cached in-app for 30 minutes")
+    live,error,latest_date=load_portwatch_latest()
+    if error:
+        st.warning(f"PortWatch is temporarily unavailable. Canonical P&C port data remains available under Ports. {error}")
+    elif live.empty:
+        st.info("PortWatch returned no current observations.")
+    else:
+        countries=sorted(x for x in live.get("country",pd.Series(dtype=str)).dropna().astype(str).unique() if x.strip())
+        c1,c2=st.columns([1,2])
+        with c1:
+            selected_country=st.selectbox("Country",["All"]+countries,key="portwatch_country")
+        scoped=live.copy()
+        if selected_country!="All":
+            scoped=scoped[scoped["country"].astype(str).eq(selected_country)]
+        with c2:
+            port_search=st.text_input("Filter ports",placeholder="Jebel Ali, Rotterdam, Singapore, Shanghai...",key="portwatch_search")
+        if port_search:
+            scoped=scoped[scoped["portname"].astype(str).str.contains(port_search,case=False,na=False)]
+
+        total_calls=pd.to_numeric(scoped.get("portcalls",pd.Series(dtype=float)),errors="coerce").sum()
+        total_imports=pd.to_numeric(scoped.get("import",pd.Series(dtype=float)),errors="coerce").sum()
+        total_exports=pd.to_numeric(scoped.get("export",pd.Series(dtype=float)),errors="coerce").sum()
+        m1,m2,m3,m4=st.columns(4)
+        m1.metric("Latest observation",latest_date)
+        m2.metric("Ports in view",f"{len(scoped):,}")
+        m3.metric("Port calls",f"{int(total_calls):,}")
+        m4.metric("Imports / exports",f"{int(total_imports):,} / {int(total_exports):,}")
+
+        metric_choice=st.radio(
+            "Rank by",
+            ["Port calls","Container calls","Tanker calls","Imports","Exports"],
+            horizontal=True,
+            key="portwatch_metric"
+        )
+        metric_map={
+            "Port calls":"portcalls",
+            "Container calls":"portcalls_container",
+            "Tanker calls":"portcalls_tanker",
+            "Imports":"import",
+            "Exports":"export",
+        }
+        metric_col=metric_map[metric_choice]
+        ranking=scoped[["portname","country",metric_col]].copy() if metric_col in scoped.columns else pd.DataFrame()
+        if not ranking.empty:
+            ranking[metric_col]=pd.to_numeric(ranking[metric_col],errors="coerce").fillna(0)
+            ranking=ranking.sort_values(metric_col,ascending=False).head(20)
+            ranking["Port / Country"]=ranking["portname"].astype(str)+" — "+ranking["country"].astype(str)
+            st.markdown(f"### Top ports by {metric_choice.lower()}")
+            st.bar_chart(ranking.set_index("Port / Country")[metric_col],horizontal=True)
+
+        show_cols=[
+            "Date","portname","country","ISO3","portcalls","portcalls_container","portcalls_dry_bulk",
+            "portcalls_general_cargo","portcalls_roro","portcalls_tanker","import","export"
+        ]
+        show=scoped[[c for c in show_cols if c in scoped.columns]].copy()
+        show=show.rename(columns={
+            "portname":"Port","country":"Country","ISO3":"ISO3","portcalls":"Port Calls",
+            "portcalls_container":"Container Calls","portcalls_dry_bulk":"Dry Bulk Calls",
+            "portcalls_general_cargo":"General Cargo Calls","portcalls_roro":"Ro-Ro Calls",
+            "portcalls_tanker":"Tanker Calls","import":"Imports","export":"Exports"
+        })
+        st.markdown("### Latest daily observations")
+        st.dataframe(show.sort_values("Port Calls",ascending=False) if "Port Calls" in show.columns else show,use_container_width=True,hide_index=True)
+
+        port_options=scoped[["portid","portname","country"]].dropna(subset=["portid"]).drop_duplicates().sort_values(["portname","country"]).to_dict("records")
+        if port_options:
+            st.markdown("### Port trend")
+            pick=st.selectbox(
+                "Port for recent history",
+                range(len(port_options)),
+                format_func=lambda i:f"{port_options[i]['portname']} — {port_options[i]['country']}",
+                key="portwatch_history_port"
+            )
+            days=st.select_slider("Observations",options=[30,60,90,180,365],value=90,key="portwatch_history_days")
+            hist,hist_error=load_portwatch_history(port_options[pick]["portid"],days)
+            if hist_error:
+                st.warning(f"Recent history could not be loaded. {hist_error}")
+            elif not hist.empty:
+                hist=hist.sort_values("Date")
+                series_cols=[c for c in ["portcalls","portcalls_container","portcalls_tanker","import","export"] if c in hist.columns]
+                if series_cols:
+                    st.line_chart(hist.set_index("Date")[series_cols])
+                st.caption("PortWatch measures observed daily shipping activity. Use it as an operational signal alongside P&C ownership, corridor, event and compliance data—not as a substitute for the canonical port record.")
+
+
+elif page=="Live Feeds":
+    header(
+        "Live Feeds",
+        "Operational and mobility APIs shown as separate evidence layers. Credentials, licensing and persistence are visible so the interface never implies that every feed is equally authoritative or permanently free."
+    )
+    aishub_user=_secret("AISHUB_USERNAME")
+    navitia_token=_secret("NAVITIA_TOKEN")
+    tabs=st.tabs(["Maritime AIS","Intermodal Mobility","API Catalog"])
+
+    with tabs[0]:
+        st.markdown("### AISHub · live vessel positions")
+        st.caption("Contributor-access feed · minimum one-minute polling interval · live observations are not persisted in this Excel test build")
+        if not aishub_user:
+            st.info("AISHub is wired but not activated. Add `AISHUB_USERNAME` to Streamlit secrets after joining AISHub as a data contributor.")
+        areas={
+            "Strait of Hormuz":(23.0,27.5,54.0,58.5),
+            "Dubai / Jebel Ali":(24.5,25.8,54.3,56.2),
+            "Singapore Strait":(0.7,1.7,103.2,104.6),
+            "Rotterdam / North Sea":(51.5,52.5,3.2,5.4),
+            "Custom":None
+        }
+        c1,c2,c3=st.columns([1.4,1,1])
+        with c1: area=st.selectbox("Area",list(areas),key="ais_area")
+        with c2: imo=st.text_input("IMO filter",key="ais_imo",placeholder="e.g. 9220641")
+        with c3: mmsi=st.text_input("MMSI filter",key="ais_mmsi")
+        if area=="Custom":
+            c1,c2,c3,c4=st.columns(4)
+            latmin=c1.number_input("South",-90.0,90.0,20.0,key="ais_latmin")
+            latmax=c2.number_input("North",-90.0,90.0,30.0,key="ais_latmax")
+            lonmin=c3.number_input("West",-180.0,180.0,50.0,key="ais_lonmin")
+            lonmax=c4.number_input("East",-180.0,180.0,60.0,key="ais_lonmax")
+        else:
+            latmin,latmax,lonmin,lonmax=areas[area]
+        if st.button("Load live AIS",key="ais_load",disabled=not bool(aishub_user)):
+            adf,aerr=load_aishub(aishub_user,latmin,latmax,lonmin,lonmax,mmsi,imo,30)
+            st.session_state["aishub_results"]=(adf,aerr)
+        adf,aerr=st.session_state.get("aishub_results",(pd.DataFrame(),""))
+        if aerr: st.warning(aerr)
+        elif not adf.empty:
+            m1,m2,m3,m4=st.columns(4)
+            m1.metric("Vessels in view",f"{len(adf):,}")
+            m2.metric("With IMO",f"{adf.get('IMO',pd.Series(dtype=str)).astype(str).replace('0','').ne('').sum():,}")
+            m3.metric("Underway >1 kn",f"{pd.to_numeric(adf.get('SOG',pd.Series(dtype=float)),errors='coerce').gt(1).sum():,}")
+            m4.metric("Unique destinations",f"{adf.get('DEST',pd.Series(dtype=str)).replace('',pd.NA).dropna().nunique():,}")
+            mapdf=adf.rename(columns={"LATITUDE":"lat","LONGITUDE":"lon"})
+            if {"lat","lon"}.issubset(mapdf.columns):
+                st.map(mapdf.dropna(subset=["lat","lon"])[["lat","lon"]],use_container_width=True)
+            cols=[c for c in ["NAME","IMO","MMSI","TYPE","SOG","COG","DRAUGHT","DEST","ETA","TIME"] if c in adf.columns]
+            display_df(adf[cols] if cols else adf,200,show_ids=True)
+            st.caption("Visual rule: the map is situational awareness; the table is the auditable observation. AIS data should be linked to the canonical vessel only after IMO/MMSI resolution.")
+
+    with tabs[1]:
+        st.markdown("### Navitia · intermodal mobility & disruption")
+        st.caption("Token-authenticated public transport API · useful around rail stations, ferry interfaces, airport access and urban disruption near logistics nodes")
+        if not navitia_token:
+            st.info("Navitia is wired but inactive. Add `NAVITIA_TOKEN` to Streamlit secrets to use real-world coverage.")
+        if navitia_token:
+            cov,cerr=navitia_get(navitia_token,"/coverage",{"count":200})
+            if cerr:
+                st.warning(cerr); coverage_ids=[]
+            else:
+                coverage_ids=[r.get("id","") for r in (cov or {}).get("regions",[]) if r.get("id")]
+            if coverage_ids:
+                region=st.selectbox("Coverage",coverage_ids,key="nav_region")
+                n1,n2=st.tabs(["Stops / places","Disruptions"])
+                with n1:
+                    q=st.text_input("Find a station, stop or place",placeholder="Rotterdam Centraal",key="nav_q")
+                    if st.button("Search mobility layer",key="nav_place_go") and q.strip():
+                        pp,pe=navitia_get(navitia_token,f"/coverage/{region}/places",{"q":q.strip(),"count":50})
+                        st.session_state["nav_places"]=(pp,pe)
+                    pp,pe=st.session_state.get("nav_places",(None,""))
+                    if pe: st.warning(pe)
+                    elif pp:
+                        pdf=_navitia_places_frame(pp)
+                        if not pdf.empty:
+                            m=pdf.rename(columns={"Latitude":"lat","Longitude":"lon"})
+                            if {"lat","lon"}.issubset(m.columns): st.map(m.dropna(subset=["lat","lon"])[["lat","lon"]],use_container_width=True)
+                            display_df(pdf,100,show_ids=True)
+                with n2:
+                    if st.button("Load current disruptions",key="nav_disrupt_go"):
+                        dd,de=navitia_get(navitia_token,f"/coverage/{region}/disruptions",{"count":100})
+                        st.session_state["nav_disrupt"]=(dd,de)
+                    dd,de=st.session_state.get("nav_disrupt",(None,""))
+                    if de: st.warning(de)
+                    elif dd:
+                        ddf=_navitia_disruptions_frame(dd)
+                        if not ddf.empty:
+                            c1,c2,c3=st.columns(3)
+                            c1.metric("Active records",f"{len(ddf):,}")
+                            c2.metric("No-service",f"{ddf['Effect'].astype(str).eq('NO_SERVICE').sum():,}")
+                            c3.metric("Unique causes",f"{ddf['Cause'].replace('',pd.NA).dropna().nunique():,}")
+                            display_df(ddf,150,show_ids=True)
+                        else: st.info("No disruption records returned for this coverage.")
+        st.caption("Visual rule: Navitia is contextual. It sits beside our canonical rail/intermodal network; it does not overwrite freight-network entities in Excel.")
+
+    with tabs[2]:
+        st.markdown("### API catalog · access and role")
+        reg_path=Path(__file__).parent/"api_sources.json"
+        try: registry=json.loads(reg_path.read_text())
+        except Exception: registry={"sources":[]}
+        sources=registry.get("sources",[])
+        counts=defaultdict(int)
+        for x in sources: counts[str(x.get("status","unknown"))]+=1
+        c1,c2,c3,c4=st.columns(4)
+        c1.metric("Registered feeds",len(sources))
+        c2.metric("Enabled",counts.get("enabled",0))
+        c3.metric("Credential-gated",counts.get("credential_required",0))
+        c4.metric("Deferred / excluded",counts.get("deferred",0)+counts.get("excluded",0)+counts.get("registered",0))
+        cards=[]
+        for x in sources:
+            status=str(x.get("status","registered"))
+            cls="live" if status=="enabled" else "key" if status=="credential_required" else "trial" if status=="deferred" else "off"
+            cards.append(f"<div class='pc-feed'><div class='pc-feed-title'>{html_lib.escape(str(x.get('name','')))}</div><div class='pc-feed-meta'>{html_lib.escape(str(x.get('domain','')))} · {html_lib.escape(str(x.get('access_model',x.get('cost',''))))}<br>{html_lib.escape(str(x.get('ui_role',x.get('implementation',''))))}</div><span class='pc-status pc-status-{cls}'>{html_lib.escape(status.replace('_',' '))}</span></div>")
+        st.markdown("<div class='pc-feed-grid'>"+"".join(cards)+"</div>",unsafe_allow_html=True)
+        catalog=pd.DataFrame(sources)
+        showcols=[c for c in ["name","domain","access_model","status","authentication","persistence","ui_role"] if c in catalog.columns]
+        display_df(catalog[showcols] if showcols else catalog,100,show_ids=True)
+        st.caption("Design rule: green = immediately usable, amber = credential/contributor gated, trial = not a production dependency, grey = registered/deferred/excluded.")
 
 elif page=="Shipyards":
     header("Shipyards","Physical shipyard assets: ownership, capabilities, facilities, programmes, vessels and events.")
@@ -2812,6 +3354,90 @@ elif page=="Sanctions":
             rr=rr.drop(columns=[c for c in ["Rule ID"] if c in rr.columns],errors="ignore")
             display_df(rr,100)
 
+elif page=="USCG Safety & Compliance":
+    header(
+        "USCG Safety & Compliance",
+        "Live CGMIX/PSIX and Incident Investigation Report lookups. This is an external evidence layer and is not written into the canonical Excel model."
+    )
+    st.caption("Source: U.S. Coast Guard CGMIX · PSIX is a weekly FOIA/MISLE snapshot · live requests cached for 30 minutes")
+    t1,t2=st.tabs(["PSIX Vessel / Inspection Search","Incident Investigations"])
+    with t1:
+        c1,c2,c3=st.columns([2,1.2,1.2])
+        with c1:
+            vessel_name=st.text_input("Vessel name",placeholder="EVER GIVEN, MAERSK, tanker name...",key="cgmix_vessel_name")
+        with c2:
+            imo=st.text_input("IMO / primary ID",placeholder="IMO number",key="cgmix_imo")
+        with c3:
+            service=st.selectbox("Service",["ALL","Freight Ship","Tank Ship","Passenger (Inspected)","Towing Vessel","Offshore Supply Vessel","Commercial Fishing Vessel"],key="cgmix_service")
+        if st.button("Search USCG PSIX",key="cgmix_psix_go",use_container_width=False):
+            if not vessel_name.strip() and not imo.strip():
+                st.warning("Enter a vessel name or IMO / primary identification number.")
+            else:
+                results,error=cgmix_psix_vessel_search(vessel_name.strip(),imo.strip(),"",service)
+                st.session_state["cgmix_psix_results"]=(results,error)
+        results,error=st.session_state.get("cgmix_psix_results",(pd.DataFrame(),""))
+        if error:
+            st.warning(f"CGMIX PSIX is temporarily unavailable. {error}")
+        elif not results.empty:
+            st.markdown(f"### Vessel matches · {len(results):,}")
+            show=results.copy()
+            display_df(show,100)
+            if "VesselID" in results.columns:
+                options=results.to_dict("records")
+                selected=st.selectbox("Inspect USCG contacts / cases",range(len(options)),format_func=lambda i:f"{options[i].get('VesselName','')} — {options[i].get('Identification','')} — {options[i].get('CountryLookupName','')}",key="cgmix_psix_pick")
+                vid=options[selected].get("VesselID","")
+                cases,cerr=cgmix_psix_cases(vid)
+                if cerr:
+                    st.info(f"Vessel cases could not be loaded. {cerr}")
+                elif cases.empty:
+                    st.info("No published USCG vessel cases returned for this vessel.")
+                else:
+                    st.markdown("### USCG contacts / vessel cases")
+                    display_df(cases.sort_values("StartDtTm",ascending=False) if "StartDtTm" in cases.columns else cases,200)
+                    if "ActivityID" in cases.columns:
+                        acts=cases.to_dict("records")
+                        ai=st.selectbox("Case / activity details",range(len(acts)),format_func=lambda i:f"{acts[i].get('StartDtTm','')} · {acts[i].get('TypeLookupName','')} · {acts[i].get('USCGZonePort','')}",key="cgmix_activity_pick")
+                        aid=acts[ai].get("ActivityID","")
+                        ddf,derr=cgmix_psix_deficiencies(aid)
+                        odf,oerr=cgmix_psix_controls(aid)
+                        a,b=st.columns(2)
+                        with a:
+                            st.markdown("#### Deficiencies")
+                            if derr: st.caption(derr)
+                            elif ddf.empty: st.caption("None returned.")
+                            else: display_df(ddf,150)
+                        with b:
+                            st.markdown("#### Operational controls")
+                            if oerr: st.caption(oerr)
+                            elif odf.empty: st.caption("None returned.")
+                            else: display_df(odf,150)
+        else:
+            st.info("Search CGMIX by vessel name or IMO to retrieve live USCG records.")
+
+    with t2:
+        st.caption("Published IIR records cover reportable marine casualties investigated by the USCG. Search results are source evidence; they are not automatically promoted to canonical P&C events.")
+        c1,c2=st.columns(2)
+        with c1:
+            iv=st.text_input("Vessel",placeholder="Vessel name",key="iir_vessel")
+            io=st.text_input("Organisation",placeholder="Operator, owner, facility company...",key="iir_org")
+        with c2:
+            iff=st.text_input("Facility",placeholder="Terminal / facility",key="iir_facility")
+            ik=st.text_input("Keyword",placeholder="collision, grounding, fire, allision...",key="iir_keyword")
+        if st.button("Search incident investigations",key="iir_go"):
+            if not any([iv.strip(),io.strip(),iff.strip(),ik.strip()]):
+                st.warning("Enter at least one incident search term.")
+            else:
+                irr,ier=cgmix_iir_search(iv.strip(),io.strip(),iff.strip(),ik.strip())
+                st.session_state["cgmix_iir_results"]=(irr,ier)
+        irr,ier=st.session_state.get("cgmix_iir_results",(pd.DataFrame(),""))
+        if ier:
+            st.warning(f"CGMIX IIR is temporarily unavailable. {ier}")
+        elif not irr.empty:
+            if "StartDtTm" in irr.columns:
+                irr=irr.sort_values("StartDtTm",ascending=False)
+            st.markdown(f"### Published investigations · {len(irr):,}")
+            display_df(irr,250)
+
 elif page=="News & Events":
     header("News & Events","Map assets and systems affected by war, weather, natural hazards, labour, operational incidents and announced commercial activity.")
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
@@ -2898,6 +3524,72 @@ elif page=="News & Events":
                 confidence_col="Confidence",
                 max_items=200
             )
+
+elif page=="Global Signals":
+    header(
+        "Global Signals",
+        "GDELT-powered discovery across global news. Signals are leads for verification and entity matching, not automatically verified P&C events."
+    )
+    st.caption("Source: GDELT DOC 2.0 · public API · cached for 15 minutes · maximum 250 articles per query")
+    presets={
+        "Port disruption":"(port OR terminal) (strike OR closure OR disruption OR explosion)",
+        "Maritime security":"(ship OR tanker OR vessel) (attack OR drone OR missile OR seizure OR piracy)",
+        "Rail & intermodal":"(rail OR railway OR intermodal) (strike OR derailment OR closure OR disruption)",
+        "Logistics & supply chain":"(logistics OR shipping OR freight) (disruption OR shortage OR congestion OR delay)",
+        "Infrastructure deals":"(port OR terminal OR logistics OR railway) (acquisition OR investment OR concession OR contract)",
+        "Custom":""
+    }
+    c1,c2,c3=st.columns([1.4,2.6,1])
+    with c1:
+        preset=st.selectbox("Signal family",list(presets),key="gdelt_preset")
+    with c2:
+        query=st.text_input("GDELT query",value=presets[preset],placeholder='"Port of Rotterdam" strike',key="gdelt_query")
+    with c3:
+        span_label=st.selectbox("Window",["24 hours","3 days","7 days","30 days","3 months"],key="gdelt_span")
+    span_map={"24 hours":"24h","3 days":"3d","7 days":"7d","30 days":"30d","3 months":"3months"}
+    maxr=st.slider("Maximum articles",10,100,50,10,key="gdelt_max")
+    if st.button("Search global signals",key="gdelt_go"):
+        if len(query.strip())<3:
+            st.warning("Enter a more specific GDELT query.")
+        else:
+            gdf,gerr=load_gdelt_articles(query.strip(),span_map[span_label],maxr)
+            st.session_state["gdelt_results"]=(gdf,gerr,query.strip())
+    gdf,gerr,lastq=st.session_state.get("gdelt_results",(pd.DataFrame(),"",""))
+    if gerr:
+        st.warning(f"GDELT is temporarily unavailable or rate-limited. {gerr}")
+    elif not gdf.empty:
+        st.markdown(f"### Signal results · {len(gdf):,}")
+        if "domain" in gdf.columns:
+            c1,c2,c3=st.columns(3)
+            c1.metric("Articles",f"{len(gdf):,}")
+            c2.metric("Source domains",f"{gdf['domain'].nunique():,}")
+            if "sourcecountry" in gdf.columns:
+                c3.metric("Source countries",f"{gdf['sourcecountry'].nunique():,}")
+        if "sourcecountry" in gdf.columns:
+            top=gdf["sourcecountry"].replace("",pd.NA).dropna().value_counts().head(12)
+            if not top.empty:
+                st.markdown("#### Coverage by source country")
+                st.bar_chart(top,horizontal=True)
+        for _,row in gdf.head(100).iterrows():
+            title=str(row.get("title","") or "Untitled")
+            url=str(row.get("url","") or "")
+            domain=str(row.get("domain","") or "")
+            country=str(row.get("sourcecountry","") or "")
+            language=str(row.get("language","") or "")
+            seen=row.get("Seen",row.get("seendate",""))
+            date_text=""
+            try:
+                if pd.notna(seen): date_text=pd.to_datetime(seen).strftime("%Y-%m-%d %H:%M UTC")
+            except Exception: date_text=str(seen)
+            meta=" · ".join([x for x in [domain,country,language,date_text] if x])
+            if url:
+                st.markdown(f"**[{title}]({url})**")
+            else:
+                st.markdown(f"**{title}**")
+            if meta: st.caption(meta)
+        st.caption("Analytical rule: GDELT identifies possible activity. Promote a signal into the canonical event model only after corroboration and entity resolution.")
+    else:
+        st.info("Run a query to scan global news for emerging trade, logistics, infrastructure and maritime signals.")
 
 elif page=="Hormuz Monitor":
     header(
