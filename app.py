@@ -3536,6 +3536,192 @@ def page_company_selector():
     pick=st.selectbox("Company",range(len(opts)),format_func=lambda i:opts[i]["Company"])
     return opts[pick]["Company ID"],opts[pick]["Company"]
 
+
+
+
+def filter_distinct_port_terminals(port_row, port_terminals):
+    """Exclude port-level coverage rows that merely repeat the parent port as a terminal."""
+    if port_terminals is None or port_terminals.empty:
+        return pd.DataFrame() if port_terminals is None else port_terminals.copy()
+
+    df = port_terminals.copy()
+    port_name = str(port_row.get("Port / Facility", "") or "").strip()
+
+    def norm(v):
+        s = str(v or "").strip().casefold()
+        s = s.replace("&", " and ")
+        s = re.sub(r"[^a-z0-9]+", " ", s)
+        return re.sub(r"\s+", " ", s).strip()
+
+    pnorm = norm(port_name)
+    keep = pd.Series(True, index=df.index)
+
+    for idx, row in df.iterrows():
+        terminal_name = norm(row.get("Terminal / Facility", ""))
+        terminal_short = norm(row.get("Terminal", ""))
+        parent_name = norm(row.get("Parent Port", ""))
+        port_col = norm(row.get("Port", ""))
+
+        # A terminal row is a self-reference when its facility name is the same
+        # canonical place as the selected parent port. Keep genuinely distinct
+        # subordinate facilities such as Abu Dhabi Cruise Terminal.
+        self_ref = bool(pnorm) and (
+            terminal_name == pnorm
+            or terminal_short == pnorm
+        )
+
+        # Reinforce only when the row itself also identifies the same parent port.
+        same_parent = (
+            not parent_name or parent_name == pnorm
+        ) and (
+            not port_col or port_col == pnorm
+        )
+
+        if self_ref and same_parent:
+            keep.loc[idx] = False
+
+    return df[keep].copy()
+
+
+def render_port_commercial_network(port_row, port_terminals):
+    """Render the canonical ownership/operator network for one port."""
+    pid=str(port_row.get("Port ID","") or "").strip()
+    port_operator_id=str(port_row.get("Operator Company ID","") or "").strip()
+    port_operator_name=str(port_row.get("Operator","") or "").strip()
+    ownership=TABLES.get(("Maritime","Port Ownership"),pd.DataFrame()).copy()
+
+    st.markdown("### Ownership & operations")
+
+    if port_operator_name or port_operator_id:
+        st.markdown("**Port operator / authority**")
+        c1,c2=st.columns([5,1])
+        with c1:
+            name=port_operator_name or label(port_operator_id)
+            st.markdown(f"**{name}**")
+            st.caption("Operates / administers this port")
+        with c2:
+            if port_operator_id and port_operator_id.startswith("COMP"):
+                if st.button("Open company",key=f"portop_{pid}_{port_operator_id}",use_container_width=True):
+                    request_nav("Companies","company_pick_id",port_operator_id,name)
+                    st.rerun()
+
+    operator_rows=[]
+    if port_terminals is not None and not port_terminals.empty:
+        seen=set()
+        for _,tr in port_terminals.iterrows():
+            cid=str(tr.get("Primary Operator Company ID","") or "").strip()
+            name=str(tr.get("Primary Operator","") or tr.get("Operator / Network","") or "").strip()
+            tid=str(tr.get("Terminal ID","") or "").strip()
+            tname=str(tr.get("Terminal / Facility","") or "").strip()
+            key=(cid,name)
+            if (cid or name) and key not in seen:
+                seen.add(key)
+                operator_rows.append((cid,name,tid,tname))
+
+    if operator_rows:
+        st.markdown("**Terminal operators**")
+        for n,(cid,name,tid,tname) in enumerate(operator_rows):
+            c1,c2=st.columns([5,1])
+            with c1:
+                st.markdown(f"**{name or label(cid)}**")
+                if tname:
+                    st.caption(f"Operates {tname}")
+            with c2:
+                if cid and cid.startswith("COMP"):
+                    if st.button("Open company",key=f"termop_{pid}_{tid}_{cid}_{n}",use_container_width=True):
+                        request_nav("Companies","company_pick_id",cid,name or label(cid))
+                        st.rerun()
+
+    if ownership is not None and not ownership.empty and port_terminals is not None and not port_terminals.empty and "Terminal ID" in ownership.columns:
+        tids=set(port_terminals.get("Terminal ID",pd.Series(dtype=str)).dropna().astype(str).tolist())
+        own=ownership[ownership["Terminal ID"].astype(str).isin(tids)].copy()
+        if not own.empty:
+            st.markdown("**Owners, investors & concession partners**")
+            for n,(_,r) in enumerate(own.iterrows()):
+                cid=str(r.get("Company ID","") or "").strip()
+                cname=str(r.get("Company / Partner","") or "").strip() or label(cid)
+                tid=str(r.get("Terminal ID","") or "").strip()
+                rel=pretty_relationship(r.get("Relationship",""))
+                eq=str(r.get("Equity %","") or "").strip()
+                ctl=str(r.get("Operating Control","") or "").strip()
+                status=str(r.get("Status","") or "").strip()
+                tmatch=port_terminals[port_terminals.get("Terminal ID",pd.Series(index=port_terminals.index,dtype=str)).astype(str).eq(tid)]
+                tname=str(tmatch.iloc[0].get("Terminal / Facility","")) if not tmatch.empty else tid
+                meta=[]
+                if rel and rel.lower()!='nan': meta.append(rel)
+                if eq and eq.lower()!='nan': meta.append(f"Equity: {eq}%")
+                if ctl and ctl.lower()!='nan': meta.append(f"Operating control: {ctl}")
+                if status and status.lower()!='nan': meta.append(status)
+                c1,c2=st.columns([5,1])
+                with c1:
+                    st.markdown(f"**{cname}**")
+                    detail=tname
+                    if meta: detail += " · " + " · ".join(meta)
+                    st.caption(detail)
+                with c2:
+                    if cid and cid.startswith("COMP"):
+                        if st.button("Open company",key=f"portown_{pid}_{tid}_{cid}_{n}",use_container_width=True):
+                            request_nav("Companies","company_pick_id",cid,cname)
+                            st.rerun()
+
+
+def render_port_terminal_cards(port_id, port_terminals):
+    """Trade-facing terminal view with direct navigation to canonical operators/owners."""
+    if port_terminals is None or port_terminals.empty:
+        st.info("No terminal records linked to this port yet.")
+        return
+    ownership=TABLES.get(("Maritime","Port Ownership"),pd.DataFrame()).copy()
+    for n,(_,tr) in enumerate(port_terminals.iterrows()):
+        tid=str(tr.get("Terminal ID","") or "").strip()
+        tname=str(tr.get("Terminal / Facility","") or "Terminal").strip()
+        operator_id=str(tr.get("Primary Operator Company ID","") or "").strip()
+        operator=str(tr.get("Primary Operator","") or tr.get("Operator / Network","") or "").strip()
+        cargo=str(tr.get("Cargo Profile","") or "").strip()
+        status=str(tr.get("Status","") or "").strip()
+        capacity=str(tr.get("Container Capacity TEU/yr","") or "").strip()
+        ownership_structure=str(tr.get("Ownership / Structure","") or "").strip()
+
+        st.markdown(f"#### {tname}")
+        bits=[]
+        if cargo and cargo.lower()!='nan': bits.append(cargo)
+        if status and status.lower()!='nan': bits.append(status)
+        if capacity and capacity.lower()!='nan': bits.append(f"Capacity: {capacity} TEU/yr")
+        if bits: st.caption(" · ".join(bits))
+
+        if operator or operator_id:
+            c1,c2=st.columns([5,1])
+            with c1:
+                st.markdown(f"**Operated by:** {operator or label(operator_id)}")
+            with c2:
+                if operator_id and operator_id.startswith("COMP"):
+                    if st.button("Open company",key=f"terminal_operator_{port_id}_{tid}_{operator_id}_{n}",use_container_width=True):
+                        request_nav("Companies","company_pick_id",operator_id,operator or label(operator_id))
+                        st.rerun()
+
+        if ownership_structure and ownership_structure.lower()!='nan':
+            st.caption(f"Ownership / structure: {ownership_structure}")
+
+        if not ownership.empty and "Terminal ID" in ownership.columns:
+            own=ownership[ownership["Terminal ID"].astype(str).eq(tid)]
+            if not own.empty:
+                for j,(_,r) in enumerate(own.iterrows()):
+                    cid=str(r.get("Company ID","") or "").strip()
+                    cname=str(r.get("Company / Partner","") or "").strip() or label(cid)
+                    rel=pretty_relationship(r.get("Relationship",""))
+                    eq=str(r.get("Equity %","") or "").strip()
+                    ctl=str(r.get("Operating Control","") or "").strip()
+                    details=[x for x in [rel, (f"Equity: {eq}%" if eq and eq.lower()!='nan' else ''), (f"Operating control: {ctl}" if ctl and ctl.lower()!='nan' else '')] if x]
+                    c1,c2=st.columns([5,1])
+                    with c1:
+                        st.markdown(f"**{cname}**")
+                        if details: st.caption(" · ".join(details))
+                    with c2:
+                        if cid and cid.startswith("COMP"):
+                            if st.button("Open company",key=f"terminal_owner_{port_id}_{tid}_{cid}_{n}_{j}",use_container_width=True):
+                                request_nav("Companies","company_pick_id",cid,cname)
+                                st.rerun()
+        st.markdown("<div style='height:8px'></div>",unsafe_allow_html=True)
+
 if page=="Overview":
     header("Trade System Overview","A connected operational picture across companies, infrastructure, movement systems, commercial activity and risk.")
 
@@ -3782,10 +3968,12 @@ elif page=="Ports":
             row=p.iloc[pick]; pid=str(row.get("Port ID","")); pname=str(row.get("Port / Facility",""))
             st.markdown(f"## {pname}")
             c1,c2,c3=st.columns(3)
-            pt=terms[terms["Port ID"].astype(str).eq(pid)].copy() if not terms.empty and "Port ID" in terms.columns else pd.DataFrame()
+            pt_raw=terms[terms["Port ID"].astype(str).eq(pid)].copy() if not terms.empty and "Port ID" in terms.columns else pd.DataFrame()
+            pt=filter_distinct_port_terminals(row,pt_raw)
             c1.metric("Terminals",len(pt))
             c2.markdown(f"<div class='pc-card'><div class='pc-label'>Country</div><div class='pc-big'>{row.get('Country','')}</div></div>",unsafe_allow_html=True)
             c3.markdown(f"<div class='pc-card'><div class='pc-label'>Operator</div><div class='pc-big'>{row.get('Operator','') or 'Multiple / authority-led'}</div></div>",unsafe_allow_html=True)
+            render_port_commercial_network(row,pt)
             render_portwatch_port_snapshot(pname,row.get("Country",""))
             xy=PORT_CITY_COORDS.get(pname)
             if xy:
@@ -3794,7 +3982,12 @@ elif page=="Ports":
             if not ev.empty:
                 render_event_map(ev,loc,"Events affecting this port")
             tabs=st.tabs(["Terminals","Security & Disruption","Events & Impact","Evidence"])
-            with tabs[0]: display_df(pt,300)
+            with tabs[0]:
+                if not pt_raw.empty and len(pt) < len(pt_raw):
+                    st.caption("Port-level coverage rows are excluded here so the terminal view shows only distinct subordinate facilities.")
+                render_port_terminal_cards(pid,pt)
+                with st.expander("View terminal data table"):
+                    display_df(pt,300)
             with tabs[1]:
                 if ev.empty:
                     st.info("No linked security/disruption events for this port yet.")
