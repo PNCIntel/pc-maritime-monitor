@@ -15,8 +15,9 @@
       "status": "enabled",
       "access_model": "open",
       "domain": "ports/trade",
-      "ui_role": "operational port activity with in-session stale-result fallback",
-      "persistence": "ephemeral_test_only"
+      "ui_role": "operational port activity",
+      "persistence": "ephemeral_test_only",
+      "ui_state_policy": "retain_last_successful_session_result"
     },
     {
       "id": "hormuz_ship_monitor",
@@ -30,8 +31,9 @@
       "status": "enabled",
       "access_model": "open",
       "domain": "maritime/strait traffic",
-      "ui_role": "regional vessel-flow monitoring with persistent last-success response",
-      "persistence": "ephemeral_test_only"
+      "ui_role": "regional vessel-flow monitoring",
+      "persistence": "ephemeral_test_only",
+      "ui_state_policy": "retain_last_successful_session_result"
     },
     {
       "id": "uscg_cgmix_psix",
@@ -167,7 +169,7 @@
       "name": "NewsData.io",
       "domain": "news / global signals",
       "access_model": "free_key",
-      "status": "credential-gated",
+      "status": "credential_required",
       "enabled": true,
       "base_url": "https://newsdata.io/api/1/latest",
       "role": "Open-source news discovery and signal generation; verification required.",
@@ -180,7 +182,8 @@
       "implementation": "on-demand latest-news discovery with one-hour cache",
       "ui_role": "open-source news and signal discovery",
       "persistence": "ephemeral_test_only",
-      "notes": "Active only when NEWSDATA_API_KEY is configured. Treat results as unverified signals."
+      "notes": "Active only when NEWSDATA_API_KEY is configured. Treat results as unverified signals.",
+      "ui_state_policy": "retain_last_successful_session_result"
     }
   ]
 }

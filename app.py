@@ -13,7 +13,7 @@ import streamlit as st
 
 APP_TITLE = "P&C Trade System"
 APP_VERSION = "v2.7.0"
-RELEASE_NAME = "Command Center + Watch Areas + Corridor Explorer"
+RELEASE_NAME = "Navigation, Watch Areas & Persistent Live Data"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -114,6 +114,9 @@ div[data-baseweb="tooltip"],div[data-baseweb="tooltip"] *{
 .pc-workspace-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:.7rem 0 1rem}
 .pc-workspace-card{background:#0d1a2b;border:1px solid #28415f;border-radius:12px;padding:14px 16px;min-height:118px}
 .pc-workspace-card b{font-size:1rem}.pc-workspace-card p{color:#b8c5d4;font-size:.86rem;line-height:1.45;margin:.35rem 0 0}
+.pc-section-note{background:#0b1828;border-left:3px solid var(--gold);padding:9px 12px;border-radius:6px;margin:.4rem 0 .8rem;color:var(--muted);font-size:.87rem}
+.pc-data-status{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:.75rem;margin-right:5px}
+.pc-data-status-live{border-color:#39775c;color:#9ee6c1}.pc-data-status-stale{border-color:#806b36;color:#f5d58a}
 .pc-feed-health{display:inline-flex;align-items:center;gap:6px;border:1px solid #28415f;border-radius:999px;padding:4px 9px;font-size:.74rem;color:#b8c5d4;margin:2px 0}
 .pc-dot{width:7px;height:7px;border-radius:50%;background:#6a7c90;display:inline-block}.pc-dot-live{background:#75d6a4}.pc-dot-key{background:#d7b66a}.pc-dot-off{background:#7b8796}
 
@@ -1275,20 +1278,7 @@ def readable_relationships(df, entity_id):
             unsafe_allow_html=True
         )
 
-        # Give explicit navigation to every company endpoint except the profile already open.
-        nav_cols=[]
-        if src.startswith("COMP_") and src != str(entity_id):
-            nav_cols.append(("Open "+src_name,src))
-        if tgt.startswith("COMP_") and tgt != str(entity_id):
-            nav_cols.append(("Open "+tgt_name,tgt))
-
-        if nav_cols:
-            cols=st.columns(min(len(nav_cols),3))
-            for j,(button_label,target) in enumerate(nav_cols):
-                with cols[j]:
-                    if st.button(button_label,key=f"relopen_{i}_{target}",use_container_width=True):
-                        request_nav("Companies","company_pick_id",target,label(target))
-                        st.rerun()
+        render_relationship_actions(src,tgt,f"company_{entity_id}_{i}",current_entity_id=entity_id)
 
 def show_named_list(df, title_col, subtitle_cols=None, source_col="Source URL", max_items=100):
     """Readable cards with normal HTML links, never repeated Streamlit buttons."""
@@ -1970,10 +1960,46 @@ def object_route(entity_type, entity_id, entity_name):
     if "company" in et or eid.startswith("COMP"):
         return ("Companies","company_pick_id",eid)
     if "system" in et or eid.startswith("SYS") or eid.startswith("CORR"):
-        return ("Systems","system_pick_id",eid)
+        return ("Corridors & Systems","system_pick_id",eid)
     if "vessel" in et or eid.startswith("VESSEL") or eid.startswith("VES"):
         return ("Vessels","vessel_pick_id",eid)
     return (None,None,None)
+
+def render_relationship_actions(source_id, target_id, row_key, current_entity_id=None):
+    """Show contextual drill-down buttons beneath a readable relationship line.
+
+    Only endpoints with a canonical destination page are rendered. Terminal links route
+    through Ports and resolve the parent port there. This keeps relationship chains
+    readable while making the graph directly navigable.
+    """
+    actions=[]
+    seen=set()
+    for endpoint_id in [source_id,target_id]:
+        eid=str(endpoint_id).strip()
+        if not eid or eid in seen or (current_entity_id and eid==str(current_entity_id)):
+            continue
+        seen.add(eid)
+        name=label(eid)
+        page,key,route_id=object_route('',eid,name)
+        if not page:
+            continue
+        if page=='Companies': kind='Company'
+        elif page=='Ports' and eid.startswith('TERM'): kind='Terminal'
+        elif page=='Ports': kind='Port'
+        elif page=='Vessels': kind='Vessel'
+        elif page=='Shipyards': kind='Shipyard'
+        elif page=='Corridors & Systems': kind='System'
+        else: kind='Entity'
+        actions.append((f"View {kind}: {name}",page,key,route_id,name,eid))
+
+    if actions:
+        cols=st.columns(min(len(actions),3))
+        for j,(caption,page,key,route_id,name,eid) in enumerate(actions):
+            with cols[j % len(cols)]:
+                if st.button(caption,key=f"rel_action_{row_key}_{j}_{eid}",use_container_width=True):
+                    request_nav(page,key,route_id,name)
+                    st.rerun()
+
 
 def render_linked_objects(df, object_type_col, object_id_col, object_name_col, relationship_col=None, confidence_col=None, max_items=100):
     """Render linked graph objects as readable, navigable cards instead of dead dataframe rows."""
@@ -2620,11 +2646,11 @@ st.sidebar.markdown("### Trade System")
 st.sidebar.caption(f"{APP_VERSION} · Excel-backed test")
 
 NAV_GROUPS={
-    "Command Center":["Overview","Search","Watch Areas"],
-    "Network":["Companies","Ports","Vessels","Corridors & Hubs","Cruise & Service Craft","Shipyards","Systems"],
-    "Operations":["Port Activity","Hormuz Monitor","Live Feeds"],
-    "Markets & Policy":["Contracts","Trade Policy","Sanctions"],
-    "Intelligence":["News & Events","News & Signals"],
+    "Command Center":["Overview","Search"],
+    "Network":["Companies","Ports","Vessels","Corridors & Systems","Cruise & Service Craft","Shipyards"],
+    "Operations":["Watch Areas","Port Activity","Hormuz Monitor","Live Feeds"],
+    "Markets & Policy":["Sanctions","Trade Policy","Contracts"],
+    "Intelligence":["News & Signals","News & Events"],
     "Data":["Data"],
 }
 PAGE_WORKSPACE={p:w for w,items in NAV_GROUPS.items() for p in items}
@@ -2645,6 +2671,20 @@ else:
     page=views[0]
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("<div class='pc-small'>QUICK ACCESS</div>",unsafe_allow_html=True)
+qa1,qa2=st.sidebar.columns(2)
+with qa1:
+    if st.button("Vessels",use_container_width=True,key="qa_vessels"):
+        request_nav("Vessels"); st.rerun()
+    if st.button("Watch Areas",use_container_width=True,key="qa_watch"):
+        request_nav("Watch Areas"); st.rerun()
+with qa2:
+    if st.button("Sanctions",use_container_width=True,key="qa_sanctions"):
+        request_nav("Sanctions"); st.rerun()
+    if st.button("Corridors",use_container_width=True,key="qa_corridors"):
+        request_nav("Corridors & Systems"); st.rerun()
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("<div class='pc-small'>ACTIVE DATA LAYERS</div>",unsafe_allow_html=True)
 st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> Excel model</span>",unsafe_allow_html=True)
 st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> PortWatch</span>",unsafe_allow_html=True)
@@ -2653,7 +2693,7 @@ news_key_present=bool(_secret("NEWSDATA_API_KEY"))
 news_class="pc-dot-live" if news_key_present else "pc-dot-key"
 news_label="NewsData" if news_key_present else "NewsData · key needed"
 st.sidebar.markdown(f"<span class='pc-feed-health'><span class='pc-dot {news_class}'></span> {news_label}</span>",unsafe_allow_html=True)
-st.sidebar.caption("Use Watch Areas for monitoring; Corridors & Hubs for chokepoints/inland nodes; Sanctions for vessel/company compliance exposure. CGMIX and GDELT remain deferred.")
+st.sidebar.caption("CGMIX and GDELT remain deferred. Live API views keep the last successful session result if a refresh fails.")
 
 st.markdown(f"<div class='pc-breadcrumb'><b>{workspace}</b> &nbsp;/&nbsp; {page}</div>",unsafe_allow_html=True)
 
@@ -2680,64 +2720,45 @@ if page=="Overview":
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame())
     sanctions=TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame())
 
-    corridors=TABLES.get(("Infrastructure","Corridors"),pd.DataFrame())
-    monitoring=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame())
-    disruption=TABLES.get(("Intelligence","Disruption Watch"),pd.DataFrame())
-    active_watch_count=0
-    for _df in [monitoring,disruption]:
-        if not _df.empty:
-            status_col="Status" if "Status" in _df.columns else ("Current Status" if "Current Status" in _df.columns else None)
-            if status_col:
-                active_watch_count += int(_df[status_col].astype(str).str.contains("Active|Elevated|contingent|authorised|unresolved",case=False,regex=True,na=False).sum())
-            else:
-                active_watch_count += len(_df)
-
     metrics=st.columns(6)
     for box,(title,value) in zip(metrics,[
         ("Companies",len(companies)),("Ports",len(ports)),("Vessels",len(vessels)),
-        ("Corridors",len(corridors)),("Active watches",active_watch_count),("Sanctions",len(sanctions))
+        ("Systems",len(systems)),("Events",len(events)),("Sanctions",len(sanctions))
     ]):
         box.metric(title,f"{value:,}")
 
-    st.markdown("### Quick access")
-    qa=st.columns(5)
-    for col,(label_text,target) in zip(qa,[
-        ("Vessels","Vessels"),("Sanctions","Sanctions"),("Watch Areas","Watch Areas"),("Corridors & Hubs","Corridors & Hubs"),("PortWatch","Port Activity")
-    ]):
-        if col.button(label_text,use_container_width=True,key=f"quick_{target}"):
-            request_nav(target); st.rerun()
-
     st.markdown("### Connected coverage")
-    st.caption("Work from the coverage layer directly. Each tab has its own sub-search and shortcuts into the underlying object views.")
-    coverage_tabs=st.tabs(["Commercial Networks","Movement","Infrastructure","Intelligence","Compliance","Defence & Shipbuilding"])
-    coverage_cfg=[
-        ("Commercial Networks",["Companies","Relationships","Port Ownership","Transactions V125","Infra Deals"],["Companies","Contracts"]),
-        ("Movement",["Ports","Port Terminals","Vessels","Rail Networks","Rail Nodes","Rail Connections","Aviation Assets"],["Ports","Vessels","Systems"]),
-        ("Infrastructure",["Corridors","Dry Ports","Economic Zones","Integrated Logistics Networks","Assets","Facilities"],["Corridors & Hubs","Systems"]),
-        ("Intelligence",["Monitoring","Disruption Watch","External Disruptions","Weather Labour Events","Events","Strategic Events"],["Watch Areas","News & Events"]),
-        ("Compliance",["Sanctions Designations","Sanctions Entity Links","Watchlist Taxonomy","Trade Agreements","Trade Remedies & Restrictions"],["Sanctions","Trade Policy"]),
-        ("Defence & Shipbuilding",["Shipyards","Contracts","Sample Vessels","Programmes","Yard Capabilities","Sales & Delivery Routes"],["Shipyards","Vessels","Contracts"]),
-    ]
-    for tab,(group_name,sheets,targets) in zip(coverage_tabs,coverage_cfg):
-        with tab:
-            c1,c2=st.columns([3,1])
-            with c1:
-                cq=st.text_input(f"Search {group_name.lower()}",placeholder=f"Search within {group_name.lower()}...",key=f"coverage_q_{group_name}")
-            with c2:
-                st.caption("Open a full workspace")
-                for target in targets:
-                    if st.button(target,use_container_width=True,key=f"coverage_open_{group_name}_{target}"):
-                        request_nav(target); st.rerun()
-            if cq.strip():
-                ch=ranked_search(cq.strip(),limit=80)
-                sub=ch[ch["sheet"].isin(sheets)].head(18) if not ch.empty else pd.DataFrame()
-                if sub.empty:
-                    st.info("No matching records in this coverage family.")
-                else:
-                    for _,h in sub.iterrows():
-                        readable_search_card(h)
+    st.markdown("<div class='pc-section-note'>These are working entry points, not description cards. Search within a coverage family or open its full workspace.</div>",unsafe_allow_html=True)
+    cov_tabs=st.tabs(["Commercial networks","Movement systems","Infrastructure","Intelligence","Compliance","Defence & shipbuilding"])
+
+    def coverage_search(tab_key, placeholder, sheets, launches):
+        q=st.text_input("Search this coverage",placeholder=placeholder,key=f"coverage_{tab_key}")
+        bcols=st.columns(max(1,len(launches)))
+        for i,(label_txt,target) in enumerate(launches):
+            with bcols[i]:
+                if st.button(label_txt,use_container_width=True,key=f"coverage_launch_{tab_key}_{i}"):
+                    request_nav(target); st.rerun()
+        if q.strip():
+            hits=ranked_search(q.strip(),limit=80)
+            sub=hits[hits["sheet"].isin(sheets)].head(12) if not hits.empty else pd.DataFrame()
+            if sub.empty: st.info("No matching records in this coverage area.")
             else:
-                st.markdown(f"<div class='pc-card'><div class='pc-big'>{group_name}</div><div class='pc-small'>Enter a search above, or open one of the full workspaces to browse the complete layer.</div></div>",unsafe_allow_html=True)
+                for _,h in sub.iterrows(): readable_search_card(h)
+        else:
+            st.caption("Search here, or use the buttons above to open the full view.")
+
+    with cov_tabs[0]:
+        coverage_search("commercial","DP World, APM Terminals, KKR, Brookfield, acquisition...",["Companies","Relationships","Infra Deals","Transactions V125","Port Ownership"],[("Companies","Companies"),("Contracts & deals","Contracts")])
+    with cov_tabs[1]:
+        coverage_search("movement","Jebel Ali, Maersk vessel, ferry, rail, airport...",["Ports","Port Terminals","Vessels","Rail Networks","Rail Nodes","Ferry Routes","Cruise Routes","Aircraft"],[("Ports","Ports"),("Vessels","Vessels"),("Corridors","Corridors & Systems")])
+    with cov_tabs[2]:
+        coverage_search("infrastructure","Middle Corridor, dry port, free zone, waterway...",["Corridors","Regional Systems","System Nodes","System Links","System Dependencies","Assets","Facilities","Waterway Systems"],[("Corridors & systems","Corridors & Systems"),("Ports","Ports")])
+    with cov_tabs[3]:
+        coverage_search("intelligence","Rotterdam strike, typhoon, attack, disruption...",["Events","Strategic Events","Monitoring","Disruption Watch","Weather Labour Events","Impact Chains"],[("Watch Areas","Watch Areas"),("News & events","News & Events"),("News & signals","News & Signals")])
+    with cov_tabs[4]:
+        coverage_search("compliance","OFAC, sanctions, export controls, trade agreement...",["Sanctions Designations","Sanctions Entity Links","Watchlist Taxonomy","Trade Agreements","Trade Remedies & Restrictions","Customs & Procurement"],[("Sanctions","Sanctions"),("Trade policy","Trade Policy")])
+    with cov_tabs[5]:
+        coverage_search("defence","Seaspan, Fincantieri, shipyard, submarine, delivery...",["Shipyards","Programmes","Contracts","Sales & Delivery Routes","Vessel Build Records","Fleet Orders"],[("Shipyards","Shipyards"),("Contracts","Contracts")])
 
     st.markdown("### Latest recorded events")
     latest=events.copy()
@@ -2745,32 +2766,6 @@ if page=="Overview":
         latest["_dt"]=pd.to_datetime(latest["Date"],errors="coerce")
         latest=latest.sort_values("_dt",ascending=False)
     render_event_cards(latest,12)
-
-elif page=="Watch Areas":
-    header("Watch Areas","Active monitoring, contingent disruption watches and developing external disruptions. This is the forward-looking layer between raw news and confirmed events.")
-    monitoring=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame()).copy()
-    disruption=TABLES.get(("Intelligence","Disruption Watch"),pd.DataFrame()).copy()
-    external=TABLES.get(("Intelligence","External Disruptions"),pd.DataFrame()).copy()
-    weather=TABLES.get(("Intelligence","Weather Labour Events"),pd.DataFrame()).copy()
-    q=st.text_input("Search watch area / geography / system / issue",placeholder="Hormuz, Black Sea, Rotterdam, labour, container losses, Yemen...",key="watch_area_search")
-    def _watch_filter(df):
-        return _contains_any(df,[q]) if q.strip() and not df.empty else df
-    monitoring=_watch_filter(monitoring); disruption=_watch_filter(disruption); external=_watch_filter(external); weather=_watch_filter(weather)
-    m1,m2,m3,m4=st.columns(4)
-    m1.metric("Monitoring lines",len(monitoring)); m2.metric("Contingent watches",len(disruption)); m3.metric("External disruptions",len(external)); m4.metric("Weather / labour",len(weather))
-    wt=st.tabs(["Active Monitoring","Disruption Watch","External Disruptions","Weather & Labour"])
-    with wt[0]:
-        if monitoring.empty: st.info("No matching monitoring lines.")
-        else:
-            for _,r in monitoring.iterrows():
-                st.markdown(f"<div class='pc-card'><div class='pc-label'>{html_lib.escape(str(r.get('Family','')))} · {html_lib.escape(str(r.get('Status','')))}</div><div class='pc-big'>{html_lib.escape(str(r.get('Title','')))}</div><div class='pc-small'><b>Geography:</b> {html_lib.escape(str(r.get('Geography','')))}<br><b>Monitoring:</b> {html_lib.escape(str(r.get('What Is Being Monitored','')))}<br><b>Trigger:</b> {html_lib.escape(str(r.get('Trigger / Threshold','')))}<br><b>Next review:</b> {html_lib.escape(str(r.get('Next Review / Milestone','')))}</div></div>",unsafe_allow_html=True)
-    with wt[1]:
-        if disruption.empty: st.info("No matching contingent watches.")
-        else:
-            for _,r in disruption.iterrows():
-                st.markdown(f"<div class='pc-card'><div class='pc-label'>{html_lib.escape(str(r.get('Family','')))} · {html_lib.escape(str(r.get('Probability / Read','')))}</div><div class='pc-big'>{html_lib.escape(str(r.get('Issue','')))}</div><div class='pc-small'><b>{html_lib.escape(str(r.get('Country','')))} — {html_lib.escape(str(r.get('Location / System','')))}</b><br><b>Status:</b> {html_lib.escape(str(r.get('Current Status','')))}<br><b>Trigger:</b> {html_lib.escape(str(r.get('Trigger / Threshold','')))}<br><b>Potential impact:</b> {html_lib.escape(str(r.get('Potential Trade / Commercial Impact','')))}</div></div>",unsafe_allow_html=True)
-    with wt[2]: display_df(humanize_df(external),200)
-    with wt[3]: display_df(humanize_df(weather),200)
 
 elif page=="Search":
     header("Search P&C","One query across companies, ports, shipyards, vessels, contracts, transactions, news, events and systems.")
@@ -2928,6 +2923,34 @@ elif page=="Ports":
                 if not chains.empty: display_df(chains,100)
             with tabs[2]: display_df(pd.DataFrame([row]),20)
 
+elif page=="Watch Areas":
+    header("Watch Areas","Active monitoring, disruption watchlists, weather/labour observations and strategic events in one operational workspace.")
+    monitoring=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame()).copy()
+    disruption=TABLES.get(("Intelligence","Disruption Watch"),pd.DataFrame()).copy()
+    weather=TABLES.get(("Intelligence","Weather Labour Events"),pd.DataFrame()).copy()
+    strategic=TABLES.get(("Intelligence","Strategic Events"),pd.DataFrame()).copy()
+    corridors=TABLES.get(("Infrastructure","Corridors"),pd.DataFrame()).copy()
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Monitoring",f"{len(monitoring):,}")
+    m2.metric("Disruption watch",f"{len(disruption):,}")
+    m3.metric("Weather / labour",f"{len(weather):,}")
+    m4.metric("Corridors",f"{len(corridors):,}")
+    wt1,wt2,wt3,wt4=st.tabs(["Active monitoring","Disruption watch","Weather & labour","Strategic events"])
+    with wt1:
+        q=st.text_input("Search monitoring",placeholder="Hormuz, Black Sea, Red Sea, port strike...",key="watch_monitor_q")
+        display_df(_contains_any(monitoring,[q]) if q.strip() and not monitoring.empty else monitoring,300)
+    with wt2:
+        q=st.text_input("Search disruption watch",placeholder="port, rail, aviation, weather, conflict...",key="watch_disrupt_q")
+        display_df(_contains_any(disruption,[q]) if q.strip() and not disruption.empty else disruption,300)
+    with wt3:
+        q=st.text_input("Search weather / labour",placeholder="typhoon, earthquake, strike, protest...",key="watch_weather_q")
+        display_df(_contains_any(weather,[q]) if q.strip() and not weather.empty else weather,300)
+    with wt4:
+        q=st.text_input("Search strategic events",placeholder="attack, closure, acquisition, sanctions...",key="watch_strategic_q")
+        display_df(_contains_any(strategic,[q]) if q.strip() and not strategic.empty else strategic,300)
+    if st.button("Open corridor context",key="watch_open_corridors"):
+        request_nav("Corridors & Systems"); st.rerun()
+
 elif page=="Port Activity":
     header(
         "Global Port Activity",
@@ -2935,18 +2958,21 @@ elif page=="Port Activity":
     )
     st.caption("Source: IMF PortWatch Daily Ports Data · public ArcGIS Feature Service · cached in-app for 30 minutes")
     live,error,latest_date=load_portwatch_latest()
-    if not live.empty and not error:
-        st.session_state["portwatch_last_success"]=(live,latest_date)
-    elif (error or live.empty) and "portwatch_last_success" in st.session_state:
-        cached_live,cached_date=st.session_state["portwatch_last_success"]
-        live=cached_live; latest_date=cached_date
-        st.warning(f"PortWatch live refresh failed; showing the last successful in-session snapshot ({cached_date}). {error}")
-        error=""
-    if error:
+    live_status="live"
+    if not error and not live.empty:
+        st.session_state["portwatch_last_good"]=(live.copy(),latest_date)
+    elif error and "portwatch_last_good" in st.session_state:
+        live,latest_date=st.session_state["portwatch_last_good"]
+        live_status="stale"
+        st.warning(f"PortWatch refresh failed; showing the last successful session snapshot. {error}")
+    if error and live_status=="live":
         st.warning(f"PortWatch is temporarily unavailable. Canonical P&C port data remains available under Ports. {error}")
     elif live.empty:
         st.info("PortWatch returned no current observations.")
     else:
+        status_label="LIVE API" if live_status=="live" else "LAST SUCCESSFUL SNAPSHOT"
+        status_cls="live" if live_status=="live" else "stale"
+        st.markdown(f"<span class='pc-data-status pc-data-status-{status_cls}'>{status_label}</span>",unsafe_allow_html=True)
         countries=sorted(x for x in live.get("country",pd.Series(dtype=str)).dropna().astype(str).unique() if x.strip())
         c1,c2=st.columns([1,2])
         with c1:
@@ -3014,7 +3040,14 @@ elif page=="Port Activity":
                 key="portwatch_history_port"
             )
             days=st.select_slider("Observations",options=[30,60,90,180,365],value=90,key="portwatch_history_days")
+            hist_key=f"portwatch_history_{port_options[pick]['portid']}_{days}"
             hist,hist_error=load_portwatch_history(port_options[pick]["portid"],days)
+            if not hist_error and not hist.empty:
+                st.session_state[hist_key]=hist.copy()
+            elif hist_error and hist_key in st.session_state:
+                hist=st.session_state[hist_key]
+                st.warning(f"History refresh failed; showing the last successful session result. {hist_error}")
+                hist_error=""
             if hist_error:
                 st.warning(f"Recent history could not be loaded. {hist_error}")
             elif not hist.empty:
@@ -3032,9 +3065,9 @@ elif page=="Live Feeds":
     )
     aishub_user=_secret("AISHUB_USERNAME")
     navitia_token=_secret("NAVITIA_TOKEN")
-    feed_view=st.radio("Live feed",["Maritime AIS","Intermodal Mobility","API Catalog"],horizontal=True,key="live_feed_view")
+    tabs=st.tabs(["Maritime AIS","Intermodal Mobility","API Catalog"])
 
-    if feed_view=="Maritime AIS":
+    with tabs[0]:
         st.markdown("### AISHub · live vessel positions")
         st.caption("Contributor-access feed · minimum one-minute polling interval · live observations are not persisted in this Excel test build")
         if not aishub_user:
@@ -3125,7 +3158,17 @@ elif page=="Live Feeds":
         reg_path=Path(__file__).parent/"api_sources.json"
         try: registry=json.loads(reg_path.read_text())
         except Exception: registry={"sources":[]}
-        sources=registry.get("sources",[])
+        sources=[dict(x) for x in registry.get("sources",[])]
+        # Reflect actual runtime credential state rather than only the static registry label.
+        runtime_enabled={
+            "newsdata_io_latest": bool(_secret("NEWSDATA_API_KEY")),
+            "aishub_live_ais": bool(aishub_user),
+            "navitia_mobility": bool(navitia_token),
+        }
+        for x in sources:
+            sid=str(x.get("id",""))
+            if sid in runtime_enabled:
+                x["status"]="enabled" if runtime_enabled[sid] else "credential_required"
         counts=defaultdict(int)
         for x in sources: counts[str(x.get("status","unknown"))]+=1
         c1,c2,c3,c4=st.columns(4)
@@ -3270,27 +3313,6 @@ elif page=="Vessels":
             )
             vr=d.iloc[pick]
             render_defence_vessel_profile(str(vr.get("Vessel ID","")),str(vr.get("Vessel","")))
-
-elif page=="Corridors & Hubs":
-    header("Corridors & Hubs","Strategic maritime chokepoints, multimodal corridors, dry ports, economic zones and integrated logistics networks.")
-    corridors=TABLES.get(("Infrastructure","Corridors"),pd.DataFrame()).copy()
-    dry=TABLES.get(("Infrastructure","Dry Ports"),pd.DataFrame()).copy()
-    zones=TABLES.get(("Infrastructure","Economic Zones"),pd.DataFrame()).copy()
-    networks=TABLES.get(("Infrastructure","Integrated Logistics Networks"),pd.DataFrame()).copy()
-    q=st.text_input("Search corridor / hub / country / operator / gateway",placeholder="Hormuz, Middle Corridor, Tbilisi, KEZAD, CentrePort, Great Lakes...",key="corridor_hub_search")
-    if q.strip():
-        corridors=_contains_any(corridors,[q]); dry=_contains_any(dry,[q]); zones=_contains_any(zones,[q]); networks=_contains_any(networks,[q])
-    m1,m2,m3,m4=st.columns(4)
-    m1.metric("Corridors",len(corridors)); m2.metric("Dry ports / inland hubs",len(dry)); m3.metric("Economic zones",len(zones)); m4.metric("Integrated networks",len(networks))
-    ct=st.tabs(["Corridors","Dry Ports & Inland Hubs","Economic Zones","Integrated Networks"])
-    with ct[0]:
-        if corridors.empty: st.info("No matching corridors.")
-        else:
-            for _,r in corridors.iterrows():
-                st.markdown(f"<div class='pc-card'><div class='pc-label'>{html_lib.escape(str(r.get('Type','')))} · {html_lib.escape(str(r.get('Status','')))}</div><div class='pc-big'>{html_lib.escape(str(r.get('Corridor','')))}</div><div class='pc-small'><b>{html_lib.escape(str(r.get('Country / Region','')))}</b><br>{html_lib.escape(str(r.get('Connects','')))}<br><b>Traffic:</b> {html_lib.escape(str(r.get('Primary Traffic','')))}<br><b>Strategic note:</b> {html_lib.escape(str(r.get('Strategic Note','')))}</div></div>",unsafe_allow_html=True)
-    with ct[1]: display_df(humanize_df(dry),200)
-    with ct[2]: display_df(humanize_df(zones),200)
-    with ct[3]: display_df(humanize_df(networks),200)
 
 elif page=="Cruise & Service Craft":
     header("Cruise & Service Craft","Cruise brands, ships, destinations and route families alongside tug, OSV and offshore-construction fleets.")
@@ -3783,65 +3805,90 @@ elif page=="Hormuz Monitor":
             st.markdown("### Documented public endpoints")
             display_df(endpoints,100)
             st.markdown("[Open traffic statistics](https://hormuz.data-tracking.net/stats) · [Open API documentation](https://hormuz.data-tracking.net/api-docs)")
-            if st.button("Refresh live 24-hour API summary",key="hormuz_live_summary"):
+            if st.toggle("Load live 24-hour API summary",value=False,key="hormuz_live_summary"):
                 payload,error=load_hormuz_api("summary","hours",24)
                 if not error and payload is not None:
-                    st.session_state["hormuz_last_summary"]=(payload,pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M UTC"))
-                elif error:
-                    st.warning(f"Live API refresh failed; the stored monthly snapshot remains usable. {error}")
-            saved=st.session_state.get("hormuz_last_summary")
-            if saved:
-                payload,stamp=saved
-                st.caption(f"Last successful live API response · {stamp} · retained through page reruns")
-                st.json(payload,expanded=False)
-            else:
-                st.info("No live summary loaded in this session yet.")
+                    st.session_state["hormuz_last_good_summary"]=payload
+                elif error and "hormuz_last_good_summary" in st.session_state:
+                    payload=st.session_state["hormuz_last_good_summary"]
+                    st.warning(f"Live refresh failed; showing the last successful session response. {error}")
+                    error=""
+                if error:
+                    st.warning(f"Live API unavailable; the stored monthly snapshot remains usable. {error}")
+                elif payload is not None:
+                    st.caption("Live public API response · cached for 30 minutes · retained for this session")
+                    st.json(payload,expanded=False)
 
-elif page=="Systems":
-    header("Systems & Corridors","Connected port, rail, waterway and corridor systems with linked events.")
-    systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame())
-    if systems.empty:
-        st.info("Systems workbook not available.")
-    else:
-        systems=systems.reset_index(drop=True)
-        requested_system=st.session_state.pop("system_pick_id",None)
-        default_system=0
-        if requested_system and "System ID" in systems.columns:
-            mi=systems.index[systems["System ID"].astype(str).eq(str(requested_system))].tolist()
-            if mi: default_system=int(mi[0])
-
-        names=systems["System"].tolist()
-        if requested_system:
-            st.session_state["system_select_name"]=names[default_system]
+elif page=="Corridors & Systems":
+    header("Corridors & Systems","Canonical trade corridors, connected systems, waterways and route exposure in one network view.")
+    corridors=TABLES.get(("Infrastructure","Corridors"),pd.DataFrame()).copy()
+    waterways=TABLES.get(("Systems & Waterways","Waterway Systems"),pd.DataFrame()).copy()
+    tanker_corr=TABLES.get(("Maritime","Tanker Corridor Exposure"),pd.DataFrame()).copy()
+    gl_corr=TABLES.get(("Maritime","Great Lakes Cargo Corridors"),pd.DataFrame()).copy()
+    delivery=TABLES.get(("Defence & Shipbuilding","Sales & Delivery Routes"),pd.DataFrame()).copy()
+    systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame()).copy()
+    ct1,ct2,ct3,ct4=st.tabs(["Corridors","Connected systems","Waterways","Exposure & routes"])
+    with ct1:
+        cq=st.text_input("Find corridor",placeholder="Middle Corridor, Great Lakes, Hormuz, Arctic...",key="corridor_search")
+        display_df(_contains_any(corridors,[cq]) if cq.strip() and not corridors.empty else corridors,250)
+    with ct3:
+        wq=st.text_input("Find waterway",placeholder="Suez, Panama, Bosporus, St Lawrence...",key="waterway_search")
+        display_df(_contains_any(waterways,[wq]) if wq.strip() and not waterways.empty else waterways,250)
+    with ct4:
+        et1,et2,et3=st.tabs(["Tanker exposure","Great Lakes cargo","Defence delivery routes"])
+        with et1: display_df(tanker_corr,250)
+        with et2: display_df(gl_corr,250)
+        with et3: display_df(delivery,250)
+    with ct2:
+        if systems.empty:
+            st.info("Systems workbook not available.")
         else:
-            current_system=st.session_state.get("system_select_name",names[default_system])
-            if not isinstance(current_system,str) or current_system not in names:
-                st.session_state["system_select_name"]=names[default_system]
+            systems=systems.reset_index(drop=True)
+            requested_system=st.session_state.pop("system_pick_id",None)
+            default_system=0
+            if requested_system and "System ID" in systems.columns:
+                mi=systems.index[systems["System ID"].astype(str).eq(str(requested_system))].tolist()
+                if mi: default_system=int(mi[0])
 
-        name=st.selectbox("System",names,key="system_select_name")
-        srow=systems[systems["System"]==name].iloc[0]; sid=srow["System ID"]
-        st.markdown(f"## {name}")
-        st.caption(f"{srow.get('Geography','')} · {srow.get('Archetype','')}")
-        se=TABLES.get(("Systems & Waterways","System Entities"),pd.DataFrame())
-        sl=TABLES.get(("Systems & Waterways","System Links"),pd.DataFrame())
-        sf=TABLES.get(("Systems & Waterways","Facilities"),pd.DataFrame())
-        si=TABLES.get(("Systems & Waterways","Network Interfaces"),pd.DataFrame())
-        sube=se[se["System ID"].astype(str).eq(str(sid))] if "System ID" in se.columns else pd.DataFrame()
-        subs=sl[sl["System ID"].astype(str).eq(str(sid))] if "System ID" in sl.columns else pd.DataFrame()
-        subf=sf[sf["System ID"].astype(str).eq(str(sid))] if "System ID" in sf.columns else pd.DataFrame()
-        subi=si[si["System ID"].astype(str).eq(str(sid))] if "System ID" in si.columns else pd.DataFrame()
-        ev,loc,chains=event_bundle_for_entities(system_ids=[sid])
-        if not ev.empty: render_event_map(ev,loc,"System events")
-        tabs=st.tabs(["Entities","Relationships","Facilities","Interfaces","Events"])
-        with tabs[0]: display_df(sube,200)
-        with tabs[1]:
-            for _,r in subs.iterrows():
-                st.markdown(f"<div class='pc-rel'><b>{label(r['Source Entity ID'])}</b> → {str(r['Relationship']).replace('_',' ').title()} → <b>{label(r['Target Entity ID'])}</b></div>",unsafe_allow_html=True)
-        with tabs[2]: display_df(subf,200)
-        with tabs[3]: display_df(subi,200)
-        with tabs[4]:
-            render_event_cards(ev,50)
-            if not chains.empty: display_df(chains,100)
+            names=systems["System"].tolist()
+            if requested_system:
+                st.session_state["system_select_name"]=names[default_system]
+            else:
+                current_system=st.session_state.get("system_select_name",names[default_system])
+                if not isinstance(current_system,str) or current_system not in names:
+                    st.session_state["system_select_name"]=names[default_system]
+
+            name=st.selectbox("System",names,key="system_select_name")
+            srow=systems[systems["System"]==name].iloc[0]; sid=srow["System ID"]
+            st.markdown(f"## {name}")
+            st.caption(f"{srow.get('Geography','')} · {srow.get('Archetype','')}")
+            se=TABLES.get(("Systems & Waterways","System Entities"),pd.DataFrame())
+            sl=TABLES.get(("Systems & Waterways","System Links"),pd.DataFrame())
+            sf=TABLES.get(("Systems & Waterways","Facilities"),pd.DataFrame())
+            si=TABLES.get(("Systems & Waterways","Network Interfaces"),pd.DataFrame())
+            sube=se[se["System ID"].astype(str).eq(str(sid))] if "System ID" in se.columns else pd.DataFrame()
+            subs=sl[sl["System ID"].astype(str).eq(str(sid))] if "System ID" in sl.columns else pd.DataFrame()
+            subf=sf[sf["System ID"].astype(str).eq(str(sid))] if "System ID" in sf.columns else pd.DataFrame()
+            subi=si[si["System ID"].astype(str).eq(str(sid))] if "System ID" in si.columns else pd.DataFrame()
+            ev,loc,chains=event_bundle_for_entities(system_ids=[sid])
+            if not ev.empty: render_event_map(ev,loc,"System events")
+            tabs=st.tabs(["Entities","Relationships","Facilities","Interfaces","Events"])
+            with tabs[0]: display_df(sube,200)
+            with tabs[1]:
+                for ri,(_,r) in enumerate(subs.iterrows()):
+                    src_id=str(r.get("Source Entity ID","")).strip()
+                    tgt_id=str(r.get("Target Entity ID","")).strip()
+                    rel_txt=pretty_relationship(r.get("Relationship",""))
+                    st.markdown(
+                        f"<div class='pc-rel'><b>{label(src_id)}</b> → {rel_txt} → <b>{label(tgt_id)}</b></div>",
+                        unsafe_allow_html=True
+                    )
+                    render_relationship_actions(src_id,tgt_id,f"system_{sid}_{ri}")
+            with tabs[2]: display_df(subf,200)
+            with tabs[3]: display_df(subi,200)
+            with tabs[4]:
+                render_event_cards(ev,50)
+                if not chains.empty: display_df(chains,100)
 
 elif page=="Data":
     header("Data Explorer","Raw evidence and debugging tables. Internal IDs remain hidden unless explicitly enabled.")

@@ -1,4 +1,4 @@
-# P&C Trade System v2.4
+# P&C Trade System v2.7
 
 This is the Excel-backed test implementation of the Power & Corridors Trade System ahead of the planned PostgreSQL migration. It preserves the 14 canonical domain workbooks while adding live public API layers for operational, maritime-safety and global-signal testing.
 
@@ -52,3 +52,16 @@ The 14 Excel workbooks remain the source-of-truth model. Live API output is deli
 
 ## v2.6 navigation
 The app now uses six grouped workspaces in the sidebar: Command Center, Network, Operations, Markets & Policy, Intelligence, and Data. CGMIX/GDELT are deferred from the active UI. NewsData.io is available under Intelligence > News & Signals after adding `NEWSDATA_API_KEY` to Streamlit secrets.
+
+
+## v2.7 navigation and persistence rework
+- Permanent sidebar quick access to **Vessels, Sanctions, Watch Areas and Corridors**.
+- **Connected Coverage** is now six searchable tabs with direct links into the full model.
+- **Watch Areas** groups Monitoring, Disruption Watch, Weather & Labour and Strategic Events.
+- **Corridors & Systems** exposes corridor, connected-system, waterway and route/exposure layers.
+- PortWatch and Hormuz retain the last successful session result when a refresh fails.
+- CGMIX/GDELT remain deferred; Excel model remains unchanged.
+
+
+## v2.8 relationship navigation
+Readable relationship chains now include contextual View Company / View Port / View Terminal / View Vessel / View Shipyard / View System buttons wherever the endpoint resolves to a canonical record.

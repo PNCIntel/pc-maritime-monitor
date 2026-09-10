@@ -3,7 +3,7 @@
   "implementation_version": "2.7.0",
   "source_application_version": "2.6.0",
   "data_model_version": "1.34",
-  "release_name": "Command Center + Watch Areas + Corridor Explorer",
+  "release_name": "Navigation, Watch Areas & Persistent Live Data",
   "built_on": "2026-09-10",
   "deployment_target": "Streamlit Community Cloud / GitHub",
   "entry_point": "app.py",
@@ -50,20 +50,21 @@
       "ADS-B Exchange from free stack"
     ]
   },
-  "app_version": "v2.7.0",
+  "app_version": "v2.8.0",
   "release_date": "2026-09-10",
   "new_features": [
-    "Interactive Command Center coverage explorer with domain sub-searches and direct workspace shortcuts",
-    "Dedicated Watch Areas view for Monitoring, Disruption Watch, External Disruptions and Weather/Labour",
-    "Dedicated Corridors & Hubs view for chokepoints, multimodal corridors, dry ports, economic zones and logistics networks",
-    "Persistent in-session PortWatch and Hormuz API results across Streamlit reruns",
-    "Persistent Live Feeds view selection instead of reset-prone tabs"
+    "Permanent quick access to Vessels, Sanctions, Watch Areas and Corridors",
+    "Searchable Connected Coverage tabs",
+    "Dedicated Watch Areas page",
+    "Expanded Corridors & Systems page",
+    "Last-successful API result fallback for PortWatch and Hormuz"
   ],
   "changes": [
-    "Reworked Connected Coverage from passive cards into searchable coverage tabs with direct navigation.",
-    "Added visible quick access to Vessels, Sanctions, Watch Areas, Corridors & Hubs and PortWatch from the Command Center.",
-    "Promoted monitoring/watch data and corridor/inland-hub data to first-class views.",
-    "Retained last successful PortWatch and Hormuz live responses in session state so data does not disappear on rerun or temporary refresh failure.",
-    "Preserved all canonical Excel workbooks unchanged."
+    "Connected Coverage is actionable instead of descriptive",
+    "Watch Areas and Corridors are explicitly navigable",
+    "PortWatch latest/history and Hormuz live summary remain visible through transient refresh failures",
+    "CGMIX/GDELT remain deferred",
+    "Canonical Excel workbooks unchanged",
+    "Relationship chains now include contextual drill-down buttons to canonical company, port, terminal, vessel, shipyard and system records where available."
   ]
 }
