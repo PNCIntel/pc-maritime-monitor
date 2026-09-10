@@ -2557,6 +2557,131 @@ def clean_network_table(df, cols=None, height=280):
     display_df(v,height)
 
 
+
+def _norm_governance_name(v):
+    s=str(v or "").strip().casefold()
+    s=s.replace("&"," and ")
+    s=re.sub(r"[^a-z0-9]+"," ",s)
+    return re.sub(r"\s+"," ",s).strip()
+
+def _resolve_entity_name(entity_id):
+    eid=str(entity_id or "").strip()
+    if not eid:
+        return ""
+    resolved=label(eid)
+    if resolved and resolved != eid:
+        return resolved
+    # Fall back to System Entities, which includes authorities not yet promoted
+    # into the core Companies table.
+    se=TABLES.get(("Systems & Waterways","System Entities"),pd.DataFrame())
+    if not se.empty and "Entity ID" in se.columns:
+        hit=se[se["Entity ID"].astype(str).eq(eid)]
+        if not hit.empty:
+            return str(hit.iloc[0].get("Entity","") or eid)
+    return eid
+
+def _canonical_company_id_for_governance(entity_id, entity_name=""):
+    """Return a core Company ID only when the governance entity is actually canonical there."""
+    companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
+    if companies.empty or "Company ID" not in companies.columns:
+        return ""
+    eid=str(entity_id or "").strip()
+    if eid and not companies[companies["Company ID"].astype(str).eq(eid)].empty:
+        return eid
+    name=_norm_governance_name(entity_name)
+    if name and "Company" in companies.columns:
+        for _,r in companies.iterrows():
+            if _norm_governance_name(r.get("Company","")) == name:
+                return str(r.get("Company ID","") or "")
+    return ""
+
+def port_governance_rows(port_row):
+    """Resolve governance rows for the selected port without inventing authority relationships."""
+    gov=TABLES.get(("Systems & Waterways","Port Governance"),pd.DataFrame()).copy()
+    if gov.empty:
+        return gov
+
+    pid=str(port_row.get("Port ID","") or "").strip()
+    pname=str(port_row.get("Port / Facility","") or "").strip()
+    pnorm=_norm_governance_name(pname)
+
+    # Match by direct ID first.
+    mask=pd.Series(False,index=gov.index)
+    if "Port/System Entity ID" in gov.columns and pid:
+        mask |= gov["Port/System Entity ID"].astype(str).eq(pid)
+
+    # Resolve legacy/system IDs through the label registry and System Entities.
+    if "Port/System Entity ID" in gov.columns and pnorm:
+        for idx,gid in gov["Port/System Entity ID"].fillna("").astype(str).items():
+            if mask.loc[idx]:
+                continue
+            gname=_resolve_entity_name(gid)
+            if _norm_governance_name(gname) == pnorm:
+                mask.loc[idx]=True
+
+    return gov[mask].copy()
+
+def render_port_governance(port_row):
+    """Trade-facing governance/authority layer for a canonical port."""
+    st.markdown("### Governance & authority")
+    gov=port_governance_rows(port_row)
+
+    if gov.empty:
+        st.caption("No dedicated governance/authority record has been mapped for this port yet.")
+        return
+
+    for n,(_,r) in enumerate(gov.iterrows()):
+        aid=str(r.get("Authority/Governing Entity ID","") or "").strip()
+        aname=_resolve_entity_name(aid)
+        role=pretty_relationship(r.get("Governance Role",""))
+        note=str(r.get("Model Note","") or "").strip()
+        src=str(r.get("Source URL","") or "").strip()
+
+        c1,c2=st.columns([5,1])
+        with c1:
+            st.markdown(f"**{aname}**")
+            if role and role.lower()!="nan":
+                st.caption(role)
+            if note and note.lower()!="nan":
+                st.caption(note)
+
+        with c2:
+            cid=_canonical_company_id_for_governance(aid,aname)
+            if cid:
+                if st.button("Open entity",key=f"portgov_{port_row.get('Port ID','')}_{aid}_{n}",use_container_width=True):
+                    request_nav("Companies","company_pick_id",cid,aname)
+                    st.rerun()
+
+        if src.startswith("http"):
+            st.link_button("Authority source ↗",src,key=f"portgovsrc_{port_row.get('Port ID','')}_{aid}_{n}")
+
+def render_system_governance():
+    """Expose authorities and governance models across ports/waterways/systems."""
+    gov=TABLES.get(("Systems & Waterways","Port Governance"),pd.DataFrame()).copy()
+    se=TABLES.get(("Systems & Waterways","System Entities"),pd.DataFrame()).copy()
+    waterways=TABLES.get(("Systems & Waterways","Waterway Systems"),pd.DataFrame()).copy()
+    locks=TABLES.get(("Systems & Waterways","Locks & Canals"),pd.DataFrame()).copy()
+
+    tabs=st.tabs(["Authorities & governance","Waterways","Locks & canals"])
+    with tabs[0]:
+        if gov.empty:
+            st.info("No governance records available.")
+        else:
+            v=gov.copy()
+            if "Port/System Entity ID" in v.columns:
+                v["Port / system"] = v["Port/System Entity ID"].map(_resolve_entity_name)
+            if "Authority/Governing Entity ID" in v.columns:
+                v["Authority / governing entity"] = v["Authority/Governing Entity ID"].map(_resolve_entity_name)
+            if "Governance Role" in v.columns:
+                v["Governance role"] = v["Governance Role"].map(pretty_relationship)
+            cols=[c for c in ["Port / system","Authority / governing entity","Governance role","Model Note","Source URL"] if c in v.columns]
+            display_df(v[cols] if cols else v,320)
+    with tabs[1]:
+        clean_network_table(waterways,["Waterway","Type","Trade Function"],260)
+    with tabs[2]:
+        clean_network_table(locks,["Waterway","Facility","Type","Country/Operator"],300)
+
+
 def request_nav(page_name, object_key=None, object_id=None, object_name=None):
     """Defer a page/object jump until the next Streamlit rerun.
     Destination pages consume *_pick_id requests before their selector widget is created.
@@ -4174,6 +4299,7 @@ elif page=="Ports":
             c2.markdown(f"<div class='pc-card'><div class='pc-label'>Country</div><div class='pc-big'>{row.get('Country','')}</div></div>",unsafe_allow_html=True)
             c3.markdown(f"<div class='pc-card'><div class='pc-label'>Operator</div><div class='pc-big'>{row.get('Operator','') or 'Multiple / authority-led'}</div></div>",unsafe_allow_html=True)
             render_port_commercial_network(row,pt)
+            render_port_governance(row)
             render_portwatch_port_snapshot(pname,row.get("Country",""))
             xy=PORT_CITY_COORDS.get(pname)
             if xy:
@@ -4181,7 +4307,7 @@ elif page=="Ports":
             ev,loc,chains=event_bundle_for_entities(asset_ids=[pid])
             if not ev.empty:
                 render_event_map(ev,loc,"Events affecting this port")
-            tabs=st.tabs(["Terminals","Security & Disruption","Events & Impact","Evidence"])
+            tabs=st.tabs(["Terminals","Governance","Security & Disruption","Events & Impact","Evidence"])
             with tabs[0]:
                 if not pt_raw.empty and len(pt) < len(pt_raw):
                     st.caption("Port-level coverage rows are excluded here so the terminal view shows only distinct subordinate facilities.")
@@ -4189,6 +4315,15 @@ elif page=="Ports":
                 with st.expander("View terminal data table"):
                     display_df(pt,300)
             with tabs[1]:
+                gov=port_governance_rows(row)
+                if gov.empty:
+                    st.info("No dedicated port-governance record has been mapped yet.")
+                else:
+                    v=gov.copy()
+                    v["Authority / governing entity"]=v["Authority/Governing Entity ID"].map(_resolve_entity_name)
+                    v["Governance role"]=v["Governance Role"].map(pretty_relationship)
+                    display_df(v[["Authority / governing entity","Governance role","Model Note","Source URL"]],220)
+            with tabs[2]:
                 if ev.empty:
                     st.info("No linked security/disruption events for this port yet.")
                 else:
@@ -4196,10 +4331,10 @@ elif page=="Ports":
                     sev=ev[security_mask].copy()
                     render_event_cards(sev,50)
                     if sev.empty: st.info("No events currently classified into the security/disruption view.")
-            with tabs[2]:
+            with tabs[3]:
                 render_event_cards(ev,50)
                 if not chains.empty: display_df(chains,100)
-            with tabs[3]: display_df(pd.DataFrame([row]),20)
+            with tabs[4]: display_df(pd.DataFrame([row]),20)
 
 elif page=="Watch Areas":
     header("Watch Areas","Active monitoring, disruption watchlists, weather/labour observations and strategic events in one operational workspace.")
@@ -5116,6 +5251,8 @@ elif page=="Hormuz Monitor":
 
 elif page=="Corridors & Systems":
     header("Corridors & Systems","Canonical trade corridors, connected systems, waterways and route exposure in one network view.")
+    with st.expander("Governance & authorities",expanded=False):
+        render_system_governance()
     corridors=TABLES.get(("Infrastructure","Corridors"),pd.DataFrame()).copy()
     waterways=TABLES.get(("Systems & Waterways","Waterway Systems"),pd.DataFrame()).copy()
     tanker_corr=TABLES.get(("Maritime","Tanker Corridor Exposure"),pd.DataFrame()).copy()
