@@ -391,6 +391,136 @@ st.markdown(f'<div class="pc-title">{page}</div>', unsafe_allow_html=True)
 st.markdown('<div class="pc-deck">Decision-useful intelligence on geopolitical disruption, maritime security, trade corridors, aviation, sanctions, critical infrastructure and operational risk.</div>', unsafe_allow_html=True)
 st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
 
+
+def _watch_tokens(v):
+    s=str(v or "").casefold()
+    words=re.findall(r"[a-z0-9]+",s)
+    stop={"and","the","of","to","in","for","with","from","area","region","ports","port","sea","gulf"}
+    return [w for w in words if len(w)>=4 and w not in stop]
+
+def watch_area_events(geography):
+    if hazard_events.empty:
+        return hazard_events
+    toks=_watch_tokens(geography)
+    if not toks:
+        return hazard_events.iloc[0:0]
+    mask=pd.Series(False,index=hazard_events.index)
+    for c in ["Country / Countries","Location","Title","Description","Operational Impact","Trade / Commercial Impact"]:
+        if c not in hazard_events.columns:
+            continue
+        s=hazard_events[c].fillna("").astype(str).str.casefold()
+        for t in toks:
+            mask |= s.str.contains(re.escape(t),na=False)
+    return hazard_events[mask].copy()
+
+def watch_area_related_assets(geography):
+    toks=_watch_tokens(geography)
+    out={}
+    for label,df,cols in [
+        ("Ports",ports,["Port / Facility","Country","Operator","Key Role"]),
+        ("Dry ports",dry_ports,["Hub Name","Country","City / Region","Linked Seaports / Gateways"]),
+    ]:
+        if df is None or df.empty:
+            continue
+        mask=pd.Series(False,index=df.index)
+        for c in cols:
+            if c not in df.columns:
+                continue
+            s=df[c].fillna("").astype(str).str.casefold()
+            for t in toks:
+                mask |= s.str.contains(re.escape(t),na=False)
+        hit=df[mask].head(12)
+        if not hit.empty:
+            out[label]=hit
+    return out
+
+def _split_indicators(v):
+    s=clean_display_text(v)
+    if not s:
+        return []
+    parts=re.split(r"[;•|]+",s)
+    return [p.strip(" -") for p in parts if p.strip(" -")]
+
+def render_watch_area_brief(rows,geography):
+    if rows.empty:
+        st.info("No active monitoring record for this area.")
+        return
+
+    rows=rows.reset_index(drop=True)
+    if len(rows)>1:
+        pick=st.selectbox(
+            "Monitoring lens",range(len(rows)),
+            format_func=lambda i:clean_display_text(rows.iloc[i].get("Title","Monitoring")),
+            key="intel_watch_lens"
+        )
+        r=rows.iloc[pick]
+    else:
+        r=rows.iloc[0]
+
+    st.markdown(f"## {clean_display_text(geography)}")
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Status",clean_display_text(r.get("Status","")) or "—")
+    c2.metric("Confidence",clean_display_text(r.get("Confidence","")) or "—")
+    c3.metric("Horizon",clean_display_text(r.get("Time Horizon","")) or "—")
+    c4.metric("Last reviewed",clean_display_text(r.get("Last Reviewed","")) or "—")
+
+    focus=clean_display_text(r.get("What Is Being Monitored",""))
+    notes=clean_display_text(r.get("Notes",""))
+    trigger=clean_display_text(r.get("Trigger / Threshold",""))
+    next_review=clean_display_text(r.get("Next Review / Milestone",""))
+
+    st.markdown("### Current picture")
+    extra=f"<div style='margin-top:10px;'>{notes}</div>" if notes else ""
+    st.markdown(
+        f"""<div class='pc-card'>
+        <div class='pc-label'>{clean_display_text(r.get('Family',''))}</div>
+        <div class='pc-big'>{clean_display_text(r.get('Title',''))}</div>
+        <div class='pc-search-details' style='margin-top:10px;'>{focus}</div>
+        {extra}
+        </div>""",unsafe_allow_html=True
+    )
+
+    indicators=_split_indicators(r.get("Key Indicators",""))
+    lcol,rcol=st.columns([1.15,1])
+    with lcol:
+        st.markdown("### Priority indicators")
+        if indicators:
+            for n,item in enumerate(indicators[:8],1):
+                st.markdown(f"**{n}. {item}**")
+        else:
+            st.caption("No priority indicators have been structured yet.")
+    with rcol:
+        st.markdown("### What would change the judgement?")
+        review=f"<div class='pc-label' style='margin-top:12px;'>Next review</div><div>{next_review}</div>" if next_review else ""
+        st.markdown(
+            f"""<div class='pc-card'>
+            <div class='pc-label'>Trigger / threshold</div>
+            <div>{trigger or 'No explicit threshold has been recorded yet.'}</div>
+            {review}
+            </div>""",unsafe_allow_html=True
+        )
+
+    ev=watch_area_events(geography)
+    st.markdown("### Recent activity")
+    if ev.empty:
+        st.caption("No recent event records currently match this watch area.")
+    else:
+        if "Start Date" in ev.columns:
+            ev=ev.sort_values("Start Date",ascending=False)
+        show_df(ev,["Start Date","Event Type","Severity","Status","Location","Title","Operational Impact","Trade / Commercial Impact","Confidence"],300)
+
+    related=watch_area_related_assets(geography)
+    st.markdown("### Exposed / related coverage")
+    if not related:
+        st.caption("No canonical ports or inland hubs are yet mapped directly to this watch area.")
+    else:
+        if "Ports" in related:
+            st.markdown("**Ports**")
+            show_df(related["Ports"],["Port / Facility","Country","Operator","Facility Type","Key Role"],220)
+        if "Dry ports" in related:
+            st.markdown("**Dry ports / inland hubs**")
+            show_df(related["Dry ports"],["Hub Name","Country","City / Region","Status","Linked Seaports / Gateways"],180)
+
 # -----------------------------------------------------------------------------
 # 1. OPERATING PICTURE
 # -----------------------------------------------------------------------------
@@ -496,16 +626,33 @@ elif page == "Alerts & Incidents":
 # 3. WATCH AREAS
 # -----------------------------------------------------------------------------
 elif page == "Watch Areas":
-    section("04 · Forward", "Watch Areas", "Geographic or system-level monitoring built from active monitoring, disruption watch and hazard records.")
-    mons = monitoring.copy()
-    if not mons.empty:
-        mons = mons[text_col(mons,"Status").str.contains("Active|Monitoring|Developing", case=False, regex=True, na=False)]
-        geos = sorted([x for x in text_col(mons,"Geography").unique() if x])
-        selected = st.selectbox("Watch area", ["All"] + geos)
-        if selected != "All": mons = mons[text_col(mons,"Geography").eq(selected)]
-        show_df(mons, ["Title","Family","Geography","Status","Time Horizon","What Is Being Monitored","Key Indicators","Trigger / Threshold","Confidence","Last Reviewed"], 420)
-    section("Disruption layer", "Current disruption watches")
-    show_df(disruption, ["As Of","Family","Country","Location / System","Issue","Current Status","Trigger / Threshold","Potential Mode Impact","Potential Trade / Commercial Impact","Probability / Read","Time Horizon","Confidence"], 400)
+    section("04 · Forward", "Watch Areas", "Area-based intelligence: current picture, priority indicators, thresholds, recent activity and exposed infrastructure.")
+    mons=monitoring.copy()
+    if mons.empty:
+        st.info("No monitoring records available.")
+    else:
+        mons=mons[text_col(mons,"Status").str.contains("Active|Monitoring|Developing",case=False,regex=True,na=False)]
+        geos=sorted([x for x in text_col(mons,"Geography").unique() if x])
+        if not geos:
+            st.info("No active watch areas are currently defined.")
+        else:
+            selected=st.selectbox("Watch area",geos,key="intel_watch_area")
+            area_rows=mons[text_col(mons,"Geography").eq(selected)].copy()
+            render_watch_area_brief(area_rows,selected)
+
+            toks=_watch_tokens(selected)
+            if not disruption.empty and toks:
+                mask=pd.Series(False,index=disruption.index)
+                for c in ["Country","Location / System","Issue","Potential Mode Impact","Potential Trade / Commercial Impact"]:
+                    if c not in disruption.columns:
+                        continue
+                    s=disruption[c].fillna("").astype(str).str.casefold()
+                    for t in toks:
+                        mask |= s.str.contains(re.escape(t),na=False)
+                darea=disruption[mask].copy()
+                if not darea.empty:
+                    st.markdown("### Active disruption watches in this area")
+                    show_df(darea,["As Of","Family","Country","Location / System","Issue","Current Status","Potential Mode Impact","Potential Trade / Commercial Impact","Probability / Read","Time Horizon","Confidence"],260)
 
 # -----------------------------------------------------------------------------
 # 4. MONITORING & INDICATORS

@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import re
+from difflib import SequenceMatcher
 import json
 import html as html_lib
 import xml.etree.ElementTree as ET
@@ -547,6 +548,202 @@ def load_portwatch_history(portid, observations=90):
         return _portwatch_frame(payload.get("features",[])), ""
     except (HTTPError, URLError, TimeoutError, ValueError, OSError, TypeError) as exc:
         return pd.DataFrame(), str(exc)
+
+
+def _norm_place_name(v):
+    s=str(v or "").strip().casefold()
+    s=re.sub(r"\b(port of|port|harbour|harbor|terminal|terminals)\b"," ",s)
+    s=s.replace("&"," and ")
+    s=re.sub(r"[^a-z0-9]+"," ",s)
+    return re.sub(r"\s+"," ",s).strip()
+
+def match_portwatch_port(live, canonical_name, country=""):
+    """Conservatively match a canonical P&C port to one PortWatch record."""
+    if live is None or live.empty or "portname" not in live.columns:
+        return pd.DataFrame(), 0.0
+    cname=_norm_place_name(canonical_name)
+    ccountry=str(country or "").strip().casefold()
+    if not cname:
+        return pd.DataFrame(), 0.0
+    candidates=live.copy()
+    if ccountry and "country" in candidates.columns:
+        same=candidates[candidates["country"].astype(str).str.casefold().eq(ccountry)]
+        if not same.empty:
+            candidates=same
+    scored=[]
+    for idx,r in candidates.iterrows():
+        pname=_norm_place_name(r.get("portname",""))
+        if not pname:
+            continue
+        if pname == cname:
+            score=1.0
+        elif pname in cname or cname in pname:
+            score=0.92
+        else:
+            score=SequenceMatcher(None,cname,pname).ratio()
+        if ccountry and str(r.get("country","")).strip().casefold()==ccountry:
+            score=min(1.0,score+0.04)
+        scored.append((score,idx))
+    if not scored:
+        return pd.DataFrame(), 0.0
+    score,idx=max(scored,key=lambda x:x[0])
+    if score < 0.68:
+        return pd.DataFrame(), score
+    return live.loc[[idx]].copy(), score
+
+def render_portwatch_port_snapshot(port_name, country):
+    """Live PortWatch context embedded in the canonical Trade port page."""
+    live,error,latest_date=load_portwatch_latest()
+    status="live"
+    if not error and not live.empty:
+        st.session_state["portwatch_last_good"]=(live.copy(),latest_date)
+    elif error and "portwatch_last_good" in st.session_state:
+        live,latest_date=st.session_state["portwatch_last_good"]
+        status="stale"
+
+    st.markdown("### PortWatch · latest operational day")
+    if live is None or live.empty:
+        st.caption("Live PortWatch data is currently unavailable for this port.")
+        return
+
+    match,score=match_portwatch_port(live,port_name,country)
+    if match.empty:
+        st.caption(f"No confident PortWatch match for {port_name} on the latest available day ({latest_date or 'unknown'}).")
+        return
+
+    r=match.iloc[0]
+    matched_name=str(r.get("portname","")).strip()
+    status_text="live API" if status=="live" else "last successful snapshot"
+    st.caption(f"IMF PortWatch · {latest_date} · {status_text} · matched to {matched_name} ({score:.0%})")
+
+    def n(col):
+        v=pd.to_numeric(pd.Series([r.get(col)]),errors="coerce").iloc[0]
+        return None if pd.isna(v) else float(v)
+
+    metrics=[
+        ("Port calls",n("portcalls")),
+        ("Container calls",n("portcalls_container")),
+        ("Tanker calls",n("portcalls_tanker")),
+        ("Imports",n("import")),
+        ("Exports",n("export")),
+    ]
+    cols=st.columns(5)
+    for c,(label,value) in zip(cols,metrics):
+        c.metric(label,"—" if value is None else f"{value:,.0f}")
+
+    portid=str(r.get("portid","")).strip()
+    if portid:
+        hist,herr=load_portwatch_history(portid,30)
+        if not hist.empty and "Date" in hist.columns:
+            h=hist.sort_values("Date").copy()
+            use=[c for c in ["portcalls","import","export"] if c in h.columns]
+            if use:
+                st.caption("Recent PortWatch trend · 30 observations")
+                chart=h.set_index("Date")[use].rename(columns={
+                    "portcalls":"Port calls","import":"Imports","export":"Exports"
+                })
+                st.line_chart(chart,use_container_width=True)
+        elif herr:
+            st.caption("Recent PortWatch history is temporarily unavailable.")
+
+def _trade_context_tokens(row):
+    raw=" ".join(str(row.get(c,"") or "") for c in [
+        "Country","Location / System","Issue","Potential Mode Impact","Potential Trade / Commercial Impact"
+    ])
+    words=re.findall(r"[A-Za-z0-9À-ÿ'-]+",raw.casefold())
+    stop={"the","and","with","from","over","for","into","major","potential","current","system",
+          "action","trade","commercial","impact","country","location","port","ports","airport",
+          "airports","rail","week","weeks","days"}
+    return [w for w in words if len(w)>=4 and w not in stop][:30]
+
+def infer_trade_disruption_context(row):
+    """Find canonical network objects that appear materially connected to a disruption watch."""
+    tokens=_trade_context_tokens(row)
+    location=str(row.get("Location / System","") or "")
+    issue=str(row.get("Issue","") or "")
+    hay=(location+" "+issue).casefold()
+
+    out={}
+    companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame()).copy()
+    ports=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
+    corridors=TABLES.get(("Infrastructure","Corridors"),pd.DataFrame()).copy()
+    railnets=TABLES.get(("Rail","Rail Networks"),pd.DataFrame()).copy()
+    railnodes=TABLES.get(("Rail","Rail Nodes"),pd.DataFrame()).copy()
+
+    if not companies.empty and "Company" in companies.columns:
+        mask=pd.Series(False,index=companies.index)
+        for i,nm in companies["Company"].fillna("").astype(str).items():
+            n=nm.casefold().strip()
+            if len(n)>=4 and n in hay:
+                mask.loc[i]=True
+        out["Companies"]=companies[mask].head(8)
+
+    if not ports.empty and "Port / Facility" in ports.columns:
+        mask=pd.Series(False,index=ports.index)
+        normloc=_norm_place_name(location)
+        for i,nm in ports["Port / Facility"].fillna("").astype(str).items():
+            n=_norm_place_name(nm)
+            if n and normloc and (n in normloc or normloc in n):
+                mask.loc[i]=True
+        out["Ports"]=ports[mask].head(8)
+
+    def token_match(df,cols):
+        if df.empty:
+            return df
+        mask=pd.Series(False,index=df.index)
+        for c in cols:
+            if c not in df.columns:
+                continue
+            s=df[c].fillna("").astype(str).str.casefold()
+            for t in tokens:
+                mask |= s.str.contains(re.escape(t),na=False)
+        return df[mask].head(8)
+
+    out["Corridors"]=token_match(corridors,["Corridor","Country / Region","Connects","Primary Traffic","Strategic Note"])
+    out["Rail Networks"]=token_match(railnets,["Network / Corridor","Countries / Jurisdictions","Start Node","End Node","Primary Cargo / Role"])
+    out["Rail Nodes"]=token_match(railnodes,["Node","Country","Node Type","Notes"])
+    return out
+
+def render_trade_disruption_brief(row):
+    st.markdown("### Selected disruption")
+    c1,c2,c3=st.columns(3)
+    c1.metric("Status",str(row.get("Current Status","") or "—"))
+    c2.metric("Probability / read",str(row.get("Probability / Read","") or "—"))
+    c3.metric("Time horizon",str(row.get("Time Horizon","") or "—"))
+
+    st.markdown(
+        f"""<div class='pc-card'>
+        <div class='pc-label'>{row.get('Family','')} · {row.get('Country','')}</div>
+        <div class='pc-big'>{row.get('Location / System','')}</div>
+        <div class='pc-search-details' style='margin-top:8px;'>{row.get('Issue','')}</div>
+        <div style='margin-top:12px;'><b>Mode impact:</b> {row.get('Potential Mode Impact','')}</div>
+        <div style='margin-top:8px;'><b style='color:#D8B45A;'>Trade / commercial impact:</b> {row.get('Potential Trade / Commercial Impact','')}</div>
+        <div style='margin-top:8px;'><b>Trigger / threshold:</b> {row.get('Trigger / Threshold','')}</div>
+        </div>""",
+        unsafe_allow_html=True
+    )
+
+    ctx=infer_trade_disruption_context(row)
+    nonempty={k:v for k,v in ctx.items() if isinstance(v,pd.DataFrame) and not v.empty}
+    st.markdown("### Connected trade exposure")
+    if not nonempty:
+        st.caption("No canonical company, port, corridor or rail asset has been confidently linked to this watch yet.")
+        return
+    if "Companies" in nonempty:
+        st.markdown("**Companies**")
+        display_df(nonempty["Companies"],150)
+    if "Ports" in nonempty:
+        st.markdown("**Ports**")
+        display_df(nonempty["Ports"],150)
+    if "Corridors" in nonempty:
+        st.markdown("**Corridors / systems**")
+        display_df(nonempty["Corridors"],170)
+    if "Rail Networks" in nonempty:
+        st.markdown("**Rail networks**")
+        display_df(nonempty["Rail Networks"],150)
+    if "Rail Nodes" in nonempty:
+        st.markdown("**Rail nodes**")
+        display_df(nonempty["Rail Nodes"],150)
 
 @st.cache_data(show_spinner=False)
 def all_tables():
@@ -3589,6 +3786,7 @@ elif page=="Ports":
             c1.metric("Terminals",len(pt))
             c2.markdown(f"<div class='pc-card'><div class='pc-label'>Country</div><div class='pc-big'>{row.get('Country','')}</div></div>",unsafe_allow_html=True)
             c3.markdown(f"<div class='pc-card'><div class='pc-label'>Operator</div><div class='pc-big'>{row.get('Operator','') or 'Multiple / authority-led'}</div></div>",unsafe_allow_html=True)
+            render_portwatch_port_snapshot(pname,row.get("Country",""))
             xy=PORT_CITY_COORDS.get(pname)
             if xy:
                 st.map(pd.DataFrame([{"name":pname,"lat":xy[0],"lon":xy[1]}]),latitude="lat",longitude="lon",size=100)
@@ -3628,16 +3826,19 @@ elif page=="Watch Areas":
         display_df(_contains_any(monitoring,[q]) if q.strip() and not monitoring.empty else monitoring,300)
     with wt2:
         q=st.text_input("Search disruption watch",placeholder="port, rail, aviation, weather, conflict...",key="watch_disrupt_q")
-        display_df(_contains_any(disruption,[q]) if q.strip() and not disruption.empty else disruption,300)
+        dview=_contains_any(disruption,[q]) if q.strip() and not disruption.empty else disruption
+        display_df(dview,300)
+        if not dview.empty:
+            dview=dview.reset_index(drop=True)
+            labels=[f"{r.get('Location / System','')} — {r.get('Issue','')}" for _,r in dview.iterrows()]
+            dpick=st.selectbox("Inspect disruption",range(len(labels)),format_func=lambda i:labels[i],key="watch_disruption_pick")
+            render_trade_disruption_brief(dview.iloc[dpick])
     with wt3:
         q=st.text_input("Search weather / labour",placeholder="typhoon, earthquake, strike, protest...",key="watch_weather_q")
         display_df(_contains_any(weather,[q]) if q.strip() and not weather.empty else weather,300)
     with wt4:
         q=st.text_input("Search strategic events",placeholder="attack, closure, acquisition, sanctions...",key="watch_strategic_q")
         display_df(_contains_any(strategic,[q]) if q.strip() and not strategic.empty else strategic,300)
-    if st.button("Open corridor context",key="watch_open_corridors"):
-        request_nav("Corridors & Systems"); st.rerun()
-
 elif page=="Port Activity":
     header(
         "Global Port Activity",
