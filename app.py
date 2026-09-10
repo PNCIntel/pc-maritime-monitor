@@ -1663,7 +1663,7 @@ def _next_event_render_scope():
 def render_event_associations(event_id, key_prefix="event"):
     links=event_associations(event_id)
     if not links: return
-    st.markdown("#### Associated network")
+    st.markdown("#### Commercially connected network")
     for i,(typ,lid,name,rel,conf) in enumerate(links[:12]):
         page,key,resolved_id,resolved_name=resolve_event_link_target(typ,lid,name)
         c1,c2=st.columns([4,1])
@@ -1679,24 +1679,59 @@ def render_event_cards(events,max_items=40):
     if events is None or events.empty:
         st.info("No linked events.")
         return
+
     render_scope = _next_event_render_scope()
-    e=events.copy()
+    e = events.copy()
+
     if "Start Date" in e.columns:
-        e["_dt"]=pd.to_datetime(e["Start Date"],errors="coerce")
-        e=e.sort_values("_dt",ascending=False)
-    for idx,(_,row) in enumerate(e.head(max_items).iterrows()):
-        title=str(row.get("Title","Event")); eid=str(row.get("Event ID",""))
-        meta=[]
-        for c in ["Start Date","Event Family","Event Type","Severity","Status","Location"]:
-            v=str(row.get(c,"")).strip()
-            if v and v.lower()!='nan': meta.append(pretty_enum(v))
-        st.markdown(f"<div class='pc-card'><div class='pc-big'>{title}</div><div class='pc-search-details'>{' · '.join(meta)}</div></div>",unsafe_allow_html=True)
-        card_prefix=f"eventblock_{render_scope}_card_{idx}"
-        render_event_associations(eid,key_prefix=card_prefix)
-        url=str(row.get("Primary Source URL","")).strip()
+        e["_dt"] = pd.to_datetime(e["Start Date"], errors="coerce")
+        e = e.sort_values("_dt", ascending=False)
+
+    for idx, (_, row) in enumerate(e.head(max_items).iterrows()):
+        title = str(row.get("Title", "Event")).strip()
+        eid = str(row.get("Event ID", "")).strip()
+
+        meta = []
+        for c in ["Start Date", "Event Type", "Severity", "Location"]:
+            v = str(row.get(c, "")).strip()
+            if v and v.lower() != "nan":
+                meta.append(pretty_enum(v))
+
+        description = str(row.get("Description", "")).strip()
+        operational = str(row.get("Operational Impact", "")).strip()
+        commercial = str(row.get("Trade / Commercial Impact", "")).strip()
+
+        # Build a trade-facing event card: incident first, consequence second.
+        card = [
+            "<div class='pc-card'>",
+            f"<div class='pc-search-details' style='color:#D8B45A; text-transform:uppercase; letter-spacing:.08em;'>{' · '.join(meta)}</div>",
+            f"<div class='pc-big' style='margin-top:10px;'>{title}</div>",
+        ]
+        if description and description.lower() != "nan":
+            card.append(f"<div class='pc-search-details' style='margin-top:10px;'>{description}</div>")
+        if operational and operational.lower() != "nan":
+            card.append(
+                f"<div style='margin-top:12px;'><b>Operational impact:</b> {operational}</div>"
+            )
+        if commercial and commercial.lower() != "nan":
+            card.append(
+                f"<div style='margin-top:8px; padding-top:8px; border-top:1px solid #33414C;'>"
+                f"<b style='color:#D8B45A;'>Trade / commercial impact:</b> {commercial}</div>"
+            )
+        card.append("</div>")
+        st.markdown("".join(card), unsafe_allow_html=True)
+
+        card_prefix = f"eventblock_{render_scope}_card_{idx}"
+
+        # Commercially relevant linked network sits immediately beneath the event card.
+        render_event_associations(eid, key_prefix=card_prefix)
+
+        url = str(row.get("Primary Source URL", "")).strip()
         if url.startswith("http"):
-            st.link_button("Open source ↗",url,key=f"{card_prefix}_{eid}_source")
-        st.markdown("<div style='height:8px'></div>",unsafe_allow_html=True)
+            st.link_button("Open source ↗", url, key=f"{card_prefix}_{eid}_source")
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
 
 def entity_asset_ids_from_profile(prof):
     ids=set()
@@ -3419,7 +3454,6 @@ elif page=="Search":
 
 elif page=="Maritime Disruptions":
     header("Maritime Disruptions","Operational maritime casualties, groundings, SAR, pollution, attacks and official-source MARSEC reporting that can affect trade flows, vessels, ports and corridors.")
-    st.markdown("<div class='pc-section-note'>This is the trade-facing operational view. It focuses on commercial consequence and linked assets; the dedicated P&C Intelligence app provides the deeper security workflow.</div>",unsafe_allow_html=True)
     render_marsec_workspace()
 
 elif page=="Aviation":
