@@ -1,6 +1,22 @@
-# P&C Trade System v2.7
+# P&C Trade System v2.9.0 — Investment & Financial Intelligence
+
+This Excel-backed test build adds a global Investments workspace, company-level Investment and Financial sections, structured financial examples for AD Ports Group and DP World, and expanded Gulftainer coverage including the September 2026 Suksawat Terminal investment in Thailand.
+
+The underlying model remains Excel-backed ahead of the planned PostgreSQL migration. Internal IDs remain available for joins but are suppressed from normal presentation.
+
+# P&C Trade System v2.8.2
 
 This is the Excel-backed test implementation of the Power & Corridors Trade System ahead of the planned PostgreSQL migration. It preserves the 14 canonical domain workbooks while adding live public API layers for operational, maritime-safety and global-signal testing.
+
+## v2.8.2 presentation cleanup
+
+- Internal database IDs and join keys are hidden throughout the normal user interface.
+- Canonical keys remain unchanged in the Excel workbooks and are still used internally for joins and navigation.
+- Real-world operational identifiers such as IMO and MMSI remain visible where useful.
+- Technical column names, snake_case/camelCase headings, enum values, relationship codes, status codes and type values are converted into readable English before display.
+- Unresolved internal keys are suppressed instead of being shown to users.
+- PortWatch tables now use the same presentation-cleaning layer as the rest of the application.
+
 
 ## Repository layout
 

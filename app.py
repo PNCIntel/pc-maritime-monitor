@@ -12,8 +12,8 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v2.7.0"
-RELEASE_NAME = "Navigation, Watch Areas & Persistent Live Data"
+APP_VERSION = "v2.9.0"
+RELEASE_NAME = "Investment & Financial Intelligence"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -167,7 +167,7 @@ def load_hormuz_api(path, parameter_name="", parameter_value=""):
     if parameter_name and parameter_value:
         url += f"?{parameter_name}={int(parameter_value)}"
     try:
-        req = Request(url, headers={"User-Agent":"PC-Trade-System/2.7"})
+        req = Request(url, headers={"User-Agent":"PC-Trade-System/2.9"})
         with urlopen(req, timeout=8) as response:
             return json.loads(response.read().decode("utf-8")), ""
     except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
@@ -302,7 +302,7 @@ def load_gdelt_articles(query, timespan="24h", maxrecords=50):
             "timespan":timespan,"maxrecords":max(1,min(int(maxrecords),250))}
     url=GDELT_DOC_URL+"?"+urlencode(params)
     try:
-        req=Request(url,headers={"User-Agent":"PC-Trade-System/2.7"})
+        req=Request(url,headers={"User-Agent":"PC-Trade-System/2.9"})
         with urlopen(req,timeout=20) as response:
             raw=response.read().decode("utf-8",errors="replace")
         try:
@@ -329,7 +329,7 @@ def load_newsdata_articles(query, api_key, language="en", size=10):
         return pd.DataFrame(), "NewsData.io API key not configured"
     params={"apikey":api_key,"q":query,"language":language,"size":min(int(size),10)}
     try:
-        req=Request(NEWSDATA_LATEST_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.7"})
+        req=Request(NEWSDATA_LATEST_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.9"})
         with urlopen(req,timeout=12) as response:
             payload=json.loads(response.read().decode("utf-8"))
         if str(payload.get("status","")).lower() not in {"success",""}:
@@ -362,7 +362,7 @@ def load_aishub(username, latmin=-90.0, latmax=90.0, lonmin=-180.0, lonmax=180.0
     if str(mmsi).strip(): params["mmsi"]=str(mmsi).strip()
     if str(imo).strip(): params["imo"]=str(imo).strip()
     try:
-        req=Request(AISHUB_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.7"})
+        req=Request(AISHUB_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.9"})
         with urlopen(req,timeout=15) as response:
             payload=json.loads(response.read().decode("utf-8",errors="replace"))
         if isinstance(payload,list) and len(payload)>=2 and isinstance(payload[0],dict):
@@ -436,7 +436,7 @@ PORTWATCH_NUMERIC = [c for c in PORTWATCH_FIELDS if c.startswith(("portcalls","i
 
 def _portwatch_request(params):
     url = PORTWATCH_QUERY_URL + "?" + urlencode(params)
-    req = Request(url, headers={"User-Agent":"PC-Trade-System/2.7"})
+    req = Request(url, headers={"User-Agent":"PC-Trade-System/2.9"})
     with urlopen(req, timeout=12) as response:
         payload=json.loads(response.read().decode("utf-8"))
     if "error" in payload:
@@ -542,9 +542,17 @@ if MISSING_WORKBOOKS:
     st.info("Place the 14 canonical XLSX files in the data/ directory using the filenames shown above.")
     st.stop()
 
-ID_RE=re.compile(r"(^|\s)(id|entity id|company id|programme id|program id|yard id|vessel id|facility id|source id|relationship id|contract id|route id|news id|event id|port id|terminal id|asset id|link id|event link id|news link id|location record|status record|chain id|impact id|observation id|canonical event id|external event id|approval id|status history id|control record id)(\s|$)",re.I)
+# ---------- presentation cleanup ----------
+# Keep internal join keys in the data model, but never expose them in the normal UI.
+# Real-world identifiers (IMO, MMSI, call sign, registration number) remain visible.
+INTERNAL_ID_EXCEPTIONS={"IMO","IMO Number","MMSI","Call Sign","Registration Number","Official Number","VIN","HIN","Activity Number"}
 
-# Internal IDs are required for joins, but never need to be the normal user interface.
+ID_RE=re.compile(
+    r"(?:^|[ _/\\-])(id|ids|identifier|identifiers|internal key|record key)(?:$|[ _/\\-])"
+    r"|(?:^|[ _/\\-])(entity|company|programme|program|yard|vessel|facility|source|relationship|contract|route|news|event|port|terminal|asset|link|observation|approval|control|status|chain)[ _/\\-]*id(?:$|[ _/\\-])",
+    re.I,
+)
+
 ID_FRIENDLY_NAMES={
     "Company ID":"Company","Company Entity ID":"Company","Entity ID":"Entity",
     "Source Entity":"Source","Target Entity":"Target","Source Entity ID":"Source","Target Entity ID":"Target",
@@ -557,17 +565,72 @@ ID_FRIENDLY_NAMES={
     "Operator Company ID":"Operator","Owner Company ID":"Owner",
 }
 
+COLUMN_ENGLISH={
+    "ISO3":"Country Code","portname":"Port","country":"Country","portcalls":"Port Calls",
+    "portcalls_container":"Container Calls","portcalls_dry_bulk":"Dry Bulk Calls",
+    "portcalls_general_cargo":"General Cargo Calls","portcalls_roro":"Ro-Ro Calls",
+    "portcalls_tanker":"Tanker Calls","import":"Imports","export":"Exports",
+    "seendate":"Seen Date","pubDate":"Published","pubdate":"Published",
+    "source_name":"Source","source_url":"Source","source_id":"Source",
+    "image_url":"Image","article_id":"Article","disruption_id":"Disruption",
+}
+
+def _is_internal_id_col(c):
+    c=str(c).strip()
+    if c in INTERNAL_ID_EXCEPTIONS:
+        return False
+    if c in ID_FRIENDLY_NAMES:
+        return True
+    # catches Company_ID / companyId / Record ID / entity identifier without hiding IMO/MMSI
+    normalized=re.sub(r"([a-z0-9])([A-Z])",r"\1 \2",c).replace("_"," ").replace("-"," ")
+    normalized=re.sub(r"\s+"," ",normalized).strip()
+    if normalized in INTERNAL_ID_EXCEPTIONS:
+        return False
+    return bool(ID_RE.search(normalized) or re.search(r"\bID$",normalized,re.I))
+
+def english_header(c):
+    c=str(c).strip()
+    if c in COLUMN_ENGLISH:
+        return COLUMN_ENGLISH[c]
+    if c in ID_FRIENDLY_NAMES:
+        return ID_FRIENDLY_NAMES[c]
+    # snake_case / camelCase / technical headings -> normal English
+    x=re.sub(r"([a-z0-9])([A-Z])",r"\1 \2",c)
+    x=x.replace("_"," ").strip()
+    x=re.sub(r"\s+"," ",x)
+    replacements={
+        "Url":"Source","Urls":"Sources","URL":"Source","URLs":"Sources",
+        "Ro Ro":"Ro-Ro","Roro":"Ro-Ro","Iso3":"Country Code",
+        "Jv":"JV","Imo":"IMO","Mmsi":"MMSI","Teu":"TEU","LNG":"LNG",
+    }
+    if x in replacements:
+        return replacements[x]
+    # Preserve standard acronyms but title-case technical lowercase headers.
+    words=[]
+    keep={"IMO","MMSI","AIS","API","US","USA","UK","UAE","EU","JV","MRO","LNG","TEU","SAR","RFI","RFP","HS","UN","OFAC"}
+    for w in x.split():
+        wu=w.upper()
+        if wu in keep:
+            words.append(wu)
+        elif w.isupper() and len(w)<=4:
+            words.append(w)
+        else:
+            words.append(w.capitalize())
+    return " ".join(words)
+
 def _friendly_col_name(c):
     c=str(c)
-    if c in ID_FRIENDLY_NAMES: return ID_FRIENDLY_NAMES[c]
-    if ID_RE.search(c):
-        s=re.sub(r"\bID\b","",c,flags=re.I).strip(" /_-")
-        return s or "Entity"
-    return c
+    if c in ID_FRIENDLY_NAMES:
+        return ID_FRIENDLY_NAMES[c]
+    if _is_internal_id_col(c):
+        x=re.sub(r"\b(ids?|identifier|identifiers)\b","",english_header(c),flags=re.I).strip(" /_-")
+        return x or "Entity"
+    return english_header(c)
 
 def humanize_df(df, keep_urls=True, show_internal_ids=False):
-    """Resolve internal keys to English names before presentation."""
-    if df is None or df.empty: return pd.DataFrame()
+    """Convert data-model fields into ordinary English before presentation."""
+    if df is None or df.empty:
+        return pd.DataFrame()
     out=pd.DataFrame(index=df.index)
     for c in df.columns:
         cstr=str(c)
@@ -575,37 +638,46 @@ def humanize_df(df, keep_urls=True, show_internal_ids=False):
             continue
         vals=df[c].copy()
 
-        # Resolve ID-bearing fields into canonical English labels.
-        is_id_col=bool(ID_RE.search(cstr) or cstr in ID_FRIENDLY_NAMES)
+        is_id_col=_is_internal_id_col(cstr)
         if is_id_col:
             friendly=_friendly_col_name(cstr)
+            if show_internal_ids:
+                out[english_header(cstr)]=vals
+                continue
+            # IDs are used only as lookup keys: show the resolved English entity name.
             resolved=vals.astype(str).map(label)
-            # Suppress raw source/news/etc IDs if they cannot be translated to something human.
             unresolved=resolved.eq(vals.astype(str))
-            technical_prefix=vals.astype(str).str.match(r"^(SRC|REL|NEWS|NL|OWN|BERTH|EQ|PRICE|FIN|CON|SALE|ANN|FAC|LNK|CM|INT|GOV|TEST|SYS|PORT|TERM|COMP|DEF|YARD|PROG|VES|ASSET|WATER|RAIL|CORR)_?",case=False,na=False)
-            if technical_prefix.all() and unresolved.all() and not show_internal_ids:
+            # Never leak unresolved internal keys into the interface.
+            resolved=resolved.mask(unresolved,"")
+            if resolved.astype(str).str.strip().eq("").all():
                 continue
             if friendly in out.columns:
-                # avoid duplicate English columns such as Primary Operator ID + Primary Operator
-                if out[friendly].astype(str).str.strip().eq("").all():
-                    out[friendly]=resolved
-                continue
-            out[friendly]=resolved
-            if show_internal_ids and friendly != cstr:
-                out[cstr]=vals
-        else:
-            # Also translate exact entity-key values that happen to live in non-ID columns.
-            def trans(v):
-                s=str(v).strip()
-                if s in LABELS:
-                    return label(s)
-                if cstr.lower() in {"relationship","link type","capability","event type","event family","asset type","control type","status","yard model"}:
-                    return pretty_relationship(s) if cstr.lower() in {"relationship","link type"} else pretty_enum(s)
-                return pretty_enum(s)
-            out[cstr]=vals.map(trans)
+                existing=out[friendly].astype(str).str.strip()
+                out.loc[existing.eq(""),friendly]=resolved[existing.eq("")]
+            else:
+                out[friendly]=resolved
+            continue
 
-    # Prefer populated human-readable columns and drop duplicate column names.
+        friendly=english_header(cstr)
+        def trans(v):
+            s=str(v).strip()
+            if not s or s.lower()=="nan":
+                return ""
+            if s in LABELS:
+                return label(s)
+            return pretty_relationship(s) if cstr.lower().replace("_"," ") in {"relationship","link type","relationship type"} else pretty_enum(s)
+        converted=vals.map(trans)
+        if friendly in out.columns:
+            existing=out[friendly].astype(str).str.strip()
+            out.loc[existing.eq(""),friendly]=converted[existing.eq("")]
+        else:
+            out[friendly]=converted
+
     out=out.loc[:,~out.columns.duplicated()].copy()
+    # Remove columns that became entirely blank after internal-ID suppression.
+    blank=[c for c in out.columns if out[c].astype(str).str.strip().eq("").all()]
+    if blank:
+        out=out.drop(columns=blank)
     return out
 
 def hide_ids(df, keep_url=True):
@@ -661,24 +733,34 @@ def label(x):
     s=str(x).strip(); return LABELS.get(s,s)
 
 def pretty_enum(v):
-    """Turn implementation taxonomy into ordinary English for the UI."""
+    """Turn implementation taxonomies/codes into ordinary English for the UI."""
     s=str(v).strip()
-    if not s:
+    if not s or s.lower()=="nan":
         return ""
-    # Do not touch URLs or normal prose.
     if s.startswith("http://") or s.startswith("https://"):
         return s
-    # Resolve canonical IDs first.
     if s in LABELS:
         return LABELS[s]
-    # ALL_CAPS_ENUM / SNAKE_CASE_ENUM -> title-like English.
-    if "_" in s and re.fullmatch(r"[A-Z0-9_ /+-]+",s):
-        s=s.replace("_"," ").strip()
-        # Preserve common acronyms.
+
+    # Common booleans / compact status values.
+    exact={
+        "Y":"Yes","N":"No","YES":"Yes","NO":"No","TRUE":"Yes","FALSE":"No",
+        "UNK":"Unknown","UNKNOWN":"Unknown","N/A":"Not applicable","NA":"Not applicable",
+        "TBD":"To be determined","TBC":"To be confirmed",
+    }
+    if s.upper() in exact:
+        return exact[s.upper()]
+
+    # Translate code-like snake_case / kebab-case / ALL_CAPS values while leaving prose alone.
+    code_like=("_" in s or ("-" in s and " " not in s) or (s.isupper() and len(s)>3))
+    if code_like and not re.fullmatch(r"[A-Z]{2,4}-?\d+",s):
+        x=s.replace("_"," ").replace("-"," ")
+        x=re.sub(r"\s+"," ",x).strip()
+        keep={"MRO","JV","UAE","US","USA","UK","EU","IMO","MMSI","AIS","OPV","LNG","TEU","CG","SAR","RFI","RFP","HS","UN","OFAC","NATO"}
         words=[]
-        keep={"MRO","JV","UAE","US","USA","UK","EU","IMO","OPV","LNG","TEU","CG","SAR","RFI","RFP"}
-        for w in s.split():
-            words.append(w if w in keep else w.lower())
+        for w in x.split():
+            wu=w.upper()
+            words.append(wu if wu in keep else w.lower())
         if words:
             words[0]=words[0] if words[0] in keep else words[0].capitalize()
         return " ".join(words)
@@ -1527,6 +1609,164 @@ def entity_asset_ids_from_profile(prof):
             ids.update(df[col].astype(str).tolist())
     return ids
 
+def _num(v):
+    try:
+        if v is None or str(v).strip()=="": return None
+        return float(str(v).replace(",",""))
+    except Exception:
+        return None
+
+def _money(v,currency=""):
+    n=_num(v)
+    if n is None: return "Undisclosed"
+    cur=str(currency or "").strip()
+    a=abs(n)
+    if a>=1_000_000_000: txt=f"{n/1_000_000_000:,.2f}bn"
+    elif a>=1_000_000: txt=f"{n/1_000_000:,.1f}m"
+    elif a>=1_000: txt=f"{n/1_000:,.1f}k"
+    else: txt=f"{n:,.0f}"
+    return f"{cur} {txt}".strip()
+
+def _metric_value(row):
+    v=_num(row.get("Value",""))
+    unit=str(row.get("Unit","")).strip().lower()
+    cur=str(row.get("Currency","")).strip()
+    if v is None: return "—"
+    if unit=="percent": return f"{v:,.1f}%"
+    if unit=="multiple": return f"{v:,.1f}x"
+    if unit=="currency": return _money(v,cur)
+    return f"{v:,.1f} {row.get('Unit','')}".strip()
+
+def _company_investments(entity_id):
+    df=TABLES.get(("Corporate & Markets","Investments"),pd.DataFrame()).copy()
+    if df.empty: return df
+    scope=company_scope_ids(entity_id)
+    if "Company ID" in df.columns:
+        df=df[df["Company ID"].astype(str).isin(scope)]
+    return df
+
+def render_investment_dashboard(base_df=None, company_id=None, compact=False):
+    df=(base_df.copy() if isinstance(base_df,pd.DataFrame) else TABLES.get(("Corporate & Markets","Investments"),pd.DataFrame()).copy())
+    if df.empty:
+        st.info("No structured investment records are available yet.")
+        return
+    if company_id and "Company ID" in df.columns:
+        df=df[df["Company ID"].astype(str).isin(company_scope_ids(company_id))]
+    if df.empty:
+        st.info("No structured investment records are mapped to this company yet.")
+        return
+    if "Company ID" in df.columns:
+        df["Company"]=df["Company ID"].map(label)
+    if "Announced Date" in df.columns:
+        df["_date"]=pd.to_datetime(df["Announced Date"],errors="coerce")
+        if "Fiscal Year" not in df.columns: df["Fiscal Year"]=df["_date"].dt.year.astype("Int64").astype(str)
+        df["Month"]=df["_date"].dt.to_period("M").astype(str)
+    # Filters
+    fc=st.columns(4 if company_id else 5)
+    idx=0
+    if not company_id:
+        companies=["All"]+sorted([x for x in df.get("Company",pd.Series(dtype=str)).dropna().astype(str).unique() if x])
+        co=fc[idx].selectbox("Company",companies,key="inv_company_filter"); idx+=1
+        if co!="All": df=df[df["Company"].eq(co)]
+    years=["All"]+sorted([str(x) for x in df.get("Fiscal Year",pd.Series(dtype=str)).dropna().astype(str).unique() if str(x).strip()],reverse=True)
+    yr=fc[idx].selectbox("Year",years,key=f"inv_year_{company_id or 'global'}"); idx+=1
+    if yr!="All": df=df[df["Fiscal Year"].astype(str).eq(yr)]
+    regs=["All"]+sorted([x for x in df.get("Region",pd.Series(dtype=str)).dropna().astype(str).unique() if x])
+    rg=fc[idx].selectbox("Region",regs,key=f"inv_region_{company_id or 'global'}"); idx+=1
+    if rg!="All": df=df[df["Region"].eq(rg)]
+    spends=["All"]+sorted([x for x in df.get("Spend Type",pd.Series(dtype=str)).dropna().astype(str).unique() if x])
+    sp=fc[idx].selectbox("Spend type",spends,key=f"inv_spend_{company_id or 'global'}"); idx+=1
+    if sp!="All": df=df[df["Spend Type"].eq(sp)]
+    if not company_id:
+        stages=["All"]+sorted([x for x in df.get("Investment Stage",pd.Series(dtype=str)).dropna().astype(str).unique() if x])
+        sg=fc[idx].selectbox("Stage",stages,key="inv_stage_global")
+        if sg!="All": df=df[df["Investment Stage"].eq(sg)]
+    if df.empty:
+        st.warning("No investments match those filters.")
+        return
+    # numeric fields
+    df["_reported"]=pd.to_numeric(df.get("Reported Value",0),errors="coerce")
+    df["_usd"]=pd.to_numeric(df.get("USD Value if Reported",0),errors="coerce")
+    k1,k2,k3,k4,k5=st.columns(5)
+    k1.metric("Records",f"{len(df):,}")
+    k2.metric("Companies",f"{df['Company'].nunique():,}" if "Company" in df.columns else "—")
+    k3.metric("Countries",f"{df.get('Country',pd.Series(dtype=str)).replace('',pd.NA).nunique():,}")
+    k4.metric("Known USD value",_money(df["_usd"].sum(),"USD") if df["_usd"].notna().any() and df["_usd"].sum()>0 else "Not comparable")
+    k5.metric("Undisclosed",f"{(df.get('Value Status','').astype(str).str.lower()=='undisclosed').sum():,}" if "Value Status" in df.columns else "—")
+    st.caption("USD totals use only values explicitly reported in USD or with a source-reported USD equivalent. Native currencies are not silently converted, avoiding false precision.")
+
+    # Currency totals and analytical charts
+    native=df[df["_reported"].notna() & df.get("Currency",pd.Series(index=df.index,dtype=str)).astype(str).ne("")]
+    if not native.empty:
+        cur=native.groupby("Currency",dropna=False)["_reported"].sum().reset_index().rename(columns={"_reported":"Reported value"})
+        cur["Reported value"]=cur.apply(lambda r:_money(r["Reported value"],r["Currency"]),axis=1)
+        st.markdown("#### Reported investment value by currency")
+        display_df(cur,20)
+    c1,c2=st.columns(2)
+    with c1:
+        st.markdown("#### Investment activity by region")
+        reg=df.groupby("Region",dropna=False).size().sort_values(ascending=False)
+        st.bar_chart(reg)
+    with c2:
+        st.markdown("#### Investment activity by spend type")
+        typ=df.groupby("Spend Type",dropna=False).size().sort_values(ascending=False)
+        st.bar_chart(typ)
+    if "Month" in df.columns and df["Month"].replace("NaT",pd.NA).notna().any():
+        st.markdown("#### Activity through the year")
+        monthly=df[df["Month"].ne("NaT")].groupby("Month").size().sort_index()
+        st.bar_chart(monthly)
+
+    st.markdown("#### Investment register")
+    cols=[c for c in ["Announced Date","Company","Project","Country","Region","Asset / Location","Investment Class","Spend Type","Reported Value","Currency","Status","Investment Stage","Capacity / Scope","Strategic Relevance"] if c in df.columns]
+    out=df[cols].copy()
+    if "Reported Value" in out.columns:
+        out["Reported Value"]=df.apply(lambda r:_money(r.get("Reported Value"),r.get("Currency","")),axis=1)
+    display_df(out.sort_values("Announced Date",ascending=False) if "Announced Date" in out.columns else out,250)
+
+def render_company_financials(entity_id):
+    scope=company_scope_ids(entity_id)
+    fin=TABLES.get(("Corporate & Markets","Company Financial Metrics"),pd.DataFrame()).copy()
+    rep=TABLES.get(("Corporate & Markets","Company Reports"),pd.DataFrame()).copy()
+    op=TABLES.get(("Corporate & Markets","Company Operating Metrics"),pd.DataFrame()).copy()
+    if not fin.empty and "Company ID" in fin.columns: fin=fin[fin["Company ID"].astype(str).isin(scope)]
+    if not rep.empty and "Company ID" in rep.columns: rep=rep[rep["Company ID"].astype(str).isin(scope)]
+    if not op.empty and "Company ID" in op.columns: op=op[op["Company ID"].astype(str).isin(scope)]
+    if fin.empty and rep.empty and op.empty:
+        st.info("No public financial or operating metrics have been structured for this company yet. Private-company disclosure may be limited.")
+        return
+    if not fin.empty:
+        fin["_dt"]=pd.to_datetime(fin.get("Period End",""),errors="coerce")
+        periods=sorted([x for x in fin.get("Period End",pd.Series(dtype=str)).astype(str).unique() if x],reverse=True)
+        selected=st.selectbox("Financial period",["Latest"]+periods,key=f"fin_period_{entity_id}")
+        if selected=="Latest":
+            latest=fin["_dt"].max()
+            view=fin[fin["_dt"].eq(latest)] if pd.notna(latest) else fin
+        else: view=fin[fin["Period End"].astype(str).eq(selected)]
+        st.markdown("### Financial snapshot")
+        metric_rows=view.head(8).to_dict("records")
+        for start in range(0,len(metric_rows),4):
+            boxes=st.columns(min(4,len(metric_rows)-start))
+            for box,row in zip(boxes,metric_rows[start:start+4]):
+                box.metric(pretty_enum(row.get("Metric","Metric")),_metric_value(row))
+        hist=fin.copy()
+        hist["Value"]=pd.to_numeric(hist["Value"],errors="coerce")
+        currency_metrics=hist[hist.get("Unit","").astype(str).eq("currency")]
+        if not currency_metrics.empty:
+            st.markdown("### Financial history")
+            pivot=currency_metrics.pivot_table(index="Metric",columns="Period End",values="Value",aggfunc="first")
+            display_df(pivot.reset_index(),100)
+        st.markdown("### Metric evidence")
+        show=fin[[c for c in ["Period End","Metric","Value","Unit","Currency","Segment","Source URL","Notes"] if c in fin.columns]].copy()
+        if "Value" in show.columns:
+            show["Value"]=fin.apply(_metric_value,axis=1)
+        display_df(show.sort_values("Period End",ascending=False),200)
+    if not op.empty:
+        st.markdown("### Operating metrics")
+        display_df(op[[c for c in ["Period End","Metric","Value","Unit","Mode","Geography","Source URL","Notes"] if c in op.columns]],100)
+    if not rep.empty:
+        st.markdown("### Reports & filings")
+        display_df(rep[[c for c in ["Report Type","Period","Publication Date","Document Title","Currency","Source URL","Status","Notes"] if c in rep.columns]],100)
+
 def render_company_profile(entity_id, entity_name):
     prof=build_company_profile(entity_id,entity_name)
     rec=company_record(entity_id)
@@ -1558,6 +1798,19 @@ def render_company_profile(entity_id, entity_name):
     c5.metric("Programmes",profile_count(prof,"programmes"))
     c6.metric("Events",profile_count(prof,"events"))
     c7.metric("News",profile_count(prof,"news")+profile_count(prof,"announcements")+profile_count(prof,"port_news")+profile_count(prof,"strategic_news"))
+
+    company_view=st.selectbox(
+        "Company section",
+        ["Profile & Assets","Investments","Financials"],
+        key=f"company_section_{entity_id}"
+    )
+    if company_view=="Investments":
+        st.markdown("### Investment intelligence")
+        render_investment_dashboard(company_id=entity_id)
+        return
+    if company_view=="Financials":
+        render_company_financials(entity_id)
+        return
 
     tabs=st.tabs(["Overview","Port Assets","Shipyards & Facilities","Vessels","Programmes & Contracts","Sales Routes","Events & Impact","News","Relationships & Systems","Policy & Compliance","Evidence"])
     with tabs[0]:
@@ -2649,7 +2902,7 @@ NAV_GROUPS={
     "Command Center":["Overview","Search"],
     "Network":["Companies","Ports","Vessels","Corridors & Systems","Cruise & Service Craft","Shipyards"],
     "Operations":["Watch Areas","Port Activity","Hormuz Monitor","Live Feeds"],
-    "Markets & Policy":["Sanctions","Trade Policy","Contracts"],
+    "Markets & Policy":["Investments","Sanctions","Trade Policy","Contracts"],
     "Intelligence":["News & Signals","News & Events"],
     "Data":["Data"],
 }
@@ -2679,8 +2932,8 @@ with qa1:
     if st.button("Watch Areas",use_container_width=True,key="qa_watch"):
         request_nav("Watch Areas"); st.rerun()
 with qa2:
-    if st.button("Sanctions",use_container_width=True,key="qa_sanctions"):
-        request_nav("Sanctions"); st.rerun()
+    if st.button("Investments",use_container_width=True,key="qa_investments"):
+        request_nav("Investments"); st.rerun()
     if st.button("Corridors",use_container_width=True,key="qa_corridors"):
         request_nav("Corridors & Systems"); st.rerun()
 
@@ -2807,6 +3060,11 @@ elif page=="Search":
         if em.empty and hits.empty:
             st.warning("No matching records found.")
 
+elif page=="Investments":
+    header("Investments","Track capital deployment, acquisitions, equity investments and infrastructure commitments across companies, regions and years.")
+    st.markdown("<div class='pc-section-note'>The register separates reported values, currencies and spend classes. Undisclosed transactions remain visible without inventing a value.</div>",unsafe_allow_html=True)
+    render_investment_dashboard()
+
 elif page=="Companies":
     header("Companies","Company-first view across assets, ports, shipyards, vessels, commercial relationships, programmes and events.")
     # honor direct navigation from Search
@@ -2868,19 +3126,24 @@ elif page=="Ports":
     if ports.empty:
         st.info("Port data unavailable.")
     else:
+        # Resolve incoming relationship navigation BEFORE creating keyed widgets.
+        # Streamlit does not allow session_state for a widget key to be mutated
+        # after that widget has been instantiated in the same run.
         requested_port=st.session_state.pop("port_pick_id",None)
-        if requested_port:
-            st.session_state["port_search_text"]=""
-        q=st.text_input("Find port",placeholder="Rotterdam, Shanghai, Odesa, Vancouver, Constanța...",key="port_search_text")
-        p=ports.copy()
-
         requested_terminal=st.session_state.pop("terminal_pick_id",None)
-        if requested_terminal:
-            st.session_state["port_search_text"]=""
+
         if requested_terminal and not terms.empty and "Terminal ID" in terms.columns:
             tr=terms[terms["Terminal ID"].astype(str).eq(str(requested_terminal))]
             if not tr.empty and "Port ID" in tr.columns:
                 requested_port=str(tr.iloc[0]["Port ID"])
+
+        # Clear any previous text filter before the text_input exists so a
+        # relationship link can land directly on the requested port/terminal.
+        if requested_port or requested_terminal:
+            st.session_state["port_search_text"]=""
+
+        q=st.text_input("Find port",placeholder="Rotterdam, Shanghai, Odesa, Vancouver, Constanța...",key="port_search_text")
+        p=ports.copy()
 
         if q: p=_contains_any(p,[q],["Port / Facility","Country","Operator"])
         p=p.sort_values("Port / Facility").reset_index(drop=True)
@@ -3028,7 +3291,7 @@ elif page=="Port Activity":
             "portcalls_tanker":"Tanker Calls","import":"Imports","export":"Exports"
         })
         st.markdown("### Latest daily observations")
-        st.dataframe(show.sort_values("Port Calls",ascending=False) if "Port Calls" in show.columns else show,use_container_width=True,hide_index=True)
+        display_df(show.sort_values("Port Calls",ascending=False) if "Port Calls" in show.columns else show, max_rows=500)
 
         port_options=scoped[["portid","portname","country"]].dropna(subset=["portid"]).drop_duplicates().sort_values(["portname","country"]).to_dict("records")
         if port_options:
