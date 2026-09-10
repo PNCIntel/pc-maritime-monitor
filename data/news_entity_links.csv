@@ -1,4 +1,4 @@
-﻿News Link ID,News ID,Entity ID,Entity Type,Relationship,Relevance,Confidence,Notes
+News Link ID,News ID,Entity ID,Entity Type,Relationship,Relevance,Confidence,Notes
 NLINK00001,NEWS00001,VESSEL_00419,Vessel,SUBJECT,Primary,High,Stena Estrid
 NLINK00002,NEWS00001,PORTG0191,Port,LOCATION,Primary,High,Holyhead Port
 NLINK00003,NEWS00001,TERM0246,Terminal,INCIDENT_AT,Primary,High,Terminal 3
@@ -39,3 +39,7 @@ NLINK00037,NEWS00015,TERM0394,Terminal,PORTFOLIO_CONTEXT,Secondary,High,ICTSI Af
 NLINK00038,NEWS00015,TERM0396,Terminal,PORTFOLIO_CONTEXT,Secondary,High,ICTSI African terminal explicitly referenced in acquisition article
 NLINK00039,NEWS00015,TERM0397,Terminal,PORTFOLIO_CONTEXT,Secondary,High,ICTSI African terminal explicitly referenced in acquisition article
 NLINK00040,NEWS00015,TERM0395,Terminal,PORTFOLIO_CONTEXT,Secondary,High,ICTSI African terminal explicitly referenced in acquisition article
+NLINK00041,NEWS00018,VESSEL_00427,Vessel,SUBJECT,Primary,High,Hercules Star
+NLINK00042,NEWS00018,COMP_PENINSULA,Company,CHARTERER / CONFIRMING COMPANY,Primary,High,Peninsula
+NLINK00043,NEWS00018,COMP_HERCULES_TANKER,Company,FLEET AFFILIATION,Secondary,Medium,Hercules Tanker Management
+NLINK00044,NEWS00018,PORTG0371,Port,REFERENCE LOCATION,Secondary,High,Port Rashid reference point; incident offshore.

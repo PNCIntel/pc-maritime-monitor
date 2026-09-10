@@ -1,4 +1,4 @@
-﻿Vessel Relationship ID,Vessel ID,Vessel Name,Company ID,Relationship Type,Effective From,Effective To,Confidence,Source ID,Notes
+Vessel Relationship ID,Vessel ID,Vessel Name,Company ID,Relationship Type,Effective From,Effective To,Confidence,Source ID,Notes
 VREL_000001,VESSEL_00016,Al Sadaf,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
 VREL_000002,VESSEL_00016,Al Sadaf,COMP_ADNOC_LS,OPERATOR,,,High,SRC_0066,Operator field from seeded vessel record.
 VREL_000003,VESSEL_00017,Arada,COMP_ADNOC_LS,OWNER,,,High,SRC_0066,Owner field from seeded vessel record.
@@ -746,3 +746,7 @@ VREL_000744,VESSEL_00418,Salish,COMP_WSF,OWNER / PUBLIC OPERATOR,,,High,SRC_0323
 VREL_000745,VESSEL_00418,Salish,COMP_WSF,OPERATOR,,,High,SRC_0323,Canonical ferry fleet relationship.
 VREL_000746,VESSEL_00423,ALPHA CRUX,COMP_VODOLEY,OWNER,,,High,SRC_0377,News-linked ownership/operator enrichment v1.16
 VREL_000747,VESSEL_00423,ALPHA CRUX,COMP_VODOLEY,OPERATOR,,,High,SRC_0377,News-linked ownership/operator enrichment v1.16
+VREL_000748,VESSEL_00427,HERCULES STAR,COMP_MACAW_SHIPPING,REGISTERED_OWNER,,,High,SRC_0409,Registered owner represented as Macaw Shipping Ltd in current vessel evidence.
+VREL_000749,VESSEL_00427,HERCULES STAR,COMP_PENINSULA,ISM_MANAGER,,,High,SRC_0409,Peninsula Petroleum S.L. named in certification evidence for management of bunkering services aboard Hercules Star.
+VREL_000750,VESSEL_00427,HERCULES STAR,COMP_PENINSULA,CHARTERER,,,High,SRC_0407,Ship & Bunker reports Peninsula confirmed Hercules Star is chartered by Peninsula.
+VREL_000751,VESSEL_00427,HERCULES STAR,COMP_HERCULES_TANKER,FLEET_AFFILIATION,,,Medium,SRC_0407,Ship & Bunker describes Hercules Tanker Management as Peninsula sister company from which the tanker is chartered; retained as affiliation rather than legal ownership assertion.

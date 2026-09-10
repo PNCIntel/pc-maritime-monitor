@@ -1,4 +1,4 @@
-﻿Company ID,Company,Entity Type,HQ City,HQ Country,Ownership,Business Segments,Senior Leader,Title,Scale / Network Notes,Status,Source ID,As Of
+Company ID,Company,Entity Type,HQ City,HQ Country,Ownership,Business Segments,Senior Leader,Title,Scale / Network Notes,Status,Source ID,As Of
 COMP_CMA_CGM,CMA CGM Group,Company,Marseille,France,Private / Saadé family controlled,Shipping; terminals; air cargo; logistics; inland transport; media,Rodolphe Saadé,Chairman & CEO,66 terminals across 40 countries reported for 2025,Active,SRC_0031,2026-09-07
 COMP_CEVA,CEVA Logistics,Company,Marseille,France,Subsidiary of CMA CGM Group,Contract logistics; freight forwarding; air; ocean; ground; automotive; eCommerce,Patrick Moebel,CEO,Global 3PL; major North American expansion underway,Active,SRC_0029,2026-09-07
 COMP_CMA_TERMINALS,CMA Terminals,Company,Marseille,France,100% owned by CMA CGM Group,Container terminals; port development,,,45 terminals; ~22m TEU handled in 2025,Active,SRC_0003,2026-09-07
@@ -197,7 +197,7 @@ COMP_MOKOBELA,Mokobela Shataki Proprietary Limited,Investment holding company,,S
 COMP_ROSNEFT,Rosneft,Integrated energy company,Moscow,Russia,State-controlled / public company,Oil; gas; pipelines; terminals,,,Developer of Vostok Oil and Bukhta Sever export system,Active,SRC_0343,2026-09-08
 COMP_VOSTOK_OIL,Vostok Oil,Energy project / platform,,Russia,Rosneft project,Upstream oil; pipeline; Arctic export logistics,,,Linked to Bukhta Sever and Vankor-Payakha-Bukhta Sever pipeline,Development / ramp-up,SRC_0343,2026-09-08
 COMP_CHCL,Cargo Handling Corporation Ltd (CHCL),Terminal operator,Port Louis,Mauritius,State-linked port cargo handler,Container terminal operations; cargo handling,,,Operator upgrading Mauritius Container Terminal equipment,Active,SRC_0344,2026-09-08
-COMP_MPA_MAURITIUS,Mauritius Ports Authority,Port authority,Port Louis,Mauritius,Government authority,Port authority; infrastructure,None,,Authority for Port Louis,Active,SRC_0344,2026-09-08
+COMP_MPA_MAURITIUS,Mauritius Ports Authority,Port authority,Port Louis,Mauritius,Government authority,Port authority; infrastructure,,,Authority for Port Louis,Active,SRC_0344,2026-09-08
 COMP_PORT_OAKLAND,Port of Oakland,Port authority,"Oakland, CA",United States,Public port authority,Seaport; airport; commercial real estate,,,Sponsor of Oakland Harbor Turning Basins Widening Project,Active,SRC_0347,2026-09-08
 COMP_USACE,U.S. Army Corps of Engineers,Government engineering agency,"Washington, DC",United States,U.S. federal agency,Navigation infrastructure; dredging; civil works,,,Federal partner on Oakland turning-basin project,Active,SRC_0347,2026-09-08
 COMP_AUSTAL,Austal Limited,Shipbuilder,"Henderson, WA",Australia,Publicly listed,Naval and commercial shipbuilding,,,Parent of Austal USA,Active,SRC_0348,2026-09-08
@@ -244,3 +244,6 @@ COMP_CONCOR,Container Corporation of India (CONCOR),Intermodal rail / terminal o
 COMP_DFCCIL,Dedicated Freight Corridor Corporation of India Ltd. (DFCCIL),Freight rail infrastructure company,New Delhi,India,Government / Ministry of Railways,Dedicated freight rail,,,Western/Eastern DFC,Active,SRC_0406,2026-09-08
 COMP_INDIAN_RAILWAYS,Indian Railways,National railway system,New Delhi,India,Government of India,Rail infrastructure; freight; passenger,,,National rail system,Active,SRC_0406,2026-09-08
 COMP_HAMBURG_PORT_AUTHORITY,Hamburg Port Authority,Port infrastructure authority,Hamburg,Germany,Public authority,Port infrastructure; port railway,,,Hamburg Port Railway,Active,SRC_0403,2026-09-08
+COMP_PENINSULA,Peninsula,Company,Gibraltar,Gibraltar,Private,Marine energy; bunkering; physical supply; trading,,,"Global marine energy supplier with UAE physical operations including Dubai, Jebel Ali, Fujairah and Abu Dhabi.",Active,SRC_0408,2026-09-10
+COMP_HERCULES_TANKER,Hercules Tanker Management,Company,,,Private / affiliated with Peninsula,Tanker management; deepsea and specialised IMO II product tankers; LNG bunker vessels,,,Established in 2023; grew out of Peninsula in-house chartering function; manages expanding tanker fleet.,Active,SRC_0410,2026-09-10
+COMP_MACAW_SHIPPING,Macaw Shipping Ltd,Company,,Spain,Private,Vessel ownership,,,Registered owner reported for Hercules Star (IMO 9916135).,Active,SRC_0409,2026-09-10

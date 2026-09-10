@@ -1,4 +1,4 @@
-﻿Source ID,Publisher,Source Note,URL,Checked As Of,Source Type
+Source ID,Publisher,Source Note,URL,Checked As Of,Source Type
 SRC_0001,akamai.apmterminals.com,,https://akamai.apmterminals.com/en/about/global-leadership,2026-09-07,Official / primary source
 SRC_0002,careers.abports.co.uk,,https://careers.abports.co.uk/content/Graduate/?locale=en_GB,2026-09-07,Official / primary source
 SRC_0003,cmacgm-group.com,,https://cmacgm-group.com/en/group-and-vision/our-activities/terminals,2026-09-07,Official / primary source
@@ -405,3 +405,8 @@ SRC_0403,HHLA,"Hamburg Port Railway: ~290 km, ~210 freight trains and >5,500 wag
 SRC_0404,HHLA,METRANS acquired 50% of Afluent Arad South Terminal in June 2026.,https://bericht.hhla.de/halbjahresfinanzbericht-2026/zwischenabschluss/verkuerzter-konzernanhang/erwerb-und-veraeusserungen.html,2026-09-08,Official / primary
 SRC_0405,CONCOR,Current rail-terminal directory lists 193 container rail terminal locations/stations.,https://www.concorindia.co.in/rail-terminals,2026-09-08,Official / primary
 SRC_0406,DFCCIL,"Western DFC ~1,506 km JNPT-Dadri; mostly double-track electrified; double-stack design.",https://dfccil.com/upload/1353697422824.pdf,2026-09-08,Official / primary
+SRC_0407,Ship & Bunker,Peninsula confirmation of Hercules Star incident off Dubai; casualty and charter relationship details.,https://shipandbunker.com/news/world/583774-peninsula-confirms-tanker-involved-in-incident-off-dubai,2026-09-10,Trade press / company-confirmed reporting
+SRC_0408,Peninsula,Official Peninsula report on Hercules Star first Fujairah physical bunker delivery; vessel size and operating role.,https://www.peninsula360.com/news/first-physical-supply-in-fujairah/,2026-09-10,Official / primary source
+SRC_0409,Bureau Veritas / Peninsula Petroleum,Certification schedule identifying Hercules Star as IMO 9916135 and managed within Peninsula Petroleum bunkering operations.,https://www.peninsula360.com/wp-content/uploads/2023/04/BV-ISO-9001.pdf,2026-09-10,Certification / primary evidence
+SRC_0410,Emirates Shipping Association,Member profile for Hercules Tanker Management; describes HTM as an integrated tanker company that grew from Peninsula chartering.,https://7emirates.com/members/,2026-09-10,Industry association / member profile
+SRC_0411,DP World,Official DP World history identifying Port Rashid as its original Dubai port operation.,https://dpw-prod-cd-1.dpworld.com/about-us,2026-09-10,Official / primary source

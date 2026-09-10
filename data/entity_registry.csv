@@ -1,4 +1,4 @@
-﻿Entity ID,Entity Type,Canonical Name,Country,Parent Entity ID,Status
+Entity ID,Entity Type,Canonical Name,Country,Parent Entity ID,Status
 PERSON_0001,Person,Rodolphe Saadé,,,Active
 PERSON_0002,Person,Patrick Moebel,,,Active
 PERSON_0003,Person,Keith Svendsen,,,Active
@@ -1817,3 +1817,8 @@ RAILNODE_0059,Rail Node,Dadri DFC Terminal,India,COMP_DFCCIL,Active
 RAILNODE_0060,Rail Node,Rewari DFC Junction,India,COMP_DFCCIL,Active
 RAILNODE_0061,Rail Node,Mundra Rail Gateway,India,COMP_CONCOR,Active
 RAILNODE_0062,Rail Node,Pipavav Rail Gateway,India,COMP_CONCOR,Active
+COMP_PENINSULA,Company,Peninsula,Gibraltar,,Active
+COMP_HERCULES_TANKER,Company,Hercules Tanker Management,,,Active
+COMP_MACAW_SHIPPING,Company,Macaw Shipping Ltd,Spain,,Active
+VESSEL_00427,Vessel,HERCULES STAR,Gibraltar,COMP_MACAW_SHIPPING,Casualty / status under assessment
+PORTG0371,Port,Port Rashid,United Arab Emirates,COMP_DPW,Active

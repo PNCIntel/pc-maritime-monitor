@@ -1,4 +1,4 @@
-﻿Port ID,Port / Facility,Country,Latitude,Longitude,Operator Company ID,Operator,Facility Type,Key Role,Coverage Note,Source ID
+Port ID,Port / Facility,Country,Latitude,Longitude,Operator Company ID,Operator,Facility Type,Key Role,Coverage Note,Source ID
 UKP001,Ayr,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
 UKP002,Barrow,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
 UKP003,Barry,United Kingdom,,,COMP_ABP,Associated British Ports,Port / terminal,Major commercial port or terminal,Phase 1 operator mapping,SRC_0009
@@ -425,3 +425,4 @@ PORTG0367,Port of Ravenna,Italy,,,COMP_EUROGATE,EUROGATE,Port / terminal,Parent 
 PORTG0368,Port of Salerno,Italy,,,COMP_EUROGATE,EUROGATE,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0373
 PORTG0369,Port of Damietta,Egypt,,,COMP_EUROGATE,EUROGATE,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0373
 PORTG0370,Port of Muuga / Tallinn,Estonia,,,COMP_HHLA,HHLA,Port / terminal,Parent port for canonical terminal network,Operator-network expansion v1.16,SRC_0374
+PORTG0371,Port Rashid,United Arab Emirates,,,COMP_DPW,DP World,Port / cruise and maritime gateway,Dubai commercial port and maritime gateway; reference point for offshore incident reporting,Added during Hercules Star incident-resolution test.,SRC_0411

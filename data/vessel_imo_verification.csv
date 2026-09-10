@@ -1,4 +1,4 @@
-﻿Vessel ID,Vessel Name,Owner Company ID,Owner Name,IMO,Verification Status,Confidence,Verified As Of,IMO Verification URL,Fleet Source ID,Vessel Status,Notes
+Vessel ID,Vessel Name,Owner Company ID,Owner Name,IMO,Verification Status,Confidence,Verified As Of,IMO Verification URL,Fleet Source ID,Vessel Status,Notes
 VESSEL_00001,UGR Al Samha,COMP_UGR,United Global Ro-Ro,9973444,IMO populated — checksum valid,High,2026-09-07,https://www.vesselfinder.com/vessels/details/9973444,SRC_0060,Operating,IMO added in v1.3 enrichment pass.
 VESSEL_00002,UGR Zakher,COMP_UGR,United Global Ro-Ro,9980411,IMO populated — checksum valid,High,2026-09-07,https://www.vesselfinder.com/vessels/details/9980411,SRC_0060,Operating,IMO added in v1.3 enrichment pass.
 VESSEL_00003,UGR Al Reef,COMP_UGR,United Global Ro-Ro,9448138,IMO populated — checksum valid,High,2026-09-07,https://www.vesselfinder.com/vessels/details/9448138,SRC_0060,Operating,IMO added in v1.3 enrichment pass.
@@ -357,3 +357,4 @@ VESSEL_00355,Presque Isle,COMP_GREAT_LAKES_FLEET,Great Lakes Fleet,7303877,IMO p
 VESSEL_00356,Roger Blough,COMP_GREAT_LAKES_FLEET,Great Lakes Fleet,7222138,IMO populated — checksum valid,High,2026-09-07,https://www.vesselfinder.com/vessels/details/7222138,SRC_0167,2023 regulator-recorded; current status to verify,Generated during v1.9 unified branch merge.
 VESSEL_00357,Badger,COMP_LAKE_MICHIGAN_CARFERRY,Lake Michigan Carferry,5033583,IMO populated — checksum valid,High,2026-09-07,https://www.vesselfinder.com/vessels/details/5033583,SRC_0167,2023 regulator-recorded; current status to verify,Generated during v1.9 unified branch merge.
 VESSEL_00358,Florence Spirit,COMP_MCKEIL,McKeil Marine,9314600,IMO populated — checksum valid,High,2026-09-07,https://www.vesselfinder.com/vessels/details/9314600,SRC_0177,Operating,Generated during v1.9 unified branch merge.
+VESSEL_00427,HERCULES STAR,COMP_MACAW_SHIPPING,Macaw Shipping Ltd,9916135,IMO populated — certification evidence,High,2026-09-10,https://www.peninsula360.com/wp-content/uploads/2023/04/BV-ISO-9001.pdf,SRC_0409,Casualty / status under assessment,IMO 9916135 appears in Peninsula Petroleum certification schedule.

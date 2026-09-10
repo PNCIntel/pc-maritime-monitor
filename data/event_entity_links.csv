@@ -1,4 +1,4 @@
-﻿Event Link ID,Observation ID,Canonical Event ID,Entity ID,Entity Type,Link Type,Match Basis,Confidence,Source Dataset,Notes
+Event Link ID,Observation ID,Canonical Event ID,Entity ID,Entity Type,Link Type,Match Basis,Confidence,Source Dataset,Notes
 ELINK_000001,OBS_000029,,VESSEL_00088,Vessel,AFFECTS / SUBJECT,Vessel name exact-normalized,High,maritime_attacks_2026,Observation subject: BARAKAH
 ELINK_000002,OBS_000044,,VESSEL_00092,Vessel,AFFECTS / SUBJECT,Vessel name exact-normalized,High,maritime_attacks_2026,Observation subject: AL BAHYAH
 ELINK_000003,OBS_000052,,VESSEL_00055,Vessel,AFFECTS / SUBJECT,Vessel name exact-normalized,High,maritime_attacks_2026,Observation subject: NAVIG8MESSI
@@ -26,3 +26,8 @@ ELINK_000024,OBS_000611,EVENT_0018,COMP_BUSAN_PA,Authority,AFFECTS,Exact authori
 ELINK_000025,OBS_000611,EVENT_0018,COMP_INCHEON_PA,Authority,AFFECTS,Exact authority,High,news_intake_v1_15,Incheon PA
 ELINK_000026,OBS_000611,EVENT_0018,COMP_ULSAN_PA,Authority,AFFECTS,Exact authority,High,news_intake_v1_15,Ulsan PA
 ELINK_000027,OBS_000611,EVENT_0018,COMP_YEOSU_GWANGYANG_PA,Authority,AFFECTS,Exact authority,High,news_intake_v1_15,Yeosu-Gwangyang PA
+ELINK_000028,OBS_000003,,VESSEL_00427,Vessel,AFFECTS / SUBJECT,IMO 9916135 + vessel name retrospective canonicalization,High,maritime_attacks_2026,Retroactively resolves prior 2026-03-01 Hercules Star event to canonical vessel.
+ELINK_000029,OBS_000612,EVENT_0019,VESSEL_00427,Vessel,AFFECTS / SUBJECT,Company-confirmed vessel name + IMO,High,news_intake_v1_25_test,Current Dubai incident.
+ELINK_000030,OBS_000612,EVENT_0019,COMP_PENINSULA,Company,CHARTERER / AFFECTED COMPANY,Company confirmation and charter relationship,High,news_intake_v1_25_test,Peninsula charterer and reporting company.
+ELINK_000031,OBS_000612,EVENT_0019,PORTG0371,Port,REFERENCE LOCATION / GATEWAY,UKMTO location stated relative to Port Rashid,High,news_intake_v1_25_test,"Incident occurred offshore; Port Rashid is a geographic reference/gateway, not incident site."
+ELINK_000032,OBS_000612,EVENT_0019,COMP_HERCULES_TANKER,Company,FLEET AFFILIATION,Ship & Bunker sister-company / charter-from relationship,Medium,news_intake_v1_25_test,Do not interpret as confirmed legal owner.
