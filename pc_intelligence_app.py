@@ -126,12 +126,39 @@ div[data-testid="stLinkButton"] a:visited,
 # Data helpers — all reads are from the same Excel-backed P&C model
 # -----------------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
+def _xl_cached(file_name: str, sheet: str, modified_ns: int, file_size: int) -> pd.DataFrame:
+    """Read one Excel sheet. File fingerprint is part of the Streamlit cache key."""
+    path = DATA / file_name
+    df = pd.read_excel(path, sheet_name=sheet)
+    return df.dropna(how="all")
+
+
 def xl(file_name: str, sheet: str) -> pd.DataFrame:
+    """
+    Read a shared-model workbook and invalidate cached data whenever the underlying
+    Excel file changes, even when the filename is unchanged.
+    """
+    path = DATA / file_name
+    if not path.exists():
+        return pd.DataFrame()
     try:
-        df = pd.read_excel(DATA / file_name, sheet_name=sheet)
-        return df.dropna(how="all")
+        stat = path.stat()
+        return _xl_cached(file_name, sheet, stat.st_mtime_ns, stat.st_size)
     except Exception:
         return pd.DataFrame()
+
+
+def data_file_status(file_name: str) -> dict:
+    path = DATA / file_name
+    if not path.exists():
+        return {"file": file_name, "exists": False, "size": 0, "modified": ""}
+    stat = path.stat()
+    return {
+        "file": file_name,
+        "exists": True,
+        "size": stat.st_size,
+        "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 def text_col(df, col):
@@ -389,6 +416,32 @@ page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 st.sidebar.caption("Excel-backed v3.0 · shared P&C canonical data")
 
+with st.sidebar.expander("Data status", expanded=False):
+    _hazard_status = data_file_status("13_events_hazards.xlsx")
+    _intel_status = data_file_status("09_intelligence.xlsx")
+
+    if _hazard_status["exists"]:
+        st.caption(
+            f"Events workbook: {len(hazard_events):,} events · "
+            f"{_hazard_status['size'] / 1024:.1f} KB · "
+            f"modified {_hazard_status['modified']}"
+        )
+        if not hazard_events.empty and "Start Date" in hazard_events.columns:
+            _latest_dt = pd.to_datetime(hazard_events["Start Date"], errors="coerce").max()
+            if pd.notna(_latest_dt):
+                st.caption(f"Latest event date loaded: {_latest_dt.strftime('%Y-%m-%d')}")
+    else:
+        st.error("13_events_hazards.xlsx is missing from /data.")
+
+    if _intel_status["exists"]:
+        st.caption(f"Intelligence workbook: {_intel_status['size'] / 1024:.1f} KB")
+    else:
+        st.error("09_intelligence.xlsx is missing from /data.")
+
+    if st.button("Refresh Excel data", key="refresh_excel_data"):
+        st.cache_data.clear()
+        st.rerun()
+
 # Header
 st.markdown('<div class="pc-kicker">Power & Corridors Intelligence</div>', unsafe_allow_html=True)
 st.markdown(f'<div class="pc-title">{page}</div>', unsafe_allow_html=True)
@@ -538,7 +591,7 @@ REGIONAL_SECURITY_AREAS = {
             "united arab emirates","uae","iran","iraq","saudi arabia","bahrain",
             "qatar","kuwait","oman","persian gulf","arabian gulf","gulf of oman",
             "strait of hormuz","hormuz","kharg","al-faw","dubai","abu dhabi",
-            "fujairah","doha","muscat","ras tanura"
+            "fujairah","doha","muscat","ras tanura","jazan","jizan"
         ],
     },
     "Black Sea": {
@@ -920,6 +973,22 @@ elif page == "Regional Security":
         "Mapped points use known event coordinates from Event Locations. "
         "Events without coordinates remain in the regional incident record below the map."
     )
+
+    _jazan_loaded = (
+        not hazard_events.empty
+        and contains_any(
+            hazard_events,
+            ["Title", "Location", "Description"],
+            ["Jazan", "Jizan", "Saudi Aramco"]
+        ).any()
+    )
+    if _jazan_loaded:
+        st.success("Latest Gulf dataset detected · Jazan refinery incident loaded.")
+    else:
+        st.warning(
+            "Latest Gulf dataset not detected. Replace /data/13_events_hazards.xlsx "
+            "with the latest workbook and use Data status → Refresh Excel data."
+        )
 
     region_names=list(REGIONAL_SECURITY_AREAS.keys())
     region_tabs=st.tabs(region_names)
