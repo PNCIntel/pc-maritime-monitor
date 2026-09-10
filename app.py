@@ -1653,6 +1653,13 @@ def event_associations(event_id):
             out.append(("System",str(r.get("System ID","")),str(r.get("System","")),str(r.get("Relationship","")),str(r.get("Confidence",""))))
     return out
 
+_EVENT_RENDER_SCOPE = 0
+
+def _next_event_render_scope():
+    global _EVENT_RENDER_SCOPE
+    _EVENT_RENDER_SCOPE += 1
+    return _EVENT_RENDER_SCOPE
+
 def render_event_associations(event_id, key_prefix="event"):
     links=event_associations(event_id)
     if not links: return
@@ -1664,13 +1671,15 @@ def render_event_associations(event_id, key_prefix="event"):
             st.markdown(f"**{resolved_name or name or lid}**  \n{pretty_enum(rel)}" + (f" · {conf}" if conf else ""))
         with c2:
             if page and resolved_id:
-                if st.button("Open ↗",key=f"{key_prefix}_{event_id}_{i}_{resolved_id}",use_container_width=True):
+                widget_key = re.sub(r"[^A-Za-z0-9_.-]+", "_", f"{key_prefix}_{event_id}_{i}_{typ}_{resolved_id}_{rel}")
+                if st.button("Open ↗",key=widget_key,use_container_width=True):
                     request_nav(page,key,resolved_id,resolved_name or name); st.rerun()
 
 def render_event_cards(events,max_items=40):
     if events is None or events.empty:
         st.info("No linked events.")
         return
+    render_scope = _next_event_render_scope()
     e=events.copy()
     if "Start Date" in e.columns:
         e["_dt"]=pd.to_datetime(e["Start Date"],errors="coerce")
@@ -1682,9 +1691,11 @@ def render_event_cards(events,max_items=40):
             v=str(row.get(c,"")).strip()
             if v and v.lower()!='nan': meta.append(pretty_enum(v))
         st.markdown(f"<div class='pc-card'><div class='pc-big'>{title}</div><div class='pc-search-details'>{' · '.join(meta)}</div></div>",unsafe_allow_html=True)
-        render_event_associations(eid,key_prefix=f"eventcard_{idx}")
+        card_prefix=f"eventblock_{render_scope}_card_{idx}"
+        render_event_associations(eid,key_prefix=card_prefix)
         url=str(row.get("Primary Source URL","")).strip()
-        if url.startswith("http"): st.link_button("Open source ↗",url)
+        if url.startswith("http"):
+            st.link_button("Open source ↗",url,key=f"{card_prefix}_{eid}_source")
         st.markdown("<div style='height:8px'></div>",unsafe_allow_html=True)
 
 def entity_asset_ids_from_profile(prof):
