@@ -1,244 +1,51 @@
-# P&C Trade System v1.25 — GitHub / Streamlit Split-Excel Deployment
+# P&C Trade System v1.17 — Rail Networks & Intermodal Connectivity
 
-Upload the contents of this package to the repository root.
+This is the complete GitHub + Streamlit deployment package.
 
-Structure:
+## v1.17 additions
+Rail is now a first-class movement layer alongside ports, vessels, ferries, aviation and inland logistics.
 
-- app.py
-- requirements.txt
-- data_manifest.json
-- data/
-  - 01_core_entities.xlsx
-  - 02_maritime.xlsx
-  - 03_rail.xlsx
-  - 04_road_trucking.xlsx
-  - 05_aviation.xlsx
-  - 06_infrastructure.xlsx
-  - 07_corporate_markets.xlsx
-  - 08_transactions.xlsx
-  - 09_intelligence.xlsx
-  - 10_sources_evidence.xlsx
+New runtime tables:
+- `rail_operators.csv`
+- `rail_networks.csv`
+- `rail_nodes.csv`
+- `rail_links.csv`
+- `rail_relationships.csv`
+- `rail_fleet.csv`
+- `rail_connections.csv`
+- `rail_news.csv`
 
-The Streamlit app reads each logical table from the appropriate Excel workbook and sheet.
-The CSV fallback remains temporarily for backwards compatibility.
+## Initial rail population
+- 19 rail operators / infrastructure authorities
+- 20 named networks and corridors
+- 62 physical rail nodes
+- 38 origin → destination movement links
+- 26 network/company relationship records
+- 5 rolling-stock aggregate records
+- 32 direct rail-to-port / rail-to-asset connections
+- 5 rail news/development records
 
-This is the v1.25 theory/stress-test model before Supabase migration.
+Initial coverage includes:
+UAE National Rail Network, Hafeet Rail, Saudi East Freight, Middle Corridor / BTK,
+CN, CPKC, Alameda Corridor, BNSF, Union Pacific, Norfolk Southern,
+Transnet ContainerCor / NorthCor, Tanger Med / ONCF, HHLA / METRANS,
+Hamburg Port Railway, Western Dedicated Freight Corridor and CONCOR.
 
-## v1.25.1 enrichment
-- Inocea: Davie, Helsinki Shipyard, Gulf Copper, Sata Shipbuilding, Davie Defense and Federal Fleet Services.
-- CLI: Itaqui added as a canonical port; CLI Norte and CLI Sul added as actual terminal records linked to Itaqui and Santos.
-- Seaspan: searchable company/alias handling, Entity Registry coverage, fleet portfolio and ten official operating-fleet examples.
-- News: additional entity-linked Inocea, Seaspan, CLI, Macquarie/Qube and AD Ports records.
-- AD Ports Group: 24 official monthly share-price observations for 2024–2025 plus an in-app price chart.
+## Streamlit
+`app.py` is v1.17 and includes a new **Rail Networks** page.
+Company pages show linked rail networks, rail nodes and rolling-stock aggregates.
+Port pages show canonical rail connections.
+Ask P&C searches rail networks, nodes, links and rail news.
 
+## Model workbook
+`model/PC_Trade_System_Intelligence_Model_v1_17_Rail_Networks.xlsx`
 
-## v1.26.1 — Genoa megaship-access stress test
-
-Added **Genoa Megaship Access / Rhine-Alpine Gateway** as the 11th systems test.
-
-The new graph tests:
-- Western Ligurian Sea Port Authority → Port of Genoa
-- Port authority → New Genoa Breakwater
-- PerGenova Breakwater consortium → construction programme
-- Webuild / Fincantieri Infrastructure / Fincosit / SIDRA → consortium participation
-- Breakwater → access channel / turning basin / megaship capability
-- Port of Genoa → Terzo Valico dei Giovi–Genoa Junction
-- Terzo Valico / Genoa → Rhine–Alpine Corridor
-- 8 Sep 2026 news → authority / port / asset / contractors / rail project / corridor
-
-This adds marine-access infrastructure as a first-class facility category alongside berths,
-yards, rail sidings, locks, canals, warehouses and other infrastructure.
-
-## v1.30 interface fix
-The Entity Explorer is now relationship-aware rather than table-aware. For shipbuilding companies it directly resolves:
-- shipyards and yard facilities/capabilities
-- defence/coast guard sample vessels
-- commercial maritime vessels from the maritime workbook
-- programmes and programme participation
-- contracts
-- sales/delivery routes
-- announcements and linked news
-- corporate relationships and system/corridor exposure
-
-The Shipyards & Defence page is company-first, so selecting Seaspan, Inocea, Bollinger, MAESTRAL, Fincantieri, etc. immediately exposes the connected layers.
-
-## v1.27.2 group traversal
-Company profiles now traverse controlled/owned subsidiaries and JVs up to three levels.
-This fixes parent-group profiles such as Inocea and EDGE:
-- Inocea now exposes Davie, Helsinki Shipyard and Davie Defense yards/programmes.
-- EDGE now exposes ADSB and MAESTRAL shipbuilding activity.
-The profile also labels the operating company on each yard and the prime/lead company on programmes.
-
-## v1.27.3 maritime asset traversal
-Company profiles now traverse the dedicated Maritime workbook:
-Company → Port Terminals → Parent Ports → Port Ownership/JV → Berths → Equipment → Port News.
-This fixes APM Terminals, DP World, PSA, Hutchison Ports and other terminal operators whose asset networks were already populated but hidden from the entity profile.
-
-## v1.27.4 readability + visuals
-- Fixes unreadable white Streamlit detail/popover boxes in dark mode.
-- Resolves internal company/entity/programme/yard/port/terminal/vessel keys to English names before display.
-- Internal IDs are hidden throughout the normal interface; Data Explorer has an explicit debug-only toggle.
-- Adds company port-footprint maps where canonical port coordinates exist.
-- Adds terminal-by-country and seeded terminal-capacity charts.
-- Adds shipyard country/capability charts.
-- Restores company market-price line charts where a time series exists.
-- Adds system composition charts and system maps where system ports have coordinates.
-- Also hardens Source link keys against StreamlitDuplicateElementKey.
-
-## v1.27.5 stability + visual fix
-- Eliminates repeated Streamlit link-button widgets that caused DuplicateElementKey crashes.
-- Source links are now ordinary HTML/markdown links.
-- Forces Streamlit Cloud header/toolbar into the dark app theme.
-- Keeps white detail/popover surfaces readable with dark text.
-- Adds shipyard footprint maps for the detailed stress-test yards.
-- Moves maps/charts to the top of company Overview pages.
-
-## v1.28 — Events, Hazards & Impact Propagation
-
-New data workbook:
-- `data/13_events_hazards.xlsx`
-
-New model layers:
-- unified events
-- event locations
-- event-to-asset links
-- event-to-company links
-- event-to-system/corridor links
-- impact chains
-- event status history
-- event taxonomy
-
-Interface:
-- top navigation: Search | Companies | Ports | Shipyards | Vessels | Contracts | News & Events | Systems | Data
-- News & Events is map-first
-- company profiles overlay linked events on assets
-- ports, shipyards and systems expose linked events and impact chains
-- Contracts combines government procurement with commercial/infrastructure transactions and sales routes
-
-## v1.28.1 navigation stability fix
-- Fixes `StreamlitWidgetAlreadyInstantiatedError` from Search → Open.
-- Page changes now use a deferred `nav_request`, applied before the top navigation widget is created on the next run.
-- Search can open a company profile without mutating the instantiated `top_nav` widget key.
-- Improves dark-theme contrast for ordinary Streamlit buttons.
-
-## v1.28.2 search readability fix
-App-only update:
-- Commercial / contract search cards use English titles such as `AD Ports Group → MBS Logistics`.
-- Raw transaction/deal IDs are no longer used as card titles.
-- Semicolon-delimited company IDs are resolved into company names.
-- Markdown `**...**` markers are no longer displayed literally inside HTML cards.
-- Commercial cards prioritize buyer/investor, target, type, value, status and dates.
-
-## v1.28.3 connected object navigation
-App-only update:
-- Event-linked assets, companies and systems are rendered as navigable object cards.
-- `Open` routes Zayed Port / Shanghai / Odesa to Ports, yards to Shipyards, companies to Companies, systems to Systems and vessels to Vessels.
-- Ports, Shipyards and Systems honor direct object selections from event links.
-- Technical enum values are humanized: `DIRECTLY_AFFECTED` → `Directly affected`, `COAST_GUARD_NEWBUILD` → `Coast guard newbuild`.
-- Internal Link / Event / Observation identifiers are suppressed from normal tables.
-
-## v1.28.4 portfolio + direct-port traversal
-App-only update:
-- Company profiles now read ports directly from the Maritime `Ports` operator mapping, not only through terminal rows.
-- Associated British Ports therefore exposes its UK port portfolio instead of showing Ports = 0.
-- Portfolio investments are distinguished from controlled subsidiaries.
-- OMERS / OMERS Infrastructure can expose Associated British Ports as portfolio/investment exposure without treating ABP as controlled.
-- Direct port networks get port-country figures even when no terminal-level records are present.
-- Corporate relationship cards now provide an Open action to navigate to the related company.
-
-## v1.28.5 related-news traversal
-App-only update:
-- GFS Ship Management now surfaces the canonical GFS GALAXY attack through its linked vessel/event records.
-- Strategic Events are rendered in the normal News tab as incident/reporting coverage.
-- Company news discovery expands through meaningful project/corporate relationships such as `PARTICIPATES_IN`.
-- Fincantieri Infrastructure Opere Marittime therefore inherits the Genoa breakwater article through its PerGenova consortium participation.
-- News counts include related canonical-event coverage.
-- Overview now shows latest linked reporting so relevant news is visible without opening the News tab.
-
-## v1.28.6 reliable cross-object navigation
-App-only update:
-- Fixes Open buttons that changed page but left the old selector value in place.
-- Company, Port, Shipyard and System selectors now use explicit keyed widget state that is updated before widget instantiation.
-- Cross-navigation clears stale search filters that would otherwise hide the requested object.
-- Relationship rows expose explicit `Open <Company>` actions for each linked company endpoint instead of guessing the opposite endpoint.
-- Fincantieri / EDGE / MAESTRAL relationship navigation now resolves predictably.
-- Vessel jumps populate the vessel search field before it is instantiated.
-
-## v1.28.7 session-state safety
-App-only update:
-- Fixes TypeError when old Streamlit sessions retain string values in numeric selector state.
-- Company, Port and Shipyard selector state is coerced to a valid integer before comparison/use.
-- System selector state is validated against available names.
-- Cross-object navigation remains compatible with sessions created by older app versions.
+Blank values mean not yet verified — never zero.
 
 
-## v1.29 — Trade Policy, Market Access & Sanctions Compliance
-New workbook: `data/14_trade_policy_compliance.xlsx`.
+## App v1.19 visualization upgrade
+The Streamlit application now includes an Entity Explorer, relationship graphs on company/port/vessel/rail views, and dynamic Watch Areas assembled from the canonical corridor and relationship model. The underlying data baseline remains Model v1.17.
 
-Adds first-class layers for CEPAs/FTAs/customs unions, agreement parties, asset/company exposure, tariff coverage, HS-level test structure, rules of origin, customs/procurement, trade remedies, sanctions authorities/programmes/designations, sanctions entity links, watchlist taxonomy and policy precedence.
 
-Top navigation now includes Trade Policy and Sanctions. Company profiles include a Policy & Compliance tab.
-
-## v1.29.1 sanctions readability fix
-App-only update:
-- Sanctions charts use programme names rather than internal programme IDs.
-- Default white Streamlit sanctions bar chart is replaced by dark-theme native HTML bars.
-- Designation, authority, programme, link and watchlist implementation IDs are hidden in the normal UI.
-- Sanctions tables show OFAC / UK / EU names and legal programme names.
-- Linked sanctioned entities render as cards and can open canonical vessels/companies when a canonical entity exists.
-- Watchlists explicitly remain separate from government sanctions designations.
-
-## v1.30 canonical sanctions-vessel integration
-- Adds canonical vessel records for LADY MARIIA, SUN, ELOISE, AL SAFA and ANSHUN II.
-- Adds canonical owner/manager companies: MG-FLOT, Wavewhisper Shipping, Vroom Marine Venture FZE, Manarat Alkhaleej Marine Services FZE and Laurel Shipping Ltd.
-- Sanctions designation rows now point to canonical vessel/company IDs.
-- LADY MARIIA and SUN have linked incident/news records.
-- Vessels is now an object explorer with Ownership & Management, Sanctions & Compliance, News & Events and Evidence tabs.
-- Sanctions-linked canonical vessels can open directly into the Vessel profile.
-
-## v1.32.1 sanctions UI helper fix
-- App-only patch.
-- Restores missing sanctions presentation helpers used by the Sanctions & Compliance page.
-- Fixes NameError on sanctions_programme_counts.
-- Restores readable authority/programme labels and dark-theme programme bars.
-- Restores canonical Open actions from sanctions-linked vessels/companies.
-
-## v1.30.2 vessel object profiles
-App-only update:
-- Vessels now open as full object profiles rather than raw filtered tables.
-- Tabs: Overview, Ownership & Management, Sanctions, Incidents, News, Evidence.
-- Overview uses readable vessel cards and fields instead of exposing backend IDs.
-- Owner/operator/manager companies are clickable back into Company profiles.
-- Sanctions tab shows government designations and related sanction-linked entities.
-- Incidents tab combines canonical strategic events and linked reporting into a chronology.
-- Search entity results now route vessels to Vessels, ports to Ports, yards to Shipyards and systems to Systems.
-- Vessel selector state is hardened against stale Streamlit session state.
-
-## v1.31 — AOPS and UAE fleet programme expansion
-- AOPS is now a parent programme with separate Royal Canadian Navy and Canadian Coast Guard branches.
-- All six RCN Harry DeWolf-class vessels and both CCG AOPS variants are individual vessel objects.
-- UAE fleet stress test expanded across FALAJ3, Baynunah, Bani Yas/Gowind, Falaj 2 and P51MR.
-- Named vessels are used where verified. Ordered hulls without confirmed names remain explicit `name pending` records rather than invented names.
-- New `Platform Classes` and `Vessel Status History` sheets distinguish class, programme, vessel and lifecycle.
-- Vessels UI now has a Commercial vs Defence/Government domain switch and full defence-vessel profiles.
-- Defence vessel profiles expose programme, contracts, participants, builder/yard, milestone history, announcements and delivery route.
-
-## v1.32 — Gulf kinetic escalation & tanker incident integration
-- Adds canonical commercial vessel records for RIESCO, HORIZON 1, KAVIZ, CHARMINAR, DERYA and NEW ANDROS.
-- Adds ownership / sanctions / charter relationships where source-backed.
-- Creates a new `Persian Gulf / Hormuz / Gulf of Oman Security System` linking the Strait, Gulf of Oman, northern Gulf, Kharg, UAE gateways and affected vessels.
-- Adds 8–9 Sep 2026 CENTCOM tanker strikes, NEW ANDROS drone strike, Port Rashid listing-tanker report and wider regional multi-vessel attack wave to Intelligence and Events/Hazards.
-- Adds direct event-to-vessel, event-to-port, event-to-company and event-to-system links so affected objects can be opened from the News & Events view.
-- Adds source-backed OFAC records for CHARMINAR, RIESCO/AQUARIS and DERYA.
-- Preserves source disagreement: HORIZON 1 is a registry-identified LPG tanker even though CENTCOM grouped all five struck vessels as crude-oil carriers.
-- Unidentified Port Rashid tanker remains an incident object only; no invented vessel record.
-
-## v1.32.1 — live-event visibility / traversal fix
-App-only update:
-- News & Events now has a `Current / developing events` section above the map.
-- Gulf EVT132 live events are surfaced explicitly while the incident picture is developing.
-- Event Feed is sorted newest first.
-- Vessel profiles traverse Event Asset Links / Event Entity Links instead of only primary-subject events.
-- HORIZON 1, KAVIZ, CHARMINAR and DERYA now inherit the common CENTCOM strike event.
-- NEW ANDROS retains its own drone-strike event.
-- Unidentified Port Rashid tanker remains an event without an invented vessel object.
+## v1.22 map layer
+The Streamlit interface includes map views for canonical ports, geolocated event observations, rail-linked ports, ferry terminals and corridor/watch-area gateway ports. Maps use only coordinates already present in the model.
