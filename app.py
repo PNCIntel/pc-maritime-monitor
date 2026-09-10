@@ -12,8 +12,8 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v2.6.0"
-RELEASE_NAME = "Workspace Navigation + News & Signals Test"
+APP_VERSION = "v2.7.0"
+RELEASE_NAME = "Command Center + Watch Areas + Corridor Explorer"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -164,7 +164,7 @@ def load_hormuz_api(path, parameter_name="", parameter_value=""):
     if parameter_name and parameter_value:
         url += f"?{parameter_name}={int(parameter_value)}"
     try:
-        req = Request(url, headers={"User-Agent":"PC-Trade-System/2.6"})
+        req = Request(url, headers={"User-Agent":"PC-Trade-System/2.7"})
         with urlopen(req, timeout=8) as response:
             return json.loads(response.read().decode("utf-8")), ""
     except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
@@ -219,7 +219,7 @@ def _cgmix_soap(endpoint, operation, namespace, params):
     ).encode("utf-8")
     action=namespace.rstrip("/") + ("/" if not namespace.endswith("/") else "") + operation
     req=Request(endpoint,data=body,headers={
-        "User-Agent":"PC-Trade-System/2.6",
+        "User-Agent":"PC-Trade-System/2.7",
         "Content-Type":"text/xml; charset=utf-8",
         "SOAPAction":f'"{action}"'
     },method="POST")
@@ -299,7 +299,7 @@ def load_gdelt_articles(query, timespan="24h", maxrecords=50):
             "timespan":timespan,"maxrecords":max(1,min(int(maxrecords),250))}
     url=GDELT_DOC_URL+"?"+urlencode(params)
     try:
-        req=Request(url,headers={"User-Agent":"PC-Trade-System/2.6"})
+        req=Request(url,headers={"User-Agent":"PC-Trade-System/2.7"})
         with urlopen(req,timeout=20) as response:
             raw=response.read().decode("utf-8",errors="replace")
         try:
@@ -326,7 +326,7 @@ def load_newsdata_articles(query, api_key, language="en", size=10):
         return pd.DataFrame(), "NewsData.io API key not configured"
     params={"apikey":api_key,"q":query,"language":language,"size":min(int(size),10)}
     try:
-        req=Request(NEWSDATA_LATEST_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.6"})
+        req=Request(NEWSDATA_LATEST_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.7"})
         with urlopen(req,timeout=12) as response:
             payload=json.loads(response.read().decode("utf-8"))
         if str(payload.get("status","")).lower() not in {"success",""}:
@@ -359,7 +359,7 @@ def load_aishub(username, latmin=-90.0, latmax=90.0, lonmin=-180.0, lonmax=180.0
     if str(mmsi).strip(): params["mmsi"]=str(mmsi).strip()
     if str(imo).strip(): params["imo"]=str(imo).strip()
     try:
-        req=Request(AISHUB_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.6"})
+        req=Request(AISHUB_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.7"})
         with urlopen(req,timeout=15) as response:
             payload=json.loads(response.read().decode("utf-8",errors="replace"))
         if isinstance(payload,list) and len(payload)>=2 and isinstance(payload[0],dict):
@@ -382,7 +382,7 @@ def navitia_get(token, path, params=None):
     url=NAVITIA_BASE+path
     if params: url += "?"+urlencode(params,doseq=True)
     try:
-        req=Request(url,headers={"Authorization":str(token).strip(),"User-Agent":"PC-Trade-System/2.6"})
+        req=Request(url,headers={"Authorization":str(token).strip(),"User-Agent":"PC-Trade-System/2.7"})
         with urlopen(req,timeout=15) as response:
             return json.loads(response.read().decode("utf-8",errors="replace")),""
     except (HTTPError,URLError,TimeoutError,ValueError,OSError) as exc:
@@ -433,7 +433,7 @@ PORTWATCH_NUMERIC = [c for c in PORTWATCH_FIELDS if c.startswith(("portcalls","i
 
 def _portwatch_request(params):
     url = PORTWATCH_QUERY_URL + "?" + urlencode(params)
-    req = Request(url, headers={"User-Agent":"PC-Trade-System/2.6"})
+    req = Request(url, headers={"User-Agent":"PC-Trade-System/2.7"})
     with urlopen(req, timeout=12) as response:
         payload=json.loads(response.read().decode("utf-8"))
     if "error" in payload:
@@ -2620,8 +2620,8 @@ st.sidebar.markdown("### Trade System")
 st.sidebar.caption(f"{APP_VERSION} · Excel-backed test")
 
 NAV_GROUPS={
-    "Command Center":["Overview","Search"],
-    "Network":["Companies","Ports","Vessels","Cruise & Service Craft","Shipyards","Systems"],
+    "Command Center":["Overview","Search","Watch Areas"],
+    "Network":["Companies","Ports","Vessels","Corridors & Hubs","Cruise & Service Craft","Shipyards","Systems"],
     "Operations":["Port Activity","Hormuz Monitor","Live Feeds"],
     "Markets & Policy":["Contracts","Trade Policy","Sanctions"],
     "Intelligence":["News & Events","News & Signals"],
@@ -2653,7 +2653,7 @@ news_key_present=bool(_secret("NEWSDATA_API_KEY"))
 news_class="pc-dot-live" if news_key_present else "pc-dot-key"
 news_label="NewsData" if news_key_present else "NewsData · key needed"
 st.sidebar.markdown(f"<span class='pc-feed-health'><span class='pc-dot {news_class}'></span> {news_label}</span>",unsafe_allow_html=True)
-st.sidebar.caption("CGMIX and GDELT are deferred while their connectors are reworked.")
+st.sidebar.caption("Use Watch Areas for monitoring; Corridors & Hubs for chokepoints/inland nodes; Sanctions for vessel/company compliance exposure. CGMIX and GDELT remain deferred.")
 
 st.markdown(f"<div class='pc-breadcrumb'><b>{workspace}</b> &nbsp;/&nbsp; {page}</div>",unsafe_allow_html=True)
 
@@ -2680,26 +2680,64 @@ if page=="Overview":
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame())
     sanctions=TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame())
 
+    corridors=TABLES.get(("Infrastructure","Corridors"),pd.DataFrame())
+    monitoring=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame())
+    disruption=TABLES.get(("Intelligence","Disruption Watch"),pd.DataFrame())
+    active_watch_count=0
+    for _df in [monitoring,disruption]:
+        if not _df.empty:
+            status_col="Status" if "Status" in _df.columns else ("Current Status" if "Current Status" in _df.columns else None)
+            if status_col:
+                active_watch_count += int(_df[status_col].astype(str).str.contains("Active|Elevated|contingent|authorised|unresolved",case=False,regex=True,na=False).sum())
+            else:
+                active_watch_count += len(_df)
+
     metrics=st.columns(6)
     for box,(title,value) in zip(metrics,[
         ("Companies",len(companies)),("Ports",len(ports)),("Vessels",len(vessels)),
-        ("Systems",len(systems)),("Events",len(events)),("Sanctions",len(sanctions))
+        ("Corridors",len(corridors)),("Active watches",active_watch_count),("Sanctions",len(sanctions))
     ]):
         box.metric(title,f"{value:,}")
 
+    st.markdown("### Quick access")
+    qa=st.columns(5)
+    for col,(label_text,target) in zip(qa,[
+        ("Vessels","Vessels"),("Sanctions","Sanctions"),("Watch Areas","Watch Areas"),("Corridors & Hubs","Corridors & Hubs"),("PortWatch","Port Activity")
+    ]):
+        if col.button(label_text,use_container_width=True,key=f"quick_{target}"):
+            request_nav(target); st.rerun()
+
     st.markdown("### Connected coverage")
-    cards=[
-        ("Commercial networks","Companies, ownership, investments, infrastructure deals and logistics real estate."),
-        ("Movement systems","Ports, terminals, vessels, rail, road, aviation, ferries and inland connections."),
-        ("Infrastructure","Corridors, dry ports, economic zones, waterways, facilities and system dependencies."),
-        ("Intelligence","News, events, monitoring, disruption, weather, labour and impact chains."),
-        ("Compliance","Trade agreements, sanctions, restrictions, watchlists and policy precedence."),
-        ("Defence & shipbuilding","Shipyards, programmes, contracts, vessels, capabilities and delivery routes."),
+    st.caption("Work from the coverage layer directly. Each tab has its own sub-search and shortcuts into the underlying object views.")
+    coverage_tabs=st.tabs(["Commercial Networks","Movement","Infrastructure","Intelligence","Compliance","Defence & Shipbuilding"])
+    coverage_cfg=[
+        ("Commercial Networks",["Companies","Relationships","Port Ownership","Transactions V125","Infra Deals"],["Companies","Contracts"]),
+        ("Movement",["Ports","Port Terminals","Vessels","Rail Networks","Rail Nodes","Rail Connections","Aviation Assets"],["Ports","Vessels","Systems"]),
+        ("Infrastructure",["Corridors","Dry Ports","Economic Zones","Integrated Logistics Networks","Assets","Facilities"],["Corridors & Hubs","Systems"]),
+        ("Intelligence",["Monitoring","Disruption Watch","External Disruptions","Weather Labour Events","Events","Strategic Events"],["Watch Areas","News & Events"]),
+        ("Compliance",["Sanctions Designations","Sanctions Entity Links","Watchlist Taxonomy","Trade Agreements","Trade Remedies & Restrictions"],["Sanctions","Trade Policy"]),
+        ("Defence & Shipbuilding",["Shipyards","Contracts","Sample Vessels","Programmes","Yard Capabilities","Sales & Delivery Routes"],["Shipyards","Vessels","Contracts"]),
     ]
-    cols=st.columns(3)
-    for i,(title,body) in enumerate(cards):
-        with cols[i%3]:
-            st.markdown(f"<div class='pc-card'><div class='pc-big'>{title}</div><div class='pc-small'>{body}</div></div>",unsafe_allow_html=True)
+    for tab,(group_name,sheets,targets) in zip(coverage_tabs,coverage_cfg):
+        with tab:
+            c1,c2=st.columns([3,1])
+            with c1:
+                cq=st.text_input(f"Search {group_name.lower()}",placeholder=f"Search within {group_name.lower()}...",key=f"coverage_q_{group_name}")
+            with c2:
+                st.caption("Open a full workspace")
+                for target in targets:
+                    if st.button(target,use_container_width=True,key=f"coverage_open_{group_name}_{target}"):
+                        request_nav(target); st.rerun()
+            if cq.strip():
+                ch=ranked_search(cq.strip(),limit=80)
+                sub=ch[ch["sheet"].isin(sheets)].head(18) if not ch.empty else pd.DataFrame()
+                if sub.empty:
+                    st.info("No matching records in this coverage family.")
+                else:
+                    for _,h in sub.iterrows():
+                        readable_search_card(h)
+            else:
+                st.markdown(f"<div class='pc-card'><div class='pc-big'>{group_name}</div><div class='pc-small'>Enter a search above, or open one of the full workspaces to browse the complete layer.</div></div>",unsafe_allow_html=True)
 
     st.markdown("### Latest recorded events")
     latest=events.copy()
@@ -2707,6 +2745,32 @@ if page=="Overview":
         latest["_dt"]=pd.to_datetime(latest["Date"],errors="coerce")
         latest=latest.sort_values("_dt",ascending=False)
     render_event_cards(latest,12)
+
+elif page=="Watch Areas":
+    header("Watch Areas","Active monitoring, contingent disruption watches and developing external disruptions. This is the forward-looking layer between raw news and confirmed events.")
+    monitoring=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame()).copy()
+    disruption=TABLES.get(("Intelligence","Disruption Watch"),pd.DataFrame()).copy()
+    external=TABLES.get(("Intelligence","External Disruptions"),pd.DataFrame()).copy()
+    weather=TABLES.get(("Intelligence","Weather Labour Events"),pd.DataFrame()).copy()
+    q=st.text_input("Search watch area / geography / system / issue",placeholder="Hormuz, Black Sea, Rotterdam, labour, container losses, Yemen...",key="watch_area_search")
+    def _watch_filter(df):
+        return _contains_any(df,[q]) if q.strip() and not df.empty else df
+    monitoring=_watch_filter(monitoring); disruption=_watch_filter(disruption); external=_watch_filter(external); weather=_watch_filter(weather)
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Monitoring lines",len(monitoring)); m2.metric("Contingent watches",len(disruption)); m3.metric("External disruptions",len(external)); m4.metric("Weather / labour",len(weather))
+    wt=st.tabs(["Active Monitoring","Disruption Watch","External Disruptions","Weather & Labour"])
+    with wt[0]:
+        if monitoring.empty: st.info("No matching monitoring lines.")
+        else:
+            for _,r in monitoring.iterrows():
+                st.markdown(f"<div class='pc-card'><div class='pc-label'>{html_lib.escape(str(r.get('Family','')))} · {html_lib.escape(str(r.get('Status','')))}</div><div class='pc-big'>{html_lib.escape(str(r.get('Title','')))}</div><div class='pc-small'><b>Geography:</b> {html_lib.escape(str(r.get('Geography','')))}<br><b>Monitoring:</b> {html_lib.escape(str(r.get('What Is Being Monitored','')))}<br><b>Trigger:</b> {html_lib.escape(str(r.get('Trigger / Threshold','')))}<br><b>Next review:</b> {html_lib.escape(str(r.get('Next Review / Milestone','')))}</div></div>",unsafe_allow_html=True)
+    with wt[1]:
+        if disruption.empty: st.info("No matching contingent watches.")
+        else:
+            for _,r in disruption.iterrows():
+                st.markdown(f"<div class='pc-card'><div class='pc-label'>{html_lib.escape(str(r.get('Family','')))} · {html_lib.escape(str(r.get('Probability / Read','')))}</div><div class='pc-big'>{html_lib.escape(str(r.get('Issue','')))}</div><div class='pc-small'><b>{html_lib.escape(str(r.get('Country','')))} — {html_lib.escape(str(r.get('Location / System','')))}</b><br><b>Status:</b> {html_lib.escape(str(r.get('Current Status','')))}<br><b>Trigger:</b> {html_lib.escape(str(r.get('Trigger / Threshold','')))}<br><b>Potential impact:</b> {html_lib.escape(str(r.get('Potential Trade / Commercial Impact','')))}</div></div>",unsafe_allow_html=True)
+    with wt[2]: display_df(humanize_df(external),200)
+    with wt[3]: display_df(humanize_df(weather),200)
 
 elif page=="Search":
     header("Search P&C","One query across companies, ports, shipyards, vessels, contracts, transactions, news, events and systems.")
@@ -2871,6 +2935,13 @@ elif page=="Port Activity":
     )
     st.caption("Source: IMF PortWatch Daily Ports Data · public ArcGIS Feature Service · cached in-app for 30 minutes")
     live,error,latest_date=load_portwatch_latest()
+    if not live.empty and not error:
+        st.session_state["portwatch_last_success"]=(live,latest_date)
+    elif (error or live.empty) and "portwatch_last_success" in st.session_state:
+        cached_live,cached_date=st.session_state["portwatch_last_success"]
+        live=cached_live; latest_date=cached_date
+        st.warning(f"PortWatch live refresh failed; showing the last successful in-session snapshot ({cached_date}). {error}")
+        error=""
     if error:
         st.warning(f"PortWatch is temporarily unavailable. Canonical P&C port data remains available under Ports. {error}")
     elif live.empty:
@@ -2961,9 +3032,9 @@ elif page=="Live Feeds":
     )
     aishub_user=_secret("AISHUB_USERNAME")
     navitia_token=_secret("NAVITIA_TOKEN")
-    tabs=st.tabs(["Maritime AIS","Intermodal Mobility","API Catalog"])
+    feed_view=st.radio("Live feed",["Maritime AIS","Intermodal Mobility","API Catalog"],horizontal=True,key="live_feed_view")
 
-    with tabs[0]:
+    if feed_view=="Maritime AIS":
         st.markdown("### AISHub · live vessel positions")
         st.caption("Contributor-access feed · minimum one-minute polling interval · live observations are not persisted in this Excel test build")
         if not aishub_user:
@@ -3199,6 +3270,27 @@ elif page=="Vessels":
             )
             vr=d.iloc[pick]
             render_defence_vessel_profile(str(vr.get("Vessel ID","")),str(vr.get("Vessel","")))
+
+elif page=="Corridors & Hubs":
+    header("Corridors & Hubs","Strategic maritime chokepoints, multimodal corridors, dry ports, economic zones and integrated logistics networks.")
+    corridors=TABLES.get(("Infrastructure","Corridors"),pd.DataFrame()).copy()
+    dry=TABLES.get(("Infrastructure","Dry Ports"),pd.DataFrame()).copy()
+    zones=TABLES.get(("Infrastructure","Economic Zones"),pd.DataFrame()).copy()
+    networks=TABLES.get(("Infrastructure","Integrated Logistics Networks"),pd.DataFrame()).copy()
+    q=st.text_input("Search corridor / hub / country / operator / gateway",placeholder="Hormuz, Middle Corridor, Tbilisi, KEZAD, CentrePort, Great Lakes...",key="corridor_hub_search")
+    if q.strip():
+        corridors=_contains_any(corridors,[q]); dry=_contains_any(dry,[q]); zones=_contains_any(zones,[q]); networks=_contains_any(networks,[q])
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Corridors",len(corridors)); m2.metric("Dry ports / inland hubs",len(dry)); m3.metric("Economic zones",len(zones)); m4.metric("Integrated networks",len(networks))
+    ct=st.tabs(["Corridors","Dry Ports & Inland Hubs","Economic Zones","Integrated Networks"])
+    with ct[0]:
+        if corridors.empty: st.info("No matching corridors.")
+        else:
+            for _,r in corridors.iterrows():
+                st.markdown(f"<div class='pc-card'><div class='pc-label'>{html_lib.escape(str(r.get('Type','')))} · {html_lib.escape(str(r.get('Status','')))}</div><div class='pc-big'>{html_lib.escape(str(r.get('Corridor','')))}</div><div class='pc-small'><b>{html_lib.escape(str(r.get('Country / Region','')))}</b><br>{html_lib.escape(str(r.get('Connects','')))}<br><b>Traffic:</b> {html_lib.escape(str(r.get('Primary Traffic','')))}<br><b>Strategic note:</b> {html_lib.escape(str(r.get('Strategic Note','')))}</div></div>",unsafe_allow_html=True)
+    with ct[1]: display_df(humanize_df(dry),200)
+    with ct[2]: display_df(humanize_df(zones),200)
+    with ct[3]: display_df(humanize_df(networks),200)
 
 elif page=="Cruise & Service Craft":
     header("Cruise & Service Craft","Cruise brands, ships, destinations and route families alongside tug, OSV and offshore-construction fleets.")
@@ -3691,13 +3783,19 @@ elif page=="Hormuz Monitor":
             st.markdown("### Documented public endpoints")
             display_df(endpoints,100)
             st.markdown("[Open traffic statistics](https://hormuz.data-tracking.net/stats) · [Open API documentation](https://hormuz.data-tracking.net/api-docs)")
-            if st.toggle("Load live 24-hour API summary",value=False,key="hormuz_live_summary"):
+            if st.button("Refresh live 24-hour API summary",key="hormuz_live_summary"):
                 payload,error=load_hormuz_api("summary","hours",24)
-                if error:
-                    st.warning(f"Live API unavailable; the stored monthly snapshot remains usable. {error}")
-                else:
-                    st.caption("Live public API response · cached for 30 minutes")
-                    st.json(payload,expanded=False)
+                if not error and payload is not None:
+                    st.session_state["hormuz_last_summary"]=(payload,pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M UTC"))
+                elif error:
+                    st.warning(f"Live API refresh failed; the stored monthly snapshot remains usable. {error}")
+            saved=st.session_state.get("hormuz_last_summary")
+            if saved:
+                payload,stamp=saved
+                st.caption(f"Last successful live API response · {stamp} · retained through page reruns")
+                st.json(payload,expanded=False)
+            else:
+                st.info("No live summary loaded in this session yet.")
 
 elif page=="Systems":
     header("Systems & Corridors","Connected port, rail, waterway and corridor systems with linked events.")

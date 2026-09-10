@@ -1,5 +1,5 @@
 {
-  "version": "1.2",
+  "version": "1.3",
   "updated": "2026-09-10",
   "sources": [
     {
@@ -15,7 +15,7 @@
       "status": "enabled",
       "access_model": "open",
       "domain": "ports/trade",
-      "ui_role": "operational port activity",
+      "ui_role": "operational port activity with in-session stale-result fallback",
       "persistence": "ephemeral_test_only"
     },
     {
@@ -30,7 +30,7 @@
       "status": "enabled",
       "access_model": "open",
       "domain": "maritime/strait traffic",
-      "ui_role": "regional vessel-flow monitoring",
+      "ui_role": "regional vessel-flow monitoring with persistent last-success response",
       "persistence": "ephemeral_test_only"
     },
     {
