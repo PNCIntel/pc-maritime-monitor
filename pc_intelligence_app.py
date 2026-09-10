@@ -471,14 +471,15 @@ def render_watch_area_brief(rows,geography):
 
     st.markdown("### Current picture")
     extra=f"<div style='margin-top:10px;'>{notes}</div>" if notes else ""
-    st.markdown(
-        f"""<div class='pc-card'>
-        <div class='pc-label'>{clean_display_text(r.get('Family',''))}</div>
-        <div class='pc-big'>{clean_display_text(r.get('Title',''))}</div>
-        <div class='pc-search-details' style='margin-top:10px;'>{focus}</div>
-        {extra}
-        </div>""",unsafe_allow_html=True
+    current_picture_html = (
+        "<div class='pc-card'>"
+        f"<div class='pc-label'>{clean_display_text(r.get('Family',''))}</div>"
+        f"<div class='pc-big'>{clean_display_text(r.get('Title',''))}</div>"
+        f"<div class='pc-search-details' style='margin-top:10px;'>{focus}</div>"
+        f"{extra}"
+        "</div>"
     )
+    st.markdown(current_picture_html, unsafe_allow_html=True)
 
     indicators=_split_indicators(r.get("Key Indicators",""))
     lcol,rcol=st.columns([1.15,1])
@@ -492,13 +493,14 @@ def render_watch_area_brief(rows,geography):
     with rcol:
         st.markdown("### What would change the judgement?")
         review=f"<div class='pc-label' style='margin-top:12px;'>Next review</div><div>{next_review}</div>" if next_review else ""
-        st.markdown(
-            f"""<div class='pc-card'>
-            <div class='pc-label'>Trigger / threshold</div>
-            <div>{trigger or 'No explicit threshold has been recorded yet.'}</div>
-            {review}
-            </div>""",unsafe_allow_html=True
+        judgement_html = (
+            "<div class='pc-card'>"
+            "<div class='pc-label'>Trigger / threshold</div>"
+            f"<div>{trigger or 'No explicit threshold has been recorded yet.'}</div>"
+            f"{review}"
+            "</div>"
         )
+        st.markdown(judgement_html, unsafe_allow_html=True)
 
     ev=watch_area_events(geography)
     st.markdown("### Recent activity")
