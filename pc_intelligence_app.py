@@ -591,7 +591,7 @@ REGIONAL_SECURITY_AREAS = {
             "united arab emirates","uae","iran","iraq","saudi arabia","bahrain",
             "qatar","kuwait","oman","persian gulf","arabian gulf","gulf of oman",
             "strait of hormuz","hormuz","kharg","al-faw","dubai","abu dhabi",
-            "fujairah","doha","muscat","ras tanura","jazan","jizan"
+            "fujairah","doha","muscat","ras tanura","jazan","jizan","red sea","bab el-mandeb","mocha","jeddah","yanbu"
         ],
     },
     "Black Sea": {
@@ -723,7 +723,41 @@ def render_regional_incident_map(region_name, events):
         return pts
 
     cfg=REGIONAL_SECURITY_AREAS[region_name]
-    lat0,lon0=cfg["center"]
+
+    # Fit the regional map to the actual plotted incidents rather than relying
+    # on a fixed theatre centre. This prevents western Saudi / Red Sea points
+    # such as Jazan from falling outside a Gulf-centred viewport.
+    lat_min=float(pts["Latitude"].min())
+    lat_max=float(pts["Latitude"].max())
+    lon_min=float(pts["Longitude"].min())
+    lon_max=float(pts["Longitude"].max())
+
+    lat0=(lat_min+lat_max)/2
+    lon0=(lon_min+lon_max)/2
+
+    lat_span=max(lat_max-lat_min,0.8)
+    lon_span=max(lon_max-lon_min,0.8)
+    span=max(lat_span,lon_span)
+
+    # Conservative zoom heuristic for a 500px-high regional map.
+    if span >= 50:
+        auto_zoom=2.0
+    elif span >= 30:
+        auto_zoom=2.5
+    elif span >= 18:
+        auto_zoom=3.0
+    elif span >= 10:
+        auto_zoom=3.6
+    elif span >= 6:
+        auto_zoom=4.1
+    elif span >= 3:
+        auto_zoom=4.8
+    else:
+        auto_zoom=5.6
+
+    # Keep the theatre defaults as a ceiling only; never zoom in so far that
+    # mapped incidents disappear from the initial frame.
+    auto_zoom=min(auto_zoom,float(cfg["zoom"]))
 
     if pdk is not None:
         layer=pdk.Layer(
@@ -742,7 +776,7 @@ def render_regional_incident_map(region_name, events):
         view=pdk.ViewState(
             latitude=lat0,
             longitude=lon0,
-            zoom=cfg["zoom"],
+            zoom=auto_zoom,
             pitch=0,
             bearing=0,
         )
@@ -774,7 +808,11 @@ def render_regional_incident_map(region_name, events):
         fallback=pts.rename(columns={"Latitude":"lat","Longitude":"lon"})
         st.map(fallback[["lat","lon"]],latitude="lat",longitude="lon",use_container_width=True)
 
-    st.caption(f"{len(pts)} mapped incident point{'s' if len(pts)!=1 else ''}. Hover over a point for incident details.")
+    st.caption(
+        f"{len(pts)} mapped incident point{'s' if len(pts)!=1 else ''}. "
+        "Map view automatically fits all plotted incidents in this regional tab. "
+        "Hover over a point for incident details."
+    )
     return pts
 
 def render_regional_event_workspace(region_name):
