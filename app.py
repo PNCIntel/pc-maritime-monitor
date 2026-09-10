@@ -1588,6 +1588,59 @@ def render_event_map(events, locations, title="Event map"):
             st.markdown("### Event mix")
             st.bar_chart(fam,horizontal=True)
 
+def resolve_event_link_target(link_type, link_id, link_name=""):
+    """Resolve event-link aliases to canonical objects used by the Trade UI."""
+    lt=str(link_type or "").lower(); lid=str(link_id or "").strip(); lname=str(link_name or "").strip()
+    if "company" in lt:
+        return ("Companies","company_pick_id",lid,lname)
+    if "system" in lt or lid.startswith("SYS") or lid.startswith("CORR"):
+        return ("Corridors & Systems","system_pick_id",lid,lname)
+    if "vessel" in lt or lid.startswith("VESSEL") or lid.startswith("VES_"):
+        return ("Vessels","vessel_pick_id",lid,lname)
+    # Asset links frequently came from legacy event IDs. Resolve ports by canonical name.
+    ports=TABLES.get(("Maritime","Ports"),pd.DataFrame())
+    if ("port" in lt or lid.startswith("PORT")) and not ports.empty:
+        if "Port ID" in ports.columns and lid in set(ports["Port ID"].astype(str)):
+            return ("Ports","port_pick_id",lid,lname)
+        if lname and "Port / Facility" in ports.columns:
+            exact=ports[ports["Port / Facility"].astype(str).str.casefold().eq(lname.casefold())]
+            if exact.empty:
+                exact=ports[ports["Port / Facility"].astype(str).str.contains(lname,case=False,regex=False,na=False)]
+            if not exact.empty:
+                return ("Ports","port_pick_id",str(exact.iloc[0].get("Port ID","")),str(exact.iloc[0].get("Port / Facility",lname)))
+    return (None,None,None,lname)
+
+def event_associations(event_id):
+    eid=str(event_id or "")
+    out=[]
+    eal=TABLES.get(("Events & Hazards","Event Asset Links"),pd.DataFrame())
+    ecl=TABLES.get(("Events & Hazards","Event Company Links"),pd.DataFrame())
+    esl=TABLES.get(("Events & Hazards","Event System Links"),pd.DataFrame())
+    if not eal.empty and "Event ID" in eal.columns:
+        for _,r in eal[eal["Event ID"].astype(str).eq(eid)].iterrows():
+            out.append((str(r.get("Asset Type","Asset")),str(r.get("Asset ID","")),str(r.get("Asset","")),str(r.get("Relationship","")),str(r.get("Confidence",""))))
+    if not ecl.empty and "Event ID" in ecl.columns:
+        for _,r in ecl[ecl["Event ID"].astype(str).eq(eid)].iterrows():
+            out.append(("Company",str(r.get("Company ID","")),str(r.get("Company","")),str(r.get("Relationship","")),str(r.get("Confidence",""))))
+    if not esl.empty and "Event ID" in esl.columns:
+        for _,r in esl[esl["Event ID"].astype(str).eq(eid)].iterrows():
+            out.append(("System",str(r.get("System ID","")),str(r.get("System","")),str(r.get("Relationship","")),str(r.get("Confidence",""))))
+    return out
+
+def render_event_associations(event_id, key_prefix="event"):
+    links=event_associations(event_id)
+    if not links: return
+    st.markdown("#### Associated network")
+    for i,(typ,lid,name,rel,conf) in enumerate(links[:12]):
+        page,key,resolved_id,resolved_name=resolve_event_link_target(typ,lid,name)
+        c1,c2=st.columns([4,1])
+        with c1:
+            st.markdown(f"**{resolved_name or name or lid}**  \n{pretty_enum(rel)}" + (f" · {conf}" if conf else ""))
+        with c2:
+            if page and resolved_id:
+                if st.button("Open ↗",key=f"{key_prefix}_{event_id}_{i}_{resolved_id}",use_container_width=True):
+                    request_nav(page,key,resolved_id,resolved_name or name); st.rerun()
+
 def render_event_cards(events,max_items=40):
     if events is None or events.empty:
         st.info("No linked events.")
@@ -1596,7 +1649,17 @@ def render_event_cards(events,max_items=40):
     if "Start Date" in e.columns:
         e["_dt"]=pd.to_datetime(e["Start Date"],errors="coerce")
         e=e.sort_values("_dt",ascending=False)
-    show_named_list(e,"Title",["Start Date","Event Family","Event Type","Severity","Status","Location"],source_col="Primary Source URL",max_items=max_items)
+    for idx,(_,row) in enumerate(e.head(max_items).iterrows()):
+        title=str(row.get("Title","Event")); eid=str(row.get("Event ID",""))
+        meta=[]
+        for c in ["Start Date","Event Family","Event Type","Severity","Status","Location"]:
+            v=str(row.get(c,"")).strip()
+            if v and v.lower()!='nan': meta.append(pretty_enum(v))
+        st.markdown(f"<div class='pc-card'><div class='pc-big'>{title}</div><div class='pc-search-details'>{' · '.join(meta)}</div></div>",unsafe_allow_html=True)
+        render_event_associations(eid,key_prefix=f"eventcard_{idx}")
+        url=str(row.get("Primary Source URL","")).strip()
+        if url.startswith("http"): st.link_button("Open source ↗",url)
+        st.markdown("<div style='height:8px'></div>",unsafe_allow_html=True)
 
 def entity_asset_ids_from_profile(prof):
     ids=set()
@@ -3137,6 +3200,17 @@ NAV_GROUPS={
     "Data":["Data"],
 }
 PAGE_WORKSPACE={p:w for w,items in NAV_GROUPS.items() for p in items}
+# Deep links from the separate P&C Intelligence app.
+try:
+    _qp=st.query_params
+    if _qp.get("company",None):
+        st.session_state["company_pick_id"]=str(_qp.get("company")); st.session_state["nav_request"]="Companies"
+    elif _qp.get("port",None):
+        st.session_state["port_pick_id"]=str(_qp.get("port")); st.session_state["nav_request"]="Ports"
+    elif _qp.get("vessel",None):
+        st.session_state["vessel_pick_id"]=str(_qp.get("vessel")); st.session_state["nav_request"]="Vessels"
+except Exception:
+    pass
 # Cross-page buttons queue navigation for the next rerun so sidebar widgets are not mutated after instantiation.
 if "nav_request" in st.session_state:
     requested=st.session_state.pop("nav_request")

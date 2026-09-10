@@ -165,6 +165,71 @@ def event_card(row):
     )
 
 
+def canonical_port_id(link_id, link_name):
+    lid=str(link_id or "").strip(); name=str(link_name or "").strip()
+    if not ports.empty and "Port ID" in ports.columns:
+        hit=ports[text_col(ports,"Port ID").eq(lid)]
+        if hit.empty and name:
+            hit=ports[text_col(ports,"Port / Facility").str.casefold().eq(name.casefold())]
+        if hit.empty and name:
+            hit=ports[text_col(ports,"Port / Facility").str.contains(name,case=False,regex=False,na=False)]
+        if not hit.empty: return str(hit.iloc[0].get("Port ID",""))
+    return ""
+
+def render_connected_context(event_id):
+    eid=str(event_id or "")
+    links=event_asset_links[text_col(event_asset_links,"Event ID").eq(eid)] if not event_asset_links.empty else pd.DataFrame()
+    clinks=event_company_links[text_col(event_company_links,"Event ID").eq(eid)] if not event_company_links.empty else pd.DataFrame()
+    slinks=event_system_links[text_col(event_system_links,"Event ID").eq(eid)] if not event_system_links.empty else pd.DataFrame()
+
+    if links.empty and clinks.empty and slinks.empty:
+        st.markdown('<div class="pc-empty">No connected canonical coverage has been mapped yet.</div>', unsafe_allow_html=True)
+        return
+
+    if not links.empty:
+        st.markdown("**Associated assets / ports**")
+        for _,r in links.iterrows():
+            name=str(r.get("Asset",""))
+            typ=str(r.get("Asset Type","Asset"))
+            rel=str(r.get("Relationship",""))
+            st.markdown(f"**{name}** · {typ}  \\n{rel}")
+            pid=canonical_port_id(r.get("Asset ID",""),name)
+            if pid:
+                pr=ports[text_col(ports,"Port ID").eq(pid)]
+                if not pr.empty:
+                    rr=pr.iloc[0]
+                    bits=[]
+                    for c in ["Country","Operator","Facility Type","Key Role"]:
+                        v=str(rr.get(c,"")).strip()
+                        if v and v.lower() != "nan":
+                            bits.append(f"{c}: {v}")
+                    if bits:
+                        st.caption(" · ".join(bits[:4]))
+
+    if not clinks.empty:
+        st.markdown("**Associated companies**")
+        for _,r in clinks.iterrows():
+            cid=str(r.get("Company ID",""))
+            name=str(r.get("Company",""))
+            rel=str(r.get("Relationship",""))
+            st.markdown(f"**{name}**  \\n{rel}")
+            if cid and not companies.empty and "Company ID" in companies.columns:
+                cr=companies[text_col(companies,"Company ID").eq(cid)]
+                if not cr.empty:
+                    rr=cr.iloc[0]
+                    bits=[]
+                    for c in ["HQ Country","Ownership","Business Segments","Status"]:
+                        v=str(rr.get(c,"")).strip()
+                        if v and v.lower() != "nan":
+                            bits.append(f"{c}: {v}")
+                    if bits:
+                        st.caption(" · ".join(bits[:4]))
+
+    if not slinks.empty:
+        st.markdown("**Related systems / corridors**")
+        show_df(slinks,["System","Relationship","Confidence"],180)
+
+
 # Core canonical datasets
 companies = xl("01_core_entities.xlsx", "Companies")
 ports = xl("02_maritime.xlsx", "Ports")
@@ -193,6 +258,7 @@ hazard_events = xl("13_events_hazards.xlsx", "Events")
 event_locations = xl("13_events_hazards.xlsx", "Event Locations")
 event_asset_links = xl("13_events_hazards.xlsx", "Event Asset Links")
 event_company_links = xl("13_events_hazards.xlsx", "Event Company Links")
+event_system_links = xl("13_events_hazards.xlsx", "Event System Links")
 impact_chains = xl("13_events_hazards.xlsx", "Impact Chains")
 
 # Sanctions / compliance
@@ -336,9 +402,10 @@ elif page == "Alerts & Incidents":
                 clinks = event_company_links[text_col(event_company_links,"Event ID").eq(eid)] if not event_company_links.empty else event_company_links
                 chains = impact_chains[text_col(impact_chains,"Event ID").eq(eid)] if not impact_chains.empty else impact_chains
                 section("Connected coverage", "Linked entities & impact chain")
-                show_df(links, ["Asset","Asset Type","Relationship","Confidence"], 180)
-                show_df(clinks, ["Company","Relationship","Confidence"], 150)
-                show_df(chains, ["Step","Trigger","Direct Impact","Secondary Impact","Tertiary Impact","Strategic / Commercial Outcome"], 220)
+                render_connected_context(eid)
+                if not chains.empty:
+                    st.markdown("**Impact chain**")
+                    show_df(chains, ["Step","Trigger","Direct Impact","Secondary Impact","Tertiary Impact","Strategic / Commercial Outcome"], 220)
 
 # -----------------------------------------------------------------------------
 # 3. WATCH AREAS
@@ -512,4 +579,4 @@ elif page == "Source Monitor":
 
 # Footer
 st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
-st.markdown('<div class="small-note">P&C Intelligence · Excel-backed v3.0 · One canonical data model shared with the P&C Trade System.</div>', unsafe_allow_html=True)
+st.markdown('<div class="small-note">P&C Intelligence · Excel-backed v3.0 · Dedicated security and operational intelligence interface.</div>', unsafe_allow_html=True)

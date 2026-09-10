@@ -28,3 +28,7 @@ This is the complete Excel-backed GitHub deployment package. It preserves the cu
 Replace the files in the existing GitHub repository with the contents of this package, preserving the `/data` directory. Streamlit should continue to point at `app.py`. No Supabase connection is required for this Excel-backed build.
 
 The future Supabase/PostgreSQL migration should normalize these exact relationships, not create separate trade/security databases.
+
+
+## Product separation — v3.0.3
+P&C Intelligence and the P&C Trade System remain separate user experiences. They read the same canonical data model, but P&C Intelligence does not send users into the Trade System. Relevant port, company, vessel, system and compliance context is displayed locally within the Intelligence app.

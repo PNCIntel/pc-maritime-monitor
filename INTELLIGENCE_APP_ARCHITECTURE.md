@@ -52,3 +52,7 @@ The app follows the same intelligence logic as the P&C Intelligence website:
 Deploy `pc_intelligence_app.py` as a second Streamlit Community Cloud app from the same GitHub repository and branch as the Trade System.
 
 The existing `app.py` remains the P&C Trade System.
+
+
+## Product separation — v3.0.3
+P&C Intelligence and the P&C Trade System remain separate user experiences. They read the same canonical data model, but P&C Intelligence does not send users into the Trade System. Relevant port, company, vessel, system and compliance context is displayed locally within the Intelligence app.
