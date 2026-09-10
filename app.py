@@ -12,8 +12,8 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v2.5.0"
-RELEASE_NAME = "Live Feeds + AIS / Intermodal Test"
+APP_VERSION = "v2.6.0"
+RELEASE_NAME = "Workspace Navigation + News & Signals Test"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -98,6 +98,25 @@ div[data-baseweb="tooltip"],div[data-baseweb="tooltip"] *{
 [data-testid="stDialog"],div[role="dialog"],div[data-baseweb="tooltip"]{
   background:#ffffff!important;
 }
+
+/* v2.6 workspace navigation */
+[data-testid="stSidebar"] [data-testid="stRadio"] label{
+  border:0!important;background:transparent!important;border-radius:7px!important;
+  padding:.34rem .45rem!important;margin:.05rem 0!important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] label:hover{background:#102238!important}
+[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked){
+  background:#132944!important;border-left:3px solid #d7b66a!important;
+}
+.pc-breadcrumb{font-size:.78rem;color:#8ea1b7;margin:.1rem 0 .55rem}.pc-breadcrumb b{color:#d7b66a}
+.pc-hero{background:linear-gradient(120deg,#0d1a2b,#102238);border:1px solid #28415f;border-radius:14px;padding:18px 20px;margin:.2rem 0 1rem}
+.pc-hero-title{font-size:1.25rem;font-weight:780;margin-bottom:.25rem}.pc-hero-copy{color:#b8c5d4;line-height:1.55}
+.pc-workspace-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:.7rem 0 1rem}
+.pc-workspace-card{background:#0d1a2b;border:1px solid #28415f;border-radius:12px;padding:14px 16px;min-height:118px}
+.pc-workspace-card b{font-size:1rem}.pc-workspace-card p{color:#b8c5d4;font-size:.86rem;line-height:1.45;margin:.35rem 0 0}
+.pc-feed-health{display:inline-flex;align-items:center;gap:6px;border:1px solid #28415f;border-radius:999px;padding:4px 9px;font-size:.74rem;color:#b8c5d4;margin:2px 0}
+.pc-dot{width:7px;height:7px;border-radius:50%;background:#6a7c90;display:inline-block}.pc-dot-live{background:#75d6a4}.pc-dot-key{background:#d7b66a}.pc-dot-off{background:#7b8796}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -145,7 +164,7 @@ def load_hormuz_api(path, parameter_name="", parameter_value=""):
     if parameter_name and parameter_value:
         url += f"?{parameter_name}={int(parameter_value)}"
     try:
-        req = Request(url, headers={"User-Agent":"PC-Trade-System/2.5"})
+        req = Request(url, headers={"User-Agent":"PC-Trade-System/2.6"})
         with urlopen(req, timeout=8) as response:
             return json.loads(response.read().decode("utf-8")), ""
     except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
@@ -200,7 +219,7 @@ def _cgmix_soap(endpoint, operation, namespace, params):
     ).encode("utf-8")
     action=namespace.rstrip("/") + ("/" if not namespace.endswith("/") else "") + operation
     req=Request(endpoint,data=body,headers={
-        "User-Agent":"PC-Trade-System/2.5",
+        "User-Agent":"PC-Trade-System/2.6",
         "Content-Type":"text/xml; charset=utf-8",
         "SOAPAction":f'"{action}"'
     },method="POST")
@@ -280,7 +299,7 @@ def load_gdelt_articles(query, timespan="24h", maxrecords=50):
             "timespan":timespan,"maxrecords":max(1,min(int(maxrecords),250))}
     url=GDELT_DOC_URL+"?"+urlencode(params)
     try:
-        req=Request(url,headers={"User-Agent":"PC-Trade-System/2.5"})
+        req=Request(url,headers={"User-Agent":"PC-Trade-System/2.6"})
         with urlopen(req,timeout=20) as response:
             raw=response.read().decode("utf-8",errors="replace")
         try:
@@ -296,6 +315,27 @@ def load_gdelt_articles(query, timespan="24h", maxrecords=50):
         return pd.DataFrame(),str(exc)
 
 
+
+# ---------- NewsData.io news & signal discovery ----------
+NEWSDATA_LATEST_URL = "https://newsdata.io/api/1/latest"
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def load_newsdata_articles(query, api_key, language="en", size=10):
+    """NewsData.io discovery feed. Results remain open-source signals until corroborated."""
+    if not api_key:
+        return pd.DataFrame(), "NewsData.io API key not configured"
+    params={"apikey":api_key,"q":query,"language":language,"size":min(int(size),10)}
+    try:
+        req=Request(NEWSDATA_LATEST_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.6"})
+        with urlopen(req,timeout=12) as response:
+            payload=json.loads(response.read().decode("utf-8"))
+        if str(payload.get("status","")).lower() not in {"success",""}:
+            return pd.DataFrame(), str(payload.get("message") or "NewsData request failed")
+        return pd.DataFrame(payload.get("results") or []), ""
+    except HTTPError as exc:
+        return pd.DataFrame(), f"HTTP {exc.code}"
+    except (URLError,TimeoutError,ValueError,OSError) as exc:
+        return pd.DataFrame(), str(exc)
 
 # ---------- optional live transport feeds ----------
 def _secret(name, default=""):
@@ -319,7 +359,7 @@ def load_aishub(username, latmin=-90.0, latmax=90.0, lonmin=-180.0, lonmax=180.0
     if str(mmsi).strip(): params["mmsi"]=str(mmsi).strip()
     if str(imo).strip(): params["imo"]=str(imo).strip()
     try:
-        req=Request(AISHUB_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.5"})
+        req=Request(AISHUB_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.6"})
         with urlopen(req,timeout=15) as response:
             payload=json.loads(response.read().decode("utf-8",errors="replace"))
         if isinstance(payload,list) and len(payload)>=2 and isinstance(payload[0],dict):
@@ -342,7 +382,7 @@ def navitia_get(token, path, params=None):
     url=NAVITIA_BASE+path
     if params: url += "?"+urlencode(params,doseq=True)
     try:
-        req=Request(url,headers={"Authorization":str(token).strip(),"User-Agent":"PC-Trade-System/2.5"})
+        req=Request(url,headers={"Authorization":str(token).strip(),"User-Agent":"PC-Trade-System/2.6"})
         with urlopen(req,timeout=15) as response:
             return json.loads(response.read().decode("utf-8",errors="replace")),""
     except (HTTPError,URLError,TimeoutError,ValueError,OSError) as exc:
@@ -393,7 +433,7 @@ PORTWATCH_NUMERIC = [c for c in PORTWATCH_FIELDS if c.startswith(("portcalls","i
 
 def _portwatch_request(params):
     url = PORTWATCH_QUERY_URL + "?" + urlencode(params)
-    req = Request(url, headers={"User-Agent":"PC-Trade-System/2.5"})
+    req = Request(url, headers={"User-Agent":"PC-Trade-System/2.6"})
     with urlopen(req, timeout=12) as response:
         payload=json.loads(response.read().decode("utf-8"))
     if "error" in payload:
@@ -2574,28 +2614,48 @@ def render_live_event_cluster(events, locations):
             unsafe_allow_html=True
         )
 
-# ---------- top navigation ----------
-st.sidebar.markdown("### P&C Trade System")
-st.sidebar.caption(f"{APP_VERSION} · {RELEASE_NAME}")
-st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
-st.sidebar.markdown("---")
+# ---------- workspace navigation ----------
+st.sidebar.markdown("<div class='pc-kicker'>Power & Corridors Intelligence</div>",unsafe_allow_html=True)
+st.sidebar.markdown("### Trade System")
+st.sidebar.caption(f"{APP_VERSION} · Excel-backed test")
 
-pages=["Overview","Search","Companies","Ports","Port Activity","Live Feeds","Shipyards","Vessels","Cruise & Service Craft","Contracts","Trade Policy","Sanctions","USCG Safety & Compliance","News & Events","Global Signals","Hormuz Monitor","Systems","Data"]
-
-# Navigation requests are applied BEFORE the top-nav widget is instantiated.
-# This avoids StreamlitWidgetAlreadyInstantiatedError when a button changes pages.
+NAV_GROUPS={
+    "Command Center":["Overview","Search"],
+    "Network":["Companies","Ports","Vessels","Cruise & Service Craft","Shipyards","Systems"],
+    "Operations":["Port Activity","Hormuz Monitor","Live Feeds"],
+    "Markets & Policy":["Contracts","Trade Policy","Sanctions"],
+    "Intelligence":["News & Events","News & Signals"],
+    "Data":["Data"],
+}
+PAGE_WORKSPACE={p:w for w,items in NAV_GROUPS.items() for p in items}
+# Cross-page buttons queue navigation for the next rerun so sidebar widgets are not mutated after instantiation.
 if "nav_request" in st.session_state:
     requested=st.session_state.pop("nav_request")
-    if requested in pages:
-        st.session_state["top_nav"]=requested
+    target_workspace=PAGE_WORKSPACE.get(requested)
+    if target_workspace:
+        st.session_state["workspace_nav"]=target_workspace
+        st.session_state[f"view_nav_{target_workspace}"]=requested
+if st.session_state.get("workspace_nav") not in NAV_GROUPS:
+    st.session_state["workspace_nav"]="Command Center"
+workspace=st.sidebar.radio("Workspace",list(NAV_GROUPS),index=0,key="workspace_nav")
+views=NAV_GROUPS[workspace]
+if len(views)>1:
+    page=st.sidebar.radio("View",views,index=0,key=f"view_nav_{workspace}")
+else:
+    page=views[0]
 
-if "top_nav" not in st.session_state or st.session_state["top_nav"] not in pages:
-    st.session_state["top_nav"]="Overview"
+st.sidebar.markdown("---")
+st.sidebar.markdown("<div class='pc-small'>ACTIVE DATA LAYERS</div>",unsafe_allow_html=True)
+st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> Excel model</span>",unsafe_allow_html=True)
+st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> PortWatch</span>",unsafe_allow_html=True)
+st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> Hormuz</span>",unsafe_allow_html=True)
+news_key_present=bool(_secret("NEWSDATA_API_KEY"))
+news_class="pc-dot-live" if news_key_present else "pc-dot-key"
+news_label="NewsData" if news_key_present else "NewsData · key needed"
+st.sidebar.markdown(f"<span class='pc-feed-health'><span class='pc-dot {news_class}'></span> {news_label}</span>",unsafe_allow_html=True)
+st.sidebar.caption("CGMIX and GDELT are deferred while their connectors are reworked.")
 
-page=st.radio("Navigation",pages,horizontal=True,label_visibility="collapsed",key="top_nav")
-
-# Old Streamlit sessions can retain widget values from previous app versions.
-# Numeric selectors are normalized again on their destination page.
+st.markdown(f"<div class='pc-breadcrumb'><b>{workspace}</b> &nbsp;/&nbsp; {page}</div>",unsafe_allow_html=True)
 
 def page_company_selector():
     companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
@@ -3354,7 +3414,7 @@ elif page=="Sanctions":
             rr=rr.drop(columns=[c for c in ["Rule ID"] if c in rr.columns],errors="ignore")
             display_df(rr,100)
 
-elif page=="USCG Safety & Compliance":
+elif page=="__DEFERRED_USCG_SAFETY_COMPLIANCE__":
     header(
         "USCG Safety & Compliance",
         "Live CGMIX/PSIX and Incident Investigation Report lookups. This is an external evidence layer and is not written into the canonical Excel model."
@@ -3525,71 +3585,68 @@ elif page=="News & Events":
                 max_items=200
             )
 
-elif page=="Global Signals":
+elif page=="News & Signals":
     header(
-        "Global Signals",
-        "GDELT-powered discovery across global news. Signals are leads for verification and entity matching, not automatically verified P&C events."
+        "News & Signals",
+        "Open-source discovery across trade, ports, logistics, maritime, rail, aviation and infrastructure. Results remain leads for verification and entity matching."
     )
-    st.caption("Source: GDELT DOC 2.0 · public API · cached for 15 minutes · maximum 250 articles per query")
+    api_key=_secret("NEWSDATA_API_KEY")
+    if not api_key:
+        st.markdown("<div class='pc-hero'><div class='pc-hero-title'>NewsData.io connector ready</div><div class='pc-hero-copy'>Add <b>NEWSDATA_API_KEY</b> to Streamlit Secrets to activate this workspace. No external requests are made until the key is present.</div></div>",unsafe_allow_html=True)
+    else:
+        st.caption("Source: NewsData.io · cached for 60 minutes · discovery layer only")
     presets={
-        "Port disruption":"(port OR terminal) (strike OR closure OR disruption OR explosion)",
-        "Maritime security":"(ship OR tanker OR vessel) (attack OR drone OR missile OR seizure OR piracy)",
-        "Rail & intermodal":"(rail OR railway OR intermodal) (strike OR derailment OR closure OR disruption)",
-        "Logistics & supply chain":"(logistics OR shipping OR freight) (disruption OR shortage OR congestion OR delay)",
-        "Infrastructure deals":"(port OR terminal OR logistics OR railway) (acquisition OR investment OR concession OR contract)",
+        "Maritime security":"ship vessel tanker attack drone missile seizure piracy",
+        "Ports & terminals":"port terminal strike closure disruption explosion congestion",
+        "Logistics & supply chain":"logistics shipping freight disruption congestion delay shortage",
+        "Rail & intermodal":"rail railway freight intermodal derailment strike disruption",
+        "Aviation & air cargo":"airport aviation air cargo disruption closure strike",
+        "Trade & sanctions":"trade sanctions export controls shipping compliance",
+        "Infrastructure & deals":"port terminal logistics railway acquisition investment concession contract",
         "Custom":""
     }
-    c1,c2,c3=st.columns([1.4,2.6,1])
-    with c1:
-        preset=st.selectbox("Signal family",list(presets),key="gdelt_preset")
-    with c2:
-        query=st.text_input("GDELT query",value=presets[preset],placeholder='"Port of Rotterdam" strike',key="gdelt_query")
-    with c3:
-        span_label=st.selectbox("Window",["24 hours","3 days","7 days","30 days","3 months"],key="gdelt_span")
-    span_map={"24 hours":"24h","3 days":"3d","7 days":"7d","30 days":"30d","3 months":"3months"}
-    maxr=st.slider("Maximum articles",10,100,50,10,key="gdelt_max")
-    if st.button("Search global signals",key="gdelt_go"):
+    c1,c2=st.columns([1.2,2.8])
+    with c1: family=st.selectbox("Signal family",list(presets),key="newsdata_family")
+    with c2: query=st.text_input("Search terms",value=presets[family],placeholder="Rotterdam port strike",key="newsdata_query")
+    if st.button("Search news & signals",type="primary",disabled=not bool(api_key),key="newsdata_go"):
         if len(query.strip())<3:
-            st.warning("Enter a more specific GDELT query.")
+            st.warning("Enter a more specific search.")
         else:
-            gdf,gerr=load_gdelt_articles(query.strip(),span_map[span_label],maxr)
-            st.session_state["gdelt_results"]=(gdf,gerr,query.strip())
-    gdf,gerr,lastq=st.session_state.get("gdelt_results",(pd.DataFrame(),"",""))
-    if gerr:
-        st.warning(f"GDELT is temporarily unavailable or rate-limited. {gerr}")
-    elif not gdf.empty:
-        st.markdown(f"### Signal results · {len(gdf):,}")
-        if "domain" in gdf.columns:
-            c1,c2,c3=st.columns(3)
-            c1.metric("Articles",f"{len(gdf):,}")
-            c2.metric("Source domains",f"{gdf['domain'].nunique():,}")
-            if "sourcecountry" in gdf.columns:
-                c3.metric("Source countries",f"{gdf['sourcecountry'].nunique():,}")
-        if "sourcecountry" in gdf.columns:
-            top=gdf["sourcecountry"].replace("",pd.NA).dropna().value_counts().head(12)
-            if not top.empty:
-                st.markdown("#### Coverage by source country")
-                st.bar_chart(top,horizontal=True)
-        for _,row in gdf.head(100).iterrows():
+            ndf,nerr=load_newsdata_articles(query.strip(),api_key,"en",10)
+            st.session_state["newsdata_results"]=(ndf,nerr,query.strip())
+    ndf,nerr,lastq=st.session_state.get("newsdata_results",(pd.DataFrame(),"",""))
+    if nerr:
+        st.warning(f"NewsData.io is temporarily unavailable. {nerr}")
+    elif not ndf.empty:
+        m1,m2,m3=st.columns(3)
+        m1.metric("Signals",f"{len(ndf):,}")
+        source_col="source_name" if "source_name" in ndf.columns else ("source_id" if "source_id" in ndf.columns else None)
+        m2.metric("Sources",f"{ndf[source_col].nunique():,}" if source_col else "—")
+        countries=set()
+        if "country" in ndf.columns:
+            for x in ndf["country"].tolist():
+                if isinstance(x,list): countries.update(str(v) for v in x)
+                elif x: countries.add(str(x))
+        m3.metric("Countries",f"{len(countries):,}" if countries else "—")
+        st.markdown(f"### Results for `{lastq}`")
+        for _,row in ndf.head(50).iterrows():
             title=str(row.get("title","") or "Untitled")
-            url=str(row.get("url","") or "")
-            domain=str(row.get("domain","") or "")
-            country=str(row.get("sourcecountry","") or "")
-            language=str(row.get("language","") or "")
-            seen=row.get("Seen",row.get("seendate",""))
-            date_text=""
-            try:
-                if pd.notna(seen): date_text=pd.to_datetime(seen).strftime("%Y-%m-%d %H:%M UTC")
-            except Exception: date_text=str(seen)
-            meta=" · ".join([x for x in [domain,country,language,date_text] if x])
-            if url:
-                st.markdown(f"**[{title}]({url})**")
-            else:
-                st.markdown(f"**{title}**")
+            url=str(row.get("link","") or "")
+            desc=str(row.get("description","") or "")
+            source=str(row.get("source_name",row.get("source_id","")) or "")
+            pub=str(row.get("pubDate","") or "")
+            country=row.get("country","")
+            if isinstance(country,list): country=", ".join(map(str,country))
+            if url: st.markdown(f"**[{title}]({url})**")
+            else: st.markdown(f"**{title}**")
+            meta=" · ".join(x for x in [source,str(country),pub] if str(x).strip())
             if meta: st.caption(meta)
-        st.caption("Analytical rule: GDELT identifies possible activity. Promote a signal into the canonical event model only after corroboration and entity resolution.")
-    else:
-        st.info("Run a query to scan global news for emerging trade, logistics, infrastructure and maritime signals.")
+            if desc: st.write(desc[:650] + ("…" if len(desc)>650 else ""))
+            st.markdown("<span class='pc-chip'>OPEN SOURCE</span><span class='pc-chip'>UNVERIFIED SIGNAL</span>",unsafe_allow_html=True)
+            st.markdown("---")
+        st.caption("Corroborate and resolve entities before promoting a signal into the canonical event model.")
+    elif api_key:
+        st.info("Choose a signal family or enter search terms to scan the latest news feed.")
 
 elif page=="Hormuz Monitor":
     header(
@@ -3699,4 +3756,4 @@ elif page=="Data":
     display_df(df,600,show_ids=show_debug_ids)
 
 st.sidebar.markdown("---")
-st.sidebar.caption(f"{APP_TITLE} {APP_VERSION} · {len(TABLES):,} loaded tables")
+st.sidebar.caption(f"{len(TABLES):,} tables loaded · {RELEASE_NAME}")

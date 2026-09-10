@@ -1,9 +1,9 @@
 {
   "product": "P&C Trade System",
-  "implementation_version": "2.4.0",
-  "source_application_version": "2.3.0",
+  "implementation_version": "2.6.0",
+  "source_application_version": "2.5.0",
   "data_model_version": "1.34",
-  "release_name": "Live Feeds + AIS / Intermodal Test",
+  "release_name": "Workspace Navigation + News & Signals Test",
   "built_on": "2026-09-10",
   "deployment_target": "Streamlit Community Cloud / GitHub",
   "entry_point": "app.py",
@@ -30,23 +30,39 @@
     "live_api_smoke_test": "NOT_RUN_NO_NETWORK_IN_BUILD_ENVIRONMENT"
   },
   "external_api_sources": {
-    "enabled": 5,
-    "registered": 1,
-    "portwatch": "IMF Daily Ports Data",
-    "hormuz": "Strait of Hormuz Ship Monitor",
-    "uscg_psix": "CGMIX Port State Information Exchange",
-    "uscg_iir": "CGMIX Incident Investigation Reports",
-    "gdelt_doc": "GDELT DOC 2.0",
-    "gdelt_geo": "registered for later geographic enrichment"
+    "active_open": [
+      "IMF PortWatch",
+      "Strait of Hormuz Ship Monitor"
+    ],
+    "active_keyed": [
+      "NewsData.io (when key configured)",
+      "AISHub (contributor access)",
+      "Navitia (token)"
+    ],
+    "deferred": [
+      "USCG CGMIX PSIX",
+      "USCG CGMIX IIR",
+      "GDELT DOC 2.0",
+      "GDELT GEO 2.0",
+      "Cirium FlightStats"
+    ],
+    "excluded": [
+      "ADS-B Exchange from free stack"
+    ]
   },
-  "app_version": "v2.5.0",
+  "app_version": "v2.6.0",
   "release_date": "2026-09-10",
   "new_features": [
-    "Unified Live Feeds page",
-    "AISHub live AIS connector (credential-gated)",
-    "Navitia intermodal mobility/disruption connector (credential-gated)",
-    "API access/licensing catalog",
-    "Cirium trial classification",
-    "ADS-B Exchange commercial exclusion"
+    "Six-workspace sidebar navigation replacing the long horizontal menu",
+    "Contextual second-level views inside each workspace",
+    "NewsData.io News & Signals workspace",
+    "Active data-layer status indicators in the sidebar",
+    "CGMIX and GDELT removed from active navigation pending rework"
+  ],
+  "changes": [
+    "Replaced long horizontal menu with grouped sidebar workspaces and contextual views.",
+    "Removed CGMIX and GDELT from active navigation; retained as deferred registry sources.",
+    "Added NewsData.io News & Signals connector, activated only when NEWSDATA_API_KEY is configured.",
+    "Preserved Excel model/workbooks unchanged for pre-Postgres testing."
   ]
 }

@@ -42,11 +42,13 @@
       "cost": "free/public",
       "cache_ttl_seconds": 1800,
       "implementation": "on-demand vessel search + vessel cases + deficiencies + operational controls",
-      "status": "enabled",
+      "status": "deferred",
       "persistence": "ephemeral_test_only",
       "access_model": "open",
       "domain": "maritime safety/compliance",
-      "ui_role": "authoritative inspection/casualty evidence"
+      "ui_role": "authoritative inspection/casualty evidence",
+      "enabled": false,
+      "notes": "Deferred from active UI pending connector rework/Postgres ingestion."
     },
     {
       "id": "uscg_cgmix_iir",
@@ -57,11 +59,13 @@
       "cost": "free/public",
       "cache_ttl_seconds": 1800,
       "implementation": "on-demand published incident investigation search",
-      "status": "enabled",
+      "status": "deferred",
       "persistence": "ephemeral_test_only",
       "access_model": "open",
       "domain": "maritime safety/compliance",
-      "ui_role": "authoritative inspection/casualty evidence"
+      "ui_role": "authoritative inspection/casualty evidence",
+      "enabled": false,
+      "notes": "Deferred from active UI pending connector rework/Postgres ingestion."
     },
     {
       "id": "gdelt_doc_2",
@@ -73,11 +77,13 @@
       "cache_ttl_seconds": 900,
       "max_records_per_query": 250,
       "implementation": "on-demand global news/event signal discovery",
-      "status": "enabled",
+      "status": "deferred",
       "persistence": "ephemeral_test_only",
       "access_model": "open",
       "domain": "global signals/news",
-      "ui_role": "discovery and geographic enrichment"
+      "ui_role": "discovery and geographic enrichment",
+      "enabled": false,
+      "notes": "Deferred from active UI pending connector rework/Postgres ingestion."
     },
     {
       "id": "gdelt_geo_2",
@@ -88,11 +94,13 @@
       "cost": "free/public",
       "cache_ttl_seconds": 900,
       "implementation": "registered for geographic signal enrichment; deferred from UI until Postgres/entity-resolution phase",
-      "status": "registered",
+      "status": "deferred",
       "persistence": "not_ingested",
       "access_model": "open",
       "domain": "global signals/news",
-      "ui_role": "discovery and geographic enrichment"
+      "ui_role": "discovery and geographic enrichment",
+      "enabled": false,
+      "notes": "Deferred from active UI pending connector rework/Postgres ingestion."
     },
     {
       "id": "aishub_live_ais",
@@ -154,6 +162,25 @@
       "status": "excluded",
       "persistence": "not_ingested",
       "notes": "Commercial-entity use requires a commercial API licence."
+    },
+    {
+      "name": "NewsData.io",
+      "domain": "news / global signals",
+      "access_model": "free_key",
+      "status": "credential-gated",
+      "enabled": true,
+      "base_url": "https://newsdata.io/api/1/latest",
+      "role": "Open-source news discovery and signal generation; verification required.",
+      "secret": "NEWSDATA_API_KEY",
+      "id": "newsdata_io_latest",
+      "type": "JSON REST API",
+      "authentication": "API key",
+      "cost": "free-key tier / provider limits apply",
+      "cache_ttl_seconds": 3600,
+      "implementation": "on-demand latest-news discovery with one-hour cache",
+      "ui_role": "open-source news and signal discovery",
+      "persistence": "ephemeral_test_only",
+      "notes": "Active only when NEWSDATA_API_KEY is configured. Treat results as unverified signals."
     }
   ]
 }

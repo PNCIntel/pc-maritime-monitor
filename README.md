@@ -48,3 +48,7 @@ The 14 Excel workbooks remain the source-of-truth model. Live API output is deli
 - **Live Feeds > API Catalog:** visual status cards distinguish enabled, credential-gated, trial/deferred and excluded feeds.
 - Cirium FlightStats is catalogued as trial/deferred; ADS-B Exchange is explicitly excluded from the free production stack.
 - Excel remains the canonical entity layer; all new API observations are ephemeral in this pre-Postgres test.
+
+
+## v2.6 navigation
+The app now uses six grouped workspaces in the sidebar: Command Center, Network, Operations, Markets & Policy, Intelligence, and Data. CGMIX/GDELT are deferred from the active UI. NewsData.io is available under Intelligence > News & Signals after adding `NEWSDATA_API_KEY` to Streamlit secrets.
