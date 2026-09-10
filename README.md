@@ -1,51 +1,27 @@
-# P&C Trade System v1.17 — Rail Networks & Intermodal Connectivity
+# P&C Trade System v2
 
-This is the complete GitHub + Streamlit deployment package.
+This is the clean XLSX-native implementation of the Power & Corridors Trade System. It preserves the connected company, port, vessel, infrastructure, rail, aviation, commercial, intelligence, compliance, events and defence model while removing the older CSV deployment assumptions.
 
-## v1.17 additions
-Rail is now a first-class movement layer alongside ports, vessels, ferries, aviation and inland logistics.
+## Repository layout
 
-New runtime tables:
-- `rail_operators.csv`
-- `rail_networks.csv`
-- `rail_nodes.csv`
-- `rail_links.csv`
-- `rail_relationships.csv`
-- `rail_fleet.csv`
-- `rail_connections.csv`
-- `rail_news.csv`
+- `app.py` — Streamlit application
+- `data/` — 14 canonical domain workbooks
+- `data_manifest.json` — workbook and sheet routing contract
+- `verify_deployment.py` — package, schema and integrity checks
+- `requirements.txt` — Python dependencies
+- `.streamlit/config.toml` — deployment theme and server settings
 
-## Initial rail population
-- 19 rail operators / infrastructure authorities
-- 20 named networks and corridors
-- 62 physical rail nodes
-- 38 origin → destination movement links
-- 26 network/company relationship records
-- 5 rolling-stock aggregate records
-- 32 direct rail-to-port / rail-to-asset connections
-- 5 rail news/development records
+## Deploy on Streamlit Community Cloud
 
-Initial coverage includes:
-UAE National Rail Network, Hafeet Rail, Saudi East Freight, Middle Corridor / BTK,
-CN, CPKC, Alameda Corridor, BNSF, Union Pacific, Norfolk Southern,
-Transnet ContainerCor / NorthCor, Tanger Med / ONCF, HHLA / METRANS,
-Hamburg Port Railway, Western Dedicated Freight Corridor and CONCOR.
+1. Upload the contents of this folder to the root of the GitHub repository.
+2. Keep all 14 `.xlsx` files under `data/` with their canonical filenames.
+3. Set the Streamlit entry point to `app.py`.
+4. Deploy or reboot the application.
 
-## Streamlit
-`app.py` is v1.17 and includes a new **Rail Networks** page.
-Company pages show linked rail networks, rail nodes and rolling-stock aggregates.
-Port pages show canonical rail connections.
-Ask P&C searches rail networks, nodes, links and rail news.
+## Validate before deployment
 
-## Model workbook
-`model/PC_Trade_System_Intelligence_Model_v1_17_Rail_Networks.xlsx`
+```bash
+python verify_deployment.py
+```
 
-Blank values mean not yet verified — never zero.
-
-
-## App v1.19 visualization upgrade
-The Streamlit application now includes an Entity Explorer, relationship graphs on company/port/vessel/rail views, and dynamic Watch Areas assembled from the canonical corridor and relationship model. The underlying data baseline remains Model v1.17.
-
-
-## v1.22 map layer
-The Streamlit interface includes map views for canonical ports, geolocated event observations, rail-linked ports, ferry terminals and corridor/watch-area gateway ports. Maps use only coordinates already present in the model.
+The verifier checks the Python syntax, required files, workbook readability, manifest-to-sheet routing, spreadsheet error markers, canonical primary keys and IMO uniqueness.

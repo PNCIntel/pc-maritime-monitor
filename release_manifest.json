@@ -1,0 +1,32 @@
+{
+  "product": "P&C Trade System",
+  "implementation_version": "2.0.0",
+  "source_application_version": "1.32.1",
+  "data_model_version": "1.32",
+  "release_name": "Unified XLSX Implementation",
+  "built_on": "2026-09-10",
+  "deployment_target": "Streamlit Community Cloud / GitHub",
+  "entry_point": "app.py",
+  "data_directory": "data",
+  "canonical_workbooks": 14,
+  "workbook_sheets": 176,
+  "manifest_sheet_mappings": 166,
+  "headline_counts": {
+    "companies": 327,
+    "ports": 427,
+    "vessels": 447,
+    "unique_imos": 352,
+    "systems": 14,
+    "events": 18,
+    "sanctions_designations": 8
+  },
+  "validation": {
+    "python_syntax": "PASS",
+    "workbook_readability": "PASS",
+    "manifest_routing": "PASS",
+    "spreadsheet_error_scan": "PASS",
+    "primary_key_checks": "PASS",
+    "imo_uniqueness": "PASS",
+    "headless_overview_smoke_test": "PASS"
+  }
+}

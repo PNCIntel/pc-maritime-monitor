@@ -1,111 +1,193 @@
 #!/usr/bin/env python3
-"""Deployment integrity checks for P&C Trade System App v4.8 / Model v1.12."""
+"""Validate the deployable P&C Trade System v2 package."""
+
 from __future__ import annotations
-import csv, re, sys
+
+import argparse
+import hashlib
+import json
+import re
+import sys
+from collections import Counter
 from pathlib import Path
 
-BASE=Path(__file__).resolve().parent
-DATA=BASE/'data'
-APP=BASE/'app.py'
-errors=[]; notes=[]
+from openpyxl import load_workbook
 
-def read_root(name):
-    with (DATA/name).open('r',encoding='utf-8-sig',newline='') as f:
-        return list(csv.DictReader(f))
-def nonblank(v): return v is not None and str(v).strip()!=''
-def tokens(v,prefix):
-    if not nonblank(v): return []
-    return re.findall(rf'{re.escape(prefix)}[A-Za-z0-9_\-]+',str(v))
 
-for name in ['app.py','requirements.txt','manifest.json','PC_Trade_System_Intelligence_Model_v1_12_MASTER.xlsx']:
-    if not (BASE/name).exists(): errors.append(f'Missing required root file: {name}')
-if not DATA.is_dir(): errors.append('Missing data/ directory')
+BASE = Path(__file__).resolve().parent
+DATA = BASE / "data"
+APP = BASE / "app.py"
+MANIFEST = BASE / "data_manifest.json"
 
-try:
-    compile(APP.read_text(encoding='utf-8'),str(APP),'exec'); notes.append('app.py syntax: PASS')
-except Exception as exc: errors.append(f'app.py syntax error: {exc}')
 
-app_text=APP.read_text(encoding='utf-8')
-referenced=sorted(set(re.findall(r'[A-Za-z0-9_\-]+\.csv',app_text)))
-missing_app=[n for n in referenced if not (DATA/n).exists()]
-if missing_app: errors.append('Missing app-referenced CSVs: '+', '.join(missing_app))
-notes.append(f'app-referenced CSV files: {len(referenced)}; missing: {len(missing_app)}')
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
-all_csv=sorted(DATA.rglob('*.csv'))
-root_csv=sorted(DATA.glob('*.csv'))
-for path in all_csv:
+
+def sheet_rows(path: Path, sheet: str) -> tuple[list[str], list[dict[str, str]]]:
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    worksheet = workbook[sheet]
+    iterator = worksheet.iter_rows(values_only=True)
     try:
-        with path.open('r',encoding='utf-8-sig',newline='') as f:
-            r=csv.reader(f); header=next(r,None)
-            if not header: errors.append(f'CSV has no header: {path.relative_to(BASE)}')
-            for _ in r: pass
-    except Exception as exc: errors.append(f'CSV parse failure {path.relative_to(BASE)}: {exc}')
-notes.append(f'packaged CSV files (recursive): {len(all_csv)}')
-notes.append(f'root runtime CSV files: {len(root_csv)}')
+        raw_header = next(iterator)
+    except StopIteration:
+        return [], []
+    headers = [str(value).strip() if value is not None else "" for value in raw_header]
+    rows: list[dict[str, str]] = []
+    for values in iterator:
+        record = {
+            header: "" if value is None else str(value).strip()
+            for header, value in zip(headers, values)
+            if header
+        }
+        if any(record.values()):
+            rows.append(record)
+    return headers, rows
 
-companies=read_root('companies.csv'); sources=read_root('sources.csv'); assets=read_root('assets.csv'); people=read_root('people.csv'); vessels=read_root('vessels.csv')
-company_ids={r['Company ID'].strip() for r in companies if nonblank(r.get('Company ID'))}
-source_ids={r['Source ID'].strip() for r in sources if nonblank(r.get('Source ID'))}
-asset_ids={r['Asset ID'].strip() for r in assets if nonblank(r.get('Asset ID'))}
-person_ids={r['Person ID'].strip() for r in people if nonblank(r.get('Person ID'))}
-vessel_ids={r['Vessel ID'].strip() for r in vessels if nonblank(r.get('Vessel ID'))}
 
-primary={'companies.csv':'Company ID','sources.csv':'Source ID','assets.csv':'Asset ID','people.csv':'Person ID','leadership_roles.csv':'Role ID','relationships.csv':'Relationship ID','fleet_portfolios.csv':'Fleet ID','aircraft.csv':'Aircraft ID','fleet_orders.csv':'Order ID','investments.csv':'Investment ID','strategic_events.csv':'Event ID','logistics_real_estate.csv':'LRE ID','infrastructure_connections.csv':'Connection ID','integrated_logistics_networks.csv':'Network ID'}
-for fn,key in primary.items():
-    rows=read_root(fn); vals=[str(r.get(key,'')).strip() for r in rows if nonblank(r.get(key))]
-    seen=set(); dup=set()
-    for x in vals:
-        if x in seen: dup.add(x)
-        seen.add(x)
-    if dup: errors.append(f'Duplicate {key} in {fn}: '+', '.join(sorted(dup)[:10]))
+def duplicate_values(rows: list[dict[str, str]], key: str) -> list[str]:
+    values = [row.get(key, "").strip() for row in rows if row.get(key, "").strip()]
+    return sorted(value for value, count in Counter(values).items() if count > 1)
 
-missing_company=set(); missing_source=set(); missing_asset=set(); missing_person=set(); missing_vessel=set()
-for path in root_csv:
-    with path.open('r',encoding='utf-8-sig',newline='') as f: rows=list(csv.DictReader(f))
-    if not rows: continue
-    headers=rows[0].keys()
-    for row in rows:
-        for h in headers:
-            val=row.get(h,'')
-            if 'Company ID' in h or 'Company IDs' in h:
-                for t in tokens(val,'COMP_'):
-                    if t not in company_ids: missing_company.add((path.name,h,t))
-            if h in {'Source Entity','Target Entity','Subject Entity ID','Parent Entity ID','Target Entity / Asset ID'}:
-                for t in tokens(val,'COMP_'):
-                    if t not in company_ids: missing_company.add((path.name,h,t))
-                for t in tokens(val,'ASSET'):
-                    if t not in asset_ids: missing_asset.add((path.name,t))
-            if 'Source ID' in h:
-                for t in tokens(val,'SRC_'):
-                    if t not in source_ids: missing_source.add((path.name,t))
-            if h in {'Asset ID','Source Asset ID'}:
-                for t in tokens(val,'ASSET'):
-                    if t not in asset_ids: missing_asset.add((path.name,t))
-            if h=='Person ID':
-                for t in tokens(val,'PERSON_'):
-                    if t not in person_ids: missing_person.add((path.name,t))
-            if h in {'Vessel ID','Canonical Vessel ID'}:
-                for t in tokens(val,'VESSEL_'):
-                    if t not in vessel_ids: missing_vessel.add((path.name,t))
-if missing_company: errors.append('Missing company references: '+'; '.join(f'{a}:{b}:{c}' for a,b,c in sorted(missing_company)[:20]))
-if missing_source: errors.append('Missing source references: '+'; '.join(f'{a}:{b}' for a,b in sorted(missing_source)[:20]))
-if missing_asset: errors.append('Missing asset references: '+'; '.join(f'{a}:{b}' for a,b in sorted(missing_asset)[:20]))
-if missing_person: errors.append('Missing person references: '+'; '.join(f'{a}:{b}' for a,b in sorted(missing_person)[:20]))
-if missing_vessel: errors.append('Missing vessel references: '+'; '.join(f'{a}:{b}' for a,b in sorted(missing_vessel)[:20]))
 
-imos=[r['IMO'].strip() for r in vessels if nonblank(r.get('IMO'))]
-seen=set(); dup=set()
-for x in imos:
-    if x in seen: dup.add(x)
-    seen.add(x)
-if dup: errors.append('Duplicate nonblank canonical IMO values: '+', '.join(sorted(dup)[:20]))
-notes.append(f'canonical vessels: {len(vessels)}; populated IMO: {len(imos)}; unique IMO: {len(set(imos))}')
-notes.append(f'companies: {len(companies)}; sources: {len(sources)}; assets: {len(assets)}')
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--json", action="store_true", help="Print machine-readable results")
+    args = parser.parse_args()
 
-print('P&C DEPLOYMENT VALIDATION'); print('='*28)
-for n in notes: print('PASS:',n)
-if errors:
-    print('\nFAILURES')
-    for e in errors: print('FAIL:',e)
-    sys.exit(1)
-print('\nREFERENCE INTEGRITY: PASS')
+    errors: list[str] = []
+    notes: list[str] = []
+    stats: dict[str, int | str | dict[str, str]] = {}
+
+    for path in [APP, BASE / "requirements.txt", MANIFEST]:
+        if not path.exists():
+            errors.append(f"Missing required file: {path.relative_to(BASE)}")
+    if not DATA.is_dir():
+        errors.append("Missing required directory: data")
+    if errors:
+        return finish(args.json, errors, notes, stats)
+
+    try:
+        compile(APP.read_text(encoding="utf-8"), str(APP), "exec")
+        notes.append("app.py syntax")
+    except Exception as exc:
+        errors.append(f"app.py syntax: {exc}")
+
+    try:
+        model = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    except Exception as exc:
+        errors.append(f"data_manifest.json: {exc}")
+        return finish(args.json, errors, notes, stats)
+
+    files_contract = model.get("files", {})
+    expected_files = sorted(files_contract)
+    actual_files = sorted(path.name for path in DATA.glob("*.xlsx"))
+    missing_files = sorted(set(expected_files) - set(actual_files))
+    extra_files = sorted(set(actual_files) - set(expected_files))
+    if missing_files:
+        errors.append("Missing workbooks: " + ", ".join(missing_files))
+    if extra_files:
+        errors.append("Unexpected workbooks: " + ", ".join(extra_files))
+
+    available: dict[str, set[str]] = {}
+    formula_errors: list[str] = []
+    total_sheets = 0
+    for filename in actual_files:
+        path = DATA / filename
+        try:
+            workbook = load_workbook(path, read_only=True, data_only=False)
+            available[filename] = set(workbook.sheetnames)
+            total_sheets += len(workbook.sheetnames)
+            for worksheet in workbook.worksheets:
+                for row in worksheet.iter_rows():
+                    for cell in row:
+                        if isinstance(cell.value, str) and re.search(
+                            r"#(?:REF!|DIV/0!|VALUE!|NAME\?|N/A|NUM!|NULL!|SPILL!|CALC!)",
+                            cell.value,
+                        ):
+                            formula_errors.append(f"{filename}:{worksheet.title}!{cell.coordinate}")
+        except Exception as exc:
+            errors.append(f"Unreadable workbook {filename}: {exc}")
+
+    expected_sheet_count = 0
+    for filename, sheets in files_contract.items():
+        expected_sheet_count += len(sheets)
+        for sheet in sheets:
+            if filename in available and sheet not in available[filename]:
+                errors.append(f"Missing sheet: {filename} / {sheet}")
+    if formula_errors:
+        errors.append("Spreadsheet errors: " + ", ".join(formula_errors[:20]))
+
+    app_text = APP.read_text(encoding="utf-8")
+    for filename in expected_files:
+        if filename not in app_text:
+            errors.append(f"app.py does not reference {filename}")
+
+    companies = sheet_rows(DATA / "01_core_entities.xlsx", "Companies")[1]
+    ports = sheet_rows(DATA / "02_maritime.xlsx", "Ports")[1]
+    vessels = sheet_rows(DATA / "02_maritime.xlsx", "Vessels")[1]
+    systems = sheet_rows(DATA / "11_systems_waterways_governance.xlsx", "Systems")[1]
+    events = sheet_rows(DATA / "13_events_hazards.xlsx", "Events")[1]
+    sanctions = sheet_rows(DATA / "14_trade_policy_compliance.xlsx", "Sanctions Designations")[1]
+
+    for label, rows, key in [
+        ("companies", companies, "Company ID"),
+        ("ports", ports, "Port ID"),
+        ("vessels", vessels, "Vessel ID"),
+        ("systems", systems, "System ID"),
+        ("events", events, "Event ID"),
+    ]:
+        duplicates = duplicate_values(rows, key)
+        if duplicates:
+            errors.append(f"Duplicate {key}: " + ", ".join(duplicates[:20]))
+        stats[label] = len(rows)
+
+    imos = [row.get("IMO", "").strip() for row in vessels if row.get("IMO", "").strip()]
+    duplicate_imos = sorted(value for value, count in Counter(imos).items() if count > 1)
+    if duplicate_imos:
+        errors.append("Duplicate nonblank canonical IMO: " + ", ".join(duplicate_imos[:20]))
+
+    stats.update(
+        {
+            "sanctions": len(sanctions),
+            "unique_imos": len(set(imos)),
+            "workbooks": len(actual_files),
+            "sheets": total_sheets,
+            "model_version": str(model.get("version", "")),
+            "hashes": {"app.py": sha256(APP), **{name: sha256(DATA / name) for name in actual_files}},
+        }
+    )
+    notes.extend(
+        [
+            f"{len(actual_files)} canonical workbooks",
+            f"{total_sheets} workbook sheets",
+            f"{expected_sheet_count} manifest sheet mappings",
+            "spreadsheet error scan",
+            "canonical primary-key checks",
+            "canonical IMO uniqueness",
+        ]
+    )
+    return finish(args.json, errors, notes, stats)
+
+
+def finish(as_json: bool, errors: list[str], notes: list[str], stats: dict) -> int:
+    result = {"status": "PASS" if not errors else "FAIL", "checks": notes, "errors": errors, "stats": stats}
+    if as_json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print("P&C TRADE SYSTEM V2 DEPLOYMENT VALIDATION")
+        print("=" * 42)
+        for note in notes:
+            print(f"PASS: {note}")
+        for error in errors:
+            print(f"FAIL: {error}")
+        print(f"\nRESULT: {result['status']}")
+    return 0 if not errors else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

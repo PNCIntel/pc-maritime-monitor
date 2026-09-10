@@ -1,5 +1,6 @@
 {
   "version": "1.32",
+  "implementation_version": "2.0.0",
   "sheet_to_file": {
     "Companies": "01_core_entities.xlsx",
     "Entity Registry": "01_core_entities.xlsx",
@@ -123,7 +124,7 @@
     "Locks & Canals": "11_systems_waterways_governance.xlsx",
     "Network Interfaces": "11_systems_waterways_governance.xlsx",
     "Stress Tests": "11_systems_waterways_governance.xlsx",
-    "Defence Overview": "12_defence_shipbuilding.xlsx",
+    "Overview": "12_defence_shipbuilding.xlsx",
     "Defence Companies": "12_defence_shipbuilding.xlsx",
     "Yard Facilities": "12_defence_shipbuilding.xlsx",
     "Yard Capabilities": "12_defence_shipbuilding.xlsx",
@@ -133,7 +134,31 @@
     "Contracts": "12_defence_shipbuilding.xlsx",
     "Sales & Delivery Routes": "12_defence_shipbuilding.xlsx",
     "Announcements": "12_defence_shipbuilding.xlsx",
-    "Defence Sources": "12_defence_shipbuilding.xlsx"
+    "Sources": "12_defence_shipbuilding.xlsx",
+    "Platform Classes": "12_defence_shipbuilding.xlsx",
+    "Vessel Status History": "12_defence_shipbuilding.xlsx",
+    "Events": "13_events_hazards.xlsx",
+    "Event Locations": "13_events_hazards.xlsx",
+    "Event Asset Links": "13_events_hazards.xlsx",
+    "Event Company Links": "13_events_hazards.xlsx",
+    "Event System Links": "13_events_hazards.xlsx",
+    "Impact Chains": "13_events_hazards.xlsx",
+    "Event Status History": "13_events_hazards.xlsx",
+    "Trade Agreements": "14_trade_policy_compliance.xlsx",
+    "Agreement Parties": "14_trade_policy_compliance.xlsx",
+    "Agreement Asset Links": "14_trade_policy_compliance.xlsx",
+    "Agreement Company Links": "14_trade_policy_compliance.xlsx",
+    "Tariff Coverage": "14_trade_policy_compliance.xlsx",
+    "HS Product Tests": "14_trade_policy_compliance.xlsx",
+    "Rules of Origin": "14_trade_policy_compliance.xlsx",
+    "Customs & Procurement": "14_trade_policy_compliance.xlsx",
+    "Trade Remedies & Restrictions": "14_trade_policy_compliance.xlsx",
+    "Sanctions Authorities": "14_trade_policy_compliance.xlsx",
+    "Sanctions Programmes": "14_trade_policy_compliance.xlsx",
+    "Sanctions Designations": "14_trade_policy_compliance.xlsx",
+    "Sanctions Entity Links": "14_trade_policy_compliance.xlsx",
+    "Watchlist Taxonomy": "14_trade_policy_compliance.xlsx",
+    "Policy Interaction Rules": "14_trade_policy_compliance.xlsx"
   },
   "files": {
     "01_core_entities.xlsx": [
@@ -235,7 +260,12 @@
       "Company Market Prices",
       "Corporate Actions",
       "Ownership History",
-      "Company Reports"
+      "Company Reports",
+      "Company Financial Metrics",
+      "Company Operating Metrics",
+      "Investment Funds",
+      "Portfolio Holdings V125",
+      "Company Aliases"
     ],
     "08_transactions.xlsx": [
       "Infra Deals",
@@ -290,7 +320,40 @@
       "Contracts",
       "Sales & Delivery Routes",
       "Announcements",
-      "Sources"
+      "Sources",
+      "Platform Classes",
+      "Vessel Status History"
+    ],
+    "13_events_hazards.xlsx": [
+      "Events",
+      "Event Locations",
+      "Event Asset Links",
+      "Event Company Links",
+      "Event System Links",
+      "Impact Chains",
+      "Event Status History",
+      "Event Taxonomy",
+      "Sources",
+      "Overview"
+    ],
+    "14_trade_policy_compliance.xlsx": [
+      "Trade Agreements",
+      "Agreement Parties",
+      "Agreement Asset Links",
+      "Agreement Company Links",
+      "Tariff Coverage",
+      "HS Product Tests",
+      "Rules of Origin",
+      "Customs & Procurement",
+      "Trade Remedies & Restrictions",
+      "Sanctions Authorities",
+      "Sanctions Programmes",
+      "Sanctions Designations",
+      "Sanctions Entity Links",
+      "Watchlist Taxonomy",
+      "Policy Interaction Rules",
+      "Sources",
+      "Overview"
     ]
   },
   "model": "Gulf kinetic escalation + canonical tanker incidents + Hormuz security system"
