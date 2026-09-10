@@ -1,6 +1,6 @@
 {
-  "version": "1.32",
-  "implementation_version": "2.0.0",
+  "version": "1.33",
+  "implementation_version": "2.1.0",
   "sheet_to_file": {
     "Companies": "01_core_entities.xlsx",
     "Entity Registry": "01_core_entities.xlsx",
@@ -47,6 +47,11 @@
     "Great Lakes Vessel Staging": "02_maritime.xlsx",
     "Great Lakes Cargo Corridors": "02_maritime.xlsx",
     "Great Lakes Cruise": "02_maritime.xlsx",
+    "Cruise Lines": "02_maritime.xlsx",
+    "Cruise Ships": "02_maritime.xlsx",
+    "Cruise Destinations": "02_maritime.xlsx",
+    "Cruise Routes": "02_maritime.xlsx",
+    "Service Craft": "02_maritime.xlsx",
     "Great Lakes Disruptions": "02_maritime.xlsx",
     "Rail Operators": "03_rail.xlsx",
     "Rail Networks": "03_rail.xlsx",
@@ -209,6 +214,11 @@
       "Great Lakes Vessel Staging",
       "Great Lakes Cargo Corridors",
       "Great Lakes Cruise",
+      "Cruise Lines",
+      "Cruise Ships",
+      "Cruise Destinations",
+      "Cruise Routes",
+      "Service Craft",
       "Great Lakes Disruptions"
     ],
     "03_rail.xlsx": [

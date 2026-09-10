@@ -5,8 +5,8 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v2.0.0"
-RELEASE_NAME = "Unified XLSX Implementation"
+APP_VERSION = "v2.1.0"
+RELEASE_NAME = "Cruise & Service Craft Expansion"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -444,6 +444,16 @@ def company_scope_ids(entity_id, max_depth=3):
                 if tgt and any(term in relationship for term in ownership_terms):
                     if tgt not in scope:
                         scope.add(tgt); nxt.add(tgt)
+            # Group operating-ecosystem links are deliberately traversable in
+            # reverse so a Noatum Maritime profile can surface SAFEEN service
+            # craft without claiming those sister businesses are subsidiaries.
+            inbound=rel[rel.get("Target Entity",pd.Series(dtype=str)).astype(str).eq(src)]
+            for _,r in inbound.iterrows():
+                relationship=str(r.get("Relationship","")).upper()
+                source_entity=str(r.get("Source Entity","")).strip()
+                if source_entity and "GROUP_ECOSYSTEM_LINK" in relationship:
+                    if source_entity not in scope:
+                        scope.add(source_entity); nxt.add(source_entity)
         if not nxt: break
         frontier=nxt
     return scope
@@ -2216,7 +2226,7 @@ st.sidebar.caption(f"{APP_VERSION} · {RELEASE_NAME}")
 st.sidebar.markdown("**Normal use:** work from the top navigation. Internal tables remain under Data.")
 st.sidebar.markdown("---")
 
-pages=["Overview","Search","Companies","Ports","Shipyards","Vessels","Contracts","Trade Policy","Sanctions","News & Events","Systems","Data"]
+pages=["Overview","Search","Companies","Ports","Shipyards","Vessels","Cruise & Service Craft","Contracts","Trade Policy","Sanctions","News & Events","Systems","Data"]
 
 # Navigation requests are applied BEFORE the top-nav widget is instantiated.
 # This avoids StreamlitWidgetAlreadyInstantiatedError when a button changes pages.
@@ -2310,6 +2320,7 @@ elif page=="Search":
             groups=[
                 ("Commercial / contracts",["Contracts","Infra Deals","Transactions V125","Sales & Delivery Routes","Vessel Transactions"]),
                 ("Assets",["Port Terminals","Ports","Shipyards","Yard Facilities","Sample Vessels","Platform Classes","Vessel Status History","Vessels","Assets"]),
+                ("Cruise & service craft",["Cruise Lines","Cruise Ships","Cruise Destinations","Cruise Routes","Service Craft"]),
                 ("Trade policy & compliance",["Trade Agreements","Tariff Coverage","HS Product Tests","Rules of Origin","Customs & Procurement","Trade Remedies & Restrictions","Sanctions Designations"]),
                 ("News & events",["Events","Strategic Events","Announcements","News Registry","Impact Chains"]),
                 ("Systems & relationships",["Systems","System Entities","System Links","Relationships","Port Ownership"]),
@@ -2565,6 +2576,46 @@ elif page=="Vessels":
             )
             vr=d.iloc[pick]
             render_defence_vessel_profile(str(vr.get("Vessel ID","")),str(vr.get("Vessel","")))
+
+elif page=="Cruise & Service Craft":
+    header("Cruise & Service Craft","Cruise brands, ships, destinations and route families alongside tug, OSV and offshore-construction fleets.")
+    lines=TABLES.get(("Maritime","Cruise Lines"),pd.DataFrame()).copy()
+    ships=TABLES.get(("Maritime","Cruise Ships"),pd.DataFrame()).copy()
+    destinations=TABLES.get(("Maritime","Cruise Destinations"),pd.DataFrame()).copy()
+    routes=TABLES.get(("Maritime","Cruise Routes"),pd.DataFrame()).copy()
+    craft=TABLES.get(("Maritime","Service Craft"),pd.DataFrame()).copy()
+
+    m1,m2,m3,m4,m5=st.columns(5)
+    m1.metric("Cruise brands",len(lines))
+    m2.metric("Cruise ships",len(ships))
+    m3.metric("Private / controlled destinations",len(destinations))
+    m4.metric("Route families",len(routes))
+    m5.metric("Service craft",len(craft))
+
+    q=st.text_input("Search cruise and service-craft coverage",placeholder="CocoCay, Great Lakes, SAFEEN, tug, offshore support...")
+    if q:
+        lines=_contains_any(lines,[q]); ships=_contains_any(ships,[q])
+        destinations=_contains_any(destinations,[q]); routes=_contains_any(routes,[q]); craft=_contains_any(craft,[q])
+
+    tabs=st.tabs(["Cruise Lines","Cruise Ships","Destinations","Routes","Tugs / OSVs / Service Craft"])
+    with tabs[0]:
+        st.caption("Brand and parent-group structure is separated so fleet and destination exposure can roll up without losing the operating line.")
+        display_df(humanize_df(lines),200)
+    with tabs[1]:
+        st.caption("Sector-specific cruise detail links back to the canonical vessel registry.")
+        display_df(humanize_df(ships),300)
+    with tabs[2]:
+        st.caption("Destination type distinguishes private islands, leased destinations, resort calls and partner beach clubs. Legal land ownership is not inferred.")
+        display_df(humanize_df(destinations),200)
+    with tabs[3]:
+        st.caption("Route families are representative operating patterns, not live sailing schedules.")
+        display_df(humanize_df(routes),200)
+    with tabs[4]:
+        segments=sorted([x for x in craft.get("Craft Segment",pd.Series(dtype=str)).unique().tolist() if str(x).strip()])
+        selected=st.multiselect("Craft segment",segments,default=[])
+        shown=craft[craft["Craft Segment"].isin(selected)] if selected else craft
+        st.caption("SAFEEN assets are connected through the AD Ports / Noatum group ecosystem; direct legal ownership is only shown when supported.")
+        display_df(humanize_df(shown),300)
 
 elif page=="Contracts":
     header("Contracts & Commercial","Government procurement, commercial transactions, infrastructure deals, vessel sales and delivery routes.")
