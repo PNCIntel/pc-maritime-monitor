@@ -1,0 +1,8 @@
+﻿asset_id,name,asset_type,subtype,country,region_city,operator_entity_id,owner_entity_id,capacity_value,capacity_unit,status,record_status,data_quality,source_id
+ASSET_TBILISI,Tbilisi Intermodal Hub / Tbilisi Dry Port,Dry port,Inland intermodal hub,Georgia,Tbilisi,COMP_TBILISI_DRY_PORT,COMP_ADPORTS,200000,TEU/year,Operating / expanding,verified,high,SRC_ADPORTS_TBILISI
+ASSET_AL_DHAID,Al Dhaid Multi-Modal Trade Corridor,Logistics hub,Planned inland logistics / dry-port-style corridor,United Arab Emirates,"Al Dhaid, Sharjah",COMP_GULFTAINER,COMP_GULFTAINER,1500000,TEU/year,Development,verified,high,SRC_GULFTAINER_INV
+PORT_ZAYED,Zayed Port,Port,Commercial / urban port,United Arab Emirates,Abu Dhabi,COMP_ADPORTS,COMP_ADPORTS,,,Operating,verified,medium,SRC_ZAYED_EVENT
+PORT_ROTTERDAM,Port of Rotterdam,Port,Major seaport,Netherlands,Rotterdam,,,,,Operating,verified,high,SRC_ROTTERDAM_EVENT
+PORT_GENOA,Port of Genoa,Port,Major seaport,Italy,Genoa,,,,,Operating / expanding,verified,high,SRC_GENOA_EVENT
+PORT_MOREBAYA,Morebaya Port,Port,Integrated mining export port,Guinea,Morebaya,,,,,Commissioning,verified,high,SRC_MOREBAYA_EVENT
+PORT_KHALIFA,Khalifa Port,Port,Commercial / industrial port,United Arab Emirates,Abu Dhabi,COMP_ADPORTS,COMP_ADPORTS,,,Operating / expanding,verified,high,SRC_ADPORTS_INV

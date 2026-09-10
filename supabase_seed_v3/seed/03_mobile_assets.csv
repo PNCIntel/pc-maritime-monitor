@@ -1,0 +1,7 @@
+﻿mobile_asset_id,name,asset_type,subtype,imo_or_identifier,flag,year_built,owner_entity_id,operator_entity_id,status,record_status,data_quality,source_id
+VESSEL_MRAWEH,Mraweh,Vessel,LNG carrier,9074638,,,,,Operating / PGSA-listed,verified,high,SRC_PGSA_PC
+VESSEL_TARIF,Tarif,Vessel,LNG carrier,9828390,,,,,Operating / PGSA-listed,verified,high,SRC_PGSA_PC
+VESSEL_GASLOG_SHANGHAI,GasLog Shanghai,Vessel,LNG carrier,9600528,Bermuda,2013,COMP_CL_GAS_THREE,COMP_GASLOG,Operating / PGSA-listed,provisional,medium,SRC_GASLOG_REF
+VESSEL_AL_REKAYYAT,Al Rekayyat,Vessel,Q-Flex LNG carrier,9397339,Marshall Islands,2009,COMP_NAKILAT_HHI1910,COMP_STASCO_SM,Operating / PGSA-listed,provisional,medium,SRC_ALREK_REF
+VESSEL_LADONNA,LADONNA,Vessel,Commercial vessel,,,,,,Damaged in attack,verified,medium,SRC_LADONNA_EVENT
+VESSEL_MSC_ELSA3,MSC Elsa 3,Vessel,Containership,,,,,,Casualty / salvage case,verified,medium,SRC_ICG

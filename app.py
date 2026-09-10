@@ -12,8 +12,8 @@ import pandas as pd
 import streamlit as st
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v2.9.0"
-RELEASE_NAME = "Investment & Financial Intelligence"
+APP_VERSION = "v3.0.0"
+RELEASE_NAME = "Core Intelligence Model · Excel Deployment"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -99,7 +99,7 @@ div[data-baseweb="tooltip"],div[data-baseweb="tooltip"] *{
   background:#ffffff!important;
 }
 
-/* v2.6 workspace navigation */
+/* v3.0 workspace navigation */
 [data-testid="stSidebar"] [data-testid="stRadio"] label{
   border:0!important;background:transparent!important;border-radius:7px!important;
   padding:.34rem .45rem!important;margin:.05rem 0!important;
@@ -1766,6 +1766,8 @@ def render_company_financials(entity_id):
     if not rep.empty:
         st.markdown("### Reports & filings")
         display_df(rep[[c for c in ["Report Type","Period","Publication Date","Document Title","Currency","Source URL","Status","Notes"] if c in rep.columns]],100)
+    st.markdown("### Share-price history")
+    render_share_price_history(entity_id)
 
 def render_company_profile(entity_id, entity_name):
     prof=build_company_profile(entity_id,entity_name)
@@ -1801,7 +1803,7 @@ def render_company_profile(entity_id, entity_name):
 
     company_view=st.selectbox(
         "Company section",
-        ["Profile & Assets","Investments","Financials"],
+        ["Profile & Assets","Investments","Financials","Share Price","Security & Risk"],
         key=f"company_section_{entity_id}"
     )
     if company_view=="Investments":
@@ -1810,6 +1812,14 @@ def render_company_profile(entity_id, entity_name):
         return
     if company_view=="Financials":
         render_company_financials(entity_id)
+        return
+    if company_view=="Share Price":
+        st.markdown("### Share-price intelligence")
+        render_share_price_history(entity_id)
+        return
+    if company_view=="Security & Risk":
+        st.markdown("### Security & risk")
+        render_company_security_risk(entity_id,entity_name)
         return
 
     tabs=st.tabs(["Overview","Port Assets","Shipyards & Facilities","Vessels","Programmes & Contracts","Sales Routes","Events & Impact","News","Relationships & Systems","Policy & Compliance","Evidence"])
@@ -2625,6 +2635,7 @@ def render_vessel_profile(vessel_id,vessel_name):
     tabs=st.tabs([
         "Overview",
         "Ownership & Management",
+        "Security & Compliance",
         "Sanctions",
         "Incidents",
         "News",
@@ -2680,6 +2691,21 @@ def render_vessel_profile(vessel_id,vessel_name):
         render_vessel_relationship_cards(vessel_id,vessel_name,rel,"ownership")
 
     with tabs[2]:
+        sec=security_vessel_bundle(vessel_id,vessel_name,vessel_value(r,"IMO"))
+        if sec["designations"].empty and sec["exposure"].empty and sec["restrictions"].empty:
+            st.info("No operational compliance or security restriction is linked to this vessel.")
+        else:
+            if not sec["designations"].empty:
+                st.markdown("### Compliance designations")
+                display_df(sec["designations"],100)
+            if not sec["exposure"].empty:
+                st.markdown("### Secondary / counterparty exposure")
+                display_df(sec["exposure"],100)
+            if not sec["restrictions"].empty:
+                st.markdown("### Vessel restriction records")
+                display_df(sec["restrictions"],100)
+
+    with tabs[3]:
         if san.empty:
             st.info("No government sanctions designation linked to this canonical vessel.")
         else:
@@ -2696,16 +2722,16 @@ def render_vessel_profile(vessel_id,vessel_name):
                     st.markdown("### Related sanction-linked entities")
                     render_sanction_link_cards(linked)
 
-    with tabs[3]:
+    with tabs[4]:
         render_vessel_incident_cards(events,news)
 
-    with tabs[4]:
+    with tabs[5]:
         if not news.empty:
             show_named_list(news,"Headline",["Published Date","Publisher","Region","Event Type"],source_col="URL",max_items=100)
         else:
             st.info("No linked news reporting.")
 
-    with tabs[5]:
+    with tabs[6]:
         if not evd.empty:
             st.markdown("### Vessel evidence")
             display_df(evd,150)
@@ -2893,6 +2919,210 @@ def render_live_event_cluster(events, locations):
             unsafe_allow_html=True
         )
 
+# ---------- v3.0 security / compliance product lens ----------
+def _first_existing(df, candidates):
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+def security_vessel_bundle(vessel_id="", vessel_name="", imo=""):
+    restrictions=TABLES.get(("Maritime","Vessel Restrictions"),pd.DataFrame()).copy()
+    designations=TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()).copy()
+    exposure=TABLES.get(("Trade Policy & Compliance","Compliance Exposure"),pd.DataFrame()).copy()
+    out={"restrictions":pd.DataFrame(),"designations":pd.DataFrame(),"exposure":pd.DataFrame()}
+    if not restrictions.empty:
+        mask=pd.Series(False,index=restrictions.index)
+        for col,val in [("Vessel ID",vessel_id),("IMO",imo),("Vessel Name",vessel_name)]:
+            if val and col in restrictions.columns:
+                mask=mask | restrictions[col].astype(str).str.strip().eq(str(val).strip())
+        out["restrictions"]=restrictions[mask].copy()
+    if not designations.empty:
+        mask=pd.Series(False,index=designations.index)
+        for col,val in [("Target ID",vessel_id),("IMO / Identifier",imo),("Target Name",vessel_name)]:
+            if val and col in designations.columns:
+                mask=mask | designations[col].astype(str).str.strip().eq(str(val).strip())
+        out["designations"]=designations[mask].copy()
+    if not exposure.empty:
+        mask=pd.Series(False,index=exposure.index)
+        for col,val in [("Source Vessel ID",vessel_id),("Source Vessel",vessel_name)]:
+            if val and col in exposure.columns:
+                mask=mask | exposure[col].astype(str).str.strip().eq(str(val).strip())
+        out["exposure"]=exposure[mask].copy()
+    return out
+
+def render_share_price_history(entity_id):
+    listings=TABLES.get(("Corporate & Markets","Company Listings"),pd.DataFrame()).copy()
+    prices=TABLES.get(("Corporate & Markets","Company Market Prices"),pd.DataFrame()).copy()
+    scope=company_scope_ids(entity_id)
+    if not listings.empty and "Company ID" in listings.columns:
+        listing=listings[listings["Company ID"].astype(str).isin(scope)].copy()
+    else:
+        listing=pd.DataFrame()
+    if not listing.empty:
+        r=listing.iloc[0]
+        a,b,c=st.columns(3)
+        a.metric("Ticker",str(r.get("Ticker","") or "—"))
+        b.metric("Exchange",str(r.get("Exchange","") or "—"))
+        c.metric("Currency",str(r.get("Currency","") or "—"))
+        status=str(r.get("Listing Status","")).strip()
+        if status: st.caption(status)
+    if prices.empty or "Company ID" not in prices.columns:
+        st.info("No structured share-price history for this company yet.")
+        return
+    p=prices[prices["Company ID"].astype(str).isin(scope)].copy()
+    date_col=_first_existing(p,["Date","Month End","Trade Date"])
+    close_col=_first_existing(p,["Close","Adjusted Close","Price"])
+    if p.empty or not date_col or not close_col:
+        st.info("No structured share-price history for this company yet.")
+        return
+    p["_date"]=pd.to_datetime(p[date_col],errors="coerce")
+    p["_close"]=pd.to_numeric(p[close_col],errors="coerce")
+    p=p.dropna(subset=["_date","_close"]).sort_values("_date")
+    if p.empty:
+        st.info("No usable price observations.")
+        return
+    ranges={"1M":31,"3M":93,"6M":186,"YTD":None,"1Y":366,"3Y":1096,"5Y":1827,"All":99999}
+    period=st.radio("Price history",list(ranges),horizontal=True,key=f"price_range_{entity_id}")
+    end=p["_date"].max()
+    if period=="YTD":
+        start=pd.Timestamp(year=end.year,month=1,day=1)
+    else:
+        start=end-pd.Timedelta(days=ranges[period])
+    view=p[p["_date"].ge(start)].copy()
+    if view.empty: view=p.copy()
+    first=float(view.iloc[0]["_close"]); last=float(view.iloc[-1]["_close"])
+    pct=((last/first)-1)*100 if first else None
+    hi=float(view["_close"].max()); lo=float(view["_close"].min())
+    a,b,c,d=st.columns(4)
+    a.metric("Latest",f"{last:,.2f}")
+    b.metric("Period change",f"{pct:+.1f}%" if pct is not None else "—")
+    c.metric("Period high",f"{hi:,.2f}")
+    d.metric("Period low",f"{lo:,.2f}")
+    st.line_chart(view.set_index("_date")["_close"])
+    cols=[c for c in [date_col,"Open","High","Low",close_col,"Volume","Currency","Source URL","Notes"] if c in p.columns]
+    if cols: display_df(p[cols].sort_values(date_col,ascending=False),250)
+
+def render_company_security_risk(entity_id, entity_name):
+    scope=company_scope_ids(entity_id)
+    vessels=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
+    vrel=TABLES.get(("Maritime","Vessel Relationships"),pd.DataFrame()).copy()
+    comp_exp=TABLES.get(("Trade Policy & Compliance","Compliance Exposure"),pd.DataFrame()).copy()
+    comp_des=TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()).copy()
+    monitoring=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame()).copy()
+    prof=build_company_profile(entity_id,entity_name)
+    asset_ids=entity_asset_ids_from_profile(prof)
+    ev,loc,chains=event_bundle_for_entities(entity_ids=scope,asset_ids=asset_ids)
+    vids=set()
+    if not vessels.empty:
+        for c in ["Owner Company ID","Operator Company ID"]:
+            if c in vessels.columns:
+                vids.update(vessels[vessels[c].astype(str).isin(scope)]["Vessel ID"].astype(str).tolist())
+    if not vrel.empty and "Company ID" in vrel.columns and "Vessel ID" in vrel.columns:
+        vids.update(vrel[vrel["Company ID"].astype(str).isin(scope)]["Vessel ID"].astype(str).tolist())
+    cv=vessels[vessels["Vessel ID"].astype(str).isin(vids)].copy() if vids and not vessels.empty else pd.DataFrame()
+    d=pd.DataFrame()
+    if not comp_des.empty and "Target ID" in comp_des.columns:
+        d=comp_des[comp_des["Target ID"].astype(str).isin(vids)].copy()
+    x=pd.DataFrame()
+    if not comp_exp.empty and "Source Vessel ID" in comp_exp.columns:
+        x=comp_exp[comp_exp["Source Vessel ID"].astype(str).isin(vids)].copy()
+    a,b,c,dmetric=st.columns(4)
+    a.metric("Linked vessels",len(cv))
+    b.metric("Security / disruption events",len(ev))
+    c.metric("Compliance designations",len(d))
+    dmetric.metric("Secondary exposures",len(x))
+    if not d.empty:
+        st.markdown("### Fleet compliance exposure")
+        display_df(d[[c for c in ["Date","Target Name","IMO / Identifier","Status","Direct / Indirect","Reason / Basis","Verification","Notes"] if c in d.columns]],100)
+    if not x.empty:
+        st.markdown("### Secondary / counterparty exposure")
+        display_df(x[[c for c in ["Source Vessel","Counterparty / Related Entity","Relationship","Event / Geography","Exposure Type","Status","Confidence","Analytical Note"] if c in x.columns]],100)
+    if not ev.empty:
+        st.markdown("### Asset and company security / disruption events")
+        render_event_cards(ev,100)
+        if not chains.empty:
+            with st.expander("Impact chains"):
+                display_df(chains,100)
+    if not monitoring.empty:
+        # broad matching on linked entity/vessel IDs for the Excel phase
+        linked=[]
+        ids=set(scope)|vids|set(asset_ids)
+        for _,r in monitoring.iterrows():
+            blob=" ".join(str(r.get(c,"")) for c in ["Linked Entity IDs","Linked Event IDs","Title","Geography"])
+            if any(i and i in blob for i in ids): linked.append(r)
+        if linked:
+            st.markdown("### Active monitoring")
+            display_df(pd.DataFrame(linked)[[c for c in ["Title","Family","Geography","Status","Time Horizon","What Is Being Monitored","Trigger / Threshold","Confidence"] if c in monitoring.columns]],100)
+    if d.empty and x.empty and ev.empty:
+        st.info("No structured security/compliance exposure has been linked to this company yet.")
+
+def render_security_operating_picture():
+    monitoring=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame()).copy()
+    events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+    des=TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()).copy()
+    exposure=TABLES.get(("Trade Policy & Compliance","Compliance Exposure"),pd.DataFrame()).copy()
+    feeds=TABLES.get(("Sources","Source Feeds"),pd.DataFrame()).copy()
+    active=monitoring[monitoring.get("Status",pd.Series(dtype=str)).astype(str).str.contains("Active",case=False,na=False)] if not monitoring.empty else monitoring
+    severe=events[events.get("Severity",pd.Series(dtype=str)).astype(str).str.lower().isin(["high","severe","critical"])] if not events.empty else events
+    marsec=events[events.get("Event Family",pd.Series(dtype=str)).astype(str).str.contains("Maritime|Security|Conflict|Port",case=False,regex=True,na=False)] if not events.empty else events
+    official=feeds[feeds.get("Feed ID",pd.Series(dtype=str)).astype(str).str.startswith("FEED_SEC")] if not feeds.empty else feeds
+    cols=st.columns(5)
+    vals=[("Active monitors",len(active)),("High/severe events",len(severe)),("MARSEC/security events",len(marsec)),("Compliance records",len(des)+len(exposure)),("Security feeds",len(official))]
+    for c,(lab,val) in zip(cols,vals): c.metric(lab,f"{val:,}")
+    if not active.empty:
+        st.markdown("### Priority monitoring")
+        display_df(active[[c for c in ["Title","Family","Geography","Status","Time Horizon","What Is Being Monitored","Trigger / Threshold","Confidence"] if c in active.columns]],100)
+    if not severe.empty:
+        st.markdown("### Latest high-severity events")
+        render_event_cards(severe,20)
+
+def render_marsec_workspace():
+    events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+    feeds=TABLES.get(("Sources","Source Feeds"),pd.DataFrame()).copy()
+    if not feeds.empty:
+        sec=feeds[feeds.get("Feed ID",pd.Series(dtype=str)).astype(str).str.startswith("FEED_SEC")].copy()
+        if not sec.empty:
+            st.markdown("### Official MARSEC collection")
+            display_df(sec[[c for c in ["Source Name","Coverage","Default Event Families","Priority","Active","Last Checked","Notes"] if c in sec.columns]],100)
+    if events.empty:
+        st.info("No event data loaded."); return
+    mask=events.get("Event Family",pd.Series(index=events.index,dtype=str)).astype(str).str.contains("Maritime|Security|Conflict|Port",case=False,regex=True,na=False)
+    marsec=events[mask].copy()
+    c1,c2=st.columns(2)
+    with c1:
+        families=sorted([x for x in marsec.get("Event Type",pd.Series(dtype=str)).astype(str).unique() if x])
+        et=st.selectbox("Incident type",["All"]+families,key="marsec_type_filter")
+    with c2:
+        countries=sorted([x for x in marsec.get("Country / Countries",pd.Series(dtype=str)).astype(str).unique() if x])
+        country=st.selectbox("Country / area",["All"]+countries,key="marsec_country_filter")
+    if et!="All": marsec=marsec[marsec["Event Type"].astype(str).eq(et)]
+    if country!="All": marsec=marsec[marsec["Country / Countries"].astype(str).eq(country)]
+    st.markdown("### Incident feed")
+    render_event_cards(marsec,100)
+
+def render_compliance_exposure_workspace():
+    regimes=TABLES.get(("Trade Policy & Compliance","Compliance Regimes"),pd.DataFrame()).copy()
+    des=TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()).copy()
+    exp=TABLES.get(("Trade Policy & Compliance","Compliance Exposure"),pd.DataFrame()).copy()
+    restrictions=TABLES.get(("Maritime","Vessel Restrictions"),pd.DataFrame()).copy()
+    a,b,c=st.columns(3)
+    a.metric("Compliance regimes",len(regimes))
+    b.metric("Direct designations",len(des))
+    c.metric("Exposure links",len(exp))
+    if not regimes.empty:
+        st.markdown("### Regimes")
+        display_df(regimes,50)
+    if not des.empty:
+        st.markdown("### Designations")
+        display_df(des[[c for c in ["Date","Target Type","Target Name","IMO / Identifier","Status","Direct / Indirect","Reason / Basis","Verification","Notes"] if c in des.columns]],200)
+    if not exp.empty:
+        st.markdown("### Secondary / counterparty exposure")
+        display_df(exp[[c for c in ["Source Vessel","Counterparty / Related Entity","Related Entity Type","Relationship","Event / Geography","Exposure Type","Status","Confidence","Analytical Note"] if c in exp.columns]],200)
+    if not restrictions.empty:
+        with st.expander("Underlying vessel restriction records"):
+            display_df(restrictions,200)
+
 # ---------- workspace navigation ----------
 st.sidebar.markdown("<div class='pc-kicker'>Power & Corridors Intelligence</div>",unsafe_allow_html=True)
 st.sidebar.markdown("### Trade System")
@@ -2900,8 +3130,9 @@ st.sidebar.caption(f"{APP_VERSION} · Excel-backed test")
 
 NAV_GROUPS={
     "Command Center":["Overview","Search"],
-    "Network":["Companies","Ports","Vessels","Corridors & Systems","Cruise & Service Craft","Shipyards"],
+    "Network":["Companies","Ports","Vessels","Aviation","Corridors & Systems","Cruise & Service Craft","Shipyards"],
     "Operations":["Watch Areas","Port Activity","Hormuz Monitor","Live Feeds"],
+    "P&C Intelligence Test":["Operating Picture","MARSEC","Compliance & Exposure"],
     "Markets & Policy":["Investments","Sanctions","Trade Policy","Contracts"],
     "Intelligence":["News & Signals","News & Events"],
     "Data":["Data"],
@@ -3009,7 +3240,7 @@ if page=="Overview":
     with cov_tabs[3]:
         coverage_search("intelligence","Rotterdam strike, typhoon, attack, disruption...",["Events","Strategic Events","Monitoring","Disruption Watch","Weather Labour Events","Impact Chains"],[("Watch Areas","Watch Areas"),("News & events","News & Events"),("News & signals","News & Signals")])
     with cov_tabs[4]:
-        coverage_search("compliance","OFAC, sanctions, export controls, trade agreement...",["Sanctions Designations","Sanctions Entity Links","Watchlist Taxonomy","Trade Agreements","Trade Remedies & Restrictions","Customs & Procurement"],[("Sanctions","Sanctions"),("Trade policy","Trade Policy")])
+        coverage_search("compliance","OFAC, sanctions, export controls, trade agreement...",["Sanctions Designations","Sanctions Entity Links","Compliance Regimes","Compliance Designations","Compliance Exposure","Watchlist Taxonomy","Trade Agreements","Trade Remedies & Restrictions","Customs & Procurement"],[("Sanctions","Sanctions"),("Trade policy","Trade Policy")])
     with cov_tabs[5]:
         coverage_search("defence","Seaspan, Fincantieri, shipyard, submarine, delivery...",["Shipyards","Programmes","Contracts","Sales & Delivery Routes","Vessel Build Records","Fleet Orders"],[("Shipyards","Shipyards"),("Contracts","Contracts")])
 
@@ -3047,7 +3278,7 @@ elif page=="Search":
                 ("Commercial / contracts",["Contracts","Infra Deals","Transactions V125","Sales & Delivery Routes","Vessel Transactions"]),
                 ("Assets",["Port Terminals","Ports","Shipyards","Yard Facilities","Sample Vessels","Platform Classes","Vessel Status History","Vessels","Assets"]),
                 ("Cruise & service craft",["Cruise Lines","Cruise Ships","Cruise Destinations","Cruise Routes","Service Craft"]),
-                ("Trade policy & compliance",["Trade Agreements","Tariff Coverage","HS Product Tests","Rules of Origin","Customs & Procurement","Trade Remedies & Restrictions","Sanctions Designations"]),
+                ("Trade policy & compliance",["Trade Agreements","Tariff Coverage","HS Product Tests","Rules of Origin","Customs & Procurement","Trade Remedies & Restrictions","Sanctions Designations","Compliance Regimes","Compliance Designations","Compliance Exposure"]),
                 ("News & events",["Events","Strategic Events","Announcements","News Registry","Impact Chains"]),
                 ("Systems & relationships",["Systems","System Entities","System Links","Relationships","Port Ownership"]),
             ]
@@ -3059,6 +3290,39 @@ elif page=="Search":
                     readable_search_card(h)
         if em.empty and hits.empty:
             st.warning("No matching records found.")
+
+elif page=="Operating Picture":
+    header("P&C Intelligence · Operating Picture","Security, disruption, compliance and monitoring over the same canonical P&C data.")
+    st.markdown("<div class='pc-section-note'>Test product lens only. No data is duplicated: vessels, companies, ports, events and sources are the same records used elsewhere in the Trade System.</div>",unsafe_allow_html=True)
+    render_security_operating_picture()
+
+elif page=="MARSEC":
+    header("MARSEC","Official-source maritime security, safety, casualty, SAR and disruption monitoring.")
+    render_marsec_workspace()
+
+elif page=="Compliance & Exposure":
+    header("Compliance & Exposure","PGSA and other operational compliance regimes, direct restrictions and secondary/counterparty exposure. Government sanctions remain separately identifiable.")
+    render_compliance_exposure_workspace()
+
+elif page=="Aviation":
+    header("Aviation","Aircraft, carrier deployment and aviation-linked operational/security data from the shared model.")
+    aircraft=TABLES.get(("Aviation","Aircraft"),pd.DataFrame()).copy()
+    registry=TABLES.get(("Aviation","Aircraft Registry"),pd.DataFrame()).copy()
+    rel=TABLES.get(("Aviation","Aircraft Relationships"),pd.DataFrame()).copy()
+    if aircraft.empty:
+        st.info("No aviation records loaded.")
+    else:
+        q=st.text_input("Filter aviation",placeholder="CMA CGM Air Cargo, Cargolux, registration, aircraft type...")
+        view=aircraft.copy()
+        if q:
+            mask=pd.Series(False,index=view.index)
+            for c in view.columns:
+                mask=mask | view[c].astype(str).str.contains(q,case=False,na=False)
+            view=view[mask]
+        display_df(view,250)
+        if not rel.empty:
+            with st.expander("Aircraft relationships"):
+                display_df(rel,250)
 
 elif page=="Investments":
     header("Investments","Track capital deployment, acquisitions, equity investments and infrastructure commitments across companies, regions and years.")
@@ -3179,12 +3443,20 @@ elif page=="Ports":
             ev,loc,chains=event_bundle_for_entities(asset_ids=[pid])
             if not ev.empty:
                 render_event_map(ev,loc,"Events affecting this port")
-            tabs=st.tabs(["Terminals","Events & Impact","Evidence"])
+            tabs=st.tabs(["Terminals","Security & Disruption","Events & Impact","Evidence"])
             with tabs[0]: display_df(pt,300)
             with tabs[1]:
+                if ev.empty:
+                    st.info("No linked security/disruption events for this port yet.")
+                else:
+                    security_mask=ev.get("Event Family",pd.Series(index=ev.index,dtype=str)).astype(str).str.contains("Security|Conflict|Maritime|Port|Weather|Natural|Labour|Civil|Cyber",case=False,regex=True,na=False)
+                    sev=ev[security_mask].copy()
+                    render_event_cards(sev,50)
+                    if sev.empty: st.info("No events currently classified into the security/disruption view.")
+            with tabs[2]:
                 render_event_cards(ev,50)
                 if not chains.empty: display_df(chains,100)
-            with tabs[2]: display_df(pd.DataFrame([row]),20)
+            with tabs[3]: display_df(pd.DataFrame([row]),20)
 
 elif page=="Watch Areas":
     header("Watch Areas","Active monitoring, disruption watchlists, weather/labour observations and strategic events in one operational workspace.")

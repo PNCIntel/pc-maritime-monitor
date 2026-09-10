@@ -1,0 +1,9 @@
+﻿relationship_id,source_type,source_id,relationship_type,target_type,target_id,ownership_percent,valid_from,valid_to,confidence,record_status,source_record_id,notes
+REL_001,Company,COMP_ADPORTS,OWNS,Asset,ASSET_TBILISI,60,2024-08-15,,High,verified,SRC_ADPORTS_TBILISI,Majority interest in Tbilisi Dry Port.
+REL_002,Company,COMP_TBILISI_DRY_PORT,OPERATES,Asset,ASSET_TBILISI,,,,High,verified,SRC_ADPORTS_TBILISI,Operating company for dry port.
+REL_003,Company,COMP_GULFTAINER,OWNS / OPERATES,Asset,ASSET_AL_DHAID,,,,High,verified,SRC_GULFTAINER_INV,Development led by Gulftainer.
+REL_004,Company,COMP_ADPORTS,OWNS / OPERATES,Asset,PORT_KHALIFA,,,,High,verified,SRC_ADPORTS_INV,Core AD Ports asset.
+REL_005,Company,COMP_CL_GAS_THREE,REGISTERED_OWNER,MobileAsset,VESSEL_GASLOG_SHANGHAI,,,,High,provisional,SRC_GASLOG_REF,Time-aware registered owner relationship.
+REL_006,Company,COMP_GASLOG,OPERATOR / COMMERCIAL_MANAGER,MobileAsset,VESSEL_GASLOG_SHANGHAI,,,,High,provisional,SRC_GASLOG_REF,Group management relationship.
+REL_007,Company,COMP_NAKILAT_HHI1910,REGISTERED_OWNER,MobileAsset,VESSEL_AL_REKAYYAT,,,,Medium-High,provisional,SRC_ALREK_REF,Time-aware registered owner relationship.
+REL_008,Company,COMP_STASCO_SM,OPERATOR / MANAGER,MobileAsset,VESSEL_AL_REKAYYAT,,,,Medium-High,provisional,SRC_ALREK_REF,Source-reported operator/manager.

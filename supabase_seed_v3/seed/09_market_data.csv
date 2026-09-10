@@ -1,0 +1,9 @@
+﻿market_record_id,entity_id,exchange,ticker,date,open,high,low,close,volume,currency,record_type,record_status,source_id,notes
+LIST_ADPORTS,COMP_ADPORTS,Abu Dhabi Securities Exchange,ADPORTS,2022-02-08,,,,3.20,,AED,Listing,verified,SRC_ADPORTS_LISTING,Listing price / first trading date context.
+PRICE_ADP_2024_01,COMP_ADPORTS,Abu Dhabi Securities Exchange,ADPORTS,2024-01-31,,6.45,6.18,6.21,,AED,Monthly price,verified,SRC_ADPORTS_ANNUAL,Official annual-report monthly series.
+PRICE_ADP_2024_02,COMP_ADPORTS,Abu Dhabi Securities Exchange,ADPORTS,2024-02-29,,6.27,5.46,5.79,,AED,Monthly price,verified,SRC_ADPORTS_ANNUAL,Official annual-report monthly series.
+PRICE_ADP_2024_03,COMP_ADPORTS,Abu Dhabi Securities Exchange,ADPORTS,2024-03-31,,5.94,5.41,5.76,,AED,Monthly price,verified,SRC_ADPORTS_ANNUAL,Official annual-report monthly series.
+PRICE_ADP_2024_04,COMP_ADPORTS,Abu Dhabi Securities Exchange,ADPORTS,2024-04-30,,5.99,5.22,5.81,,AED,Monthly price,verified,SRC_ADPORTS_ANNUAL,Official annual-report monthly series.
+PRICE_ADP_2024_05,COMP_ADPORTS,Abu Dhabi Securities Exchange,ADPORTS,2024-05-31,,5.87,4.8,5.08,,AED,Monthly price,verified,SRC_ADPORTS_ANNUAL,Official annual-report monthly series.
+PRICE_ADP_2024_06,COMP_ADPORTS,Abu Dhabi Securities Exchange,ADPORTS,2024-06-30,,5.27,4.96,5.1,,AED,Monthly price,verified,SRC_ADPORTS_ANNUAL,Official annual-report monthly series.
+PRICE_ADP_2024_07,COMP_ADPORTS,Abu Dhabi Securities Exchange,ADPORTS,2024-07-31,,5.29,4.95,5.2,,AED,Monthly price,verified,SRC_ADPORTS_ANNUAL,Official annual-report monthly series.

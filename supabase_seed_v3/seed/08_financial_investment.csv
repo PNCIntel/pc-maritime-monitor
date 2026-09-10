@@ -1,0 +1,12 @@
+﻿financial_record_id,record_type,entity_id,period_or_date,metric_or_project,value,unit,currency,country_region,asset_id,spend_type,status,record_status,source_id,notes
+FIN_ADP_2025_REV,Financial metric,COMP_ADPORTS,2025-12-31,Revenue,20770000000,currency,AED,,,,FY2025,verified,SRC_ADPORTS_ANNUAL,
+FIN_ADP_2025_EBITDA,Financial metric,COMP_ADPORTS,2025-12-31,EBITDA,5110000000,currency,AED,,,,FY2025,verified,SRC_ADPORTS_ANNUAL,
+FIN_ADP_2025_NP,Financial metric,COMP_ADPORTS,2025-12-31,Net profit,2070000000,currency,AED,,,,FY2025,verified,SRC_ADPORTS_ANNUAL,
+FIN_ADP_2025_CAPEX,Financial metric,COMP_ADPORTS,2025-12-31,Organic CAPEX,5500000000,currency,AED,,,CAPEX,FY2025,verified,SRC_ADPORTS_RESULTS,
+FIN_ADP_Q2_26_REV,Financial metric,COMP_ADPORTS,2026-06-30,Revenue,7080000000,currency,AED,,,,Q2 2026,verified,SRC_ADPORTS_Q2,
+FIN_ADP_Q2_26_EBITDA,Financial metric,COMP_ADPORTS,2026-06-30,EBITDA,1740000000,currency,AED,,,,Q2 2026,verified,SRC_ADPORTS_Q2,
+FIN_ADP_Q2_26_CAPEX,Financial metric,COMP_ADPORTS,2026-06-30,Organic CAPEX,1450000000,currency,AED,,,CAPEX,Q2 2026,verified,SRC_ADPORTS_Q2,Excludes GFS stake purchase.
+INV_ADP_CLI,Investment,COMP_ADPORTS,2026-06-30,CLI acquisition,3100000000,reported value,AED,Brazil,,M&A,Announced Q2 2026,verified,SRC_ADPORTS_INV,Strategic entry into South America.
+INV_ADP_EGA,Investment,COMP_ADPORTS,2026-06-30,EGA dedicated berth infrastructure,84000000,reported value,AED,United Arab Emirates,PORT_KHALIFA,CAPEX,Agreement,verified,SRC_ADPORTS_INV,Industrial cargo integration.
+INV_GULF_DHAID,Investment,COMP_GULFTAINER,2026-06-10,Al Dhaid Multi-Modal Trade Corridor,,,,United Arab Emirates,ASSET_AL_DHAID,CAPEX,Development,verified,SRC_GULFTAINER_INV,150 ha; 1.5m TEU annual capacity.
+INV_ADP_TBILISI,Investment,COMP_ADPORTS,2024-08-15,Tbilisi Dry Port majority acquisition,60,ownership percent,%,Georgia,ASSET_TBILISI,M&A,Completed,verified,SRC_ADPORTS_TBILISI,Majority acquisition / strategic corridor investment.

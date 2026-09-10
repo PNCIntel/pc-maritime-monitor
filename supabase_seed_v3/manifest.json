@@ -1,0 +1,41 @@
+{
+  "model": "P&C Core Intelligence Model v3.0",
+  "created": "2026-09-10",
+  "purpose": "Supabase/PostgreSQL seed and model validation",
+  "seed_files": [
+    "01_entities.csv",
+    "02_assets_infrastructure.csv",
+    "03_mobile_assets.csv",
+    "04_relationships.csv",
+    "05_geography_corridors.csv",
+    "06_events.csv",
+    "06b_event_links.csv",
+    "07_security_compliance.csv",
+    "08_financial_investment.csv",
+    "09_market_data.csv",
+    "10_intelligence_analysis.csv",
+    "11_sources_observations.csv"
+  ],
+  "schema_files": [
+    "001_core_schema.sql",
+    "002_seed_load_psql.sql"
+  ],
+  "test_files": [
+    "VALIDATION_QUESTIONS.md",
+    "model_validation_queries.sql"
+  ],
+  "counts": {
+    "entities": 12,
+    "assets": 7,
+    "mobile_assets": 6,
+    "relationships": 8,
+    "geographies": 7,
+    "events": 10,
+    "event_links": 11,
+    "security_compliance": 7,
+    "financial_investment": 11,
+    "market_data": 8,
+    "intelligence_analysis": 5,
+    "sources": 25
+  }
+}

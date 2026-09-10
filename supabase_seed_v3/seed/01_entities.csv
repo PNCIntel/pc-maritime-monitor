@@ -1,0 +1,13 @@
+﻿entity_id,name,entity_type,subtype,hq_city,hq_country,ownership_summary,status,record_status,data_quality,source_id,as_of
+COMP_ADPORTS,AD Ports Group,Company,Ports / logistics group,Abu Dhabi,United Arab Emirates,75.42% owned by ADQ,Active,verified,high,SRC_ADPORTS_CORP,2026-09-07
+COMP_GULFTAINER,Gulftainer,Company,Port / terminal operator,Sharjah,United Arab Emirates,Private,Active,verified,high,SRC_GULFTAINER_CORP,2026-09-07
+COMP_CMA_CGM,CMA CGM Group,Company,Shipping / logistics group,Marseille,France,Private / Saadé family controlled,Active,verified,high,SRC_CMA_CORP,2026-09-07
+COMP_GASLOG,GasLog Ltd,Company,LNG shipping company,Piraeus,Greece,Shipping group / public-market history,Active,provisional,medium,SRC_GASLOG_REF,2026-09-10
+COMP_CL_GAS_THREE,CL Gas Three Ltd,Company,Registered vessel owner,,,Special-purpose registered owner,Active,provisional,medium,SRC_GASLOG_REF,2026-09-10
+COMP_NAKILAT_HHI1910,Nakilat HHI 1910 Inc.,Company,Registered vessel owner,,,Special-purpose vessel owner,Active,provisional,medium,SRC_ALREK_REF,2026-09-10
+COMP_STASCO_SM,STASCO Ship Management,Company,Ship manager / operator,,,Ship management entity,Active,provisional,medium,SRC_ALREK_REF,2026-09-10
+COMP_TBILISI_DRY_PORT,Tbilisi Dry Port,Company,Dry-port operator,Tbilisi,Georgia,60% AD Ports Group; other shareholders include Wilhelmsen Port Services Georgia and Inveco LLC,Active,verified,high,SRC_ADPORTS_TBILISI,2026-09-07
+GOV_JCG,Japan Coast Guard,Government entity,Coast guard,Tokyo,Japan,Government of Japan,Active,verified,high,SRC_JCG,2026-09-10
+GOV_KCG,Korea Coast Guard,Government entity,Coast guard,Incheon,South Korea,Government of the Republic of Korea,Active,verified,high,SRC_KCG,2026-09-10
+GOV_ICG,Indian Coast Guard,Government entity,Coast guard,New Delhi,India,Government of India,Active,verified,high,SRC_ICG,2026-09-10
+GOV_DGS_INDIA,Directorate General of Shipping India,Government entity,Maritime regulator,Mumbai,India,Government of India,Active,verified,high,SRC_DGS_INDIA,2026-09-10

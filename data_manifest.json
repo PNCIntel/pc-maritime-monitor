@@ -1,6 +1,6 @@
 {
-  "version": "1.34",
-  "implementation_version": "2.3.0",
+  "version": "3.0",
+  "implementation_version": "3.0.0",
   "sheet_to_file": {
     "Companies": "01_core_entities.xlsx",
     "Entity Registry": "01_core_entities.xlsx",
@@ -372,5 +372,15 @@
       "Overview"
     ]
   },
-  "model": "Connected chokepoint traffic, tanker economics, maritime compliance, defence maintenance, workforce and sanctions-exposed shipbuilding"
+  "model": "Connected chokepoint traffic, tanker economics, maritime compliance, defence maintenance, workforce and sanctions-exposed shipbuilding",
+  "release_name": "P&C Core Intelligence Model \u00b7 Excel Deployment",
+  "release_date": "2026-09-10",
+  "new_security_sheets": {
+    "Compliance Regimes": "14_trade_policy_compliance.xlsx",
+    "Compliance Designations": "14_trade_policy_compliance.xlsx",
+    "Compliance Exposure": "14_trade_policy_compliance.xlsx",
+    "Security Product View": "09_intelligence.xlsx",
+    "Vessel Restrictions": "02_maritime.xlsx",
+    "Source Feeds": "10_sources_evidence.xlsx"
+  }
 }

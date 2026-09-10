@@ -1,83 +1,30 @@
-# P&C Trade System v2.9.0 — Investment & Financial Intelligence
+# P&C Trade System v3.0 — Excel / GitHub / Streamlit Deployment
 
-This Excel-backed test build adds a global Investments workspace, company-level Investment and Financial sections, structured financial examples for AD Ports Group and DP World, and expanded Gulftainer coverage including the September 2026 Suksawat Terminal investment in Thailand.
+This is the complete Excel-backed GitHub deployment package. It preserves the current v2.9 data model and adds the v3.0 P&C Core Intelligence product lens without forking the data.
 
-The underlying model remains Excel-backed ahead of the planned PostgreSQL migration. Internal IDs remain available for joins but are suppressed from normal presentation.
+## Streamlit entry points
+- `app.py` — P&C Trade System v3.0, including the temporary **P&C Intelligence Test** workspace.
+- `pc_intelligence_app.py` — separate P&C Intelligence proof-of-concept using the same `/data` Excel files.
 
-# P&C Trade System v2.8.2
+## New v3.0 Trade System UI
+- P&C Intelligence Test → Operating Picture
+- P&C Intelligence Test → MARSEC
+- P&C Intelligence Test → Compliance & Exposure
+- Network → Aviation
+- Companies → Share Price
+- Companies → Security & Risk
+- Vessels → Security & Compliance
+- Ports → Security & Disruption
 
-This is the Excel-backed test implementation of the Power & Corridors Trade System ahead of the planned PostgreSQL migration. It preserves the 14 canonical domain workbooks while adding live public API layers for operational, maritime-safety and global-signal testing.
+## Data model additions already present
+- `02_maritime.xlsx` → Vessel Restrictions plus PGSA-linked canonical vessels/relationships.
+- `09_intelligence.xlsx` → security monitoring and Security Product View.
+- `10_sources_evidence.xlsx` → Japan Coast Guard, Korea Coast Guard, Indian Coast Guard, DG Shipping and PGSA source feeds.
+- `13_events_hazards.xlsx` → MARSEC sample events and impact chains.
+- `14_trade_policy_compliance.xlsx` → Compliance Regimes, Compliance Designations and Compliance Exposure.
+- `07_corporate_markets.xlsx` → Company listings, financial metrics, investments and share-price history remain part of the same data set.
 
-## v2.8.2 presentation cleanup
+## GitHub / Streamlit deployment
+Replace the files in the existing GitHub repository with the contents of this package, preserving the `/data` directory. Streamlit should continue to point at `app.py`. No Supabase connection is required for this Excel-backed build.
 
-- Internal database IDs and join keys are hidden throughout the normal user interface.
-- Canonical keys remain unchanged in the Excel workbooks and are still used internally for joins and navigation.
-- Real-world operational identifiers such as IMO and MMSI remain visible where useful.
-- Technical column names, snake_case/camelCase headings, enum values, relationship codes, status codes and type values are converted into readable English before display.
-- Unresolved internal keys are suppressed instead of being shown to users.
-- PortWatch tables now use the same presentation-cleaning layer as the rest of the application.
-
-
-## Repository layout
-
-- `app.py` — Streamlit application
-- `data/` — 14 canonical domain workbooks (model v1.34)
-- `data_manifest.json` — workbook and sheet routing contract
-- `api_sources.json` — public API registry
-- `verify_deployment.py` — package, schema and integrity checks
-- `requirements.txt` — Python dependencies
-- `.streamlit/config.toml` — deployment theme and server settings
-
-## Deploy on Streamlit Community Cloud
-
-1. Upload the contents of this folder to the root of the GitHub repository.
-2. Keep all 14 `.xlsx` files under `data/` with their canonical filenames.
-3. Set the Streamlit entry point to `app.py`.
-4. Deploy or reboot the application.
-
-## Validate before deployment
-
-```bash
-python verify_deployment.py
-```
-
-The verifier checks Python syntax, required files, workbook readability, manifest-to-sheet routing, spreadsheet error markers, canonical primary keys and IMO uniqueness.
-
-## v2.4 additions
-
-- USCG CGMIX / PSIX added as an on-demand vessel-safety and compliance layer: vessel lookup, USCG contacts/cases, deficiencies and operational controls.
-- USCG Incident Investigation Reports (IIR) added for on-demand searches of published Coast Guard marine-casualty investigations.
-- GDELT DOC 2.0 added as a `Global Signals` discovery layer with maritime-security, port disruption, rail/intermodal, logistics and infrastructure-deal query presets plus custom queries.
-- GDELT-derived results remain discovery signals only; they are not automatically promoted into the canonical event model.
-- GDELT GEO 2.0 is registered in `api_sources.json` for later geographic/entity enrichment but is not persisted in this Excel test build.
-- Existing IMF PortWatch and Strait of Hormuz live API functions remain enabled.
-- All API results in v2.4 are cached in-app and remain external to the canonical XLSX model, making the storage-layer migration to PostgreSQL cleaner.
-
-## API persistence rule for this test
-
-The 14 Excel workbooks remain the source-of-truth model. Live API output is deliberately ephemeral in v2.4. During PostgreSQL migration, selected observations can be moved into dedicated fact/evidence tables after entity resolution, deduplication and verification rules are finalized.
-
-
-## v2.5 live-feed visual model
-- **Live Feeds > Maritime AIS:** AISHub map + vessel observation table; activates only when `AISHUB_USERNAME` is configured.
-- **Live Feeds > Intermodal Mobility:** Navitia coverage, place/stop map and disruption table; activates only when `NAVITIA_TOKEN` is configured.
-- **Live Feeds > API Catalog:** visual status cards distinguish enabled, credential-gated, trial/deferred and excluded feeds.
-- Cirium FlightStats is catalogued as trial/deferred; ADS-B Exchange is explicitly excluded from the free production stack.
-- Excel remains the canonical entity layer; all new API observations are ephemeral in this pre-Postgres test.
-
-
-## v2.6 navigation
-The app now uses six grouped workspaces in the sidebar: Command Center, Network, Operations, Markets & Policy, Intelligence, and Data. CGMIX/GDELT are deferred from the active UI. NewsData.io is available under Intelligence > News & Signals after adding `NEWSDATA_API_KEY` to Streamlit secrets.
-
-
-## v2.7 navigation and persistence rework
-- Permanent sidebar quick access to **Vessels, Sanctions, Watch Areas and Corridors**.
-- **Connected Coverage** is now six searchable tabs with direct links into the full model.
-- **Watch Areas** groups Monitoring, Disruption Watch, Weather & Labour and Strategic Events.
-- **Corridors & Systems** exposes corridor, connected-system, waterway and route/exposure layers.
-- PortWatch and Hormuz retain the last successful session result when a refresh fails.
-- CGMIX/GDELT remain deferred; Excel model remains unchanged.
-
-
-## v2.8 relationship navigation
-Readable relationship chains now include contextual View Company / View Port / View Terminal / View Vessel / View Shipyard / View System buttons wherever the endpoint resolves to a canonical record.
+The future Supabase/PostgreSQL migration should normalize these exact relationships, not create separate trade/security databases.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the deployable P&C Trade System v2 package."""
+"""Validate the deployable P&C Trade System v3.0 Excel-backed package."""
 
 from __future__ import annotations
 
@@ -179,7 +179,7 @@ def finish(as_json: bool, errors: list[str], notes: list[str], stats: dict) -> i
     if as_json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        print("P&C TRADE SYSTEM V2 DEPLOYMENT VALIDATION")
+        print("P&C TRADE SYSTEM V3.0 DEPLOYMENT VALIDATION")
         print("=" * 42)
         for note in notes:
             print(f"PASS: {note}")

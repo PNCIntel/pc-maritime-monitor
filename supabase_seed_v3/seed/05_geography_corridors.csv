@@ -1,0 +1,8 @@
+﻿geo_id,name,geo_type,parent_geo_id,countries,geometry_status,watch_status,risk_level,record_status,source_id,notes
+GEO_HORMUZ,Strait of Hormuz,Chokepoint,,Iran; Oman,polygon_pending,Active,High,verified,SRC_HORMUZ_MON,Core maritime/energy watch area.
+GEO_GULF_OMAN,Gulf of Oman,Sea,,Oman; Iran; UAE,polygon_pending,Active,Elevated,verified,SRC_PGSA_PC,STS and approach-area monitoring.
+GEO_N_EU_PORTS,Northern European Ports,Trade corridor / port cluster,,Germany; Netherlands,polygon_pending,Active,Elevated,verified,SRC_N_EU_STRIKE,Labour disruption cluster.
+GEO_JAPAN_MARSEC,Japan Maritime Approaches,Watch area,,Japan,polygon_pending,Active,Watch,verified,SRC_JCG,Official JCG incident collection area.
+GEO_KOREA_MARSEC,Korean Waters,Watch area,,South Korea,polygon_pending,Active,Watch,verified,SRC_KCG,Official KCG incident collection area.
+GEO_INDIA_MARSEC,Indian Maritime Approaches,Watch area,,India,polygon_pending,Active,Watch,verified,SRC_ICG,ICG/DG Shipping casualty and pollution monitoring.
+CORRIDOR_TBILISI,Black Sea–Caspian / Tbilisi Inland Corridor,Trade corridor,,Georgia; Azerbaijan; Armenia,geometry_pending,Monitoring,Watch,verified,SRC_ADPORTS_TBILISI,Links Poti/Batumi with Caucasus inland markets.

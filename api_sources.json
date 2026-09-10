@@ -185,5 +185,6 @@
       "notes": "Active only when NEWSDATA_API_KEY is configured. Treat results as unverified signals.",
       "ui_state_policy": "retain_last_successful_session_result"
     }
-  ]
+  ],
+  "security_source_registry": "Excel Source Feeds includes JCG, KCG, Indian Coast Guard, DG Shipping and PGSA monitoring seeds; automated connectors remain future ingestion work."
 }
