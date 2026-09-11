@@ -554,11 +554,138 @@ def _canonical_db_event_frames():
     except Exception:
         return pd.DataFrame(), pd.DataFrame()
 
+
+@st.cache_data(show_spinner=False, ttl=180)
+def _canonical_db_vessel_frames():
+    """Return canonical Supabase vessels and vessel-event links in Intelligence UI shape."""
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame(), pd.DataFrame()
+
+        vrows = pc_safe_rows(
+            sb,
+            "pc_mobile_assets",
+            "mobile_asset_id,name,asset_type,subtype,imo,mmsi,registration,call_sign,flag,year_built,dwt,capacity_value,capacity_unit,owner_entity_id,operator_entity_id,manager_entity_id,status,record_status,data_quality,source_id,metadata",
+            5000,
+            order="name",
+        )
+        erows = pc_safe_rows(
+            sb,
+            "pc_entities",
+            "entity_id,name,entity_type,subtype,hq_city,hq_country,status,record_status,metadata",
+            5000,
+            order="name",
+        )
+        lrows = pc_safe_rows(
+            sb,
+            "pc_event_links",
+            "event_link_id,event_id,linked_type,linked_id,linked_name,relationship,confidence,source_id,metadata",
+            10000,
+        )
+
+        entity_names = {
+            str(r.get("entity_id") or ""): str(r.get("name") or "")
+            for r in (erows or [])
+        }
+
+        vessel_rows = []
+        for r in (vrows or []):
+            meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+            owner_id = str(r.get("owner_entity_id") or "").strip()
+            operator_id = str(r.get("operator_entity_id") or "").strip()
+            manager_id = str(r.get("manager_entity_id") or "").strip()
+            vessel_rows.append({
+                "Vessel ID": str(r.get("mobile_asset_id") or "").strip(),
+                "Vessel Name": str(r.get("name") or "").strip(),
+                "IMO": normalize_imo(r.get("imo")),
+                "MMSI": str(r.get("mmsi") or "").strip(),
+                "Call Sign": str(r.get("call_sign") or "").strip(),
+                "Flag": str(r.get("flag") or "").strip(),
+                "Vessel Type": str(r.get("asset_type") or "").strip(),
+                "Subtype / Class": str(r.get("subtype") or "").strip(),
+                "Year Built": r.get("year_built"),
+                "DWT": r.get("dwt"),
+                "Capacity": r.get("capacity_value"),
+                "Capacity Unit": str(r.get("capacity_unit") or "").strip(),
+                "Registered Owner (Legal)": entity_names.get(owner_id, owner_id),
+                "Operator": entity_names.get(operator_id, operator_id),
+                "Technical / ISM Manager": entity_names.get(manager_id, manager_id),
+                "Owner Company ID": owner_id,
+                "Operator Company ID": operator_id,
+                "Manager Company ID": manager_id,
+                "Status": str(r.get("status") or r.get("record_status") or "").strip(),
+                "Record Status": str(r.get("record_status") or "").strip(),
+                "Data Quality": str(r.get("data_quality") or "").strip(),
+                "Source ID": str(r.get("source_id") or "").strip(),
+                "Completeness Note": (
+                    "Canonical Supabase vessel resolved from ReCAAP incident data."
+                    if meta.get("recaap_input_name")
+                    else "Canonical Supabase mobile-asset record."
+                ),
+                "Metadata": meta,
+            })
+
+        link_rows = []
+        for r in (lrows or []):
+            linked_type = str(r.get("linked_type") or "").strip().casefold()
+            if linked_type not in {"mobile_asset", "vessel"}:
+                continue
+            link_rows.append({
+                "Link ID": str(r.get("event_link_id") or "").strip(),
+                "Event ID": str(r.get("event_id") or "").strip(),
+                "Asset ID": str(r.get("linked_id") or "").strip(),
+                "Asset": str(r.get("linked_name") or "").strip(),
+                "Asset Type": "Vessel",
+                "Relationship": str(r.get("relationship") or "").strip(),
+                "Confidence": str(r.get("confidence") or "").strip(),
+                "Source ID": str(r.get("source_id") or "").strip(),
+                "Metadata": r.get("metadata") or {},
+            })
+
+        return pd.DataFrame(vessel_rows), pd.DataFrame(link_rows)
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame()
+
+
+def _merge_db_vessels(legacy, canonical):
+    """Prefer normalized DB vessel rows while retaining legacy-only coverage."""
+    if canonical is None or canonical.empty:
+        return legacy.copy() if isinstance(legacy, pd.DataFrame) else pd.DataFrame()
+    if legacy is None or legacy.empty:
+        return canonical.copy()
+
+    old = legacy.copy()
+    new = canonical.copy()
+    canon_ids = set(text_col(new, "Vessel ID"))
+    canon_imos = set(new["IMO"].map(normalize_imo)) if "IMO" in new.columns else set()
+    canon_imos.discard("")
+
+    keep = pd.Series(True, index=old.index)
+    if "Vessel ID" in old.columns and canon_ids:
+        keep &= ~text_col(old, "Vessel ID").isin(canon_ids)
+    if "IMO" in old.columns and canon_imos:
+        keep &= ~old["IMO"].map(normalize_imo).isin(canon_imos)
+
+    return pd.concat([old[keep], new], ignore_index=True, sort=False)
+
+
+def _merge_db_event_asset_links(legacy, canonical):
+    """Merge normalized pc_event_links into the Intelligence event-asset layer."""
+    if canonical is None or canonical.empty:
+        return legacy.copy() if isinstance(legacy, pd.DataFrame) else pd.DataFrame()
+    if legacy is None or legacy.empty:
+        return canonical.copy()
+    out = pd.concat([legacy, canonical], ignore_index=True, sort=False)
+    keys = [c for c in ["Event ID","Asset ID","Relationship"] if c in out.columns]
+    return out.drop_duplicates(subset=keys, keep="last") if keys else out
+
 # Core canonical datasets
 companies = xl("01_core_entities.xlsx", "Companies")
 ports = xl("02_maritime.xlsx", "Ports")
 port_terminals = xl("02_maritime.xlsx", "Port Terminals")
-vessels = xl("02_maritime.xlsx", "Vessels")
+_db_vessels, _db_vessel_event_links = _canonical_db_vessel_frames()
+vessels = _merge_db_vessels(xl("02_maritime.xlsx", "Vessels"), _db_vessels)
 vessel_restrictions = xl("02_maritime.xlsx", "Vessel Restrictions")
 aircraft = xl("05_aviation.xlsx", "Aircraft Registry")
 aviation_disruptions = xl("05_aviation.xlsx", "Aviation Disruptions")
@@ -596,7 +723,10 @@ if _db_events.empty:
     if not recaap_locations.empty:
         event_locations = pd.concat([event_locations, recaap_locations], ignore_index=True, sort=False)
 hazard_events = intelligence_event_filter(hazard_events_raw)
-event_asset_links = xl("13_events_hazards.xlsx", "Event Asset Links")
+event_asset_links = _merge_db_event_asset_links(
+    xl("13_events_hazards.xlsx", "Event Asset Links"),
+    _db_vessel_event_links,
+)
 event_company_links = xl("13_events_hazards.xlsx", "Event Company Links")
 event_system_links = xl("13_events_hazards.xlsx", "Event System Links")
 impact_chains = xl("13_events_hazards.xlsx", "Impact Chains")
@@ -649,7 +779,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v3.3.7 multimodal · {_bst.get('mode','excel').title()} backend · shared canonical model")
+st.sidebar.caption(f"v3.3.8 canonical vessels · {_bst.get('mode','excel').title()} backend · normalized DB events/vessels")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -1508,7 +1638,7 @@ elif page in ["Maritime Security", "Maritime"]:
     if not vessel_event_links.empty:
         vessel_mask = (
             text_col(vessel_event_links,"Asset Type").str.contains("vessel|ship|tanker|carrier",case=False,regex=True,na=False)
-            | text_col(vessel_event_links,"Asset ID").str.startswith("VESSEL",na=False)
+            | text_col(vessel_event_links,"Asset ID").str.match(r"^(VESSEL|VES_)",case=False,na=False)
         )
         vessel_event_links = vessel_event_links[vessel_mask].copy()
 
