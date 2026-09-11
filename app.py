@@ -2305,12 +2305,47 @@ def render_investment_dashboard(base_df=None, company_id=None, compact=False):
     c1,c2=st.columns(2)
     with c1:
         st.markdown("#### Investment activity by region")
-        reg=df.groupby("Region",dropna=False).size().sort_values(ascending=False)
-        st.bar_chart(reg)
+        if "Region" in df.columns and df["Region"].replace("", pd.NA).notna().any():
+            reg=(
+                df.assign(Region=df["Region"].replace("", "Unspecified"))
+                .groupby("Region",dropna=False)
+                .size()
+                .sort_values(ascending=False)
+            )
+            st.bar_chart(reg)
+        elif "Country" in df.columns and df["Country"].replace("", pd.NA).notna().any():
+            st.caption("Region is not populated for these records; showing country activity instead.")
+            reg=(
+                df.assign(Country=df["Country"].replace("", "Unspecified"))
+                .groupby("Country",dropna=False)
+                .size()
+                .sort_values(ascending=False)
+            )
+            st.bar_chart(reg)
+        else:
+            st.caption("No region or country field is available for these investment records.")
+
     with c2:
         st.markdown("#### Investment activity by spend type")
-        typ=df.groupby("Spend Type",dropna=False).size().sort_values(ascending=False)
-        st.bar_chart(typ)
+        if "Spend Type" in df.columns and df["Spend Type"].replace("", pd.NA).notna().any():
+            typ=(
+                df.assign(**{"Spend Type": df["Spend Type"].replace("", "Unspecified")})
+                .groupby("Spend Type",dropna=False)
+                .size()
+                .sort_values(ascending=False)
+            )
+            st.bar_chart(typ)
+        elif "Investment Class" in df.columns and df["Investment Class"].replace("", pd.NA).notna().any():
+            st.caption("Spend type is not populated for these records; showing investment class instead.")
+            typ=(
+                df.assign(**{"Investment Class": df["Investment Class"].replace("", "Unspecified")})
+                .groupby("Investment Class",dropna=False)
+                .size()
+                .sort_values(ascending=False)
+            )
+            st.bar_chart(typ)
+        else:
+            st.caption("No spend-type or investment-class field is available for these records.")
     if "Month" in df.columns and df["Month"].replace("NaT",pd.NA).notna().any():
         st.markdown("#### Activity through the year")
         monthly=df[df["Month"].ne("NaT")].groupby("Month").size().sort_index()
