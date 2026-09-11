@@ -30,7 +30,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.6-multimodal-regional-ui"
+APP_VERSION = "v3.3.7-compact-multimodal-ui"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Legacy Excel + Research Reference + Supabase Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -4240,16 +4240,15 @@ st.sidebar.markdown("### Trade System")
 _bst=backend_status()
 st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend")
 
-NAV_GROUPS={
-    "Command Center":["Overview","Search","Regional Maps"],
-    "Domains":["Maritime","Ports & Terminals","Rail","Aviation","Trucking","Ferries","Cruise","Energy & Industry","Corridors & Systems"],
-    "Entities":["Companies","Vessels","Shipyards","Network Map"],
-    "Alerts & Monitoring":["Alerts & Disruptions","Watch Areas","Hormuz Monitor","Live Feeds"],
-    "Markets & Policy":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Reference & Benchmarks","Investments","Sanctions & Compliance","Trade Policy","Contracts"],
-    "Intelligence":["News & Signals","News & Events"],
-    "Data":["Reference Library","Data"],
+NAV_SECTIONS={
+    "OPERATING PICTURE":["Overview","Regional Maps","Alerts & Disruptions","Watch Areas"],
+    "DOMAINS":["Maritime","Rail","Aviation","Trucking","Defence & Shipbuilding","Energy & Industry"],
+    "TRADE NETWORK":["Ports & Terminals","Corridors & Systems","Companies","Vessels","Investments"],
+    "MARKETS & POLICY":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Sanctions & Compliance","Trade Policy","Contracts"],
+    "MONITORING & TOOLS":["Hormuz Monitor","Live Feeds","News & Signals","Search","Reference & Benchmarks","Data"],
 }
-PAGE_WORKSPACE={p:w for w,items in NAV_GROUPS.items() for p in items}
+VISIBLE_PAGES=[p for items in NAV_SECTIONS.values() for p in items]
+HIDDEN_ROUTES={"Ports","Shipyards","Network Map","News & Events","Reference Library","Ferries","Cruise","Maritime Security","Maritime Disruptions","Port Activity"}
 # Deep links from the separate P&C Intelligence app.
 try:
     _qp=st.query_params
@@ -4261,21 +4260,23 @@ try:
         st.session_state["vessel_pick_id"]=str(_qp.get("vessel")); st.session_state["nav_request"]="Vessels"
 except Exception:
     pass
-# Cross-page buttons queue navigation for the next rerun so sidebar widgets are not mutated after instantiation.
+
+if "pc_trade_page" not in st.session_state:
+    st.session_state["pc_trade_page"]="Overview"
 if "nav_request" in st.session_state:
-    requested=st.session_state.pop("nav_request")
-    target_workspace=PAGE_WORKSPACE.get(requested)
-    if target_workspace:
-        st.session_state["workspace_nav"]=target_workspace
-        st.session_state[f"view_nav_{target_workspace}"]=requested
-if st.session_state.get("workspace_nav") not in NAV_GROUPS:
-    st.session_state["workspace_nav"]="Command Center"
-workspace=st.sidebar.radio("Workspace",list(NAV_GROUPS),index=0,key="workspace_nav")
-views=NAV_GROUPS[workspace]
-if len(views)>1:
-    page=st.sidebar.radio("View",views,index=0,key=f"view_nav_{workspace}")
-else:
-    page=views[0]
+    st.session_state["pc_trade_page"]=st.session_state.pop("nav_request")
+
+page=st.session_state.get("pc_trade_page","Overview")
+st.sidebar.markdown("<div class='pc-small' style='margin:4px 0 8px'>CURRENT</div>",unsafe_allow_html=True)
+st.sidebar.markdown(f"<div class='pc-card' style='padding:9px 11px'><b>{html_lib.escape(str(page))}</b></div>",unsafe_allow_html=True)
+
+for section,items in NAV_SECTIONS.items():
+    st.sidebar.markdown(f"<div class='pc-small' style='margin-top:12px;letter-spacing:.08em'>{section}</div>",unsafe_allow_html=True)
+    for item in items:
+        label_txt=("● " if page==item else "")+item
+        if st.sidebar.button(label_txt,key=f"navflat_{section}_{item}",use_container_width=True):
+            st.session_state["pc_trade_page"]=item
+            st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("<div class='pc-small'>QUICK ACCESS</div>",unsafe_allow_html=True)
@@ -4628,20 +4629,53 @@ elif page=="Alerts & Disruptions":
 
 elif page=="Maritime":
     header("Maritime","Vessels, incidents, disruptions, piracy, port exposure and navigation risk in one maritime workspace.")
-    tabs=st.tabs(["Incidents","Disruptions","Vessels","Ports","Navigation & Compliance"])
+    tabs=st.tabs(["Overview","Incidents","Disruptions","Vessels","Ports","Ferries","Cruise","Navigation & Compliance"])
     with tabs[0]:
+        v=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
+        p=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
+        ev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+        m1,m2,m3,m4=st.columns(4)
+        m1.metric("Vessels",len(v))
+        m2.metric("Ports",len(p))
+        if not ev.empty:
+            mev=_contains_any(ev,["maritime","port","vessel","piracy","shipping"],["Mode","Event Family","Event Type","Title","Description"])
+        else:
+            mev=pd.DataFrame()
+        m3.metric("Linked events",len(mev))
+        m4.metric("Critical / high",int(mev.get("Severity",pd.Series(dtype=str)).isin(["Critical","Severe","High"]).sum()) if not mev.empty else 0)
+        st.caption("Use the tabs for incidents, disruptions, fleets, ports, ferries, cruise and navigation/compliance.")
+    with tabs[1]:
         inc=official_maritime_incidents()
         st.caption("Official and vessel-linked maritime incidents.")
         render_official_security_records(inc,"maritime_unified_incidents")
-    with tabs[1]:
-        render_marsec_workspace()
     with tabs[2]:
+        render_marsec_workspace()
+    with tabs[3]:
         v=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
         display_df(v[[c for c in ["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Status","Primary Service","Owner Company ID","Operator Company ID"] if c in v.columns]],420)
-    with tabs[3]:
+    with tabs[4]:
         p=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
         display_df(p[[c for c in ["Port / Facility","Country","Operator","Facility Type","Key Role","Coverage Note"] if c in p.columns]],420)
-    with tabs[4]:
+    with tabs[5]:
+        systems=TABLES.get(("Maritime","Ferry Systems"),pd.DataFrame()).copy()
+        routes=TABLES.get(("Maritime","Ferry Routes"),pd.DataFrame()).copy()
+        c1,c2=st.columns(2)
+        with c1:
+            st.markdown("### Ferry systems")
+            display_df(systems,220)
+        with c2:
+            st.markdown("### Ferry routes")
+            display_df(routes,220)
+    with tabs[6]:
+        cruise=TABLES.get(("Maritime","Great Lakes Cruise"),pd.DataFrame()).copy()
+        research=TABLES.get(("Maritime","Fleet Research Universe"),pd.DataFrame()).copy()
+        st.markdown("### Cruise / passenger maritime")
+        if not cruise.empty:
+            display_df(cruise,220)
+        else:
+            cview=_contains_any(research,["cruise"],research.columns.tolist()) if not research.empty else pd.DataFrame()
+            display_df(cview,220)
+    with tabs[7]:
         ev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
         if not ev.empty:
             ev=_contains_any(ev,["GPS","GNSS","AIS","sanction","seizure","interdiction","piracy","navigation"],["Event Family","Event Type","Title","Description","Trade / Commercial Impact"])
@@ -5537,6 +5571,63 @@ elif page=="Live Feeds":
         showcols=[c for c in ["name","domain","access_model","status","authentication","persistence","ui_role"] if c in catalog.columns]
         display_df(catalog[showcols] if showcols else catalog,100,show_ids=True)
         st.caption("Design rule: green = immediately usable, amber = credential/contributor gated, trial = not a production dependency, grey = registered/deferred/excluded.")
+
+elif page=="Defence & Shipbuilding":
+    header("Defence & Shipbuilding","Shipyards, government procurement, naval and research-vessel programmes, contracts, delivery routes and industrial capacity.")
+    dcos=TABLES.get(("Defence & Shipbuilding","Defence Companies"),pd.DataFrame()).copy()
+    yards=TABLES.get(("Defence & Shipbuilding","Shipyards"),pd.DataFrame()).copy()
+    programmes=TABLES.get(("Defence & Shipbuilding","Programmes"),pd.DataFrame()).copy()
+    participants=TABLES.get(("Defence & Shipbuilding","Programme Participants"),pd.DataFrame()).copy()
+    vessels=TABLES.get(("Defence & Shipbuilding","Sample Vessels"),pd.DataFrame()).copy()
+    contracts=TABLES.get(("Defence & Shipbuilding","Contracts"),pd.DataFrame()).copy()
+    announcements=TABLES.get(("Defence & Shipbuilding","Announcements"),pd.DataFrame()).copy()
+    routes=TABLES.get(("Defence & Shipbuilding","Sales & Delivery Routes"),pd.DataFrame()).copy()
+    events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+
+    k1,k2,k3,k4,k5=st.columns(5)
+    k1.metric("Companies",len(dcos))
+    k2.metric("Shipyards",len(yards))
+    k3.metric("Programmes",len(programmes))
+    k4.metric("Vessels",len(vessels))
+    k5.metric("Contracts",len(contracts))
+
+    q=st.text_input("Search defence & shipbuilding",placeholder="GRSE, NCPOR, ADSB, Fincantieri, Davie, icebreaker, research vessel...")
+    if q:
+        dcos=_contains_any(dcos,[q]); yards=_contains_any(yards,[q]); programmes=_contains_any(programmes,[q])
+        vessels=_contains_any(vessels,[q]); contracts=_contains_any(contracts,[q]); announcements=_contains_any(announcements,[q]); routes=_contains_any(routes,[q])
+
+    tabs=st.tabs(["Overview","Programmes","Shipyards","Vessels","Contracts","Events & Announcements","Delivery Routes"])
+    with tabs[0]:
+        st.markdown("### Industrial base")
+        display_df(dcos[[c for c in ["Entity","Industrial Model","Country / Geography","Markets","Ownership / Role Note","Status"] if c in dcos.columns]],220)
+        if not events.empty:
+            devents=_contains_any(events,["defence","shipbuilding","naval","coast guard","research vessel","shipyard"],["Event Family","Event Type","Mode","Title","Description","Trade / Commercial Impact"])
+            st.markdown("### Recent linked events")
+            render_event_cards(devents,20)
+    with tabs[1]:
+        display_df(programmes[[c for c in ["Programme","Customer Type","Customer","Quantity","Platform / Class","Contract Value","Status","Build / Sales Route"] if c in programmes.columns]],260)
+        if not participants.empty:
+            with st.expander("Programme participants"):
+                display_df(participants,260)
+    with tabs[2]:
+        display_df(yards[[c for c in ["Shipyard","Location","Country","Yard Model","Current / Representative Work","Status"] if c in yards.columns]],260)
+        if not yards.empty and "Yard ID" in yards.columns:
+            pick=st.selectbox("Inspect shipyard",range(len(yards)),format_func=lambda i:f"{yards.iloc[i].get('Shipyard','')} — {yards.iloc[i].get('Country','')}",key="defence_yard_pick")
+            if st.button("Open detailed shipyard",key="defence_open_yard"):
+                request_nav("Shipyards","yard_pick_id",yards.iloc[pick].get("Yard ID",""),yards.iloc[pick].get("Shipyard",""))
+                st.rerun()
+    with tabs[3]:
+        display_df(vessels[[c for c in ["Vessel","Class / Type","Customer / Operator","Build Yard ID","Status","Build / Delivery Route"] if c in vessels.columns]],300)
+    with tabs[4]:
+        display_df(contracts[[c for c in ["Date","Customer","Contractor Entity ID","Value","Scope","Contract Type","Status / Evidence Note"] if c in contracts.columns]],260)
+    with tabs[5]:
+        if not announcements.empty:
+            display_df(announcements[[c for c in ["Date","Headline","Primary Entity ID","Programme ID","Event Type","Linked Entities / Topics"] if c in announcements.columns]],260)
+        if not events.empty:
+            devents=_contains_any(events,["defence","shipbuilding","naval","coast guard","research vessel","shipyard"],["Event Family","Event Type","Mode","Title","Description"])
+            render_event_cards(devents,35)
+    with tabs[6]:
+        display_df(routes,220)
 
 elif page=="Shipyards":
     header("Shipyards","Physical shipyard assets: ownership, capabilities, facilities, programmes, vessels and events.")

@@ -446,6 +446,12 @@ compliance_regimes = xl("14_trade_policy_compliance.xlsx", "Compliance Regimes")
 compliance_designations = xl("14_trade_policy_compliance.xlsx", "Compliance Designations")
 compliance_exposure = xl("14_trade_policy_compliance.xlsx", "Compliance Exposure")
 watchlist_taxonomy = xl("14_trade_policy_compliance.xlsx", "Watchlist Taxonomy")
+defence_companies = xl("12_defence_shipbuilding.xlsx", "Defence Companies")
+defence_yards = xl("12_defence_shipbuilding.xlsx", "Shipyards")
+defence_programmes = xl("12_defence_shipbuilding.xlsx", "Programmes")
+defence_vessels = xl("12_defence_shipbuilding.xlsx", "Sample Vessels")
+defence_contracts = xl("12_defence_shipbuilding.xlsx", "Contracts")
+defence_announcements = xl("12_defence_shipbuilding.xlsx", "Announcements")
 
 # -----------------------------------------------------------------------------
 # Sidebar architecture
@@ -459,9 +465,9 @@ st.sidebar.markdown(
 )
 
 NAV = {
-    "INTELLIGENCE DESK": ["Operating Picture", "Alerts & Incidents", "Regional Maps"],
-    "FORWARD MONITORING": ["Watch Areas", "Monitoring & Indicators"],
-    "DOMAIN INTELLIGENCE": ["Maritime Security", "Rail & Inland", "Ports & Infrastructure", "Aviation & Movement", "Energy & Infrastructure", "Sanctions & Compliance"],
+    "OPERATING PICTURE": ["Operating Picture", "Regional Maps", "Alerts & Incidents"],
+    "DOMAINS": ["Maritime", "Rail & Inland", "Aviation & Movement", "Defence & Strategic Industry", "Energy & Infrastructure"],
+    "MONITORING": ["Watch Areas", "Monitoring & Indicators", "Sanctions & Compliance"],
     "DISCOVERY": ["Intelligence Search", "Source Monitor"],
 }
 
@@ -475,7 +481,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v3.3.6 multimodal · {_bst.get('mode','excel').title()} backend · shared canonical model")
+st.sidebar.caption(f"v3.3.7 multimodal · {_bst.get('mode','excel').title()} backend · shared canonical model")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -1291,7 +1297,7 @@ elif page == "Monitoring & Indicators":
 # -----------------------------------------------------------------------------
 # 5. MARITIME SECURITY
 # -----------------------------------------------------------------------------
-elif page == "Maritime Security":
+elif page in ["Maritime Security", "Maritime"]:
     section(
         "Domain intelligence",
         "Maritime Security",
@@ -1979,6 +1985,31 @@ elif page == "Aviation & Movement":
 # -----------------------------------------------------------------------------
 # ENERGY & INFRASTRUCTURE
 # -----------------------------------------------------------------------------
+elif page == "Defence & Strategic Industry":
+    page_header("Defence & Strategic Industry","Procurement, shipyards, programmes, government research vessels and strategic industrial capacity.")
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Shipyards",len(defence_yards))
+    c2.metric("Programmes",len(defence_programmes))
+    c3.metric("Vessels",len(defence_vessels))
+    c4.metric("Contracts",len(defence_contracts))
+
+    tabs=st.tabs(["Programmes","Shipyards","Vessels","Contracts","Announcements"])
+    with tabs[0]:
+        if defence_programmes.empty: st.info("No programme records loaded.")
+        else: st.dataframe(defence_programmes,use_container_width=True,hide_index=True,height=360)
+    with tabs[1]:
+        if defence_yards.empty: st.info("No shipyard records loaded.")
+        else: st.dataframe(defence_yards,use_container_width=True,hide_index=True,height=360)
+    with tabs[2]:
+        if defence_vessels.empty: st.info("No defence/government vessel records loaded.")
+        else: st.dataframe(defence_vessels,use_container_width=True,hide_index=True,height=360)
+    with tabs[3]:
+        if defence_contracts.empty: st.info("No contract records loaded.")
+        else: st.dataframe(defence_contracts,use_container_width=True,hide_index=True,height=360)
+    with tabs[4]:
+        if defence_announcements.empty: st.info("No announcements loaded.")
+        else: st.dataframe(defence_announcements,use_container_width=True,hide_index=True,height=360)
+
 elif page == "Energy & Infrastructure":
     section("Domain intelligence", "Energy & Infrastructure", "Refineries, pipelines, LNG, power and industrial assets viewed through disruption, security and trade exposure.")
     terms=["energy","refinery","oil","gas","lng","pipeline","power","fuel","terminal","industrial"]

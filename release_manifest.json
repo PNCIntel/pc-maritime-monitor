@@ -1,7 +1,7 @@
 {
-  "release": "v3.3.5",
+  "release": "v3.3.6",
   "build_date": "2026-09-11",
-  "file_count": 84,
+  "file_count": 88,
   "files": [
     {
       "path": ".gitignore",
@@ -17,6 +17,21 @@
       "path": ".streamlit/secrets.example.toml",
       "bytes": 530,
       "sha256": "d5880a73823b2c9e773a4e10378740ea11cab9feb1846259e1c04a36d75ad36e"
+    },
+    {
+      "path": "BACKFILL_NADOR_BEIRUT_MONTEVIDEO_20260911.md",
+      "bytes": 1292,
+      "sha256": "91104db1295f2f02bea80e846e92753fe9ab512a51cbd60deeea1589b0d378f7"
+    },
+    {
+      "path": "BACKFILL_SAGAR_MANTHAN_PROGRAM_20260911.md",
+      "bytes": 883,
+      "sha256": "663385c3caf02bf1f9c7190348b3ce50bd0599935733a7ec4bee684e7a586175"
+    },
+    {
+      "path": "BACKFILL_SECURITY_TRADE_20260911.md",
+      "bytes": 891,
+      "sha256": "953ed557151ba703481b04b76507ed1f5814dc83931d921c3f0cf04999e70ec5"
     },
     {
       "path": "MIGRATION_CHECKLIST.md",
@@ -59,29 +74,34 @@
       "sha256": "14fd1581a46341998d94d6d64e36a4c5d897d4e2c88723ed01c2f03541a7b3ab"
     },
     {
+      "path": "TRADE_SYSTEM_V3_3_6_BUILD.md",
+      "bytes": 1615,
+      "sha256": "e0e10bfe061ac91a4168c5b36fe630d99dc8c6988fbc3f9badaa9e46871f3f7c"
+    },
+    {
       "path": "TRADE_SYSTEM_V3_3_BUILD.md",
       "bytes": 989,
       "sha256": "1cff0bac427979ae36c193796fc9a09f69616fdd6347323609fb5a59d565a133"
     },
     {
       "path": "app.py",
-      "bytes": 327998,
-      "sha256": "227fbb670ecab1a50c2ddae826727cf21913e9a01ff448485fd193e3771ab662"
+      "bytes": 337114,
+      "sha256": "996fe2c7a11de64b14731dc5500f17a89e0ec1f5fa5b1ed82e345ecc09ecfff7"
     },
     {
       "path": "data/01_core_entities.xlsx",
-      "bytes": 167430,
-      "sha256": "772ec305910a5830703d2c85b13a75b9da6460b31d61c5dd2ff21d06b4d58315"
+      "bytes": 169039,
+      "sha256": "7201ee93fd3f7642ce12feeea6d3e9a120928b724f3e196b086c6791c6523ba4"
     },
     {
       "path": "data/02_maritime.xlsx",
-      "bytes": 451878,
-      "sha256": "d76db8e3fd2ad820939cefd56833ea37585bab2a150a4c4cb23a798a93c4ca46"
+      "bytes": 456156,
+      "sha256": "a692dcc6980589984decc5256c772e41d61913654557010436e6162421380462"
     },
     {
       "path": "data/03_rail.xlsx",
-      "bytes": 26581,
-      "sha256": "3cdb8da591e4c5f86d2127e45becd66c06686cdb005b14332774522450b9bb1b"
+      "bytes": 27551,
+      "sha256": "1a3b0a3bf08afe65a83e6740c1ebc4346925e1c63fb9e18bb7a46de0b600c695"
     },
     {
       "path": "data/04_road_trucking.xlsx",
@@ -90,33 +110,33 @@
     },
     {
       "path": "data/05_aviation.xlsx",
-      "bytes": 43545,
-      "sha256": "791f6d0e016395af366885f3fe4737eef3f5e16705d4a348fdf35dbec7441d83"
+      "bytes": 45387,
+      "sha256": "00b1b40d5c17744fb397a40cacb3d8d2ec70eb6b8348b9055764e2bcde8c93fc"
     },
     {
       "path": "data/06_infrastructure.xlsx",
-      "bytes": 52598,
-      "sha256": "d4a8d50bb62deaf12d6ef661a83eb5d8f64f36668241ca4d17eee16ad49d966c"
+      "bytes": 54168,
+      "sha256": "70bff2dd95a4d9d5e237b6b6ad2ce17ad3c1d35e8274ecd9041682a1bbaad2df"
     },
     {
       "path": "data/07_corporate_markets.xlsx",
-      "bytes": 34943,
-      "sha256": "1e2afc3620487dac9550abf31984dfa1c15224dc3d70bddd80a784141ccefe9f"
+      "bytes": 38133,
+      "sha256": "98cb9bf036e7a77cd0e0aee48ec91d12451c860e9020e7a1c76033f53753038c"
     },
     {
       "path": "data/08_transactions.xlsx",
-      "bytes": 17600,
-      "sha256": "0e5acdd731858ba1022e09f40efe845b1f94542ad1e0d3911f4a4165fbaccc0a"
+      "bytes": 21007,
+      "sha256": "70b10a0f1a6a3f67babc7708fbd2f3a9c866f8b8c26a03cabc26c6ed412f3d27"
     },
     {
       "path": "data/09_intelligence.xlsx",
-      "bytes": 216599,
-      "sha256": "7f42ac4e1aff0d3797794f4bd50a28896597937887668486571c79456715c82f"
+      "bytes": 234776,
+      "sha256": "de62408bddabceb6862a1ca9b2acc0909313cbcad19a58c56f665a69f3171d4e"
     },
     {
       "path": "data/10_sources_evidence.xlsx",
-      "bytes": 51151,
-      "sha256": "6876065512314d2b0b6625c4a02e7a6d97585dfc13ad1670ee9fea18c9401412"
+      "bytes": 55384,
+      "sha256": "adb3650bb9da8ba15f8406351a182f0a82aa7aaa13d4805417ba8da82f29c323"
     },
     {
       "path": "data/11_systems_waterways_governance.xlsx",
@@ -125,18 +145,18 @@
     },
     {
       "path": "data/12_defence_shipbuilding.xlsx",
-      "bytes": 38643,
-      "sha256": "d1b9009375e6e8fa7bbf71269d26058a25682154f28cf89488d4dcd84d514f33"
+      "bytes": 40961,
+      "sha256": "b917df6f387e16be549bfd2d9747ebdcf3bd8cfd473b8fa3fa58713caa611eb1"
     },
     {
       "path": "data/13_events_hazards.xlsx",
-      "bytes": 46367,
-      "sha256": "ef4c66125af8fccfdea49c14b2dcff1d3638f8ff034d7532fe770015a918c5ba"
+      "bytes": 52460,
+      "sha256": "31178a6a837d38d8d63ce373e42caa3be612294fcbe66c37c0c9558a5662e0c4"
     },
     {
       "path": "data/14_trade_policy_compliance.xlsx",
-      "bytes": 30364,
-      "sha256": "b433b6353badc36b91ec2cf1fa723c429caca342267fc951d5424865689f3e7f"
+      "bytes": 31816,
+      "sha256": "8a0dd021bc5bedbfabbdadd153b55fba5d89d88d0e784966051f2763a287b761"
     },
     {
       "path": "data/15_market_intelligence_reference.xlsx",
@@ -245,8 +265,8 @@
     },
     {
       "path": "pc-intelligence.py",
-      "bytes": 100943,
-      "sha256": "335c02538edfec8d24b0cd7630458ce71158a48da6bc89fbb814c9f58ffab420"
+      "bytes": 105116,
+      "sha256": "0859cc7a7e8616dc1e97a8944079012ea8e2beb5f76a29e4b966e96e4b9c300a"
     },
     {
       "path": "pc-nerai.py",
@@ -260,13 +280,8 @@
     },
     {
       "path": "pc_intelligence_app.py",
-      "bytes": 100943,
-      "sha256": "335c02538edfec8d24b0cd7630458ce71158a48da6bc89fbb814c9f58ffab420"
-    },
-    {
-      "path": "release_manifest.json",
-      "bytes": 13685,
-      "sha256": "3366417cc9351718a188269c9b0a248fa559ed58adc5773574971a609192d56d"
+      "bytes": 105116,
+      "sha256": "0859cc7a7e8616dc1e97a8944079012ea8e2beb5f76a29e4b966e96e4b9c300a"
     },
     {
       "path": "requirements.txt",
