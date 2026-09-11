@@ -97,19 +97,33 @@ FK_RULES = {
 }
 
 def _source_count(payload):
-    if not isinstance(payload,dict): return 0
+    """Count source URLs in the common payload shapes accepted by Batch Staging."""
+    if not isinstance(payload,dict):
+        return 0
+
+    def _count_seq(seq):
+        if not isinstance(seq,list):
+            return 0
+        n=0
+        for s in seq:
+            if isinstance(s,str) and s.strip().lower().startswith(("http://","https://")):
+                n += 1
+            elif isinstance(s,dict) and (s.get("url") or s.get("source_url")):
+                n += 1
+        return n
+
     count=0
     meta=payload.get("metadata") or {}
     if isinstance(meta,dict):
-        for key in ("research_sources","sources"):
-            seq=meta.get(key) or []
-            if isinstance(seq,list):
-                count += sum(1 for s in seq if isinstance(s,dict) and (s.get("url") or s.get("source_url")))
-    seq=payload.get("sources") or []
-    if isinstance(seq,list):
-        count += sum(1 for s in seq if isinstance(s,dict) and (s.get("url") or s.get("source_url")))
+        count += _count_seq(meta.get("research_sources") or [])
+        count += _count_seq(meta.get("sources") or [])
+        if meta.get("source_url"):
+            count += 1
+
+    count += _count_seq(payload.get("sources") or [])
     if payload.get("source_url"):
         count += 1
+
     return count
 
 def _schema_valid(table,payload):
