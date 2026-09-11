@@ -45,6 +45,249 @@ def title(t,copy=""):
     st.markdown(f"<div class='pc-k'>P&C INTERNAL</div><h1>{t}</h1>",unsafe_allow_html=True)
     if copy: st.caption(copy)
 
+# ---------------------------------------------------------------------------
+# Controlled AI staging + canonical apply helpers
+# ---------------------------------------------------------------------------
+
+AI_ALLOWED_TABLES = {
+    "pc_entities",
+    "pc_assets",
+    "pc_mobile_assets",
+    "pc_relationships",
+    "pc_events",
+    "pc_transactions",
+    "pc_security_compliance",
+    "pc_energy_assets",
+    "pc_energy_asset_connections",
+    "pc_industrial_assets",
+    "pc_logistics_facilities",
+    "pc_market_instruments",
+    "pc_market_exposure_links",
+    "pc_trade_flows",
+    "pc_supply_series",
+    "pc_port_metrics",
+    "pc_port_capabilities",
+    "pc_transport_routes",
+    "pc_chokepoints",
+    "pc_macro_indicators",
+    "pc_observations",
+}
+
+# Conflict keys used only when a staged record has enough information to upsert safely.
+APPLY_CONFLICT_KEYS = {
+    "pc_entities": "entity_id",
+    "pc_assets": "asset_id",
+    "pc_mobile_assets": "mobile_asset_id",
+    "pc_relationships": "relationship_id",
+    "pc_events": "event_id",
+    "pc_transactions": "transaction_id",
+    "pc_security_compliance": "security_compliance_id",
+    "pc_energy_assets": "asset_id",
+    "pc_energy_asset_connections": "connection_id",
+    "pc_industrial_assets": "asset_id",
+    "pc_logistics_facilities": "asset_id",
+    "pc_market_instruments": "market_instrument_id",
+    "pc_market_exposure_links": "target_type,target_id,market_instrument_id,exposure_type",
+    "pc_trade_flows": "trade_flow_id",
+    "pc_supply_series": "supply_series_id",
+    "pc_port_metrics": "port_metric_id",
+    "pc_port_capabilities": "port_capability_id",
+    "pc_transport_routes": "route_id",
+    "pc_chokepoints": "chokepoint_id",
+    "pc_macro_indicators": "macro_indicator_id",
+    "pc_observations": "observation_id",
+}
+
+AI_CAMPAIGNS = {
+    "African ports & terminals": (
+        "Research major commercial ports, container terminals, dry ports and "
+        "port-linked logistics zones across Africa. Prioritize operator, owner, "
+        "terminal name, country, city, capacity where explicitly sourced, rail "
+        "or road connectivity, recent investment, and source URLs. Propose only "
+        "records supported by public evidence."
+    ),
+    "GCC & Red Sea refineries": (
+        "Research operational refineries, LNG plants, gas-processing facilities, "
+        "oil export terminals and major storage hubs in the GCC and Red Sea. "
+        "Capture owner/operator, location, explicit capacity, operating status, "
+        "port/pipeline connections and source URLs."
+    ),
+    "Mines & export chains": (
+        "Research major global mines and export chains for iron ore, bauxite, "
+        "copper, nickel, cobalt, lithium, manganese, phosphate and potash. Link "
+        "mine or industrial asset to rail/road, export port and destination "
+        "markets only where supported by evidence."
+    ),
+    "Logistics parks & inland hubs": (
+        "Research major port-linked logistics parks, free zones, economic zones, "
+        "warehouses and inland/intermodal terminals in Africa, the Gulf and Asia. "
+        "Capture owner, operator, area/capacity where explicit, port/rail/road "
+        "connections, investment values and source URLs."
+    ),
+    "Infrastructure investors": (
+        "Research transport, port, terminal, rail, logistics, airport and related "
+        "infrastructure acquisitions or investments by Brookfield, KKR, Macquarie, "
+        "OMERS, GIP and other major infrastructure investors since 2018. Capture "
+        "transaction date, target, stake, value, geography and evidence."
+    ),
+    "Custom research": "",
+}
+
+AI_OUTPUT_CONTRACT = """
+Return JSON with this shape:
+{
+  "records": [
+    {
+      "target_table": "one allowed P&C table",
+      "natural_key": "stable proposed natural key",
+      "action": "REVIEW",
+      "confidence": 0.0,
+      "payload": {
+        "...": "fields supported by evidence",
+        "metadata": {
+          "research_sources": [
+            {"url": "...", "publisher": "...", "title": "..."}
+          ]
+        }
+      }
+    }
+  ],
+  "sources": [],
+  "conflicts": [],
+  "notes": []
+}
+
+Allowed target tables:
+""" + ", ".join(sorted(AI_ALLOWED_TABLES))
+
+
+def _jsonable(v):
+    if isinstance(v, dict):
+        return {k:_jsonable(x) for k,x in v.items()}
+    if isinstance(v, list):
+        return [_jsonable(x) for x in v]
+    if pd.isna(v) if not isinstance(v,(dict,list,str,bool)) else False:
+        return None
+    return v
+
+
+def _record_key(payload, natural_key=""):
+    if natural_key:
+        return str(natural_key)
+    if isinstance(payload,dict):
+        for k in (
+            "entity_id","asset_id","mobile_asset_id","relationship_id","event_id",
+            "transaction_id","route_id","chokepoint_id","market_instrument_id",
+            "trade_flow_id","supply_series_id","observation_id"
+        ):
+            if payload.get(k):
+                return str(payload[k])
+        for k in ("name","title","route_name"):
+            if payload.get(k):
+                return str(payload[k])
+    return str(uuid.uuid4())
+
+
+def stage_ai_result(sb, job_id, result):
+    """Stage structured AI result. Returns (staged_count, rejected_count)."""
+    records=(result or {}).get("records") or []
+    staged=[]
+    rejected=0
+
+    for rec in records:
+        if not isinstance(rec,dict):
+            rejected+=1
+            continue
+
+        table=str(rec.get("target_table") or "").strip()
+        payload=rec.get("payload")
+
+        if table not in AI_ALLOWED_TABLES or not isinstance(payload,dict):
+            rejected+=1
+            continue
+
+        staged.append({
+            "ingestion_job_id":job_id,
+            "target_table":table,
+            "natural_key":_record_key(payload,rec.get("natural_key") or ""),
+            "action":"REVIEW",
+            "payload":_jsonable(payload),
+            "confidence":rec.get("confidence"),
+            "validation_status":"pending",
+            "review_status":"pending",
+        })
+
+    for i in range(0,len(staged),100):
+        sb.table("pc_staged_records").insert(staged[i:i+100]).execute()
+
+    return len(staged),rejected
+
+
+def apply_staged_record(sb, row, edited_payload=None):
+    """Apply one approved staged record to a canonical table.
+
+    Safety properties:
+    - target table must be allow-listed
+    - record must already be approved
+    - payload must be a JSON object
+    - upsert is used only when all configured conflict keys exist
+    - failed canonical writes do not mark the staged record as applied
+    """
+    if row.get("review_status")!="approved":
+        raise ValueError("Record must be approved before apply.")
+
+    table=str(row.get("target_table") or "").strip()
+    if table not in AI_ALLOWED_TABLES:
+        raise ValueError(f"Target table is not allowed for canonical apply: {table}")
+
+    payload=edited_payload if edited_payload is not None else row.get("payload")
+    if not isinstance(payload,dict) or not payload:
+        raise ValueError("Canonical payload must be a non-empty JSON object.")
+
+    payload=_jsonable(payload)
+    conflict=APPLY_CONFLICT_KEYS.get(table)
+    keys=[x.strip() for x in conflict.split(",")] if conflict else []
+    can_upsert=bool(keys) and all(payload.get(k) not in (None,"") for k in keys)
+
+    # Store the analyst-edited payload back into staging before canonical apply,
+    # so the reviewed proposal and the applied proposal remain identical.
+    if edited_payload is not None:
+        sb.table("pc_staged_records").update({"payload":payload}).eq(
+            "staged_record_id",row["staged_record_id"]
+        ).execute()
+
+    if can_upsert:
+        result=sb.table(table).upsert(payload,on_conflict=conflict).execute()
+        write_mode="upsert"
+    else:
+        result=sb.table(table).insert(payload).execute()
+        write_mode="insert"
+
+    # Only reached when canonical write succeeded.
+    sb.table("pc_staged_records").update({
+        "review_status":"applied",
+        "validation_status":"validated",
+    }).eq("staged_record_id",row["staged_record_id"]).execute()
+
+    # Audit log is best-effort because some deployments may require a user id
+    # under stricter auth. Failure here must not undo a successful canonical write.
+    try:
+        object_id=None
+        for k in keys:
+            if payload.get(k):
+                object_id=str(payload[k])
+                break
+        sb.table("pc_audit_log").insert({
+            "action":f"STAGED_{write_mode.upper()}",
+            "object_type":table,
+            "object_id":object_id or row.get("natural_key"),
+            "after_data":payload,
+        }).execute()
+    except Exception:
+        pass
+
+    return result,write_mode
+
 if page=="Dashboard":
     title("Platform control","One canonical data model; Trade, Intelligence and NERAI product entitlements; tenant workspaces; AI staging and review.")
     tables=[("Organizations","pc_organizations"),("Users","pc_profiles"),("Entities","pc_entities"),("Assets","pc_assets"),("Vessels / mobile","pc_mobile_assets"),("Events","pc_events"),("Staged changes","pc_staged_records"),("Open DQ issues","pc_data_quality_issues")]
@@ -117,23 +360,114 @@ elif page=="Users & Access":
                     sb.table("pc_organization_members").upsert({"organization_id":oid,"user_id":uid,"role":role,"active":True},on_conflict="organization_id,user_id").execute(); st.rerun()
 
 elif page=="Research Jobs":
-    title("AI research & enrichment","Natural-language research jobs stage proposed data; they do not write directly to canonical tables.")
-    jobs=safe_rows(sb,"pc_ingestion_jobs","*",200,order="created_at") if sb else []
-    dataframe(jobs)
-    prompt=st.text_area("Research query",placeholder="Research all African ports and propose missing ports, operators, terminals, rail links and authoritative sources.",height=130)
-    context=st.selectbox("Product context",["TRADE","INTELLIGENCE","NERAI"])
-    use_web=st.checkbox("Use current web research",True)
-    if st.button("Run AI research job",disabled=not bool(prompt)):
-        if not sb: st.error("Supabase service connection required.")
-        elif not ai_configured(): st.error("Configure OPENAI_API_KEY and OPENAI_MODEL.")
-        else:
-            job=sb.table("pc_ingestion_jobs").insert({"job_type":"AI_RESEARCH","title":prompt[:100],"query_text":prompt,"status":"running","requested_by":None}).execute().data[0]
-            try:
-                result=ai_research(prompt,context,use_web)
-                sb.table("pc_staged_records").insert({"ingestion_job_id":job['ingestion_job_id'],"target_table":"research_bundle","natural_key":str(job['ingestion_job_id']),"action":"REVIEW","payload":result,"confidence":0.7,"validation_status":"pending","review_status":"pending"}).execute()
-                sb.table("pc_ingestion_jobs").update({"status":"completed","stats":{"research_bundle":1}}).eq("ingestion_job_id",job['ingestion_job_id']).execute(); st.success("Research staged for review.")
-            except Exception as exc:
-                sb.table("pc_ingestion_jobs").update({"status":"failed","error_text":str(exc)}).eq("ingestion_job_id",job['ingestion_job_id']).execute(); st.error(str(exc))
+    title(
+        "AI research & enrichment",
+        "Launch controlled research from the interface. AI proposals are staged for analyst review and never write directly to canonical tables."
+    )
+
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        jobs=safe_rows(
+            sb,
+            "pc_ingestion_jobs",
+            "ingestion_job_id,job_type,title,query_text,status,stats,error_text,created_at,started_at,completed_at",
+            200,
+            order="created_at"
+        )
+        st.markdown("### Recent research jobs")
+        dataframe(jobs[:50])
+
+        st.markdown("### Launch research")
+        campaign=st.selectbox("Campaign",list(AI_CAMPAIGNS))
+        seed_prompt=AI_CAMPAIGNS[campaign]
+
+        prompt=st.text_area(
+            "Research query",
+            value=seed_prompt,
+            placeholder="Describe exactly what you want the AI researcher to find, verify and stage.",
+            height=180
+        )
+        c1,c2,c3=st.columns(3)
+        with c1:
+            context=st.selectbox("Product context",["TRADE","INTELLIGENCE"],index=0)
+        with c2:
+            use_web=st.checkbox("Use current web research",True)
+        with c3:
+            st.metric("Pending staged",count_rows(sb,"pc_staged_records",{"review_status":"pending"}))
+
+        st.caption(
+            "The AI researcher must provide source URLs and confidence. "
+            "All output goes to pc_staged_records for review before canonical apply."
+        )
+
+        if st.button("Run AI research job",type="primary",disabled=not bool(prompt.strip())):
+            if not ai_configured():
+                st.error("Configure OPENAI_API_KEY and OPENAI_MODEL.")
+            else:
+                job=sb.table("pc_ingestion_jobs").insert({
+                    "job_type":"AI_RESEARCH",
+                    "title":campaign if campaign!="Custom research" else prompt[:100],
+                    "query_text":prompt,
+                    "source_scope":{"product":context,"web_search":use_web,"campaign":campaign},
+                    "status":"running",
+                }).execute().data[0]
+
+                job_id=job["ingestion_job_id"]
+
+                try:
+                    with st.status("Running AI research...",expanded=True) as status:
+                        st.write("Sending research brief to OpenAI...")
+                        result=ai_research(
+                            prompt,
+                            context,
+                            use_web,
+                            output_contract=AI_OUTPUT_CONTRACT
+                        )
+
+                        st.write("Research returned. Validating structured proposals...")
+                        staged,rejected=stage_ai_result(sb,job_id,result)
+
+                        # If the model returned raw/unstructured output, preserve it
+                        # as a research bundle rather than losing the result.
+                        if staged==0 and result:
+                            sb.table("pc_staged_records").insert({
+                                "ingestion_job_id":job_id,
+                                "target_table":"research_bundle",
+                                "natural_key":str(job_id),
+                                "action":"REVIEW",
+                                "payload":result,
+                                "confidence":0.5,
+                                "validation_status":"needs_structuring",
+                                "review_status":"pending",
+                            }).execute()
+                            staged=1
+
+                        sb.table("pc_ingestion_jobs").update({
+                            "status":"completed",
+                            "stats":{
+                                "staged_records":staged,
+                                "discarded_invalid_records":rejected,
+                                "campaign":campaign,
+                                "product":context,
+                            }
+                        }).eq("ingestion_job_id",job_id).execute()
+
+                        status.update(
+                            label=f"Research complete — {staged} staged record(s)",
+                            state="complete",
+                            expanded=False
+                        )
+
+                    st.success(f"Research complete. {staged} proposal(s) sent to Review Queue.")
+                    st.rerun()
+
+                except Exception as exc:
+                    sb.table("pc_ingestion_jobs").update({
+                        "status":"failed",
+                        "error_text":str(exc)
+                    }).eq("ingestion_job_id",job_id).execute()
+                    st.error(str(exc))
 
 elif page=="Trade System Builder":
     title("Trade system builder","Build the global trade-system graph in controlled research campaigns: energy, industrial assets, flows, markets, ports, corridors and macro layers.")
@@ -200,248 +534,261 @@ elif page=="Batch Staging":
                 sb.table("pc_ingestion_jobs").update({"status":"completed","stats":{"rows":len(rows)}}).eq("ingestion_job_id",job['ingestion_job_id']).execute(); st.success("Batch staged.")
 
 elif page=="Review Queue":
-    title("Review queue","Analyst review of AI-assisted and batch-staged proposals before any canonical write.")
+    title(
+        "Review & apply queue",
+        "Review AI/batch proposals, approve them, then explicitly apply approved records to the canonical database."
+    )
 
     if not sb:
-        st.error("Supabase is required for the review queue.")
+        st.error("Supabase is required for review and apply.")
     else:
-        rows = safe_rows(
-            sb,
-            "pc_staged_records",
-            "staged_record_id,ingestion_job_id,target_table,natural_key,action,confidence,validation_status,review_status,payload,current_record,source_id,created_at",
-            500,
-            {"review_status":"pending"},
-            "created_at"
-        )
+        tabs=st.tabs(["Pending review","Approved — apply","History"])
 
-        if not rows:
-            st.success("No pending staged records.")
-        else:
-            import pandas as _pd
-            import json as _json
-
-            review_df = _pd.DataFrame(rows)
-
-            # Compact reviewer-facing summary table.
-            summary_cols = [
-                c for c in [
-                    "target_table",
-                    "natural_key",
-                    "action",
-                    "confidence",
-                    "validation_status",
-                    "review_status",
-                    "source_id",
-                    "created_at",
-                ] if c in review_df.columns
-            ]
-
-            st.caption(f"{len(review_df):,} pending staged records")
-            st.dataframe(
-                review_df[summary_cols] if summary_cols else review_df,
-                use_container_width=True,
-                hide_index=True,
-                height=min(420, 40 + 35 * max(1, len(review_df))),
+        # ---------------------------------------------------------------
+        # Pending review
+        # ---------------------------------------------------------------
+        with tabs[0]:
+            rows=safe_rows(
+                sb,
+                "pc_staged_records",
+                "staged_record_id,ingestion_job_id,target_table,natural_key,action,confidence,validation_status,review_status,payload,current_record,source_id,created_at",
+                500,
+                {"review_status":"pending"},
+                "created_at"
             )
 
-            # Friendly selector text rather than UUID-only selection.
-            def _record_label(r):
-                nk = r.get("natural_key") or "(no natural key)"
-                tt = r.get("target_table") or "(no table)"
-                conf = r.get("confidence")
-                conf_txt = f"{float(conf):.2f}" if conf not in (None, "") else "n/a"
-                return f"{tt} | {nk} | confidence {conf_txt}"
+            if not rows:
+                st.success("No pending staged records.")
+            else:
+                review_df=pd.DataFrame(rows)
+                summary_cols=[
+                    c for c in [
+                        "target_table","natural_key","action","confidence",
+                        "validation_status","source_id","created_at"
+                    ] if c in review_df.columns
+                ]
+                st.caption(f"{len(rows):,} pending record(s)")
+                st.dataframe(
+                    review_df[summary_cols] if summary_cols else review_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(420,55+34*len(rows))
+                )
 
-            labels = [_record_label(r) for r in rows]
-            selected_label = st.selectbox("Open staged record", labels, index=0)
-            row = rows[labels.index(selected_label)]
+                def _label(r):
+                    conf=r.get("confidence")
+                    try: conf=f"{float(conf):.2f}"
+                    except Exception: conf="n/a"
+                    return f"{r.get('target_table')} | {r.get('natural_key')} | confidence {conf}"
 
-            payload = row.get("payload") or {}
-            current_record = row.get("current_record") or {}
+                labels=[_label(r) for r in rows]
+                chosen=st.selectbox("Open staged record",labels,key="pending_record")
+                row=rows[labels.index(chosen)]
+                payload=row.get("payload") or {}
 
-            # Detail header
-            st.markdown("### Record review")
-            a,b,c,d = st.columns(4)
-            a.metric("Target table", row.get("target_table") or "—")
-            b.metric("Action", row.get("action") or "—")
-            c.metric("Confidence", row.get("confidence") if row.get("confidence") is not None else "—")
-            d.metric("Validation", row.get("validation_status") or "pending")
+                st.markdown("### Proposed record")
+                h1,h2,h3,h4=st.columns(4)
+                h1.metric("Target",row.get("target_table") or "—")
+                h2.metric("Action",row.get("action") or "—")
+                h3.metric("Confidence",row.get("confidence") if row.get("confidence") is not None else "—")
+                h4.metric("Validation",row.get("validation_status") or "pending")
 
-            st.caption(
-                f"Natural key: {row.get('natural_key') or '—'}  ·  "
-                f"Created: {row.get('created_at') or '—'}  ·  "
-                f"Staged record: {row.get('staged_record_id')}"
-            )
+                left,right=st.columns([1.2,0.8])
 
-            left,right = st.columns([1.15,0.85])
+                with left:
+                    st.markdown("#### Payload")
+                    if isinstance(payload,dict):
+                        payload_rows=[]
+                        for k,v in payload.items():
+                            payload_rows.append({
+                                "Field":k,
+                                "Proposed value":json.dumps(v,ensure_ascii=False,indent=2) if isinstance(v,(dict,list)) else v
+                            })
+                        st.dataframe(pd.DataFrame(payload_rows),use_container_width=True,hide_index=True)
+                    else:
+                        st.code(str(payload))
 
-            with left:
-                st.markdown("#### Proposed payload")
+                    st.markdown("#### Research sources")
+                    source_rows=[]
+                    if isinstance(payload,dict):
+                        meta=payload.get("metadata") or {}
+                        for s in (meta.get("research_sources") or []) if isinstance(meta,dict) else []:
+                            if isinstance(s,dict) and s.get("url"): source_rows.append(s)
+                        for s in payload.get("sources") or []:
+                            if isinstance(s,dict) and s.get("url"): source_rows.append(s)
 
-                # Render payload as readable field/value rows.
-                if isinstance(payload, dict):
-                    flat_rows=[]
-                    for k,v in payload.items():
-                        if isinstance(v,(dict,list)):
-                            display=_json.dumps(v,ensure_ascii=False,indent=2)
-                        else:
-                            display=v
-                        flat_rows.append({"Field":k,"Proposed value":display})
-                    st.dataframe(
-                        _pd.DataFrame(flat_rows),
-                        use_container_width=True,
-                        hide_index=True,
-                        height=min(600, 60 + 34 * max(1, len(flat_rows))),
+                    if source_rows:
+                        for i,s in enumerate(source_rows,1):
+                            label=s.get("title") or s.get("publisher") or f"Source {i}"
+                            st.markdown(f"{i}. [{label}]({s['url']})")
+                            if s.get("publisher") and s.get("publisher")!=label:
+                                st.caption(s["publisher"])
+                    else:
+                        st.info("No embedded source URLs in this proposal.")
+
+                with right:
+                    st.markdown("#### Reviewer decision")
+                    note=st.text_area(
+                        "Reviewer note",
+                        key=f"pending_note_{row['staged_record_id']}",
+                        placeholder="Optional reason, correction or instruction."
                     )
-                else:
-                    st.code(str(payload))
+                    c1,c2,c3=st.columns(3)
 
-                # Extract source links from common payload/metadata structures.
-                st.markdown("#### Sources")
-                source_rows=[]
+                    if c1.button("Approve",type="primary",key=f"approve_{row['staged_record_id']}"):
+                        update={"review_status":"approved","validation_status":"reviewed"}
+                        if note and isinstance(payload,dict):
+                            meta=payload.get("metadata") or {}
+                            if not isinstance(meta,dict): meta={}
+                            meta["review_note"]=note
+                            payload["metadata"]=meta
+                            update["payload"]=payload
+                        sb.table("pc_staged_records").update(update).eq(
+                            "staged_record_id",row["staged_record_id"]
+                        ).execute()
+                        st.success("Approved. Record moved to the Apply tab.")
+                        st.rerun()
 
-                def _add_source(obj):
-                    if not isinstance(obj,dict):
-                        return
-                    url=obj.get("url") or obj.get("source_url")
-                    if not url:
-                        return
-                    source_rows.append({
-                        "Publisher": obj.get("publisher") or obj.get("source_name") or "",
-                        "Title": obj.get("title") or obj.get("source_title") or "",
-                        "URL": url,
-                    })
+                    if c2.button("Needs changes",key=f"changes_{row['staged_record_id']}"):
+                        update={"review_status":"needs_changes"}
+                        if note and isinstance(payload,dict):
+                            meta=payload.get("metadata") or {}
+                            if not isinstance(meta,dict): meta={}
+                            meta["review_note"]=note
+                            payload["metadata"]=meta
+                            update["payload"]=payload
+                        sb.table("pc_staged_records").update(update).eq(
+                            "staged_record_id",row["staged_record_id"]
+                        ).execute()
+                        st.rerun()
 
-                if isinstance(payload,dict):
-                    meta=payload.get("metadata") or {}
-                    if isinstance(meta,dict):
-                        for s in meta.get("research_sources") or []:
-                            _add_source(s)
-                        for s in meta.get("sources") or []:
-                            _add_source(s)
-                    for s in payload.get("sources") or []:
-                        _add_source(s)
+                    if c3.button("Reject",key=f"reject_{row['staged_record_id']}"):
+                        update={"review_status":"rejected"}
+                        if note and isinstance(payload,dict):
+                            meta=payload.get("metadata") or {}
+                            if not isinstance(meta,dict): meta={}
+                            meta["review_note"]=note
+                            payload["metadata"]=meta
+                            update["payload"]=payload
+                        sb.table("pc_staged_records").update(update).eq(
+                            "staged_record_id",row["staged_record_id"]
+                        ).execute()
+                        st.rerun()
 
-                if source_rows:
-                    for i,s in enumerate(source_rows,1):
-                        label = s["Title"] or s["Publisher"] or f"Source {i}"
-                        st.markdown(f"{i}. [{label}]({s['URL']})")
-                        if s["Publisher"] and s["Publisher"] != label:
-                            st.caption(s["Publisher"])
-                else:
-                    st.info("No source URLs were embedded in this staged payload.")
+                    st.markdown("#### Safety")
+                    st.caption(
+                        "Approve does not write to production. Approved records must be "
+                        "explicitly applied from the next tab."
+                    )
 
-            with right:
-                st.markdown("#### Existing canonical context")
+        # ---------------------------------------------------------------
+        # Approved apply queue
+        # ---------------------------------------------------------------
+        with tabs[1]:
+            approved=safe_rows(
+                sb,
+                "pc_staged_records",
+                "staged_record_id,ingestion_job_id,target_table,natural_key,action,confidence,validation_status,review_status,payload,current_record,source_id,created_at",
+                500,
+                {"review_status":"approved"},
+                "created_at"
+            )
 
-                # Query likely duplicate/current candidates conservatively.
-                target_table = row.get("target_table")
-                natural_key = row.get("natural_key")
-                candidates=[]
+            if not approved:
+                st.info("No approved records waiting to be applied.")
+            else:
+                st.warning(
+                    f"{len(approved)} approved record(s) are waiting for canonical apply. "
+                    "Apply one at a time until the workflow is fully proven."
+                )
+
+                labels=[
+                    f"{r.get('target_table')} | {r.get('natural_key')} | {r.get('confidence')}"
+                    for r in approved
+                ]
+                chosen=st.selectbox("Approved record",labels,key="approved_record")
+                row=approved[labels.index(chosen)]
+                payload=row.get("payload") or {}
+
+                st.markdown("### Canonical apply")
+                a,b,c=st.columns(3)
+                a.metric("Target table",row.get("target_table") or "—")
+                b.metric("Natural key",row.get("natural_key") or "—")
+                c.metric("Confidence",row.get("confidence") if row.get("confidence") is not None else "—")
+
+                st.caption(
+                    "You may edit the JSON before apply. The edited payload is saved back "
+                    "to staging so the audit trail matches what was written."
+                )
+
+                initial_json=json.dumps(payload,ensure_ascii=False,indent=2)
+                edited=st.text_area(
+                    "Canonical JSON payload",
+                    value=initial_json,
+                    height=440,
+                    key=f"apply_json_{row['staged_record_id']}"
+                )
 
                 try:
-                    if target_table=="pc_entities":
-                        name = payload.get("name") if isinstance(payload,dict) else None
-                        if name:
-                            candidates = safe_rows(sb,"pc_entities","entity_id,name,entity_type,country,record_status",20)
-                            candidates = [x for x in candidates if str(x.get("name","")).strip().casefold()==str(name).strip().casefold()]
-                    elif target_table=="pc_assets":
-                        name = payload.get("name") if isinstance(payload,dict) else None
-                        country = payload.get("country") if isinstance(payload,dict) else None
-                        candidates = safe_rows(sb,"pc_assets","asset_id,name,asset_type,subtype,country,region_city,status,record_status",100)
-                        if name:
-                            nn=str(name).strip().casefold()
-                            candidates=[x for x in candidates if str(x.get("name","")).strip().casefold()==nn]
-                        if country and candidates:
-                            cc=str(country).strip().casefold()
-                            candidates=[x for x in candidates if not x.get("country") or str(x.get("country","")).strip().casefold()==cc]
-                    elif target_table=="pc_mobile_assets":
-                        imo = payload.get("imo") if isinstance(payload,dict) else None
-                        name = payload.get("name") if isinstance(payload,dict) else None
-                        candidates = safe_rows(sb,"pc_mobile_assets","mobile_asset_id,name,imo,mobile_type,flag,status,record_status",100)
-                        if imo:
-                            candidates=[x for x in candidates if str(x.get("imo","")).strip()==str(imo).strip()]
-                        elif name:
-                            nn=str(name).strip().casefold()
-                            candidates=[x for x in candidates if str(x.get("name","")).strip().casefold()==nn]
-                    elif target_table=="pc_transport_routes":
-                        rid = payload.get("route_id") if isinstance(payload,dict) else None
-                        if rid:
-                            candidates = safe_rows(sb,"pc_transport_routes","route_id,route_name,mode,current_status",50,{"route_id":rid})
-                except Exception:
-                    candidates=[]
+                    edited_payload=json.loads(edited)
+                    if not isinstance(edited_payload,dict):
+                        st.error("Canonical payload must be a JSON object.")
+                        edited_payload=None
+                    else:
+                        st.success("JSON is valid.")
+                except Exception as exc:
+                    st.error(f"Invalid JSON: {exc}")
+                    edited_payload=None
 
-                if current_record:
-                    st.caption("Current record supplied by staging process")
-                    st.json(current_record)
-
-                if candidates:
-                    st.warning(f"Potential existing canonical match{'es' if len(candidates)!=1 else ''}: {len(candidates)}")
-                    st.dataframe(_pd.DataFrame(candidates),use_container_width=True,hide_index=True)
+                conflict=APPLY_CONFLICT_KEYS.get(row.get("target_table"))
+                if conflict:
+                    st.caption(f"Configured conflict key: `{conflict}`")
                 else:
-                    st.success("No obvious exact canonical match detected by the review UI.")
+                    st.caption("No configured conflict key: apply will use INSERT.")
 
-                st.markdown("#### Reviewer decision")
-
-                notes = st.text_area(
-                    "Reviewer note",
-                    placeholder="Reason for approval, rejection, or requested changes.",
-                    key=f"note_{row['staged_record_id']}"
+                confirm=st.checkbox(
+                    "I reviewed this payload and authorize a canonical database write.",
+                    key=f"confirm_apply_{row['staged_record_id']}"
                 )
 
-                c1,c2,c3 = st.columns(3)
+                if st.button(
+                    "Apply approved record",
+                    type="primary",
+                    disabled=not (confirm and edited_payload),
+                    key=f"apply_{row['staged_record_id']}"
+                ):
+                    try:
+                        with st.spinner("Writing canonical record..."):
+                            result,mode=apply_staged_record(sb,row,edited_payload)
+                        st.success(
+                            f"Canonical {mode} succeeded. Staged record marked as applied."
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.error("Canonical write failed. The record remains approved and can be corrected/retried.")
+                        st.exception(exc)
 
-                if c1.button("Approve", type="primary", key=f"approve_{row['staged_record_id']}"):
-                    sb.table("pc_staged_records").update({
-                        "review_status":"approved",
-                        "reviewed_at":"now()"
-                    }).eq("staged_record_id",row["staged_record_id"]).execute()
-                    st.success("Record approved for apply.")
-                    st.rerun()
-
-                if c2.button("Needs changes", key=f"changes_{row['staged_record_id']}"):
-                    payload_update = payload if isinstance(payload,dict) else {"raw_payload":payload}
-                    if notes:
-                        meta = payload_update.get("metadata") or {}
-                        if not isinstance(meta,dict):
-                            meta={}
-                        meta["review_note"]=notes
-                        payload_update["metadata"]=meta
-                    sb.table("pc_staged_records").update({
-                        "review_status":"needs_changes",
-                        "payload":payload_update,
-                        "reviewed_at":"now()"
-                    }).eq("staged_record_id",row["staged_record_id"]).execute()
-                    st.warning("Record marked as needing changes.")
-                    st.rerun()
-
-                if c3.button("Reject", key=f"reject_{row['staged_record_id']}"):
-                    payload_update = payload if isinstance(payload,dict) else {"raw_payload":payload}
-                    if notes:
-                        meta = payload_update.get("metadata") or {}
-                        if not isinstance(meta,dict):
-                            meta={}
-                        meta["review_note"]=notes
-                        payload_update["metadata"]=meta
-                    sb.table("pc_staged_records").update({
-                        "review_status":"rejected",
-                        "payload":payload_update,
-                        "reviewed_at":"now()"
-                    }).eq("staged_record_id",row["staged_record_id"]).execute()
-                    st.error("Record rejected.")
-                    st.rerun()
-
-                st.markdown("---")
-                st.markdown("#### Apply control")
-                st.caption(
-                    "Approval and application remain separate. This protects the canonical database "
-                    "from accidental AI writes."
+        # ---------------------------------------------------------------
+        # History
+        # ---------------------------------------------------------------
+        with tabs[2]:
+            history=[]
+            for status in ["applied","rejected","needs_changes"]:
+                history.extend(
+                    safe_rows(
+                        sb,
+                        "pc_staged_records",
+                        "staged_record_id,target_table,natural_key,action,confidence,validation_status,review_status,created_at",
+                        250,
+                        {"review_status":status},
+                        "created_at"
+                    )
                 )
-
-                if row.get("review_status")=="approved":
-                    st.info("This record is approved. Use the canonical apply workflow to write it.")
-                else:
-                    st.caption("Approve the record first; canonical apply remains intentionally disabled here.")
+            if history:
+                history=sorted(history,key=lambda x:str(x.get("created_at") or ""),reverse=True)
+                dataframe(history[:500])
+            else:
+                st.caption("No completed review history yet.")
 
 elif page=="Market Data":
     title("Freight & commodity market data","Attributed public-source market observations, initially seeded from The Signal Group Weekly Market Monitor. Nothing is client-visible until approved.")
