@@ -274,6 +274,34 @@ def validate_staged_for_bulk(sb,row):
         "risk":"; ".join(risk) if risk else "safe",
     }
 
+
+def _set_action_feedback(kind, message, details=None):
+    st.session_state["_pc_action_feedback"] = {
+        "kind": kind,
+        "message": message,
+        "details": details or [],
+    }
+
+def _show_action_feedback():
+    fb = st.session_state.get("_pc_action_feedback")
+    if not fb:
+        return
+    kind = fb.get("kind","info")
+    msg = fb.get("message","")
+    if kind=="success":
+        st.success(msg)
+    elif kind=="error":
+        st.error(msg)
+    elif kind=="warning":
+        st.warning(msg)
+    else:
+        st.info(msg)
+    details = fb.get("details") or []
+    if details:
+        with st.expander("Operation details", expanded=(kind!="success")):
+            for item in details:
+                st.write(item)
+
 page=st.sidebar.radio("Workspace",PAGES)
 
 if sb is None:
@@ -951,6 +979,12 @@ elif page=="Review Queue":
         "Bulk-review safe records; route ambiguous records to manual review. JSON is available only when you need to edit it."
     )
 
+    _show_action_feedback()
+    if st.session_state.get("_pc_action_feedback"):
+        if st.button("Dismiss last operation message", key="dismiss_pc_feedback"):
+            st.session_state.pop("_pc_action_feedback", None)
+            st.rerun()
+
     if not sb:
         st.error("Supabase is required for review and apply.")
     else:
@@ -1035,41 +1069,83 @@ elif page=="Review Queue":
                 if c1.button("Approve selected safe",type="primary",disabled=not selected):
                     approved=0
                     skipped=0
-                    for x in selected:
-                        if not x["_safe"]:
-                            skipped+=1
-                            continue
-                        sb.table("pc_staged_records").update({
-                            "review_status":"approved",
-                            "validation_status":"validated"
-                        }).eq("staged_record_id",x["_id"]).execute()
-                        approved+=1
-                    st.success(f"Approved {approved} safe record(s). Skipped {skipped}.")
+                    safe_selected=[x for x in selected if x["_safe"]]
+                    total=max(1,len(safe_selected))
+                    with st.status("Approving selected records...",expanded=True) as status:
+                        progress=st.progress(0.0,text=f"0/{total} approved")
+                        for idx,x in enumerate(selected, start=1):
+                            if not x["_safe"]:
+                                skipped+=1
+                                continue
+                            st.write(f"Approving: {x['Record']}")
+                            sb.table("pc_staged_records").update({
+                                "review_status":"approved",
+                                "validation_status":"validated"
+                            }).eq("staged_record_id",x["_id"]).execute()
+                            approved+=1
+                            progress.progress(
+                                approved/total,
+                                text=f"{approved}/{total} approved"
+                            )
+                        status.update(
+                            label=f"Approval complete — {approved} approved, {skipped} skipped",
+                            state="complete",
+                            expanded=False
+                        )
+                    _set_action_feedback(
+                        "success",
+                        f"Approval complete — {approved} record(s) approved; {skipped} skipped.",
+                        ["Approved records are now available under the 'Approved — apply' tab."]
+                    )
                     st.rerun()
 
                 if c2.button("Approve + apply selected safe",disabled=not selected):
                     applied=0
                     failures=[]
-                    for x in selected:
-                        if not x["_safe"]:
-                            continue
-                        row=x["_row"]
-                        try:
-                            sb.table("pc_staged_records").update({
-                                "review_status":"approved",
-                                "validation_status":"validated"
-                            }).eq("staged_record_id",x["_id"]).execute()
-                            row["review_status"]="approved"
-                            apply_staged_record(sb,row,row.get("payload") or {})
-                            applied+=1
-                        except Exception as exc:
-                            failures.append(f"{row.get('natural_key')}: {exc}")
-                    if applied:
-                        st.success(f"Approved and applied {applied} safe record(s).")
+                    safe_selected=[x for x in selected if x["_safe"]]
+                    total=max(1,len(safe_selected))
+                    with st.status("Approving and applying selected records...",expanded=True) as status:
+                        progress=st.progress(0.0,text=f"0/{total} applied")
+                        for idx,x in enumerate(safe_selected, start=1):
+                            row=x["_row"]
+                            st.write(f"{idx}/{total}: {row.get('natural_key')}")
+                            try:
+                                sb.table("pc_staged_records").update({
+                                    "review_status":"approved",
+                                    "validation_status":"validated"
+                                }).eq("staged_record_id",x["_id"]).execute()
+                                row["review_status"]="approved"
+                                apply_staged_record(sb,row,row.get("payload") or {})
+                                applied+=1
+                            except Exception as exc:
+                                failures.append(f"{row.get('natural_key')}: {exc}")
+                            progress.progress(
+                                idx/total,
+                                text=f"{idx}/{total} processed · {applied} applied"
+                            )
+                        if failures:
+                            status.update(
+                                label=f"Completed with warnings — {applied} applied, {len(failures)} failed",
+                                state="error",
+                                expanded=True
+                            )
+                        else:
+                            status.update(
+                                label=f"Complete — {applied} record(s) applied",
+                                state="complete",
+                                expanded=False
+                            )
                     if failures:
-                        st.error(f"{len(failures)} record(s) failed and remain reviewable.")
-                        with st.expander("Failure details"):
-                            for f in failures: st.write(f)
+                        _set_action_feedback(
+                            "warning",
+                            f"Bulk operation finished — {applied} applied, {len(failures)} failed.",
+                            failures
+                        )
+                    else:
+                        _set_action_feedback(
+                            "success",
+                            f"Bulk operation complete — {applied} record(s) approved and applied."
+                        )
                     st.rerun()
 
                 if c3.button("Select all safe"):
@@ -1171,12 +1247,14 @@ elif page=="Review Queue":
                 c1,c2,c3=st.columns(3)
 
                 if c1.button("Approve",type="primary",key=f"m_approve_{row['staged_record_id']}"):
-                    update={"review_status":"approved","validation_status":"reviewed"}
-                    if edited_payload is not None:
-                        update["payload"]=edited_payload
-                    sb.table("pc_staged_records").update(update).eq(
-                        "staged_record_id",row["staged_record_id"]
-                    ).execute()
+                    with st.spinner("Approving record..."):
+                        update={"review_status":"approved","validation_status":"reviewed"}
+                        if edited_payload is not None:
+                            update["payload"]=edited_payload
+                        sb.table("pc_staged_records").update(update).eq(
+                            "staged_record_id",row["staged_record_id"]
+                        ).execute()
+                    _set_action_feedback("success","Record approved and moved to 'Approved — apply'.")
                     st.rerun()
 
                 if c2.button("Needs changes",key=f"m_changes_{row['staged_record_id']}"):
@@ -1243,21 +1321,48 @@ elif page=="Review Queue":
                 selected=[rows[i] for i,x in enumerate(edited["Apply?"].tolist()) if bool(x)]
 
                 if st.button("Apply selected safe records",type="primary",disabled=not selected):
+                    safe_selected=[x for x in selected if x["_safe"]]
                     applied=0
                     failed=[]
-                    for x in selected:
-                        if not x["_safe"]:
-                            continue
-                        try:
-                            apply_staged_record(sb,x["_row"],x["_row"].get("payload") or {})
-                            applied+=1
-                        except Exception as exc:
-                            failed.append(f"{x['_row'].get('natural_key')}: {exc}")
-                    st.success(f"Applied {applied} record(s).")
+                    total=max(1,len(safe_selected))
+                    with st.status("Applying approved records to canonical tables...",expanded=True) as status:
+                        progress=st.progress(0.0,text=f"0/{total} applied")
+                        for idx,x in enumerate(safe_selected,start=1):
+                            name=x["_row"].get("natural_key")
+                            table=x["_row"].get("target_table")
+                            st.write(f"{idx}/{total}: {name} → {table}")
+                            try:
+                                apply_staged_record(sb,x["_row"],x["_row"].get("payload") or {})
+                                applied+=1
+                            except Exception as exc:
+                                failed.append(f"{name}: {exc}")
+                            progress.progress(
+                                idx/total,
+                                text=f"{idx}/{total} processed · {applied} applied"
+                            )
+                        if failed:
+                            status.update(
+                                label=f"Apply finished with warnings — {applied} applied, {len(failed)} failed",
+                                state="error",
+                                expanded=True
+                            )
+                        else:
+                            status.update(
+                                label=f"Apply complete — {applied} record(s) written",
+                                state="complete",
+                                expanded=False
+                            )
                     if failed:
-                        st.error(f"{len(failed)} failed.")
-                        with st.expander("Failure details"):
-                            for f in failed: st.write(f)
+                        _set_action_feedback(
+                            "warning",
+                            f"Apply finished — {applied} written, {len(failed)} failed.",
+                            failed
+                        )
+                    else:
+                        _set_action_feedback(
+                            "success",
+                            f"Apply complete — {applied} record(s) written to canonical tables and moved to History."
+                        )
                     st.rerun()
 
                 st.markdown("### Single-record advanced apply")
@@ -1286,11 +1391,27 @@ elif page=="Review Queue":
                         key=f"apply_one_{row['staged_record_id']}"
                     ):
                         try:
-                            apply_staged_record(sb,row,edited_payload)
-                            st.success("Applied.")
+                            with st.status("Applying record...",expanded=True) as status:
+                                st.write("Validating payload...")
+                                st.write(f"Writing to {row.get('target_table')}...")
+                                apply_staged_record(sb,row,edited_payload)
+                                status.update(
+                                    label="Canonical write complete",
+                                    state="complete",
+                                    expanded=False
+                                )
+                            _set_action_feedback(
+                                "success",
+                                f"Record applied successfully to {row.get('target_table')} and moved to History."
+                            )
                             st.rerun()
                         except Exception as exc:
-                            st.exception(exc)
+                            _set_action_feedback(
+                                "error",
+                                "Apply failed. The record remains approved and can be retried.",
+                                [str(exc)]
+                            )
+                            st.rerun()
 
         # ---------------------------------------------------------------
         # HISTORY
