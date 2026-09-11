@@ -20,7 +20,23 @@ st.markdown("""
 <style>
 :root{--bg:#07111f;--panel:#0d1a2b;--line:#28415f;--text:#f3f6fa;--muted:#b8c5d4;--gold:#d7b66a}
 .stApp{background:var(--bg);color:var(--text)} [data-testid="stSidebar"]{background:#091725!important}
-h1,h2,h3,p,label{color:var(--text)!important}.pc-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px}.pc-k{color:var(--gold);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}
+h1,h2,h3,p,label{color:var(--text)!important}
+textarea, [data-baseweb="textarea"] textarea, [data-testid="stTextArea"] textarea{
+  background:#f4f7fb!important;
+  color:#111827!important;
+  -webkit-text-fill-color:#111827!important;
+  caret-color:#111827!important;
+  font-family:Consolas, "SFMono-Regular", Menlo, Monaco, monospace!important;
+}
+[data-testid="stTextArea"] > div,
+[data-testid="stTextArea"] [data-baseweb="textarea"]{
+  background:#f4f7fb!important;
+}
+input, [data-baseweb="input"] input{
+  color:#111827!important;
+  -webkit-text-fill-color:#111827!important;
+}
+.pc-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px}.pc-k{color:var(--gold);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}
 </style>""",unsafe_allow_html=True)
 
 if os.getenv("PC_REQUIRE_AUTH","false").lower()=="true":
@@ -309,7 +325,20 @@ if sb is None:
 
 
 def dataframe(rows):
-    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True) if rows else st.caption("No records.")
+    """Render rows without letting Streamlit's magic renderer display the returned DataframeInteractor."""
+    if rows:
+        _df = pd.DataFrame(rows)
+        _rendered = st.dataframe(
+            _df,
+            use_container_width=True,
+            hide_index=True,
+        )
+        # Intentionally do not leave st.dataframe(...) as the value of an
+        # expression statement: newer Streamlit builds can magic-render the
+        # returned DataframeInteractor object below the table.
+        return None
+    st.caption("No records.")
+    return None
 
 def title(t,copy=""):
     st.markdown(f"<div class='pc-k'>P&C INTERNAL</div><h1>{t}</h1>",unsafe_allow_html=True)
@@ -1589,7 +1618,14 @@ elif page=="Review Queue":
                 )
             if history:
                 history=sorted(history,key=lambda x:str(x.get("created_at") or ""),reverse=True)
-                dataframe(history[:500])
+                st.caption(f"{len(history):,} completed review record(s)")
+                _history_df=pd.DataFrame(history[:500])
+                _history_widget=st.dataframe(
+                    _history_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(520, 60 + 34 * max(1, len(_history_df))),
+                )
             else:
                 st.caption("No completed review history yet.")
 
