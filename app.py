@@ -30,7 +30,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.3-port-map-cruise-intelligence-fix"
+APP_VERSION = "v3.3.6-multimodal-regional-ui"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Legacy Excel + Research Reference + Supabase Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -4157,6 +4157,83 @@ def render_freight_commodity_markets():
             cols=[c for c in ["report_date","report_family","report_title","provider","week_number","source_url","source_methodology"] if c in rdf.columns]
             display_df(rdf[cols],380)
 
+
+# ---------- regional trade-map helpers ----------
+TRADE_REGIONS = {
+    "Global": {"center": (15.0, 10.0), "zoom": 1.0, "countries": []},
+    "Middle East": {"center": (25.0, 47.0), "zoom": 3.2, "countries": ["United Arab Emirates","Saudi Arabia","Oman","Qatar","Bahrain","Kuwait","Iraq","Iran","Yemen","Jordan","Lebanon","Israel","Syria"]},
+    "Africa": {"center": (2.0, 20.0), "zoom": 2.1, "countries": ["Morocco","Algeria","Tunisia","Libya","Egypt","Senegal","Ghana","Nigeria","Cameroon","Kenya","Tanzania","Mozambique","South Africa","Namibia","Angola","Djibouti","Somalia","Ethiopia","Guinea","Republic of the Congo","Democratic Republic of the Congo"]},
+    "Europe": {"center": (52.0, 12.0), "zoom": 2.7, "countries": ["United Kingdom","Ireland","France","Germany","Netherlands","Belgium","Spain","Portugal","Italy","Greece","Poland","Lithuania","Latvia","Estonia","Finland","Sweden","Norway","Denmark","Romania","Bulgaria","Ukraine","Georgia","Türkiye","Turkey"]},
+    "North America": {"center": (42.0, -101.0), "zoom": 2.5, "countries": ["United States","Canada","Mexico"]},
+    "Central America & Caribbean": {"center": (18.0, -78.0), "zoom": 3.0, "countries": ["Panama","Costa Rica","Guatemala","Honduras","El Salvador","Nicaragua","Belize","Bahamas","Haiti","Jamaica","Dominican Republic","Cuba","Trinidad and Tobago"]},
+    "South America": {"center": (-18.0, -60.0), "zoom": 2.5, "countries": ["Brazil","Argentina","Chile","Uruguay","Colombia","Ecuador","Peru","Venezuela","Guyana","Suriname","Paraguay","Bolivia"]},
+    "South Asia": {"center": (21.0, 78.0), "zoom": 3.0, "countries": ["India","Pakistan","Bangladesh","Sri Lanka","Nepal","Maldives"]},
+    "Asia-Pacific": {"center": (16.0, 116.0), "zoom": 2.4, "countries": ["China","Japan","South Korea","Taiwan","Philippines","Indonesia","Malaysia","Singapore","Vietnam","Thailand","Australia","New Zealand","Papua New Guinea"]},
+    "Central Asia": {"center": (43.0, 66.0), "zoom": 3.2, "countries": ["Kazakhstan","Uzbekistan","Turkmenistan","Kyrgyzstan","Tajikistan","Azerbaijan"]},
+    "Arctic": {"center": (70.0, 10.0), "zoom": 2.1, "countries": ["Canada","United States","Russia","Norway","Finland","Sweden","Denmark","Iceland"]},
+}
+
+def _trade_region_filter(df, region, country_cols):
+    if df is None or df.empty or region=="Global":
+        return df.copy() if df is not None else pd.DataFrame()
+    countries=TRADE_REGIONS.get(region,{}).get("countries",[])
+    if not countries: return df.copy()
+    blob=pd.Series("",index=df.index,dtype="string")
+    for c in country_cols:
+        if c in df.columns: blob=blob.str.cat(df[c].fillna("").astype(str),sep=" ")
+    pattern="|".join(re.escape(x) for x in countries)
+    return df[blob.str.contains(pattern,case=False,regex=True,na=False)].copy()
+
+def render_trade_regional_maps():
+    header("Regional Maps","A shared regional operating picture across ports, disruptions and trade exposure. Use the filters to move from geography to mode and event impact.")
+    region=st.selectbox("Region",list(TRADE_REGIONS),key="trade_region_map")
+    events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+    locs=TABLES.get(("Events & Hazards","Event Locations"),pd.DataFrame()).copy()
+    ports_df=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
+    events=_trade_region_filter(events,region,["Country / Countries","Location","Title"])
+    ports_view=_trade_region_filter(ports_df,region,["Country","Port / Facility"])
+
+    mode=st.radio("Layer",["All","Incidents & disruptions","Ports"],horizontal=True,key="trade_region_layer")
+    severity=st.multiselect("Severity",["Critical","Severe","High","Medium","Moderate","Low"],default=[],key="trade_region_severity")
+    if severity and not events.empty and "Severity" in events.columns:
+        events=events[events["Severity"].fillna("").astype(str).isin(severity)]
+
+    points=[]
+    if mode in ["All","Incidents & disruptions"] and not events.empty and not locs.empty and "Event ID" in events and "Event ID" in locs:
+        lp=locs.copy(); lp["Latitude"]=pd.to_numeric(lp.get("Latitude"),errors="coerce"); lp["Longitude"]=pd.to_numeric(lp.get("Longitude"),errors="coerce")
+        lp=lp.dropna(subset=["Latitude","Longitude"])
+        evcols=[c for c in ["Event ID","Start Date","Title","Severity","Mode","Trade / Commercial Impact"] if c in events.columns]
+        ep=lp.merge(events[evcols],on="Event ID",how="inner")
+        for _,r in ep.iterrows():
+            points.append({"lat":r["Latitude"],"lon":r["Longitude"],"name":str(r.get("Title","Event")),"kind":"Event","detail":str(r.get("Trade / Commercial Impact","")),"severity":str(r.get("Severity",""))})
+    if mode in ["All","Ports"] and not ports_view.empty:
+        p=ports_view.copy(); p["Latitude"]=pd.to_numeric(p.get("Latitude"),errors="coerce"); p["Longitude"]=pd.to_numeric(p.get("Longitude"),errors="coerce"); p=p.dropna(subset=["Latitude","Longitude"])
+        for _,r in p.iterrows():
+            points.append({"lat":r["Latitude"],"lon":r["Longitude"],"name":str(r.get("Port / Facility","Port")),"kind":"Port","detail":str(r.get("Key Role","")),"severity":""})
+    mp=pd.DataFrame(points)
+    c1,c2,c3=st.columns(3); c1.metric("Mapped points",len(mp)); c2.metric("Regional events",len(events)); c3.metric("Ports",len(ports_view))
+    if mp.empty:
+        st.info("No mapped records are available for the current regional/layer selection.")
+    elif pdk is not None:
+        cfg=TRADE_REGIONS[region]
+        layers=[]
+        evp=mp[mp["kind"].eq("Event")]
+        pp=mp[mp["kind"].eq("Port")]
+        if not pp.empty:
+            layers.append(pdk.Layer("ScatterplotLayer",pp,get_position="[lon, lat]",get_radius=25000,radius_min_pixels=3,radius_max_pixels=9,get_fill_color=[79,145,205,170],pickable=True))
+        if not evp.empty:
+            layers.append(pdk.Layer("ScatterplotLayer",evp,get_position="[lon, lat]",get_radius=40000,radius_min_pixels=5,radius_max_pixels=14,get_fill_color=[230,93,93,210],pickable=True))
+        st.pydeck_chart(pdk.Deck(layers=layers,initial_view_state=pdk.ViewState(latitude=cfg["center"][0],longitude=cfg["center"][1],zoom=cfg["zoom"]),tooltip={"html":"<b>{name}</b><br>{kind}<br>{detail}"},map_style=None),use_container_width=True,height=520)
+    else:
+        st.map(mp,latitude="lat",longitude="lon",use_container_width=True)
+    tabs=st.tabs(["Events & impact","Ports"])
+    with tabs[0]:
+        cols=[c for c in ["Start Date","Event Family","Event Type","Severity","Status","Mode","Country / Countries","Location","Title","Trade / Commercial Impact"] if c in events.columns]
+        display_df(events[cols] if cols else events,360)
+    with tabs[1]:
+        cols=[c for c in ["Port / Facility","Country","Operator","Facility Type","Key Role","Coverage Note"] if c in ports_view.columns]
+        display_df(ports_view[cols] if cols else ports_view,360)
+
 # ---------- workspace navigation ----------
 st.sidebar.markdown("<div class='pc-kicker'>Power & Corridors Intelligence</div>",unsafe_allow_html=True)
 st.sidebar.markdown("### Trade System")
@@ -4164,9 +4241,10 @@ _bst=backend_status()
 st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend")
 
 NAV_GROUPS={
-    "Command Center":["Overview","Search"],
-    "Network":["Companies","Network Map","Ports","Vessels","Rail","Aviation","Trucking","Ferries","Cruise","Corridors & Systems","Shipyards","Energy & Industry"],
-    "Operations":["Alerts & Disruptions","Watch Areas","Maritime Security","Maritime Disruptions","Port Activity","Hormuz Monitor","Live Feeds"],
+    "Command Center":["Overview","Search","Regional Maps"],
+    "Domains":["Maritime","Ports & Terminals","Rail","Aviation","Trucking","Ferries","Cruise","Energy & Industry","Corridors & Systems"],
+    "Entities":["Companies","Vessels","Shipyards","Network Map"],
+    "Alerts & Monitoring":["Alerts & Disruptions","Watch Areas","Hormuz Monitor","Live Feeds"],
     "Markets & Policy":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Reference & Benchmarks","Investments","Sanctions & Compliance","Trade Policy","Contracts"],
     "Intelligence":["News & Signals","News & Events"],
     "Data":["Reference Library","Data"],
@@ -4542,8 +4620,32 @@ elif page=="Search":
         if em.empty and hits.empty:
             st.warning("No matching records found.")
 
+elif page=="Regional Maps":
+    render_trade_regional_maps()
+
 elif page=="Alerts & Disruptions":
     render_trade_alerts_workspace()
+
+elif page=="Maritime":
+    header("Maritime","Vessels, incidents, disruptions, piracy, port exposure and navigation risk in one maritime workspace.")
+    tabs=st.tabs(["Incidents","Disruptions","Vessels","Ports","Navigation & Compliance"])
+    with tabs[0]:
+        inc=official_maritime_incidents()
+        st.caption("Official and vessel-linked maritime incidents.")
+        render_official_security_records(inc,"maritime_unified_incidents")
+    with tabs[1]:
+        render_marsec_workspace()
+    with tabs[2]:
+        v=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
+        display_df(v[[c for c in ["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Status","Primary Service","Owner Company ID","Operator Company ID"] if c in v.columns]],420)
+    with tabs[3]:
+        p=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
+        display_df(p[[c for c in ["Port / Facility","Country","Operator","Facility Type","Key Role","Coverage Note"] if c in p.columns]],420)
+    with tabs[4]:
+        ev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+        if not ev.empty:
+            ev=_contains_any(ev,["GPS","GNSS","AIS","sanction","seizure","interdiction","piracy","navigation"],["Event Family","Event Type","Title","Description","Trade / Commercial Impact"])
+        render_event_cards(ev,50)
 
 elif page=="Maritime Disruptions":
     header("Maritime Disruptions","Operational maritime casualties, groundings, SAR, pollution, attacks and official-source MARSEC reporting that can affect trade flows, vessels, ports and corridors.")
@@ -4564,10 +4666,16 @@ elif page=="Aviation":
             for c in view.columns:
                 mask=mask | view[c].astype(str).str.contains(q,case=False,na=False)
             view=view[mask]
-        display_df(view,250)
-        if not rel.empty:
-            with st.expander("Aircraft relationships"):
-                display_df(rel,250)
+        tabs=st.tabs(["Aircraft","Disruptions & Incidents","Relationships"])
+        with tabs[0]: display_df(view,300)
+        with tabs[1]:
+            ad=TABLES.get(("Aviation","Aviation Disruptions"),pd.DataFrame()).copy()
+            hev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+            if not hev.empty: hev=_contains_any(hev,["aviation","airport","air cargo","air traffic","aircraft"],["Mode","Event Family","Event Type","Title","Description"])
+            if not ad.empty: display_df(ad,260)
+            render_event_cards(hev,35)
+        with tabs[2]:
+            if not rel.empty: display_df(rel,300)
 
 
 elif page=="Rail":
@@ -4593,7 +4701,7 @@ elif page=="Rail":
         nodes=_contains_any(nodes,[q]); links=_contains_any(links,[q])
         fleet=_contains_any(fleet,[q]); connections=_contains_any(connections,[q]); news=_contains_any(news,[q])
 
-    tabs=st.tabs(["Operators","Networks & Corridors","Nodes / Terminals","Port & Intermodal Connections","Fleet","News & Events"])
+    tabs=st.tabs(["Operators","Networks & Corridors","Nodes / Terminals","Port & Intermodal Connections","Fleet","Security & Disruption","News & Events"])
     with tabs[0]:
         clean_network_table(operators,["Operator","Operator Type","Jurisdiction","Role","Network Scale","Gauge","Electrification / Signalling","Status","Notes"],280)
         if not operators.empty and "Operator" in operators.columns:
@@ -4610,6 +4718,10 @@ elif page=="Rail":
     with tabs[4]:
         clean_network_table(fleet,["Fleet Type","Count","Composition / Capacity","Status","Notes"],220)
     with tabs[5]:
+        hev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+        if not hev.empty: hev=_contains_any(hev,["rail","locomotive","railway","train","depot"],["Mode","Event Family","Event Type","Title","Description","Trade / Commercial Impact"])
+        render_event_cards(hev,40)
+    with tabs[6]:
         clean_network_table(news,["Date","Event Type","Headline","Summary"],260)
 
 elif page=="Trucking":
@@ -5049,7 +5161,7 @@ elif page=="Network Map":
         st.caption(f"{len(geo):,} canonical ports currently resolve to coordinates.")
         render_named_port_map(geo,height=610,radius=22000)
 
-elif page=="Ports":
+elif page in ["Ports","Ports & Terminals"]:
     header("Ports","Port / terminal explorer with operators, facilities, geography and linked events.")
     ports=unified_ports_with_reference(TABLES.get(("Maritime","Ports"),pd.DataFrame()))
     terms=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame())

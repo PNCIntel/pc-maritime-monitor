@@ -403,6 +403,10 @@ port_terminals = xl("02_maritime.xlsx", "Port Terminals")
 vessels = xl("02_maritime.xlsx", "Vessels")
 vessel_restrictions = xl("02_maritime.xlsx", "Vessel Restrictions")
 aircraft = xl("05_aviation.xlsx", "Aircraft Registry")
+aviation_disruptions = xl("05_aviation.xlsx", "Aviation Disruptions")
+rail_operators = xl("03_rail.xlsx", "Rail Operators")
+rail_networks = xl("03_rail.xlsx", "Rail Networks")
+rail_news = xl("03_rail.xlsx", "Rail News")
 infra_assets = xl("06_infrastructure.xlsx", "Assets")
 dry_ports = xl("06_infrastructure.xlsx", "Dry Ports")
 economic_zones = xl("06_infrastructure.xlsx", "Economic Zones")
@@ -455,9 +459,9 @@ st.sidebar.markdown(
 )
 
 NAV = {
-    "INTELLIGENCE DESK": ["Operating Picture", "Alerts & Incidents"],
+    "INTELLIGENCE DESK": ["Operating Picture", "Alerts & Incidents", "Regional Maps"],
     "FORWARD MONITORING": ["Watch Areas", "Monitoring & Indicators"],
-    "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
+    "DOMAIN INTELLIGENCE": ["Maritime Security", "Rail & Inland", "Ports & Infrastructure", "Aviation & Movement", "Energy & Infrastructure", "Sanctions & Compliance"],
     "DISCOVERY": ["Intelligence Search", "Source Monitor"],
 }
 
@@ -471,7 +475,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v3.1 migration · {_bst.get('mode','excel').title()} backend · shared canonical model")
+st.sidebar.caption(f"v3.3.6 multimodal · {_bst.get('mode','excel').title()} backend · shared canonical model")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -789,7 +793,7 @@ def infer_imo_coordinates(location_text):
     return {"Latitude":base[0],"Longitude":base[1],"Accuracy":"IMO approximate named-place","Notes":f"Approximate from IMO location: {base_name}"}
 
 def official_imo_map_points(region_name):
-    if region_name != "Middle East / Gulf" or imo_middle_east_incidents is None or imo_middle_east_incidents.empty:
+    if region_name not in ["Middle East","Middle East / Gulf"] or imo_middle_east_incidents is None or imo_middle_east_incidents.empty:
         return pd.DataFrame()
     rows=[]
     for i,r in imo_middle_east_incidents.iterrows():
@@ -810,62 +814,20 @@ def official_imo_map_points(region_name):
 # Regional security workspace helpers
 # -----------------------------------------------------------------------------
 REGIONAL_SECURITY_AREAS = {
-    "Middle East / Gulf": {
-        "center": (25.2, 51.5), "zoom": 4.2,
-        "phrases": [
-            "united arab emirates","uae","iran","iraq","saudi arabia","bahrain",
-            "qatar","kuwait","oman","persian gulf","arabian gulf","gulf of oman",
-            "strait of hormuz","hormuz","kharg","al-faw","dubai","abu dhabi",
-            "fujairah","doha","muscat","ras tanura","jazan","jizan","red sea","bab el-mandeb","mocha","jeddah","yanbu"
-        ],
-    },
-    "Black Sea": {
-        "center": (43.1, 34.0), "zoom": 4.3,
-        "phrases": [
-            "black sea","sea of azov","azov","ukraine","russia","azerbaijan",
-            "odesa","odessa","crimea","sevastopol","constanța","constanta",
-            "varna","burgas","novorossiysk","kerch","taganrog","mariupol",
-            "berdyansk","bosporus","bosphorus","turkish coast","danube delta"
-        ],
-    },
-    "Mediterranean": {
-        "center": (35.5, 18.0), "zoom": 3.4,
-        "phrases": [
-            "mediterranean","ionian","adriatic","aegean","crete","cyprus",
-            "malta","libya","tunisia","algeria","italy","genoa","sicily",
-            "greece","lebanon","israel","syria","levant","gibraltar",
-            "balearic","marseille","barcelona","taranto","trieste"
-        ],
-    },
-    "Baltic": {
-        "center": (57.0, 19.0), "zoom": 4.0,
-        "phrases": [
-            "baltic sea","baltic","estonia","latvia","lithuania","tallinn",
-            "riga","klaipeda","klaipėda","gdańsk","gdansk","gdynia",
-            "kiel","gotland","gulf of finland","gulf of riga","kaliningrad"
-        ],
-    },
-    "Caribbean": {
-        "center": (18.0, -72.0), "zoom": 3.8,
-        "phrases": [
-            "caribbean","bahamas","haiti","jamaica","dominican republic",
-            "puerto rico","cuba","trinidad","tobago","barbados","grenada",
-            "martinique","guadeloupe","aruba","curaçao","curacao",
-            "port-au-prince","varreux"
-        ],
-    },
-    "Asia-Pacific": {
-        "center": (18.0, 116.0), "zoom": 2.7,
-        "phrases": [
-            "asia-pacific","asia pacific","china","japan","taiwan","south korea",
-            "north korea","philippines","indonesia","malaysia","singapore",
-            "vietnam","thailand","australia","new zealand","hong kong",
-            "okinawa","shanghai","zhejiang","ningbo","xiangshan","taiwan strait","incheon",
-            "sunda strait","jakarta","lampung","manila","south china sea",
-            "east china sea"
-        ],
-    },
+    "Middle East": {"center": (25.2, 47.0), "zoom": 3.2, "phrases": ["united arab emirates","uae","iran","iraq","saudi arabia","bahrain","qatar","kuwait","oman","yemen","jordan","lebanon","israel","syria","persian gulf","arabian gulf","gulf of oman","strait of hormuz","hormuz","red sea","bab el-mandeb","mokha","mocha","jazan","jizan"]},
+    "Africa": {"center": (2.0, 20.0), "zoom": 2.1, "phrases": ["africa","morocco","algeria","tunisia","libya","egypt","senegal","ghana","nigeria","cameroon","kenya","tanzania","mozambique","south africa","namibia","angola","djibouti","somalia","ethiopia","guinea","mombasa","durban","maputo","kribi","lekki","dakar","berbera"]},
+    "Europe": {"center": (52.0, 12.0), "zoom": 2.7, "phrases": ["europe","united kingdom","uk","france","germany","netherlands","belgium","spain","portugal","italy","greece","poland","lithuania","latvia","estonia","finland","sweden","norway","denmark","romania","bulgaria","ukraine","georgia","turkey","türkiye"]},
+    "North America": {"center": (42.0, -101.0), "zoom": 2.5, "phrases": ["north america","united states","usa","canada","mexico","miami","new york","los angeles","great lakes"]},
+    "Central America & Caribbean": {"center": (18.0, -78.0), "zoom": 3.0, "phrases": ["central america","caribbean","panama","costa rica","guatemala","honduras","el salvador","nicaragua","belize","bahamas","haiti","jamaica","dominican republic","cuba","trinidad","port-au-prince"]},
+    "South America": {"center": (-18.0, -60.0), "zoom": 2.5, "phrases": ["south america","brazil","argentina","chile","uruguay","colombia","ecuador","peru","venezuela","guyana","suriname","paraguay","bolivia","montevideo","santos","posorja"]},
+    "South Asia": {"center": (21.0, 78.0), "zoom": 3.0, "phrases": ["south asia","india","pakistan","bangladesh","sri lanka","nepal","maldives","mumbai","chennai","colombo"]},
+    "Asia-Pacific": {"center": (16.0, 116.0), "zoom": 2.4, "phrases": ["asia-pacific","asia pacific","china","japan","taiwan","south korea","philippines","indonesia","malaysia","singapore","vietnam","thailand","australia","new zealand","hong kong","okinawa","shanghai","zhejiang","ningbo","taiwan strait","sunda strait","jakarta","manila","south china sea"]},
+    "Central Asia": {"center": (43.0, 66.0), "zoom": 3.2, "phrases": ["central asia","kazakhstan","uzbekistan","turkmenistan","kyrgyzstan","tajikistan","azerbaijan","caspian","middle corridor"]},
+    "Arctic": {"center": (70.0, 10.0), "zoom": 2.1, "phrases": ["arctic","northern sea route","murmansk","churchill","greenland","nunavut","svalbard","arkhangelsk","bering"]},
+    "Black Sea": {"center": (43.1, 34.0), "zoom": 4.3, "phrases": ["black sea","sea of azov","azov","ukraine","russia","odesa","odessa","crimea","sevastopol","constanta","constanța","varna","burgas","novorossiysk","kerch","taganrog","mariupol","berdyansk","bosporus","bosphorus","danube"]},
+    "Baltic": {"center": (57.0, 19.0), "zoom": 4.0, "phrases": ["baltic sea","baltic","estonia","latvia","lithuania","tallinn","riga","klaipeda","klaipėda","gdansk","gdańsk","gdynia","kiel","gotland","gulf of finland","kaliningrad"]},
 }
+
 
 REGIONAL_OPERATIONAL_TERMS = [
     "security","conflict","attack","strike","drone","missile","mine","piracy",
@@ -1242,10 +1204,10 @@ elif page == "Alerts & Incidents":
 # -----------------------------------------------------------------------------
 # REGIONAL SECURITY
 # -----------------------------------------------------------------------------
-elif page == "Regional Security":
+elif page in ["Regional Security","Regional Maps"]:
     section(
-        "Regional Security",
-        "Security theatres",
+        "Regional Maps",
+        "Regional operating picture",
         "Regional operating picture built from the shared event, location, entity and impact-chain layers."
     )
     st.caption(
@@ -1653,6 +1615,21 @@ elif page == "Maritime Security":
         )
 
 # -----------------------------------------------------------------------------
+# RAIL & INLAND
+# -----------------------------------------------------------------------------
+elif page == "Rail & Inland":
+    section("Domain intelligence", "Rail & Inland", "Rail attacks, network disruption, operators, corridors and trade consequences in one workspace.")
+    terms=["rail","railway","train","locomotive","depot","intermodal"]
+    rev=hazard_events[contains_any(hazard_events,["Mode","Event Family","Event Type","Title","Description","Trade / Commercial Impact"],terms)].copy() if not hazard_events.empty else hazard_events.copy()
+    c1,c2,c3=st.columns(3); c1.metric("Rail events",len(rev)); c2.metric("Operators",len(rail_operators)); c3.metric("Networks",len(rail_networks))
+    tabs=st.tabs(["Incidents & disruption","Networks","Operators","News & indicators"])
+    with tabs[0]:
+        show_df(rev,["Start Date","Severity","Status","Country / Countries","Location","Title","Operational Impact","Trade / Commercial Impact","Confidence"],520)
+    with tabs[1]: show_df(rail_networks,["Network / Corridor","Countries / Jurisdictions","Start Node","End Node","Status","Primary Cargo / Role","Notes"],420)
+    with tabs[2]: show_df(rail_operators,["Operator","Operator Type","Jurisdiction","Role","Network Scale","Status","Notes"],420)
+    with tabs[3]: show_df(rail_news,["Date","Event Type","Headline","Summary"],420)
+
+# -----------------------------------------------------------------------------
 # 6. PORTS & INFRASTRUCTURE
 # -----------------------------------------------------------------------------
 elif page == "Ports & Infrastructure":
@@ -1983,6 +1960,10 @@ elif page == "Ports & Infrastructure":
 # 7. AVIATION & MOVEMENT
 # -----------------------------------------------------------------------------
 elif page == "Aviation & Movement":
+    if not aviation_disruptions.empty:
+        section("Domain intelligence", "Aviation & Movement", "Air cargo, airports, aircraft, ATC and operational disruption with trade impact.")
+        st.markdown("### Current aviation disruptions")
+        show_df(aviation_disruptions,["Date","Location","Country","Event Type","Status","Severity","Operational Impact","Trade / Cargo Impact","Cargo Exposure / Quantification"],360)
     section("Domain intelligence", "Aviation & Movement", "Aircraft, carrier exposure, airspace/airport disruption and multimodal movement events from the same event model.")
     aviation_terms = ["Aviation","Airport","Aircraft","Airspace","Flight","UAV","Drone","GNSS","GPS","Typhoon","Volcanic","Ash"]
     ae = hazard_events[contains_any(hazard_events,["Event Family","Event Type","Mode","Title","Description","Operational Impact"], aviation_terms)] if not hazard_events.empty else hazard_events
@@ -1994,6 +1975,20 @@ elif page == "Aviation & Movement":
         show_df(ae, ["Start Date","Event Family","Event Type","Severity","Country / Countries","Location","Title","Operational Impact","Trade / Commercial Impact","Confidence"], 480)
     with tab2:
         show_df(aircraft, ["Registration","Aircraft Type","Variant","Role","Hub / Base","Country of Registration","Status","Owner / Lessor","Identity Confidence","Operator Confidence"], 500)
+
+# -----------------------------------------------------------------------------
+# ENERGY & INFRASTRUCTURE
+# -----------------------------------------------------------------------------
+elif page == "Energy & Infrastructure":
+    section("Domain intelligence", "Energy & Infrastructure", "Refineries, pipelines, LNG, power and industrial assets viewed through disruption, security and trade exposure.")
+    terms=["energy","refinery","oil","gas","lng","pipeline","power","fuel","terminal","industrial"]
+    ev=hazard_events[contains_any(hazard_events,["Mode","Event Family","Event Type","Title","Description","Operational Impact","Trade / Commercial Impact"],terms)].copy() if not hazard_events.empty else hazard_events.copy()
+    c1,c2=st.columns(2); c1.metric("Energy / infrastructure events",len(ev)); c2.metric("Canonical infrastructure assets",len(infra_assets))
+    tabs=st.tabs(["Incidents & disruption","Assets","Trade impact"])
+    with tabs[0]: show_df(ev,["Start Date","Severity","Status","Country / Countries","Location","Title","Operational Impact","Trade / Commercial Impact"],520)
+    with tabs[1]: show_df(infra_assets,[c for c in ["Asset","Asset Type","Country","Status","Owner / Operator","Notes"] if c in infra_assets.columns],420)
+    with tabs[2]:
+        if not ev.empty: show_df(ev,["Start Date","Title","Trade / Commercial Impact","Operational Impact"],420)
 
 # -----------------------------------------------------------------------------
 # 8. SANCTIONS & COMPLIANCE
