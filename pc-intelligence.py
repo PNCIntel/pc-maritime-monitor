@@ -203,23 +203,34 @@ def intelligence_event_filter(df: pd.DataFrame) -> pd.DataFrame:
     for c in ["Event Family","Event Type","Mode","Title","Description","Operational Impact","Trade / Commercial Impact"]:
         if c in df.columns:
             blob=blob.str.cat(df[c].fillna("").astype(str),sep=" ")
+    # Use word boundaries for short security terms so commercial words such as
+    # "warehouse", "commissioning" or "largest" cannot route into Intelligence by substring.
     include=(
-        r"war|conflict|attack|missile|drone|piracy|hijack|boarding|seizure|interdiction|"
-        r"smuggl|traffick|fraud|crime|theft|terror|sabotage|mine|sanction|enforcement|"
-        r"weather|typhoon|hurricane|cyclone|flood|earthquake|wildfire|storm|low water|"
-        r"grounding|collision|allision|capsize|sinking|fire|explosion|pollution|sar|"
-        r"labour|industrial action|strike|protest|riot|civil unrest|closure|outage|"
-        r"disruption|border closure|customs restriction|airspace closure|cyber|ransomware"
+        r"\bwar\b|\bconflict\b|\battack(?:s|ed|ing)?\b|\bmissile(?:s)?\b|\bdrone(?:s)?\b|"
+        r"\bpiracy\b|\bhijack(?:ed|ing)?\b|\bboarding\b|\bseizure\b|\binterdiction\b|"
+        r"\bsmuggl\w*\b|\btraffick\w*\b|\bfraud\b|\bcrime\b|\btheft\b|\bterror\w*\b|"
+        r"\bsabotage\b|\bmine(?:s|d)?\b|\bsanction\w*\b|\benforcement\b|"
+        r"\bweather\b|\btyphoon\b|\bhurricane\b|\bcyclone\b|\bflood\w*\b|\bearthquake\b|"
+        r"\bwildfire\b|\bstorm\b|\blow water\b|\bgrounding\b|\bcollision\b|\ballision\b|"
+        r"\bcapsiz\w*\b|\bsinking\b|\bfire\b|\bexplosion\b|\bpollution\b|\bSAR\b|"
+        r"\blabour\b|\bindustrial action\b|\bstrike(?:s)?\b|\bprotest\w*\b|\briot\w*\b|"
+        r"\bcivil unrest\b|\bclosure\b|\boutage\b|\bdisruption\b|\bborder closure\b|"
+        r"\bcustoms restriction\b|\bairspace closure\b|\bcyber\w*\b|\bransomware\b"
     )
     corporate=(
-        r"new terminal|terminal opening|commissioning|new crane|crane order|equipment order|"
-        r"vessel order|fleet order|acquisition|investment|capex announcement|earnings|"
-        r"dividend|share buyback|service launch|office opening|warehouse opening"
+        r"\bnew terminal\b|\bterminal opening\b|\bcommission(?:ed|ing)?\b|\bnew crane(?:s)?\b|"
+        r"\bcrane order\b|\bequipment order\b|\bvessel order\b|\bfleet order\b|\bacquisition\b|"
+        r"\binvestment\b|\bcapex\b|\bearnings\b|\bdividend\b|\bshare buyback\b|"
+        r"\bservice launch\b|\boffice opening\b|\bwarehouse opening\b|\bcapacity expansion\b"
     )
+    # Corporate-development rows are admitted only when the same record contains a
+    # concrete adverse incident, not merely language about safety, resilience or operations.
     hard_disruption=(
-        r"attack|missile|drone|piracy|seizure|smuggl|fraud|crime|weather|typhoon|flood|"
-        r"earthquake|grounding|collision|fire|explosion|strike|protest|closure|outage|"
-        r"disruption|sanction|cyber|interdiction"
+        r"\battack(?:s|ed|ing)?\b|\bmissile(?:s)?\b|\bdrone(?:s)?\b|\bpiracy\b|\bseizure\b|"
+        r"\bsmuggl\w*\b|\bfraud\b|\btyphoon\b|\bflood\w*\b|\bearthquake\b|\bgrounding\b|"
+        r"\bcollision\b|\ballision\b|\bfire\b|\bexplosion\b|\bfatalit\w*\b|\binjur\w*\b|"
+        r"\bstrike(?:s)?\b|\bprotest\w*\b|\bclosure\b|\boutage\b|\bsanction\w*\b|"
+        r"\bcyber\w*\b|\binterdiction\b|\bdetention\b|\bcasualty\b"
     )
     inc=blob.str.contains(include,case=False,regex=True,na=False)
     corp=blob.str.contains(corporate,case=False,regex=True,na=False)
@@ -388,6 +399,7 @@ def render_connected_context(event_id):
 # Core canonical datasets
 companies = xl("01_core_entities.xlsx", "Companies")
 ports = xl("02_maritime.xlsx", "Ports")
+port_terminals = xl("02_maritime.xlsx", "Port Terminals")
 vessels = xl("02_maritime.xlsx", "Vessels")
 vessel_restrictions = xl("02_maritime.xlsx", "Vessel Restrictions")
 aircraft = xl("05_aviation.xlsx", "Aircraft Registry")
@@ -1496,40 +1508,71 @@ elif page == "Maritime Security":
     with tabs[2]:
         st.markdown("### Vessels exposed to maritime-security events")
         st.caption(
-            "This is not the full vessel database. It shows vessels that are directly linked "
-            "to security incidents or have a real live restriction/compliance record."
+            "Security-side vessel coverage only: directly linked P&C incidents, IMO-confirmed incidents, "
+            "or live restriction/compliance records. The full commercial fleet remains in P&C Trade."
         )
 
-        exposure_rows = []
+        def _imo_norm(v):
+            x=re.sub(r"[^0-9]","",str(v or ""))
+            return x[:-2] if x.endswith(".0") else x
+
+        vessel_by_imo={}
+        vessel_by_name={}
+        if not vessels.empty:
+            for _,vr in vessels.iterrows():
+                imo=_imo_norm(vr.get("IMO",""))
+                name=clean_display_text(vr.get("Vessel Name",""))
+                if imo: vessel_by_imo[imo]=vr
+                if name: vessel_by_name[name.casefold()]=vr
+
+        exposure_rows=[]
         if not vessel_event_links.empty:
-            event_lookup = (
-                me.set_index("Event ID").to_dict("index")
-                if not me.empty and "Event ID" in me.columns else {}
-            )
-            for _, link in vessel_event_links.iterrows():
-                eid = str(link.get("Event ID","") or "")
-                er = event_lookup.get(eid,{})
+            event_lookup=(me.set_index("Event ID").to_dict("index") if not me.empty and "Event ID" in me.columns else {})
+            for _,link in vessel_event_links.iterrows():
+                eid=str(link.get("Event ID","") or "")
+                er=event_lookup.get(eid,{})
+                name=clean_display_text(link.get("Asset",""))
+                vr=vessel_by_name.get(name.casefold())
                 exposure_rows.append({
-                    "Vessel": clean_display_text(link.get("Asset","")),
-                    "Relationship": clean_display_text(link.get("Relationship","")),
-                    "Incident": clean_display_text(er.get("Title","")),
-                    "Date": str(er.get("Start Date",""))[:10],
-                    "Severity": clean_display_text(er.get("Severity","")),
-                    "Status": clean_display_text(er.get("Status","")),
-                    "Location": clean_display_text(er.get("Location","")),
-                    "Event ID": eid,
+                    "Vessel":name,
+                    "IMO": clean_display_text(vr.get("IMO","")) if vr is not None else "",
+                    "Vessel Type": clean_display_text(vr.get("Vessel Type","")) if vr is not None else "",
+                    "Flag": clean_display_text(vr.get("Flag","")) if vr is not None else "",
+                    "Relationship":clean_display_text(link.get("Relationship","")),
+                    "Incident":clean_display_text(er.get("Title","")),
+                    "Date":str(er.get("Start Date",""))[:10],
+                    "Severity":clean_display_text(er.get("Severity","")),
+                    "Status":clean_display_text(er.get("Status","")),
+                    "Location":clean_display_text(er.get("Location","")),
+                    "Confirmation":"P&C linked event",
+                    "Event ID":eid,
                 })
 
-        exposure = pd.DataFrame(exposure_rows)
+        # IMO confirmed Middle East incidents are authoritative exposure records, not a second vessel database.
+        if not imo_middle_east_incidents.empty:
+            for _,ir in imo_middle_east_incidents.iterrows():
+                imo=_imo_norm(ir.get("IMO",""))
+                name=clean_display_text(ir.get("Vessel",""))
+                vr=vessel_by_imo.get(imo) or vessel_by_name.get(name.casefold())
+                exposure_rows.append({
+                    "Vessel": name or (clean_display_text(vr.get("Vessel Name","")) if vr is not None else ""),
+                    "IMO": imo or (clean_display_text(vr.get("IMO","")) if vr is not None else ""),
+                    "Vessel Type": clean_display_text(vr.get("Vessel Type","")) if vr is not None else "Not yet enriched",
+                    "Flag": clean_display_text(vr.get("Flag","")) if vr is not None else "",
+                    "Relationship":"Officially confirmed maritime-security incident",
+                    "Incident":clean_display_text(ir.get("Description","")) or "IMO confirmed incident",
+                    "Date":clean_display_text(ir.get("Date (2026)","")) or clean_display_text(ir.get("Date","")),
+                    "Severity":"",
+                    "Status":"Confirmed",
+                    "Location":clean_display_text(ir.get("Location","")),
+                    "Confirmation":"IMO",
+                    "Event ID":"",
+                })
+
+        exposure=pd.DataFrame(exposure_rows)
         if not exposure.empty:
-            exposure = exposure.drop_duplicates(
-                subset=["Vessel","Incident","Date"],keep="first"
-            )
-            show_df(
-                exposure,
-                ["Vessel","Date","Severity","Status","Relationship","Location","Incident"],
-                340
-            )
+            exposure=exposure.drop_duplicates(subset=["Vessel","IMO","Date","Location","Confirmation"],keep="first")
+            show_df(exposure,["Vessel","IMO","Vessel Type","Flag","Date","Status","Location","Confirmation","Incident"],430)
         else:
             st.info("No named vessels are directly linked to maritime-security incidents.")
 
@@ -1869,79 +1912,72 @@ elif page == "Ports & Infrastructure":
     with tabs[3]:
         st.markdown("### Port drill-down")
         st.caption(
-            "Local security context only. Deep commercial ownership, capacity and investment "
-            "analysis remains in P&C Trade."
+            "Only ports or facilities linked to security/disruption events appear here. "
+            "The full commercial port universe remains in P&C Trade."
         )
 
-        if ports.empty or "Port / Facility" not in ports.columns:
-            st.info("No port records are currently loaded.")
+        security_ports=ports.copy()
+        related_port_ids=set()
+        related_port_names=set()
+        if not event_asset_links.empty:
+            for _,lr in event_asset_links.iterrows():
+                aid=clean_display_text(lr.get("Asset ID",""))
+                aname=clean_display_text(lr.get("Asset",""))
+                atyp=clean_display_text(lr.get("Asset Type",""))
+                if aid.startswith("PORT") or re.search(r"port|terminal|harbou?r",atyp,re.I):
+                    if aid.startswith("PORT"): related_port_ids.add(aid)
+                    if aname: related_port_names.add(aname.casefold())
+                # terminal event links inherit their parent port where known
+                if aid and not port_terminals.empty and "Terminal ID" in port_terminals.columns:
+                    tr=port_terminals[text_col(port_terminals,"Terminal ID").eq(aid)]
+                    if not tr.empty and "Port ID" in tr.columns:
+                        related_port_ids |= set(tr["Port ID"].dropna().astype(str))
+
+        if not security_ports.empty:
+            pmask=pd.Series(False,index=security_ports.index)
+            if related_port_ids and "Port ID" in security_ports.columns:
+                pmask |= text_col(security_ports,"Port ID").isin(related_port_ids)
+            if related_port_names and "Port / Facility" in security_ports.columns:
+                pmask |= text_col(security_ports,"Port / Facility").str.casefold().isin(related_port_names)
+            # Events sometimes identify the port in location/title before an explicit asset link is created.
+            if not pe.empty and "Port / Facility" in security_ports.columns:
+                event_blob=pd.Series("",index=pe.index,dtype="string")
+                for c in ["Location","Title","Description"]:
+                    if c in pe.columns: event_blob=event_blob.str.cat(pe[c].fillna("").astype(str),sep=" ")
+                event_text=" ".join(event_blob.tolist()).casefold()
+                for idx,pr0 in security_ports.iterrows():
+                    pn=clean_display_text(pr0.get("Port / Facility",""))
+                    if len(pn)>=4 and pn.casefold() in event_text:
+                        pmask.at[idx]=True
+            security_ports=security_ports[pmask].copy()
+
+        if security_ports.empty or "Port / Facility" not in security_ports.columns:
+            st.info("No ports are currently linked to routed security/disruption events.")
         else:
-            pnames = sorted(
-                ports["Port / Facility"].dropna().astype(str).unique().tolist()
-            )
-            pname = st.selectbox(
-                "Port / facility",
-                pnames,
-                key="intel_port_drilldown"
-            )
+            pnames=sorted(security_ports["Port / Facility"].dropna().astype(str).unique().tolist())
+            pname=st.selectbox("Affected port / facility",pnames,key="intel_port_drilldown")
+            pr=security_ports[text_col(security_ports,"Port / Facility").eq(pname)].copy()
+            show_df(pr,["Port / Facility","Country","Operator","Facility Type","Key Role","Coverage Note"],170)
+            pid=str(pr.iloc[0].get("Port ID","")) if not pr.empty else ""
 
-            pr = ports[text_col(ports,"Port / Facility").eq(pname)].copy()
-            show_df(
-                pr,
-                ["Port / Facility","Country","Operator","Facility Type",
-                 "Key Role","Coverage Note"],
-                170
-            )
-
-            pid = str(pr.iloc[0].get("Port ID","")) if not pr.empty else ""
-
-            linked_terminals = (
-                port_terminals[text_col(port_terminals,"Port ID").eq(pid)].copy()
-                if pid and not port_terminals.empty else pd.DataFrame()
-            )
+            linked_terminals=(port_terminals[text_col(port_terminals,"Port ID").eq(pid)].copy() if pid and not port_terminals.empty else pd.DataFrame())
             if not linked_terminals.empty:
                 st.markdown("**Linked terminals**")
-                show_df(
-                    linked_terminals,
-                    ["Terminal / Facility","City / Area","Asset Type","Cargo Profile",
-                     "Primary Operator","Status","Confidence","Notes"],
-                    220
-                )
+                show_df(linked_terminals,["Terminal / Facility","City / Area","Asset Type","Cargo Profile","Primary Operator","Status","Confidence","Notes"],220)
 
-            related_ids = set()
+            related_ids=set()
             if pid and not event_asset_links.empty:
-                related_ids |= set(
-                    event_asset_links[
-                        text_col(event_asset_links,"Asset ID").eq(pid)
-                    ]["Event ID"].dropna().astype(str)
-                )
-
+                related_ids |= set(event_asset_links[text_col(event_asset_links,"Asset ID").eq(pid)]["Event ID"].dropna().astype(str))
             if pname and not pe.empty:
-                name_hits = pe[
-                    contains_any(
-                        pe,
-                        ["Location","Title","Description"],
-                        [pname]
-                    )
-                ]
+                name_hits=pe[contains_any(pe,["Location","Title","Description"],[pname])]
                 if "Event ID" in name_hits.columns:
                     related_ids |= set(name_hits["Event ID"].dropna().astype(str))
-
-            related = (
-                pe[pe["Event ID"].astype(str).isin(related_ids)].copy()
-                if related_ids and not pe.empty and "Event ID" in pe.columns
-                else pd.DataFrame()
-            )
-
+            related=(pe[pe["Event ID"].astype(str).isin(related_ids)].copy() if related_ids and not pe.empty and "Event ID" in pe.columns else pd.DataFrame())
             st.markdown("**Security & disruption history**")
             if related.empty:
                 st.caption("No directly related security/disruption events are currently mapped to this port.")
             else:
-                show_df(
-                    related,
-                    ["Start Date","Severity","Status","Event Type","Title","Operational Impact"],
-                    260
-                )
+                show_df(related,["Start Date","Severity","Status","Event Type","Title","Operational Impact"],260)
 
 # -----------------------------------------------------------------------------
 # 7. AVIATION & MOVEMENT

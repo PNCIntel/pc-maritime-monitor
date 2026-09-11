@@ -1,7 +1,7 @@
 {
-  "release": "v3.3.2-port-map-cruise-intelligence-fix",
+  "release": "v3.3.5",
   "build_date": "2026-09-11",
-  "file_count": 80,
+  "file_count": 84,
   "files": [
     {
       "path": ".gitignore",
@@ -44,24 +44,39 @@
       "sha256": "2c2f58c892cd8c4194ff65c3b5158feb29a045c7bca5d99b7045f9c8067fa38c"
     },
     {
+      "path": "TRADE_SYSTEM_V3_3_3_BUILD.md",
+      "bytes": 1183,
+      "sha256": "0b23f0df52d455edf935f2114b458c3c7ffb74a8c978919fe5222d3000dfc648"
+    },
+    {
+      "path": "TRADE_SYSTEM_V3_3_4_BUILD.md",
+      "bytes": 1388,
+      "sha256": "7e218c7b23b6f0f271584d27768e3639224ede0b3e660e8e8535420a21185c69"
+    },
+    {
+      "path": "TRADE_SYSTEM_V3_3_5_BUILD.md",
+      "bytes": 1720,
+      "sha256": "14fd1581a46341998d94d6d64e36a4c5d897d4e2c88723ed01c2f03541a7b3ab"
+    },
+    {
       "path": "TRADE_SYSTEM_V3_3_BUILD.md",
       "bytes": 989,
       "sha256": "1cff0bac427979ae36c193796fc9a09f69616fdd6347323609fb5a59d565a133"
     },
     {
       "path": "app.py",
-      "bytes": 320276,
-      "sha256": "28a1facc623601fdbbf9b37f9d3184c603007e015eacd5315d7270bcea70ce04"
+      "bytes": 327998,
+      "sha256": "227fbb670ecab1a50c2ddae826727cf21913e9a01ff448485fd193e3771ab662"
     },
     {
       "path": "data/01_core_entities.xlsx",
-      "bytes": 163880,
-      "sha256": "9ec82a42c60df3fc4955c75b534bacd77a73795f4d1a306542a2ea885ae98d5b"
+      "bytes": 167430,
+      "sha256": "772ec305910a5830703d2c85b13a75b9da6460b31d61c5dd2ff21d06b4d58315"
     },
     {
       "path": "data/02_maritime.xlsx",
-      "bytes": 445090,
-      "sha256": "3ca306bd2bf679337b3b5a2d0c7e8675157002a233ccf916eede1214900bf43a"
+      "bytes": 451878,
+      "sha256": "d76db8e3fd2ad820939cefd56833ea37585bab2a150a4c4cb23a798a93c4ca46"
     },
     {
       "path": "data/03_rail.xlsx",
@@ -95,13 +110,13 @@
     },
     {
       "path": "data/09_intelligence.xlsx",
-      "bytes": 210732,
-      "sha256": "bc9b846284ac24221b30e7222141b40e484f3e2f5968d74511fdc119dc378f11"
+      "bytes": 216599,
+      "sha256": "7f42ac4e1aff0d3797794f4bd50a28896597937887668486571c79456715c82f"
     },
     {
       "path": "data/10_sources_evidence.xlsx",
-      "bytes": 49817,
-      "sha256": "777aebf1eeb3ad254af51b985667cccc479a29f26fcd3373ace5f73c6d024817"
+      "bytes": 51151,
+      "sha256": "6876065512314d2b0b6625c4a02e7a6d97585dfc13ad1670ee9fea18c9401412"
     },
     {
       "path": "data/11_systems_waterways_governance.xlsx",
@@ -110,13 +125,13 @@
     },
     {
       "path": "data/12_defence_shipbuilding.xlsx",
-      "bytes": 37488,
-      "sha256": "b8f82b9888a51369d61279226cc4b442fe1ed20e0d67981321d366d56fd6d0ef"
+      "bytes": 38643,
+      "sha256": "d1b9009375e6e8fa7bbf71269d26058a25682154f28cf89488d4dcd84d514f33"
     },
     {
       "path": "data/13_events_hazards.xlsx",
-      "bytes": 41611,
-      "sha256": "745d6777c672cb1716c294c293bfae33285c02994c1bebba4533df7758102dd9"
+      "bytes": 46367,
+      "sha256": "ef4c66125af8fccfdea49c14b2dcff1d3638f8ff034d7532fe770015a918c5ba"
     },
     {
       "path": "data/14_trade_policy_compliance.xlsx",
@@ -230,8 +245,8 @@
     },
     {
       "path": "pc-intelligence.py",
-      "bytes": 96002,
-      "sha256": "d336b7f3a633363bd281fc911ce0a0b46a6b4f0b6e8fbba3605210b89d3c4f3e"
+      "bytes": 100943,
+      "sha256": "335c02538edfec8d24b0cd7630458ce71158a48da6bc89fbb814c9f58ffab420"
     },
     {
       "path": "pc-nerai.py",
@@ -245,8 +260,13 @@
     },
     {
       "path": "pc_intelligence_app.py",
-      "bytes": 96002,
-      "sha256": "d336b7f3a633363bd281fc911ce0a0b46a6b4f0b6e8fbba3605210b89d3c4f3e"
+      "bytes": 100943,
+      "sha256": "335c02538edfec8d24b0cd7630458ce71158a48da6bc89fbb814c9f58ffab420"
+    },
+    {
+      "path": "release_manifest.json",
+      "bytes": 13685,
+      "sha256": "3366417cc9351718a188269c9b0a248fa559ed58adc5773574971a609192d56d"
     },
     {
       "path": "requirements.txt",

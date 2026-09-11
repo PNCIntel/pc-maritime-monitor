@@ -815,9 +815,14 @@ def enrich_ports_from_reference(ports):
     if ports is None or ports.empty:
         return pd.DataFrame() if ports is None else ports.copy()
     out=ports.copy()
-    if "Latitude" not in out.columns: out["Latitude"]=""
-    if "Longitude" not in out.columns: out["Longitude"]=""
+    # pandas 3.x is strict about writing floats into object/string-backed columns.
+    # Normalize coordinates to numeric before enrichment so reference matches cannot crash the Ports page.
+    if "Latitude" not in out.columns: out["Latitude"]=float("nan")
+    if "Longitude" not in out.columns: out["Longitude"]=float("nan")
+    out["Latitude"]=pd.to_numeric(out["Latitude"],errors="coerce")
+    out["Longitude"]=pd.to_numeric(out["Longitude"],errors="coerce")
     if "Geo Source" not in out.columns: out["Geo Source"]=""
+    out["Geo Source"]=out["Geo Source"].astype("object")
     ref=global_port_reference_view()
     if ref.empty: return out
     r=ref.copy(); r["_key"]=r["Port Name"].map(_port_match_key)
@@ -883,6 +888,61 @@ def render_named_port_map(df, height=480, radius=22000):
         st.pydeck_chart(pdk.Deck(layers=[layer],initial_view_state=view,tooltip=tooltip,map_style=None),use_container_width=True,height=height)
     else:
         st.map(m.rename(columns={latcol:"lat",loncol:"lon"}),latitude="lat",longitude="lon",use_container_width=True)
+
+def route_port_points(*texts):
+    """Resolve ordered route/call text to known port coordinates without inventing locations."""
+    ref=global_port_reference_view()
+    if ref.empty:
+        return pd.DataFrame()
+    lookup={}
+    for _,r in ref.iterrows():
+        key=_port_match_key(r.get("Port Name",""))
+        if key and key not in lookup:
+            lookup[key]=r
+    points=[]; seen=set()
+    for text in texts:
+        for raw in re.split(r";|\||→|>|,|\n",str(text or "")):
+            name=raw.strip(" -–—")
+            if not name: continue
+            key=_port_match_key(name)
+            hit=lookup.get(key)
+            if hit is None:
+                # conservative fallback to the curated city/port coordinate dictionary
+                xy=PORT_CITY_COORDS.get(name) or PORT_CITY_COORDS.get("Port of "+name)
+                if xy and key not in seen:
+                    points.append({"Port / Facility":name,"Country":"","Latitude":xy[0],"Longitude":xy[1],"Sequence":len(points)+1})
+                    seen.add(key)
+                continue
+            if key in seen: continue
+            points.append({"Port / Facility":hit.get("Port Name",name),"Country":hit.get("Country Name",""),
+                           "Latitude":hit.get("Latitude"),"Longitude":hit.get("Longitude"),"Sequence":len(points)+1})
+            seen.add(key)
+    return pd.DataFrame(points)
+
+def render_route_port_map(points,title="Route geography",height=430):
+    if points is None or points.empty:
+        st.caption("No route-call coordinates have been resolved yet.")
+        return
+    m=points.copy()
+    m["Latitude"]=pd.to_numeric(m["Latitude"],errors="coerce"); m["Longitude"]=pd.to_numeric(m["Longitude"],errors="coerce")
+    m=m[m["Latitude"].notna() & m["Longitude"].notna()].copy()
+    if m.empty: return
+    st.markdown(f"#### {title}")
+    if pdk is not None:
+        scatter=pdk.Layer("ScatterplotLayer",data=m,get_position="[Longitude, Latitude]",get_radius=26000,
+                          radius_min_pixels=4,radius_max_pixels=10,pickable=True,auto_highlight=True,
+                          get_fill_color=[216,180,90,185],get_line_color=[240,224,180,235],line_width_min_pixels=1)
+        layers=[scatter]
+        if len(m)>1:
+            path=[[float(r["Longitude"]),float(r["Latitude"])] for _,r in m.sort_values("Sequence").iterrows()]
+            layers.insert(0,pdk.Layer("PathLayer",data=[{"path":path}],get_path="path",get_width=3,width_min_pixels=2,
+                                      get_color=[145,168,190,190],pickable=False))
+        view=pdk.ViewState(latitude=float(m["Latitude"].mean()),longitude=float(m["Longitude"].mean()),zoom=2.2,pitch=0,bearing=0)
+        tooltip={"html":"<b>{Port / Facility}</b><br/>{Country}","style":{"backgroundColor":"#101820","color":"#F4EFE5","fontSize":"12px"}}
+        st.pydeck_chart(pdk.Deck(layers=layers,initial_view_state=view,tooltip=tooltip,map_style=None),use_container_width=True,height=height)
+    else:
+        st.map(m.rename(columns={"Latitude":"lat","Longitude":"lon"}),latitude="lat",longitude="lon",use_container_width=True)
+    st.caption("Route lines connect representative calls in listed order; they are not navigational tracks.")
 
 def cruise_tables_with_fallbacks():
     """Restore Cruise even when the old workbook lacks the four dedicated cruise sheets."""
@@ -4105,7 +4165,7 @@ st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend
 
 NAV_GROUPS={
     "Command Center":["Overview","Search"],
-    "Network":["Companies","Ports","Vessels","Rail","Aviation","Trucking","Ferries","Cruise","Corridors & Systems","Shipyards","Energy & Industry"],
+    "Network":["Companies","Network Map","Ports","Vessels","Rail","Aviation","Trucking","Ferries","Cruise","Corridors & Systems","Shipyards","Energy & Industry"],
     "Operations":["Alerts & Disruptions","Watch Areas","Maritime Security","Maritime Disruptions","Port Activity","Hormuz Monitor","Live Feeds"],
     "Markets & Policy":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Reference & Benchmarks","Investments","Sanctions & Compliance","Trade Policy","Contracts"],
     "Intelligence":["News & Signals","News & Events"],
@@ -4877,9 +4937,23 @@ elif page=="Cruise":
         clean_network_table(destinations,["Destination","Country","Destination Type","Status","Region","Typical Line / Brand Use","Investment / Operating Note","Evidence Caveat"],300)
     with tabs[3]:
         clean_network_table(routes,["Route Family","Turnaround Ports","Representative Calls","Region","Typical Duration","Season","Strategic Role","Status"],280)
+        if not routes.empty:
+            ridx=st.selectbox("Map cruise route",range(len(routes)),format_func=lambda i:str(routes.iloc[i].get("Route Family","") or routes.iloc[i].get("Representative Calls","")),key="cruise_route_map_pick")
+            rr=routes.iloc[ridx]
+            pts=route_port_points(rr.get("Turnaround Ports",""),rr.get("Representative Calls",""))
+            render_route_port_map(pts,"Representative cruise calls")
     with tabs[4]:
         st.caption("Great Lakes cruise is kept as a geographic deployment layer so operators, vessels, ports and locks can connect back into the wider Great Lakes system.")
         clean_network_table(gl,["Vessel Name","Operating Area","Representative Ports / Infrastructure","Vessel / Service Type","Season","Status","Notes"],320)
+        if not gl.empty:
+            all_pts=[]
+            for _,gr in gl.iterrows():
+                gp=route_port_points(gr.get("Representative Ports / Infrastructure",""))
+                if not gp.empty: all_pts.append(gp)
+            if all_pts:
+                pts=pd.concat(all_pts,ignore_index=True).drop_duplicates(subset=["Port / Facility"],keep="first").reset_index(drop=True)
+                pts["Sequence"]=range(1,len(pts)+1)
+                render_route_port_map(pts,"Great Lakes cruise port network")
 
 
 elif page=="Freight & Commodity Markets":
@@ -4959,6 +5033,21 @@ elif page=="Companies":
         ent=opts[pick]
         st.session_state["entity_pick"]=ent["Company ID"]
         render_company_profile(ent["Company ID"],ent["Company"])
+
+elif page=="Network Map":
+    header("Trade Network Map","Commercial geography across canonical and reference ports. Intelligence events remain on P&C Intelligence unless they affect a selected trade asset.")
+    ref=global_port_reference_view()
+    canonical=enrich_ports_from_reference(TABLES.get(("Maritime","Ports"),pd.DataFrame()))
+    t1,t2=st.tabs(["Global Ports","Canonical P&C Ports"])
+    with t1:
+        st.caption(f"{len(ref):,} geocoded ports from the global reference layer." if not ref.empty else "Global port reference unavailable.")
+        render_named_port_map(ref,height=610,radius=16000)
+    with t2:
+        geo=canonical.copy()
+        if not geo.empty:
+            geo=geo[pd.to_numeric(geo.get("Latitude"),errors="coerce").notna() & pd.to_numeric(geo.get("Longitude"),errors="coerce").notna()]
+        st.caption(f"{len(geo):,} canonical ports currently resolve to coordinates.")
+        render_named_port_map(geo,height=610,radius=22000)
 
 elif page=="Ports":
     header("Ports","Port / terminal explorer with operators, facilities, geography and linked events.")
@@ -6003,7 +6092,16 @@ elif page=="Corridors & Systems":
     with ct4:
         et1,et2,et3=st.tabs(["Tanker exposure","Great Lakes cargo","Defence delivery routes"])
         with et1: display_df(tanker_corr,250)
-        with et2: display_df(gl_corr,250)
+        with et2:
+            display_df(gl_corr,250)
+            if not gl_corr.empty:
+                gidx=st.selectbox("Map Great Lakes corridor",range(len(gl_corr)),
+                                  format_func=lambda i:" · ".join(str(v) for v in gl_corr.iloc[i].tolist()[:3] if str(v).strip() and str(v).lower()!="nan")[:140],
+                                  key="great_lakes_corridor_map_pick")
+                grow=gl_corr.iloc[gidx]
+                texts=[grow.get(c,"") for c in gl_corr.columns]
+                gpts=route_port_points(*texts)
+                render_route_port_map(gpts,"Great Lakes corridor ports")
         with et3: display_df(delivery,250)
     with ct2:
         if systems.empty:
