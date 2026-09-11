@@ -1,0 +1,12 @@
+market_instrument_id,name,symbol,asset_class,commodity,benchmark_location,currency,unit,provider,source_id,redistribution_status,attribution_required
+MKT_BRENT,Brent crude oil,Brent,energy,crude oil,North Sea,USD,USD/bbl,Public benchmark reference,,verify-series,true
+MKT_WTI,West Texas Intermediate crude oil,WTI,energy,crude oil,Cushing Oklahoma,USD,USD/bbl,EIA,SRC_OPEN_EIA,verify-series,true
+MKT_HENRY_HUB,Henry Hub natural gas,HH,energy,natural gas,Henry Hub Louisiana,USD,USD/MMBtu,EIA,SRC_OPEN_EIA,verify-series,true
+MKT_GOLD,Gold,Gold,commodity,gold,Global,USD,USD/troy oz,IMF,SRC_OPEN_IMF,verify-series,true
+MKT_COPPER,Copper,Copper,commodity,copper,Global,USD,USD/mt,IMF,SRC_OPEN_IMF,verify-series,true
+MKT_IRON_ORE,Iron ore,Iron Ore,commodity,iron ore,Global,USD,USD/dmt,IMF,SRC_OPEN_IMF,verify-series,true
+MKT_WHEAT,Wheat,Wheat,agriculture,wheat,Global,USD,USD/mt,IMF/Sources,SRC_OPEN_IMF,verify-series,true
+MKT_CORN,Corn,Corn,agriculture,corn,Global,USD,USD/mt,IMF/Sources,SRC_OPEN_IMF,verify-series,true
+MKT_SOYBEANS,Soybeans,Soybeans,agriculture,soybeans,Global,USD,USD/mt,IMF/Sources,SRC_OPEN_IMF,verify-series,true
+MKT_TD3C,TD3C Arabian Gulf–China VLCC,TD3C,freight,crude tanker,Arabian Gulf to China,USD,USD/day / WS,The Signal Group / market reporting,SRC_SIGNAL_GROUP,derived-facts-only,true
+MKT_BDI,Baltic Dry Index,BDI,freight,dry bulk,Global,USD,index,Public reporting,,restricted-benchmark,true

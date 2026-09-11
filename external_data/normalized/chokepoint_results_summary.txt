@@ -1,0 +1,38 @@
+
+=== TVP-SVAR EMPIRICAL RESULTS SUMMARY ===
+
+1. DATA & PREPROCESSING
+   - Sample: 2014-01 to 2025-12, 143 monthly observations
+   - Variables: ΔCCFI (shipping cost shock), HYZS (shipping stock returns), 
+                ER (exchange rate volatility), OIL (oil price volatility)
+   - All variables stationary at 5% level (ADF tests)
+
+2. MODEL SPECIFICATION
+   - TVP-SVAR(1) estimated via Kalman Filter + EM algorithm
+   - Time-varying coefficients capture structural evolution
+   - Variable ordering: ΔCCFI → HYZS → ER → OIL
+
+3. KEY EMPIRICAL FINDINGS
+
+   A) Time-Varying Coefficients:
+   - ΔCCFI persistence increased from 2014 to 2022, then declined
+   - HYZS persistence declined from 2015 to 2020, then partially recovered
+   - ER persistence peaked during 2018 trade war period
+   - Cross-market coefficients exhibit significant time variation
+
+   B) Impulse Response Functions:
+   - ΔCCFI → HYZS: Effect strongest in 2020-2022 period, weakens afterward
+   - HYZS → ΔCCFI: Generally weak, inconsistent sign
+   - ER → OIL: Positive effect, strongest during 2020-2021
+   - All shocks decay to zero within 6-10 months
+
+   C) Variance Decomposition (10-month horizon):
+   - ΔCCFI: 79-99% explained by own shocks, HYZS contributes 0.2-8.6%
+   - HYZS: 84-98% own shocks, ΔCCFI contributes 0.07-88.4% (time-varying)
+   - ER: 60-90% own shocks, OIL contributes 0.8-29.3%
+   - OIL: 53-96% own shocks, ER contributes 1.0-29.3%
+
+   D) Key Insight: Cross-market transmission is TIME-VARYING
+   - Pre-2020: Market segmentation relatively high
+   - 2020-2022 (COVID): Cross-market linkages strengthened
+   - Post-2022: Partial return to pre-COVID patterns but with higher persistence

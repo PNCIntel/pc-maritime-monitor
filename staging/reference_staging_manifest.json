@@ -1,0 +1,55 @@
+{
+  "global_ports": {
+    "status": "ready",
+    "path": "external_data/normalized/global_port_reference.csv",
+    "rows": 1377,
+    "columns": [
+      "id",
+      "name",
+      "iso3",
+      "geometry",
+      "lat",
+      "lon",
+      "export",
+      "import",
+      "trans",
+      "throughput"
+    ],
+    "bytes": 253522
+  },
+  "port_fuel_2050": {
+    "status": "ready",
+    "path": "external_data/normalized/port_fuel_demand_2050.csv",
+    "rows": 72072,
+    "columns": [
+      "id",
+      "scenario",
+      "name",
+      "iso3",
+      "Continent_Code",
+      "vessel_type_main",
+      "throughput_factor",
+      "Fuel_tons_route",
+      "Fuel_tons_route_slow",
+      "Fuel_tons_route_future",
+      "Fuel_tons_route_slow_future"
+    ],
+    "bytes": 11024865
+  },
+  "accuracy_stock": {
+    "status": "ready",
+    "path": "external_data/normalized/accuracy_ns_stock_data.csv",
+    "rows": 1433,
+    "columns": [
+      "Unnamed: 0",
+      "open",
+      "high",
+      "low",
+      "close",
+      "adjclose",
+      "volume",
+      "ticker"
+    ],
+    "bytes": 166650
+  }
+}
