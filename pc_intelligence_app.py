@@ -417,6 +417,10 @@ event_company_links = xl("13_events_hazards.xlsx", "Event Company Links")
 event_system_links = xl("13_events_hazards.xlsx", "Event System Links")
 impact_chains = xl("13_events_hazards.xlsx", "Impact Chains")
 
+# v3.3.2 geographic reference layers
+global_ports_reference = xl("16_global_ports_reference.xlsx", "Global Port Reference")
+imo_middle_east_incidents = xl("18_official_maritime_security.xlsx", "IMO Middle East Incidents")
+
 # Sanctions / compliance
 sanctions_authorities = xl("14_trade_policy_compliance.xlsx", "Sanctions Authorities")
 sanctions_programmes = xl("14_trade_policy_compliance.xlsx", "Sanctions Programmes")
@@ -629,6 +633,168 @@ def render_watch_area_brief(rows,geography):
 
 
 # -----------------------------------------------------------------------------
+# Geographic inference for event / official-incident mapping
+# -----------------------------------------------------------------------------
+KNOWN_PLACE_COORDS = {
+    # Asia-Pacific / recent P&C event locations
+    "ningbo": (29.9208, 121.8818),
+    "xiangshan": (29.48, 121.87),
+    "qingdao": (36.07, 120.38),
+    "songkhla": (7.23, 100.57),
+    "manila south harbour": (14.59, 120.97),
+    "manila": (14.59, 120.98),
+    "port of newcastle": (-32.89, 151.76),
+    "newcastle": (-32.89, 151.76),
+    "jakarta": (-6.10, 106.88),
+    "lampung": (-5.45, 105.27),
+    "sunda strait": (-6.0, 105.8),
+    "okinawa": (26.33, 127.80),
+    "zhejiang": (29.18, 120.10),
+    "shanghai": (31.23, 121.47),
+    "taiwan strait": (24.2, 119.7),
+    # Gulf / IMO bases
+    "port rashid": (25.27, 55.28),
+    "al-faw": (29.95, 48.47),
+    "al faw": (29.95, 48.47),
+    "dibba al-fujairah": (25.59, 56.26),
+    "dibba": (25.62, 56.27),
+    "al khasab": (26.18, 56.24),
+    "khasab": (26.18, 56.24),
+    "ash shishah": (25.96, 56.35),
+    "gwadar": (25.12, 62.33),
+    "limah": (25.94, 56.45),
+    "lima, oman": (25.94, 56.45),
+    "kumzar": (26.34, 56.41),
+    "bushehr": (28.92, 50.84),
+    "musandam peninsula": (26.10, 56.30),
+    "khor fakkan": (25.34, 56.36),
+    "dahit": (25.90, 56.35),
+    "sohar": (24.35, 56.73),
+    "shinas": (24.74, 56.46),
+    "masirah island": (20.47, 58.80),
+    "umm qasr": (30.04, 47.93),
+    "muscat": (23.59, 58.41),
+    "doha": (25.29, 51.53),
+    "dubai": (25.25, 55.30),
+    "ras al-khaimah": (25.79, 55.94),
+    "ras al khaymah": (25.79, 55.94),
+    "fujairah": (25.13, 56.33),
+    "sirik": (26.52, 57.10),
+    "chabahar": (25.29, 60.64),
+    "kish island": (26.54, 53.98),
+    "ras laffan": (25.91, 51.55),
+    "duqm": (19.67, 57.71),
+    "jebel ali": (24.99, 55.03),
+    "khor al zubair": (30.15, 47.80),
+    "al jubayl": (27.00, 49.66),
+    "mubarak al kabeer": (29.77, 48.36),
+    "port of bahrain": (26.20, 50.60),
+    "mina saqr": (25.98, 56.05),
+    "strait of hormuz": (26.35, 56.30),
+    "gulf of oman": (24.3, 58.6),
+    "persian gulf": (26.5, 52.0),
+    "arabian gulf": (26.5, 52.0),
+}
+
+def _geo_norm(v):
+    x=str(v or "").casefold().replace("_"," ").replace("&"," and ")
+    x=re.sub(r"[^a-z0-9]+"," ",x)
+    return " ".join(x.split())
+
+@st.cache_data(show_spinner=False, ttl=300)
+def _global_port_gazetteer():
+    if global_ports_reference is None or global_ports_reference.empty:
+        return []
+    out=[]
+    for _,r in global_ports_reference.iterrows():
+        raw=str(r.get("name","") or "").strip()
+        base=raw.rsplit("_",1)[0].replace("_"," ").strip() if "_" in raw else raw.replace("_"," ").strip()
+        lat=pd.to_numeric(pd.Series([r.get("lat","")]),errors="coerce").iloc[0]
+        lon=pd.to_numeric(pd.Series([r.get("lon","")]),errors="coerce").iloc[0]
+        key=_geo_norm(base)
+        if key and len(key)>=4 and pd.notna(lat) and pd.notna(lon):
+            out.append((key,base,float(lat),float(lon)))
+    # longest names first reduces accidental matching of a shorter port/city token.
+    return sorted(out,key=lambda x:len(x[0]),reverse=True)
+
+def infer_event_coordinates(location_text, country_text="", title_text=""):
+    blob=_geo_norm(" ".join([str(location_text or ""),str(country_text or ""),str(title_text or "")]))
+    if not blob:
+        return None
+    # Explicit gazetteer first.
+    for key,(lat,lon) in sorted(KNOWN_PLACE_COORDS.items(),key=lambda kv:len(kv[0]),reverse=True):
+        if _geo_norm(key) in blob:
+            return {"Latitude":lat,"Longitude":lon,"Accuracy":"Approximate named-place","Notes":f"Inferred from named location: {key}"}
+    # Then uploaded global port reference.
+    padded=f" {blob} "
+    for key,name,lat,lon in _global_port_gazetteer():
+        if f" {key} " in padded:
+            return {"Latitude":lat,"Longitude":lon,"Accuracy":"Approximate port reference","Notes":f"Inferred from Global Port Reference: {name}"}
+    return None
+
+def _direction_bearing(direction):
+    d=_geo_norm(direction)
+    bearings={"north":0,"n":0,"northeast":45,"north east":45,"ne":45,"east":90,"e":90,
+              "southeast":135,"south east":135,"se":135,"south":180,"s":180,
+              "southwest":225,"south west":225,"sw":225,"west":270,"w":270,
+              "northwest":315,"north west":315,"nw":315}
+    return bearings.get(d)
+
+def _offset_nm(lat,lon,distance_nm,bearing_deg):
+    import math
+    rad=math.radians(bearing_deg)
+    dlat=(distance_nm*math.cos(rad))/60.0
+    denom=max(0.2,60.0*math.cos(math.radians(lat)))
+    dlon=(distance_nm*math.sin(rad))/denom
+    return lat+dlat,lon+dlon
+
+def infer_imo_coordinates(location_text):
+    text=str(location_text or "").strip()
+    low=text.casefold()
+    # First identify a named reference point.
+    base=None
+    base_name=""
+    for key,(lat,lon) in sorted(KNOWN_PLACE_COORDS.items(),key=lambda kv:len(kv[0]),reverse=True):
+        if key.casefold() in low:
+            base=(lat,lon); base_name=key; break
+    # Generic coast/location fallbacks used only when IMO provides no more specific base.
+    if base is None:
+        if "oman" in low: base=(23.59,58.41); base_name="Oman coast (Muscat reference)"
+        elif "uae" in low or "united arab emirates" in low: base=(25.20,55.35); base_name="UAE coast"
+        elif "iraq" in low: base=(29.95,48.47); base_name="Iraq Gulf coast"
+        elif "qatar" in low: base=(25.50,51.55); base_name="Qatar coast"
+        elif "iran" in low or "islamic republic" in low: base=(27.0,56.0); base_name="Iranian Gulf coast"
+    if base is None:
+        return None
+    # IMO wording commonly uses '<distance>NM <direction> of <place>'.
+    m=re.search(r"(\d+(?:\.\d+)?)\s*nm\s+(northwest|north-west|nw|northeast|north-east|ne|southeast|south-east|se|southwest|south-west|sw|north|south|east|west|n|s|e|w)\b",low)
+    if m:
+        dist=float(m.group(1)); direction=m.group(2).replace("-"," ")
+        b=_direction_bearing(direction)
+        if b is not None:
+            lat,lon=_offset_nm(base[0],base[1],dist,b)
+            return {"Latitude":lat,"Longitude":lon,"Accuracy":"IMO approximate / offset","Notes":f"Approx. {dist:g} NM {direction} of {base_name}"}
+    return {"Latitude":base[0],"Longitude":base[1],"Accuracy":"IMO approximate named-place","Notes":f"Approximate from IMO location: {base_name}"}
+
+def official_imo_map_points(region_name):
+    if region_name != "Middle East / Gulf" or imo_middle_east_incidents is None or imo_middle_east_incidents.empty:
+        return pd.DataFrame()
+    rows=[]
+    for i,r in imo_middle_east_incidents.iterrows():
+        loc=str(r.get("Location","") or "")
+        xy=infer_imo_coordinates(loc)
+        if not xy: continue
+        rows.append({
+            "Event ID":f"IMO_ME_{i+1:03d}","Latitude":xy["Latitude"],"Longitude":xy["Longitude"],
+            "Location":loc,"Country":"","Accuracy":xy["Accuracy"],"Notes":xy["Notes"],
+            "Incident":f"IMO confirmed · {clean_display_text(r.get('Vessel',''))}",
+            "Date":f"2026 · {clean_display_text(r.get('Date (2026)',''))}","Severity Label":"Official confirmation",
+            "Operational":clean_display_text(r.get("Description","")),"Commercial":"","Map Accuracy":xy["Accuracy"],
+            "Source Type":"IMO confirmed incident","Vessel":clean_display_text(r.get("Vessel","")),"IMO":normalize_imo(r.get("IMO",""))
+        })
+    return pd.DataFrame(rows)
+
+# -----------------------------------------------------------------------------
 # Regional security workspace helpers
 # -----------------------------------------------------------------------------
 REGIONAL_SECURITY_AREAS = {
@@ -682,7 +848,7 @@ REGIONAL_SECURITY_AREAS = {
             "asia-pacific","asia pacific","china","japan","taiwan","south korea",
             "north korea","philippines","indonesia","malaysia","singapore",
             "vietnam","thailand","australia","new zealand","hong kong",
-            "okinawa","shanghai","zhejiang","taiwan strait","incheon",
+            "okinawa","shanghai","zhejiang","ningbo","xiangshan","taiwan strait","incheon",
             "sunda strait","jakarta","lampung","manila","south china sea",
             "east china sea"
         ],
@@ -711,11 +877,12 @@ def _regional_blob(df):
             blob = blob.str.cat(text_col(df,c), sep=" ")
     return blob.str.casefold()
 
-def regional_events(region_name, operational_only=True):
-    """Return events relevant to a regional security theatre."""
-    if hazard_events.empty or region_name not in REGIONAL_SECURITY_AREAS:
-        return hazard_events.iloc[0:0].copy()
-    df=hazard_events.copy()
+def regional_events(region_name, operational_only=True, source_df=None):
+    """Return events relevant to a regional theatre; map views may use the full event register while incident lists stay operational."""
+    base=hazard_events if source_df is None else source_df
+    if base is None or base.empty or region_name not in REGIONAL_SECURITY_AREAS:
+        return pd.DataFrame() if base is None else base.iloc[0:0].copy()
+    df=base.copy()
     blob=_regional_blob(df)
     phrases=REGIONAL_SECURITY_AREAS[region_name]["phrases"]
     region_pattern="|".join(re.escape(p.casefold()) for p in phrases)
@@ -728,30 +895,36 @@ def regional_events(region_name, operational_only=True):
     return df[mask].copy()
 
 def regional_event_map_points(events):
-    """Join the regional event set to canonical Event Locations for map rendering."""
-    if events is None or events.empty or event_locations.empty:
+    """Join events to Event Locations, then infer approximate coordinates for otherwise unmapped named places."""
+    if events is None or events.empty or "Event ID" not in events.columns:
         return pd.DataFrame()
-
-    if "Event ID" not in events.columns or "Event ID" not in event_locations.columns:
-        return pd.DataFrame()
-
-    loc=event_locations.copy()
-    loc["Latitude"]=pd.to_numeric(loc.get("Latitude"),errors="coerce")
-    loc["Longitude"]=pd.to_numeric(loc.get("Longitude"),errors="coerce")
-    loc=loc[loc["Latitude"].notna() & loc["Longitude"].notna()].copy()
-    if loc.empty:
-        return pd.DataFrame()
-
-    cols=[
-        c for c in [
-            "Event ID","Start Date","Severity","Status","Event Family","Event Type",
-            "Title","Operational Impact","Trade / Commercial Impact","Confidence"
-        ] if c in events.columns
-    ]
-    pts=loc.merge(events[cols],on="Event ID",how="inner")
-    if pts.empty:
-        return pts
-
+    explicit=pd.DataFrame()
+    if event_locations is not None and not event_locations.empty and "Event ID" in event_locations.columns:
+        loc=event_locations.copy()
+        loc["Latitude"]=pd.to_numeric(loc.get("Latitude"),errors="coerce")
+        loc["Longitude"]=pd.to_numeric(loc.get("Longitude"),errors="coerce")
+        loc=loc[loc["Latitude"].notna() & loc["Longitude"].notna()].copy()
+        cols=[c for c in ["Event ID","Start Date","Severity","Status","Event Family","Event Type","Title","Operational Impact","Trade / Commercial Impact","Confidence"] if c in events.columns]
+        if not loc.empty:
+            explicit=loc.merge(events[cols],on="Event ID",how="inner")
+    mapped_ids=set(explicit["Event ID"].astype(str)) if not explicit.empty else set()
+    inferred_rows=[]
+    for _,r in events.iterrows():
+        eid=str(r.get("Event ID","") or "")
+        if not eid or eid in mapped_ids: continue
+        xy=infer_event_coordinates(r.get("Location",""),r.get("Country / Countries",""),r.get("Title",""))
+        if not xy: continue
+        inferred_rows.append({
+            "Event ID":eid,"Location":clean_display_text(r.get("Location","")) or clean_display_text(r.get("Country / Countries","")),
+            "Country":clean_display_text(r.get("Country / Countries","")),"Latitude":xy["Latitude"],"Longitude":xy["Longitude"],
+            "Accuracy":xy["Accuracy"],"Notes":xy["Notes"],"Start Date":r.get("Start Date",""),"Severity":r.get("Severity",""),
+            "Status":r.get("Status",""),"Event Family":r.get("Event Family",""),"Event Type":r.get("Event Type",""),
+            "Title":r.get("Title",""),"Operational Impact":r.get("Operational Impact",""),"Trade / Commercial Impact":r.get("Trade / Commercial Impact",""),
+            "Confidence":r.get("Confidence","")
+        })
+    inf=pd.DataFrame(inferred_rows)
+    pts=pd.concat([explicit,inf],ignore_index=True,sort=False) if not explicit.empty or not inf.empty else pd.DataFrame()
+    if pts.empty: return pts
     pts["Incident"]=pts.get("Title","").map(clean_display_text)
     pts["Date"]=pts.get("Start Date","").astype(str).str[:10]
     pts["Mapped Location"]=pts.get("Location","").map(clean_display_text)
@@ -759,11 +932,15 @@ def regional_event_map_points(events):
     pts["Operational"]=pts.get("Operational Impact","").map(clean_display_text)
     pts["Commercial"]=pts.get("Trade / Commercial Impact","").map(clean_display_text)
     pts["Map Accuracy"]=pts.get("Accuracy","").map(clean_display_text)
+    pts["Source Type"]="P&C event"
     return pts
 
 def render_regional_incident_map(region_name, events):
     """Interactive incident map with hover details and a safe fallback."""
     pts=regional_event_map_points(events)
+    official_pts=official_imo_map_points(region_name)
+    if not official_pts.empty:
+        pts=pd.concat([pts,official_pts],ignore_index=True,sort=False) if not pts.empty else official_pts.copy()
 
     st.markdown("### Incident map")
     if pts.empty:
@@ -835,7 +1012,7 @@ def render_regional_incident_map(region_name, events):
                 "{Date} · {Severity Label}<br/>"
                 "<b>Location:</b> {Mapped Location}<br/>"
                 "<b>Operational impact:</b> {Operational}<br/>"
-                "<span style='opacity:.75'>Map accuracy: {Map Accuracy}</span>"
+                "<span style='opacity:.75'>Source: {Source Type} · Map accuracy: {Map Accuracy}</span>"
                 "</div>"
             ),
             "style":{
@@ -865,6 +1042,9 @@ def render_regional_incident_map(region_name, events):
 
 def render_regional_event_workspace(region_name):
     events=regional_events(region_name,operational_only=True)
+    # The map is intentionally broader than the security incident list: strategic infrastructure,
+    # trade and investment events in the canonical event register remain geographically visible.
+    map_events=regional_events(region_name,operational_only=False,source_df=hazard_events_raw)
 
     c1,c2,c3,c4=st.columns(4)
     c1.metric("Regional events",len(events))
@@ -872,10 +1052,11 @@ def render_regional_event_workspace(region_name):
     c2.metric("High / severe",len(severe))
     active=events[text_col(events,"Status").str.contains("Active|Developing|Ongoing|Warning",case=False,regex=True,na=False)] if not events.empty else events
     c3.metric("Active / developing",len(active))
-    mapped=regional_event_map_points(events)
-    c4.metric("Mapped points",len(mapped))
+    mapped=regional_event_map_points(map_events)
+    official_mapped=official_imo_map_points(region_name)
+    c4.metric("Mapped points",len(mapped)+len(official_mapped))
 
-    mapped_pts=render_regional_incident_map(region_name,events)
+    mapped_pts=render_regional_incident_map(region_name,map_events)
 
     st.markdown("### Regional incident record")
     if events.empty:
@@ -1056,8 +1237,8 @@ elif page == "Regional Security":
         "Regional operating picture built from the shared event, location, entity and impact-chain layers."
     )
     st.caption(
-        "Mapped points use known event coordinates from Event Locations. "
-        "Events without coordinates remain in the regional incident record below the map."
+        "The map shows geographically relevant operational and strategic events from the full event register, using Event Locations first and named-place inference second. "
+        "IMO-confirmed Middle East incidents are plotted as approximate official points where a usable location is published."
     )
 
     _jazan_loaded = (

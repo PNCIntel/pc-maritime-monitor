@@ -12,6 +12,10 @@ from urllib.parse import urlencode
 from collections import defaultdict
 import pandas as pd
 import streamlit as st
+try:
+    import pydeck as pdk
+except Exception:
+    pdk = None
 
 SHARED_DIR = Path(__file__).resolve().parent / "shared"
 if str(SHARED_DIR) not in sys.path:
@@ -26,7 +30,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.0-reference-intelligence"
+APP_VERSION = "v3.3.3-port-map-cruise-intelligence-fix"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Legacy Excel + Research Reference + Supabase Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -774,6 +778,191 @@ def all_tables():
     return out
 
 TABLES=all_tables()
+
+
+# ---------- v3.3.3 geographic + cruise integration ----------
+def _ref_port_display_name(raw):
+    raw=str(raw or "").strip()
+    if "_" in raw:
+        return raw.rsplit("_",1)[0].replace("_"," ").strip()
+    return raw.replace("_"," ").strip()
+
+def _ref_port_country(raw):
+    raw=str(raw or "").strip()
+    return raw.rsplit("_",1)[1].strip() if "_" in raw else ""
+
+def _port_match_key(v):
+    x=str(v or "").casefold().replace("&"," and ").replace("_"," ")
+    x=re.sub(r"\b(port of|port|harbour|harbor|terminal|deep sea|sea port|seaport|international|container|dock|wharf|gang)\b"," ",x)
+    x=re.sub(r"[^a-z0-9]+"," ",x)
+    return " ".join(x.split())
+
+@st.cache_data(show_spinner=False, ttl=300)
+def global_port_reference_view():
+    ref=TABLES.get(("Global Ports Reference","Global Port Reference"),pd.DataFrame()).copy()
+    if ref.empty:
+        return ref
+    ref["Port Name"]=ref.get("name",pd.Series(index=ref.index,dtype=str)).map(_ref_port_display_name)
+    ref["Country Name"]=ref.get("name",pd.Series(index=ref.index,dtype=str)).map(_ref_port_country)
+    ref["Latitude"]=pd.to_numeric(ref.get("lat"),errors="coerce")
+    ref["Longitude"]=pd.to_numeric(ref.get("lon"),errors="coerce")
+    for c in ["export","import","trans","throughput"]:
+        if c in ref.columns: ref[c]=pd.to_numeric(ref[c],errors="coerce")
+    return ref[ref["Latitude"].notna() & ref["Longitude"].notna()].copy()
+
+def enrich_ports_from_reference(ports):
+    """Populate canonical port coordinates from the uploaded 1,377-port reference where names match safely."""
+    if ports is None or ports.empty:
+        return pd.DataFrame() if ports is None else ports.copy()
+    out=ports.copy()
+    if "Latitude" not in out.columns: out["Latitude"]=""
+    if "Longitude" not in out.columns: out["Longitude"]=""
+    if "Geo Source" not in out.columns: out["Geo Source"]=""
+    ref=global_port_reference_view()
+    if ref.empty: return out
+    r=ref.copy(); r["_key"]=r["Port Name"].map(_port_match_key)
+    # exact normalized-name matches only; avoids attaching a port to a wrong same-country facility.
+    lookup={}
+    for _,rr in r.iterrows():
+        k=rr.get("_key","")
+        if k and k not in lookup:
+            lookup[k]=(rr["Latitude"],rr["Longitude"],rr["Port Name"],rr["Country Name"])
+    for idx,row in out.iterrows():
+        lat=pd.to_numeric(pd.Series([row.get("Latitude","")]),errors="coerce").iloc[0]
+        lon=pd.to_numeric(pd.Series([row.get("Longitude","")]),errors="coerce").iloc[0]
+        if pd.notna(lat) and pd.notna(lon): continue
+        k=_port_match_key(row.get("Port / Facility",""))
+        hit=lookup.get(k)
+        if hit:
+            out.at[idx,"Latitude"]=hit[0]; out.at[idx,"Longitude"]=hit[1]
+            out.at[idx,"Geo Source"]="Global Port Reference (name match)"
+    return out
+
+def unified_ports_with_reference(ports):
+    """Canonical ports plus geocoded reference-only seeds, so the explorer starts with port name + location and can be enriched later."""
+    canonical=enrich_ports_from_reference(ports)
+    ref=global_port_reference_view()
+    if ref.empty: return canonical
+    existing=set()
+    if not canonical.empty:
+        for _,r in canonical.iterrows():
+            existing.add((_port_match_key(r.get("Port / Facility","")),_port_match_key(r.get("Country",""))))
+    rows=[]
+    for _,r in ref.iterrows():
+        key=(_port_match_key(r.get("Port Name","")),_port_match_key(r.get("Country Name","")))
+        if key in existing: continue
+        rows.append({
+            "Port ID":f"REF_{r.get('id','')}","Port / Facility":r.get("Port Name",""),"Country":r.get("Country Name",""),
+            "Latitude":r.get("Latitude",""),"Longitude":r.get("Longitude",""),"Operator Company ID":"","Operator":"",
+            "Facility Type":"Reference port seed","Key Role":"Global trade / port reference",
+            "Coverage Note":"Geocoded reference seed — canonical operator, terminal and ownership enrichment pending.",
+            "Source ID":"GLOBAL_PORT_REFERENCE","Geo Source":"Global Port Reference"
+        })
+    if rows:
+        canonical=pd.concat([canonical,pd.DataFrame(rows)],ignore_index=True,sort=False)
+    return canonical
+
+def render_named_port_map(df, height=480, radius=22000):
+    if df is None or df.empty: return
+    m=df.copy()
+    latcol="Latitude" if "Latitude" in m.columns else "lat"
+    loncol="Longitude" if "Longitude" in m.columns else "lon"
+    namecol="Port Name" if "Port Name" in m.columns else ("Port / Facility" if "Port / Facility" in m.columns else "name")
+    countrycol="Country Name" if "Country Name" in m.columns else ("Country" if "Country" in m.columns else None)
+    m[latcol]=pd.to_numeric(m[latcol],errors="coerce"); m[loncol]=pd.to_numeric(m[loncol],errors="coerce")
+    m=m[m[latcol].notna() & m[loncol].notna()].copy()
+    if m.empty: return
+    m["Map Port"]=m[namecol].fillna("").astype(str)
+    m["Map Country"]=m[countrycol].fillna("").astype(str) if countrycol else ""
+    if pdk is not None:
+        layer=pdk.Layer("ScatterplotLayer",data=m,get_position=f"[{loncol}, {latcol}]",get_radius=radius,
+                        radius_min_pixels=3,radius_max_pixels=11,pickable=True,auto_highlight=True,
+                        get_fill_color=[216,180,90,175],get_line_color=[240,224,180,230],line_width_min_pixels=1)
+        view=pdk.ViewState(latitude=float(m[latcol].mean()),longitude=float(m[loncol].mean()),zoom=1.2,pitch=0,bearing=0)
+        tooltip={"html":"<b>{Map Port}</b><br/>{Map Country}","style":{"backgroundColor":"#101820","color":"#F4EFE5","fontSize":"12px"}}
+        st.pydeck_chart(pdk.Deck(layers=[layer],initial_view_state=view,tooltip=tooltip,map_style=None),use_container_width=True,height=height)
+    else:
+        st.map(m.rename(columns={latcol:"lat",loncol:"lon"}),latitude="lat",longitude="lon",use_container_width=True)
+
+def cruise_tables_with_fallbacks():
+    """Restore Cruise even when the old workbook lacks the four dedicated cruise sheets."""
+    lines=TABLES.get(("Maritime","Cruise Lines"),pd.DataFrame()).copy()
+    ships=TABLES.get(("Maritime","Cruise Ships"),pd.DataFrame()).copy()
+    destinations=TABLES.get(("Maritime","Cruise Destinations"),pd.DataFrame()).copy()
+    routes=TABLES.get(("Maritime","Cruise Routes"),pd.DataFrame()).copy()
+    gl=TABLES.get(("Maritime","Great Lakes Cruise"),pd.DataFrame()).copy()
+    research=TABLES.get(("Maritime","Fleet Research Universe"),pd.DataFrame()).copy()
+    companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame()).copy()
+    vessels=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
+    if lines.empty and not research.empty and "Segment" in research.columns:
+        rc=research[research["Segment"].fillna("").astype(str).str.contains("Cruise",case=False,na=False)].copy()
+        rows=[]
+        for _,r in rc.iterrows():
+            rows.append({
+                "Company ID":r.get("Company ID",""),
+                "Cruise Line / Brand":r.get("Company / Brand",""),
+                "Parent Group":r.get("Parent / Strategic Link",""),
+                "Market Segment":"Cruise",
+                "Fleet Profile":r.get("Fleet Scope to Capture",""),
+                "Primary Operating Regions":"",
+                "Private / Controlled Destinations":"",
+                "Route Pattern":"",
+                "Status":r.get("Canonical Status","") or r.get("Research Status",""),
+                "Notes":r.get("Why Included","") or r.get("Notes","")
+            })
+        if rows:
+            lines=pd.DataFrame(rows).drop_duplicates(subset=["Cruise Line / Brand"],keep="first")
+    if not companies.empty:
+        blob=companies.astype(str).agg(" ".join,axis=1)
+        mask=blob.str.contains("cruise",case=False,na=False)
+        c=companies[mask].copy()
+        rows=[]
+        for _,r in c.iterrows():
+            rows.append({"Company ID":r.get("Company ID",""),"Cruise Line / Brand":r.get("Company",""),
+                         "Parent Group":"","Market Segment":r.get("Business Segments",""),"Fleet Profile":"",
+                         "Primary Operating Regions":r.get("HQ Country",""),"Private / Controlled Destinations":"",
+                         "Route Pattern":"","Status":r.get("Status","") or "Canonical company record",
+                         "Notes":"Restored from canonical Companies because dedicated Cruise Lines sheet was absent."})
+        if rows:
+            cdf=pd.DataFrame(rows)
+            lines=pd.concat([lines,cdf],ignore_index=True,sort=False) if not lines.empty else cdf
+            lines=lines.drop_duplicates(subset=["Cruise Line / Brand"],keep="first")
+    if ships.empty:
+        rows=[]
+        if not gl.empty:
+            for _,r in gl.iterrows():
+                rows.append({"Company ID":r.get("Company ID",""),"Vessel Name":r.get("Vessel Name",""),
+                             "Ship Type / Class":r.get("Vessel / Service Type",""),"Flag":"","Year Built":"",
+                             "Passenger Capacity":"","Primary Deployment":r.get("Operating Area",""),
+                             "Home Port / Turnaround":r.get("Representative Ports / Infrastructure",""),
+                             "Route / Product Role":r.get("Season",""),"Status":r.get("Status","")})
+        if not vessels.empty:
+            vm=vessels[vessels.astype(str).agg(" ".join,axis=1).str.contains("cruise",case=False,na=False)]
+            for _,r in vm.iterrows():
+                rows.append({"Company ID":"","Vessel Name":r.get("Vessel Name",""),"Ship Type / Class":r.get("Vessel Type",""),
+                             "Flag":r.get("Flag",""),"Year Built":r.get("Year Built",""),"Passenger Capacity":"",
+                             "Primary Deployment":"","Home Port / Turnaround":"","Route / Product Role":"","Status":r.get("Status","")})
+        ships=pd.DataFrame(rows).drop_duplicates(subset=["Vessel Name"],keep="first") if rows else pd.DataFrame()
+    if destinations.empty and not gl.empty:
+        rows=[]
+        for _,r in gl.iterrows():
+            for dest in re.split(r";|,",str(r.get("Representative Ports / Infrastructure","") or "")):
+                dest=dest.strip()
+                if dest:
+                    rows.append({"Destination":dest,"Country":"","Destination Type":"Port / infrastructure call",
+                                 "Status":r.get("Status",""),"Region":r.get("Operating Area",""),
+                                 "Typical Line / Brand Use":label(r.get("Company ID","")),"Investment / Operating Note":"",
+                                 "Evidence Caveat":"Derived from Great Lakes Cruise deployment layer."})
+        destinations=pd.DataFrame(rows).drop_duplicates(subset=["Destination","Region"],keep="first") if rows else pd.DataFrame()
+    if routes.empty and not gl.empty:
+        rows=[]
+        for _,r in gl.iterrows():
+            rows.append({"Route Family":r.get("Operating Area",""),"Turnaround Ports":r.get("Representative Ports / Infrastructure",""),
+                         "Representative Calls":r.get("Representative Ports / Infrastructure",""),"Region":r.get("Operating Area",""),
+                         "Typical Duration":"","Season":r.get("Season",""),"Strategic Role":r.get("Vessel / Service Type",""),
+                         "Status":r.get("Status","")})
+        routes=pd.DataFrame(rows).drop_duplicates(subset=["Route Family","Representative Calls"],keep="first")
+    return lines,ships,destinations,routes,gl
 
 # Fail clearly when a deployment is incomplete. Previous builds silently loaded an
 # empty interface when the workbooks were placed in the repository root or carried
@@ -3037,8 +3226,128 @@ def render_vessel_incident_cards(events,news):
             unsafe_allow_html=True
         )
 
+def _norm_imo(value):
+    """Return a clean IMO string for matching across Excel and official-source tables."""
+    txt=str(value or "").strip()
+    if txt.endswith(".0"):
+        txt=txt[:-2]
+    digits="".join(ch for ch in txt if ch.isdigit())
+    return digits
+
+
+def official_maritime_incidents():
+    return TABLES.get(("Official Maritime Security","IMO Middle East Incidents"),pd.DataFrame()).copy()
+
+
+def canonical_vessel_id_for_official_incident(imo, vessel_name=""):
+    vessels=TABLES.get(("Maritime","Vessels"),pd.DataFrame())
+    imo_key=_norm_imo(imo)
+    if not vessels.empty:
+        if imo_key and "IMO" in vessels.columns:
+            matches=vessels[vessels["IMO"].map(_norm_imo).eq(imo_key)]
+            if not matches.empty and "Vessel ID" in matches.columns:
+                return str(matches.iloc[0].get("Vessel ID","")).strip()
+        if vessel_name and "Vessel Name" in vessels.columns:
+            name_key=str(vessel_name).strip().casefold()
+            matches=vessels[vessels["Vessel Name"].astype(str).str.strip().str.casefold().eq(name_key)]
+            if not matches.empty and "Vessel ID" in matches.columns:
+                return str(matches.iloc[0].get("Vessel ID","")).strip()
+    if imo_key:
+        return f"VES_IMO_{imo_key}"
+    safe="_".join(str(vessel_name or "UNKNOWN").upper().split())
+    return f"VES_IMO_SOURCE_{safe}"
+
+
+def commercial_vessels_with_official_stubs():
+    """Expose every IMO-confirmed vessel as a canonical-like object in the legacy Excel UI.
+
+    Existing canonical vessels keep their IDs and metadata.  IMO-only vessels get a minimal
+    in-memory stub so an official security record is always navigable to a vessel profile.
+    """
+    vessels=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
+    inc=official_maritime_incidents()
+    if inc.empty:
+        return vessels
+    cols=list(vessels.columns) if not vessels.empty else ["Vessel ID","Vessel Name","IMO","Vessel Type","Status","Source ID","Completeness Note"]
+    rows=[]
+    existing_ids=set(vessels["Vessel ID"].astype(str)) if not vessels.empty and "Vessel ID" in vessels.columns else set()
+    existing_imos=set(vessels["IMO"].map(_norm_imo)) if not vessels.empty and "IMO" in vessels.columns else set()
+    for _,r in inc.iterrows():
+        imo=_norm_imo(r.get("IMO",""))
+        vid=canonical_vessel_id_for_official_incident(imo,r.get("Vessel",""))
+        if vid in existing_ids or (imo and imo in existing_imos):
+            continue
+        item={c:"" for c in cols}
+        item.update({
+            "Vessel ID":vid,
+            "Vessel Name":str(r.get("Vessel","")).strip(),
+            "IMO":imo,
+            "Status":"Official maritime-security incident record",
+            "Source ID":"IMO_MIDDLE_EAST_CONFIRMED_INCIDENTS",
+            "Completeness Note":"Minimal legacy-app vessel stub created from an IMO-confirmed incident; enrich owner/operator/type from canonical sources.",
+        })
+        rows.append(item)
+        existing_ids.add(vid)
+        if imo: existing_imos.add(imo)
+    if rows:
+        vessels=pd.concat([vessels,pd.DataFrame(rows)],ignore_index=True,sort=False)
+    return vessels
+
+
+def official_security_for_vessel(vessel_id, vessel_name="", imo=""):
+    inc=official_maritime_incidents()
+    if inc.empty:
+        return inc
+    imo_key=_norm_imo(imo)
+    if not imo_key:
+        vessels=commercial_vessels_with_official_stubs()
+        if not vessels.empty and "Vessel ID" in vessels.columns:
+            m=vessels[vessels["Vessel ID"].astype(str).eq(str(vessel_id))]
+            if not m.empty:
+                imo_key=_norm_imo(m.iloc[0].get("IMO",""))
+                if not vessel_name:
+                    vessel_name=str(m.iloc[0].get("Vessel Name",""))
+    mask=pd.Series(False,index=inc.index)
+    if imo_key and "IMO" in inc.columns:
+        mask=mask | inc["IMO"].map(_norm_imo).eq(imo_key)
+    if vessel_name and "Vessel" in inc.columns:
+        mask=mask | inc["Vessel"].astype(str).str.strip().str.casefold().eq(str(vessel_name).strip().casefold())
+    return inc[mask].copy()
+
+
+def render_official_security_records(records, key_scope="official_security"):
+    if records is None or records.empty:
+        st.info("No IMO-confirmed maritime-security incident linked to this vessel.")
+        return
+    for i,(_,r) in enumerate(records.iterrows()):
+        vessel=str(r.get("Vessel","")).strip()
+        imo=_norm_imo(r.get("IMO",""))
+        vid=canonical_vessel_id_for_official_incident(imo,vessel)
+        date=str(r.get("Date (2026)","")).strip()
+        location=str(r.get("Location","")).strip()
+        desc=str(r.get("Description","")).strip()
+        authority=str(r.get("Confirming Authority","International Maritime Organization")).strip()
+        src=str(r.get("Source URL","")).strip()
+        st.markdown(
+            f"<div class='pc-card'><div class='pc-label'>{date} · {location}</div>"
+            f"<div class='pc-big'>{vessel} · IMO {imo}</div>"
+            f"<div class='pc-small'>{desc}</div>"
+            f"<div class='pc-small'>Confirmed by {authority}</div></div>",
+            unsafe_allow_html=True
+        )
+        c1,c2=st.columns([1,4])
+        with c1:
+            if st.button("Open vessel",key=f"{key_scope}_open_{vid}_{i}",use_container_width=True):
+                st.session_state["vessel_pick_id"]=vid
+                st.session_state["nav_request"]="Vessels"
+                st.rerun()
+        with c2:
+            if src.startswith("http"):
+                st.markdown(f"[IMO source ↗]({src})")
+
+
 def vessel_profile_data(vessel_id, vessel_name):
-    commercial=TABLES.get(("Maritime","Vessels"),pd.DataFrame())
+    commercial=commercial_vessels_with_official_stubs()
     vrel=TABLES.get(("Maritime","Vessel Relationships"),pd.DataFrame())
     evid=TABLES.get(("Maritime","Vessel Evidence"),pd.DataFrame())
     build=TABLES.get(("Maritime","Vessel Build Records"),pd.DataFrame())
@@ -3090,14 +3399,14 @@ def vessel_profile_data(vessel_id, vessel_name):
             for _,ur in unified.iterrows():
                 mapped.append({
                     "Event ID":str(ur.get("Event ID","")).strip(),
-                    "Date":str(ur.get("Date","")).strip(),
+                    "Date":str(ur.get("Start Date",ur.get("Date",""))).strip(),
                     "Event Type":str(ur.get("Event Family","")).strip() or str(ur.get("Event Type","")).strip(),
                     "Subject Entity ID":str(vessel_id),
                     "Location":str(ur.get("Location","")).strip(),
                     "Title":str(ur.get("Title","")).strip(),
                     "Description":str(ur.get("Description","")).strip(),
-                    "Operational Impact":str(ur.get("Direct Impact","")).strip(),
-                    "Financial / Strategic Impact":str(ur.get("Strategic / Commercial Outcome","")).strip(),
+                    "Operational Impact":str(ur.get("Operational Impact",ur.get("Direct Impact",""))).strip(),
+                    "Financial / Strategic Impact":str(ur.get("Trade / Commercial Impact",ur.get("Strategic / Commercial Outcome",""))).strip(),
                     "Source ID":str(ur.get("Source ID","")).strip(),
                 })
             unified=pd.DataFrame(mapped)
@@ -3140,7 +3449,7 @@ def render_vessel_profile(vessel_id,vessel_name):
     tabs=st.tabs([
         "Overview",
         "Ownership & Management",
-        "Security & Compliance",
+        "Maritime Security & Compliance",
         "Sanctions",
         "Incidents",
         "News",
@@ -3196,9 +3505,14 @@ def render_vessel_profile(vessel_id,vessel_name):
         render_vessel_relationship_cards(vessel_id,vessel_name,rel,"ownership")
 
     with tabs[2]:
+        official=official_security_for_vessel(vessel_id,vessel_name,vessel_value(r,"IMO"))
+        if not official.empty:
+            st.markdown("### IMO-confirmed maritime-security incidents")
+            render_official_security_records(official,f"vessel_security_{vessel_id}")
         sec=security_vessel_bundle(vessel_id,vessel_name,vessel_value(r,"IMO"))
         if sec["designations"].empty and sec["exposure"].empty and sec["restrictions"].empty:
-            st.info("No operational compliance or security restriction is linked to this vessel.")
+            if official.empty:
+                st.info("No operational compliance or maritime-security restriction is linked to this vessel.")
         else:
             if not sec["designations"].empty:
                 st.markdown("### Compliance designations")
@@ -3792,7 +4106,7 @@ st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend
 NAV_GROUPS={
     "Command Center":["Overview","Search"],
     "Network":["Companies","Ports","Vessels","Rail","Aviation","Trucking","Ferries","Cruise","Corridors & Systems","Shipyards","Energy & Industry"],
-    "Operations":["Alerts & Disruptions","Watch Areas","Maritime Disruptions","Port Activity","Hormuz Monitor","Official Maritime Security","Live Feeds"],
+    "Operations":["Alerts & Disruptions","Watch Areas","Maritime Security","Maritime Disruptions","Port Activity","Hormuz Monitor","Live Feeds"],
     "Markets & Policy":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Reference & Benchmarks","Investments","Sanctions & Compliance","Trade Policy","Contracts"],
     "Intelligence":["News & Signals","News & Events"],
     "Data":["Reference Library","Data"],
@@ -4530,11 +4844,7 @@ elif page=="Ferries":
 
 elif page=="Cruise":
     header("Cruise","Global cruise operators, ships, destinations, routes and Great Lakes deployment as a dedicated passenger-shipping network.")
-    lines=TABLES.get(("Maritime","Cruise Lines"),pd.DataFrame()).copy()
-    ships=TABLES.get(("Maritime","Cruise Ships"),pd.DataFrame()).copy()
-    destinations=TABLES.get(("Maritime","Cruise Destinations"),pd.DataFrame()).copy()
-    routes=TABLES.get(("Maritime","Cruise Routes"),pd.DataFrame()).copy()
-    gl=TABLES.get(("Maritime","Great Lakes Cruise"),pd.DataFrame()).copy()
+    lines,ships,destinations,routes,gl=cruise_tables_with_fallbacks()
 
     m1,m2,m3,m4=st.columns(4)
     m1.metric("Cruise brands",len(lines))
@@ -4652,11 +4962,21 @@ elif page=="Companies":
 
 elif page=="Ports":
     header("Ports","Port / terminal explorer with operators, facilities, geography and linked events.")
-    ports=TABLES.get(("Maritime","Ports"),pd.DataFrame())
+    ports=unified_ports_with_reference(TABLES.get(("Maritime","Ports"),pd.DataFrame()))
     terms=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame())
     if ports.empty:
         st.info("Port data unavailable.")
     else:
+        ref_ports=global_port_reference_view()
+        if not ref_ports.empty:
+            st.markdown("### Global port geography")
+            st.caption(f"{len(ref_ports):,} geocoded port locations from the uploaded global reference dataset. Hover a point to see the port name.")
+            render_named_port_map(ref_ports,height=500,radius=18000)
+            with st.expander("Search global port reference"):
+                rq=st.text_input("Reference port search",placeholder="Ningbo, Qingdao, Singapore, Rotterdam...",key="global_port_reference_q")
+                rv=ref_ports.copy()
+                if rq.strip(): rv=_contains_any(rv,[rq],["Port Name","Country Name","name","iso3"])
+                display_df(rv[[c for c in ["Port Name","Country Name","Latitude","Longitude","throughput","export","import","trans"] if c in rv.columns]].head(250),300)
         # Resolve incoming relationship navigation BEFORE creating keyed widgets.
         # Streamlit does not allow session_state for a widget key to be mutated
         # after that widget has been instantiated in the same run.
@@ -4708,9 +5028,16 @@ elif page=="Ports":
             render_port_commercial_network(row,pt)
             render_port_governance(row)
             render_portwatch_port_snapshot(pname,row.get("Country",""))
-            xy=PORT_CITY_COORDS.get(pname)
-            if xy:
-                st.map(pd.DataFrame([{"name":pname,"lat":xy[0],"lon":xy[1]}]),latitude="lat",longitude="lon",size=100)
+            lat=pd.to_numeric(pd.Series([row.get("Latitude","")]),errors="coerce").iloc[0]
+            lon=pd.to_numeric(pd.Series([row.get("Longitude","")]),errors="coerce").iloc[0]
+            if pd.notna(lat) and pd.notna(lon):
+                render_named_port_map(pd.DataFrame([{"Port / Facility":pname,"Country":row.get("Country",""),"Latitude":lat,"Longitude":lon}]),height=320,radius=50000)
+                if row.get("Geo Source",""):
+                    st.caption(f"Location source: {row.get('Geo Source','')}")
+            else:
+                xy=PORT_CITY_COORDS.get(pname)
+                if xy:
+                    render_named_port_map(pd.DataFrame([{"Port / Facility":pname,"Country":row.get("Country",""),"Latitude":xy[0],"Longitude":xy[1]}]),height=320,radius=50000)
             ev,loc,chains=event_bundle_for_entities(asset_ids=[pid])
             if not ev.empty:
                 render_event_map(ev,loc,"Events affecting this port")
@@ -5060,7 +5387,7 @@ elif page=="Shipyards":
 
 elif page=="Vessels":
     header("Vessels","Commercial, naval, Coast Guard and government vessels as linked intelligence objects.")
-    commercial=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
+    commercial=commercial_vessels_with_official_stubs().copy()
     defence=TABLES.get(("Defence & Shipbuilding","Sample Vessels"),pd.DataFrame()).copy()
     service=TABLES.get(("Maritime","Service Craft"),pd.DataFrame()).copy()
 
@@ -5730,23 +6057,36 @@ elif page=="Corridors & Systems":
                 if not chains.empty: display_df(chains,100)
 
 
-elif page=="Official Maritime Security":
-    header("Official Maritime Security","IMO-confirmed incidents, theatre baselines, operational measures and chokepoint governance kept separate from media reporting.")
-    inc=TABLES.get(("Official Maritime Security","IMO Middle East Incidents"),pd.DataFrame()).copy()
+elif page=="Maritime Security":
+    header("Maritime Security","Official confirmation, vessel-linked incidents, theatre baselines, operational measures and chokepoint governance in one maritime-security workspace.")
+    inc=official_maritime_incidents()
     theatre=TABLES.get(("Official Maritime Security","Theatre Baselines"),pd.DataFrame()).copy()
     measures=TABLES.get(("Official Maritime Security","Operational Measures"),pd.DataFrame()).copy()
     governance=TABLES.get(("Official Maritime Security","Chokepoint Governance"),pd.DataFrame()).copy()
-    a,b,c=st.columns(3)
-    a.metric("IMO confirmed incidents",len(inc))
+
+    a,b,c,d=st.columns(4)
+    a.metric("Confirmed incidents",len(inc))
     b.metric("Named vessels",inc["Vessel"].nunique() if not inc.empty and "Vessel" in inc else 0)
-    c.metric("Theatre baselines",len(theatre))
-    q=st.text_input("Filter official maritime records",placeholder="Hercules Star, Hormuz, Red Sea, Black Sea...")
-    if q and not inc.empty: inc=_contains_any(inc,[q])
-    tabs=st.tabs(["Confirmed Incidents","Theatre Baselines","Operational Measures","Chokepoint Governance"])
-    with tabs[0]: display_df(inc,520)
-    with tabs[1]: display_df(theatre,320)
-    with tabs[2]: display_df(measures,320)
-    with tabs[3]: display_df(governance,320)
+    linked=0
+    if not inc.empty:
+        linked=sum(1 for _,r in inc.iterrows() if canonical_vessel_id_for_official_incident(r.get("IMO",""),r.get("Vessel","")))
+    c.metric("Vessel-linked records",linked)
+    d.metric("Theatre baselines",len(theatre))
+
+    q=st.text_input("Search maritime security",placeholder="Hercules Star, IMO 9916135, Hormuz, Red Sea, Black Sea...")
+    if q and not inc.empty:
+        inc=_contains_any(inc,[q])
+
+    tabs=st.tabs(["Vessel Incidents","Theatre Baselines","Operational Measures","Chokepoints"])
+    with tabs[0]:
+        st.caption("Every confirmed record resolves to the vessel profile. The IMO register is a confirmation layer; the vessel remains the canonical intelligence object.")
+        render_official_security_records(inc,"maritime_security")
+    with tabs[1]:
+        display_df(theatre,360)
+    with tabs[2]:
+        display_df(measures,360)
+    with tabs[3]:
+        display_df(governance,360)
 
 elif page=="Reference & Benchmarks":
     header("Reference & Benchmarks","Historical accident distributions, port/corridor reference data and market-transmission context for interpreting live intelligence.")

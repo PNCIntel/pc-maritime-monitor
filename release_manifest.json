@@ -1,7 +1,7 @@
 {
-  "release": "v3.3.0-reference-intelligence",
+  "release": "v3.3.2-port-map-cruise-intelligence-fix",
   "build_date": "2026-09-11",
-  "file_count": 82,
+  "file_count": 80,
   "files": [
     {
       "path": ".gitignore",
@@ -30,8 +30,8 @@
     },
     {
       "path": "README_V3_3_TEST.md",
-      "bytes": 2945,
-      "sha256": "533391f2856b119d7728c55bc9943bb196cfc72f5674f7b9dc5a52175275430f"
+      "bytes": 5070,
+      "sha256": "d0a5762a410662e5371472a27a71c5afaa6f755f8fc61c936a1675aed2f82840"
     },
     {
       "path": "TRADE_SYSTEM_V3_2_BUILD.md",
@@ -39,19 +39,19 @@
       "sha256": "e756a7e911e0ebf9281a5afce3ebf3134bd010adc87ca8666f10484ec46501ea"
     },
     {
+      "path": "TRADE_SYSTEM_V3_3_2_BUILD.md",
+      "bytes": 1759,
+      "sha256": "2c2f58c892cd8c4194ff65c3b5158feb29a045c7bca5d99b7045f9c8067fa38c"
+    },
+    {
       "path": "TRADE_SYSTEM_V3_3_BUILD.md",
       "bytes": 989,
       "sha256": "1cff0bac427979ae36c193796fc9a09f69616fdd6347323609fb5a59d565a133"
     },
     {
-      "path": "__pycache__/app.cpython-313.pyc",
-      "bytes": 472416,
-      "sha256": "1c632f9943aeab60fd664448ced307b620c3d71c763d42b3302d5a505ce5ae79"
-    },
-    {
       "path": "app.py",
-      "bytes": 302863,
-      "sha256": "e3ad47ee78c69ebd0ae0ea475496e0b216230fee9269f6370d65eab7b74183fb"
+      "bytes": 320276,
+      "sha256": "28a1facc623601fdbbf9b37f9d3184c603007e015eacd5315d7270bcea70ce04"
     },
     {
       "path": "data/01_core_entities.xlsx",
@@ -230,8 +230,8 @@
     },
     {
       "path": "pc-intelligence.py",
-      "bytes": 86070,
-      "sha256": "cefe88f509a1d02357b62ef34ab8f6c9ff8c2d6376aba8cf1499fb32bb3085fd"
+      "bytes": 96002,
+      "sha256": "d336b7f3a633363bd281fc911ce0a0b46a6b4f0b6e8fbba3605210b89d3c4f3e"
     },
     {
       "path": "pc-nerai.py",
@@ -245,18 +245,13 @@
     },
     {
       "path": "pc_intelligence_app.py",
-      "bytes": 86070,
-      "sha256": "cefe88f509a1d02357b62ef34ab8f6c9ff8c2d6376aba8cf1499fb32bb3085fd"
+      "bytes": 96002,
+      "sha256": "d336b7f3a633363bd281fc911ce0a0b46a6b4f0b6e8fbba3605210b89d3c4f3e"
     },
     {
       "path": "requirements.txt",
       "bytes": 116,
       "sha256": "1a673cd2a6e9effdc13378b917ab5d51326f06a5a06cadb42ede065aafaff1f6"
-    },
-    {
-      "path": "scripts/__pycache__/stage_reference_datasets.cpython-313.pyc",
-      "bytes": 1905,
-      "sha256": "0663f16a1cafde3fca6ab89ab9c37ca1531370a53077cfce18bdc96feb8bf12e"
     },
     {
       "path": "scripts/bootstrap_super_admin.py",
@@ -322,11 +317,6 @@
       "path": "scripts/verify_migration.py",
       "bytes": 1780,
       "sha256": "7fd4a6de660dbb6e7f1b0d1ff85e0bc55ab77448a91ec0088d97394b9ae9d162"
-    },
-    {
-      "path": "shared/__pycache__/pc_data_bridge.cpython-313.pyc",
-      "bytes": 9025,
-      "sha256": "b7d0f9c0711f81cf59bb4ee64788b74b2a5c1521c771ed1487d205c2214a533f"
     },
     {
       "path": "shared/pc_ai.py",

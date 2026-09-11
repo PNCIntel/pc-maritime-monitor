@@ -47,3 +47,22 @@ Research-scale source datasets are stored under `external_data/` and are not all
 Apply SQL files in numeric order. `sql/010_reference_intelligence.sql` adds reference datasets/observations, official incidents, operational measures, chokepoint governance, port reference/scenario metrics and delay-model tables.
 
 `python scripts/stage_reference_datasets.py` validates the large normalized CSV layer and writes `staging/reference_staging_manifest.json`.
+
+
+## v3.3.1 maritime-security integration
+
+- Replaced the separate **Official Maritime Security** navigation view with **Maritime Security**.
+- IMO confirmed incidents now resolve directly to the canonical vessel profile by IMO number (with a minimal in-memory legacy-test vessel stub where the vessel is not yet populated in the canonical workbook).
+- Added **Maritime Security & Compliance** to commercial vessel profiles; IMO confirmation appears on the vessel itself.
+- The Maritime Security workspace now treats the IMO register as a confirmation layer, with **Open vessel** actions for every incident.
+- Theatre baselines, operational measures and chokepoint governance remain within the Maritime Security workspace rather than being detached reference pages.
+
+## v3.3.2 ports, cruise and intelligence-map integration
+
+- Restores the Cruise workspace when the dedicated Cruise Lines/Ships/Destinations/Routes sheets are absent by rebuilding the view from canonical cruise companies, Great Lakes cruise deployments and any cruise-class vessel records.
+- Adds the uploaded 1,377-port global reference as the geographic backbone of the Ports page. Reference-only ports appear as geocoded seed records with port name and coordinates, ready for later operator/terminal/ownership enrichment.
+- Port maps now use named hover points rather than anonymous dots where PyDeck is available.
+- P&C Intelligence regional maps now use explicit Event Locations first and then infer approximate coordinates from named ports/places when an event has a usable location but no coordinate row.
+- Asia-Pacific geographic vocabulary now includes Ningbo and Xiangshan, so the 9 September Ningbo/Xiangshan offshore-wind port event is geographically visible on the Asia-Pacific map.
+- IMO Middle East confirmed incidents are plotted as approximate official points when IMO publishes a usable location; distance/direction wording such as `24NM northwest of Port Rashid` is converted to an approximate plotting point.
+- `pc_intelligence_app.py` is resynchronised with `pc-intelligence.py` so both deployment entry points carry the same map logic.
