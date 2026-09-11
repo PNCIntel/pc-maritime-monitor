@@ -1,85 +1,417 @@
 {
-  "product": "P&C Trade System",
-  "implementation_version": "2.8.2",
-  "source_application_version": "2.8.1",
-  "data_model_version": "1.34",
-  "release_name": "Core Intelligence Model \u00b7 Excel Deployment",
-  "built_on": "2026-09-10",
-  "deployment_target": "Streamlit Community Cloud / GitHub",
-  "entry_point": "app.py",
-  "data_directory": "data",
-  "canonical_workbooks": 14,
-  "workbook_sheets": 185,
-  "manifest_sheet_mappings": 175,
-  "headline_counts": {
-    "companies": 355,
-    "ports": 428,
-    "vessels": 465,
-    "unique_imos": 364,
-    "systems": 14,
-    "events": 26,
-    "sanctions_designations": 8
-  },
-  "validation": {
-    "python_syntax": "PASS",
-    "workbook_readability": "PASS",
-    "manifest_routing": "PASS",
-    "spreadsheet_error_scan": "PASS",
-    "primary_key_checks": "PASS",
-    "imo_uniqueness": "PASS",
-    "live_api_smoke_test": "NOT_RUN_NO_NETWORK_IN_BUILD_ENVIRONMENT"
-  },
-  "external_api_sources": {
-    "active_open": [
-      "IMF PortWatch",
-      "Strait of Hormuz Ship Monitor"
-    ],
-    "active_keyed": [
-      "NewsData.io (when key configured)",
-      "AISHub (contributor access)",
-      "Navitia (token)"
-    ],
-    "deferred": [
-      "USCG CGMIX PSIX",
-      "USCG CGMIX IIR",
-      "GDELT DOC 2.0",
-      "GDELT GEO 2.0",
-      "Cirium FlightStats"
-    ],
-    "excluded": [
-      "ADS-B Exchange from free stack"
-    ]
-  },
-  "app_version": "v3.0.0",
-  "release_date": "2026-09-10",
-  "new_features": [
-    "Presentation-wide suppression of internal database IDs and join keys",
-    "Human-readable English column headings across normal data views",
-    "Automatic translation of technical enum and relationship codes into ordinary English",
-    "Preserves analytically useful real-world identifiers such as IMO and MMSI",
-    "Linked relationship navigation from v2.8.1 retained"
-  ],
-  "changes": [
-    "Internal IDs remain in the Excel model for joins but are not shown in the normal interface",
-    "Unresolved technical keys are dropped rather than leaked into user-facing tables",
-    "Snake_case, camelCase and ALL_CAPS implementation labels are humanized for display",
-    "Type/status/relationship values are rendered as readable English where possible",
-    "PortWatch observations now use the same presentation-cleaning pipeline as canonical tables",
-    "Canonical Excel workbooks unchanged"
-  ],
-  "excel_backed": true,
-  "entry_points": [
-    "app.py",
-    "pc_intelligence_app.py"
-  ],
-  "features_added": [
-    "P&C Intelligence Test workspace",
-    "MARSEC workspace",
-    "Compliance & Exposure",
-    "Company Security & Risk",
-    "Company Share Price",
-    "Vessel Security & Compliance",
-    "Port Security & Disruption",
-    "Aviation workspace"
+  "release": "v3.3.0-reference-intelligence",
+  "build_date": "2026-09-11",
+  "file_count": 82,
+  "files": [
+    {
+      "path": ".gitignore",
+      "bytes": 71,
+      "sha256": "75b02b0eef8a7682ff98a390841a3c5a999273cebdcc8ab2776a5e92099a57f4"
+    },
+    {
+      "path": ".streamlit/config.toml",
+      "bytes": 160,
+      "sha256": "e87eadc38bab3435777889454a2d6289e942dc9f18a9b5b90e2290e4459d8ccf"
+    },
+    {
+      "path": ".streamlit/secrets.example.toml",
+      "bytes": 530,
+      "sha256": "d5880a73823b2c9e773a4e10378740ea11cab9feb1846259e1c04a36d75ad36e"
+    },
+    {
+      "path": "MIGRATION_CHECKLIST.md",
+      "bytes": 2596,
+      "sha256": "ae4fcde0e5372fd769c3c9bb92a4e36b0f5fbc746398812b85a9c1bca145470c"
+    },
+    {
+      "path": "README_MIGRATION.md",
+      "bytes": 12904,
+      "sha256": "ec3323fde02d4c64f928f86b8ea319edfdf2baddd078e42cfef0d0fbe053ef83"
+    },
+    {
+      "path": "README_V3_3_TEST.md",
+      "bytes": 2945,
+      "sha256": "533391f2856b119d7728c55bc9943bb196cfc72f5674f7b9dc5a52175275430f"
+    },
+    {
+      "path": "TRADE_SYSTEM_V3_2_BUILD.md",
+      "bytes": 1944,
+      "sha256": "e756a7e911e0ebf9281a5afce3ebf3134bd010adc87ca8666f10484ec46501ea"
+    },
+    {
+      "path": "TRADE_SYSTEM_V3_3_BUILD.md",
+      "bytes": 989,
+      "sha256": "1cff0bac427979ae36c193796fc9a09f69616fdd6347323609fb5a59d565a133"
+    },
+    {
+      "path": "__pycache__/app.cpython-313.pyc",
+      "bytes": 472416,
+      "sha256": "1c632f9943aeab60fd664448ced307b620c3d71c763d42b3302d5a505ce5ae79"
+    },
+    {
+      "path": "app.py",
+      "bytes": 302863,
+      "sha256": "e3ad47ee78c69ebd0ae0ea475496e0b216230fee9269f6370d65eab7b74183fb"
+    },
+    {
+      "path": "data/01_core_entities.xlsx",
+      "bytes": 163880,
+      "sha256": "9ec82a42c60df3fc4955c75b534bacd77a73795f4d1a306542a2ea885ae98d5b"
+    },
+    {
+      "path": "data/02_maritime.xlsx",
+      "bytes": 445090,
+      "sha256": "3ca306bd2bf679337b3b5a2d0c7e8675157002a233ccf916eede1214900bf43a"
+    },
+    {
+      "path": "data/03_rail.xlsx",
+      "bytes": 26581,
+      "sha256": "3cdb8da591e4c5f86d2127e45becd66c06686cdb005b14332774522450b9bb1b"
+    },
+    {
+      "path": "data/04_road_trucking.xlsx",
+      "bytes": 6710,
+      "sha256": "ab95e9867f68058ae4cef0251931d7e999bb5e699021721dd3696ca5e3645a0b"
+    },
+    {
+      "path": "data/05_aviation.xlsx",
+      "bytes": 43545,
+      "sha256": "791f6d0e016395af366885f3fe4737eef3f5e16705d4a348fdf35dbec7441d83"
+    },
+    {
+      "path": "data/06_infrastructure.xlsx",
+      "bytes": 52598,
+      "sha256": "d4a8d50bb62deaf12d6ef661a83eb5d8f64f36668241ca4d17eee16ad49d966c"
+    },
+    {
+      "path": "data/07_corporate_markets.xlsx",
+      "bytes": 34943,
+      "sha256": "1e2afc3620487dac9550abf31984dfa1c15224dc3d70bddd80a784141ccefe9f"
+    },
+    {
+      "path": "data/08_transactions.xlsx",
+      "bytes": 17600,
+      "sha256": "0e5acdd731858ba1022e09f40efe845b1f94542ad1e0d3911f4a4165fbaccc0a"
+    },
+    {
+      "path": "data/09_intelligence.xlsx",
+      "bytes": 210732,
+      "sha256": "bc9b846284ac24221b30e7222141b40e484f3e2f5968d74511fdc119dc378f11"
+    },
+    {
+      "path": "data/10_sources_evidence.xlsx",
+      "bytes": 49817,
+      "sha256": "777aebf1eeb3ad254af51b985667cccc479a29f26fcd3373ace5f73c6d024817"
+    },
+    {
+      "path": "data/11_systems_waterways_governance.xlsx",
+      "bytes": 31957,
+      "sha256": "fa224a8324f516a659f00204bec73d81a74e4366fc7fad8c32f7a610dd7567c9"
+    },
+    {
+      "path": "data/12_defence_shipbuilding.xlsx",
+      "bytes": 37488,
+      "sha256": "b8f82b9888a51369d61279226cc4b442fe1ed20e0d67981321d366d56fd6d0ef"
+    },
+    {
+      "path": "data/13_events_hazards.xlsx",
+      "bytes": 41611,
+      "sha256": "745d6777c672cb1716c294c293bfae33285c02994c1bebba4533df7758102dd9"
+    },
+    {
+      "path": "data/14_trade_policy_compliance.xlsx",
+      "bytes": 30364,
+      "sha256": "b433b6353badc36b91ec2cf1fa723c429caca342267fc951d5424865689f3e7f"
+    },
+    {
+      "path": "data/15_market_intelligence_reference.xlsx",
+      "bytes": 85478,
+      "sha256": "185c432ed29c773b22690e55f071179af20302401b5ab554efe56fb05a8e269d"
+    },
+    {
+      "path": "data/16_global_ports_reference.xlsx",
+      "bytes": 188783,
+      "sha256": "dac1ecc89846a66988be29bfeadd1752bc8333a0197d7354f8729a663e5794b8"
+    },
+    {
+      "path": "data/17_trade_connectivity_reference.xlsx",
+      "bytes": 7058,
+      "sha256": "53f404a45cb4a470231b15b06264d6c831b1c19c0f0b9fd390b88fa91c7babb1"
+    },
+    {
+      "path": "data/18_official_maritime_security.xlsx",
+      "bytes": 12897,
+      "sha256": "5dc3e31cce086fdae9374ff1130b341013ec9e4359821fea31a2327748313669"
+    },
+    {
+      "path": "data/19_risk_benchmarks.xlsx",
+      "bytes": 9786,
+      "sha256": "1c6e7e0808aa9130329d7b2403ded9326aebb7de6990a89bfc7f67131fea49c8"
+    },
+    {
+      "path": "data_seed/market_instruments_seed.csv",
+      "bytes": 1421,
+      "sha256": "2e422ad7a8e35e4812d5c9e7400705e05988f44cc4d32ace74349c590cfab481"
+    },
+    {
+      "path": "data_seed/open_source_registry.csv",
+      "bytes": 3287,
+      "sha256": "581134d290bf4e0e04305f849248556eb2cc5704cccea91f1fd7762a4e694103"
+    },
+    {
+      "path": "data_seed/signal_group_2026_seed.csv",
+      "bytes": 14985,
+      "sha256": "e46c714c14a059263316b436eda95263c0fe12d9977d03316b8ec75bbc3d88d0"
+    },
+    {
+      "path": "external_data/normalized/accuracy_ns_stock_data.csv",
+      "bytes": 166650,
+      "sha256": "f1818fa3556c01daca25aef1f134fb0bb70a882d2ff2812589a594700ac2f7b0"
+    },
+    {
+      "path": "external_data/normalized/chokepoint_results_summary.txt",
+      "bytes": 1693,
+      "sha256": "9108d5aeb6027e76fd11db9186df978413a3cac975fdb7f21f46e3a10db26048"
+    },
+    {
+      "path": "external_data/normalized/global_port_reference.csv",
+      "bytes": 253522,
+      "sha256": "655229fbb2cf63df73199e73d2b9f811f5ec17d00faba6d66432984afb15fac2"
+    },
+    {
+      "path": "external_data/normalized/port_fuel_demand_2050.csv",
+      "bytes": 11024865,
+      "sha256": "048347032fe1bcb05ff8fdf1c852f3b69c246307921d73c00492bcc9cd9e16ec"
+    },
+    {
+      "path": "external_data/raw/Analysis on a database of ship accidents in port areas [Dataset].zip",
+      "bytes": 75877,
+      "sha256": "05e8ab5daafb60e090d5e2f0d4c1b0b2de4ab8c5b346fe35fab61313b0a4ad18"
+    },
+    {
+      "path": "external_data/raw/Dataset Accuracy Shipping Limited (ACCURACY.NS) Stock Performance(1).zip",
+      "bytes": 28891,
+      "sha256": "af63208de03c05ed97dab6b27d90cfa77c381fc3d5ce2902756a6c02d5013bd9"
+    },
+    {
+      "path": "external_data/raw/Free trade agreements and LSBCI Database A panel data(1).zip",
+      "bytes": 14282127,
+      "sha256": "053146147c6ef4100f28adfd3ba74caf3890945cb35bb248d893f286b3d19fc0"
+    },
+    {
+      "path": "external_data/raw/Maritime Chokepoint Risk(1).zip",
+      "bytes": 3243469,
+      "sha256": "aef1bfb4fd7b8ab7fd5fbb96b708baac6a74dd6e093529c0a671839e3e7f98b3"
+    },
+    {
+      "path": "external_data/raw/Operational Delay Factors in Port Supply Chains Data(1).zip",
+      "bytes": 577364,
+      "sha256": "15d8c7c8d4ca7a042a6a4e160e3d7a7e6b291412eb099328c9f5ff6fa7fd62e2"
+    },
+    {
+      "path": "external_data/raw/P24 WB_Datasets - Institutional Complementarity in(1).zip",
+      "bytes": 2029576,
+      "sha256": "9453abfc60742e8a69a80c8d045d6c7f3802cc0b53850c039e363ce681d95059"
+    },
+    {
+      "path": "external_data/raw/Public-Global-Port-Optimisation(1).zip",
+      "bytes": 34173534,
+      "sha256": "9c3bf954cecc6abb17d6d671e11cd4dba7d3a42748eb372a8ac953f42f459148"
+    },
+    {
+      "path": "pc-client-admin.py",
+      "bytes": 3691,
+      "sha256": "787be11b87f7e3d366d631668dac606212a2e7903963c9064e48afde6f7eb989"
+    },
+    {
+      "path": "pc-combined.py",
+      "bytes": 3779,
+      "sha256": "2fb72efcf6b6466664e3c1f60cf7619c8e996b73387b512e30d484fd4a3a1e58"
+    },
+    {
+      "path": "pc-intelligence.py",
+      "bytes": 86070,
+      "sha256": "cefe88f509a1d02357b62ef34ab8f6c9ff8c2d6376aba8cf1499fb32bb3085fd"
+    },
+    {
+      "path": "pc-nerai.py",
+      "bytes": 2730,
+      "sha256": "b7023e79990832e187491a716715b4c7a1537f6e53bf2a889b31cf2b967b7d83"
+    },
+    {
+      "path": "pc-power-admin.py",
+      "bytes": 19844,
+      "sha256": "1d576745d068da90aa52a454a763b69c46c745e0e84fe5d175c64e117a8863d4"
+    },
+    {
+      "path": "pc_intelligence_app.py",
+      "bytes": 86070,
+      "sha256": "cefe88f509a1d02357b62ef34ab8f6c9ff8c2d6376aba8cf1499fb32bb3085fd"
+    },
+    {
+      "path": "requirements.txt",
+      "bytes": 116,
+      "sha256": "1a673cd2a6e9effdc13378b917ab5d51326f06a5a06cadb42ede065aafaff1f6"
+    },
+    {
+      "path": "scripts/__pycache__/stage_reference_datasets.cpython-313.pyc",
+      "bytes": 1905,
+      "sha256": "0663f16a1cafde3fca6ab89ab9c37ca1531370a53077cfce18bdc96feb8bf12e"
+    },
+    {
+      "path": "scripts/bootstrap_super_admin.py",
+      "bytes": 1005,
+      "sha256": "2cf7d9c6be796e2262a306405d2a3e544816803918ed2d66a6feaa4fcb729103"
+    },
+    {
+      "path": "scripts/cleanup_validate.py",
+      "bytes": 3059,
+      "sha256": "b2c73e7fa3d9a5cf5803baf962e3656d2d408a8ad5fdeefc36c6ef9086fcdc5d"
+    },
+    {
+      "path": "scripts/ingest_signal_group.py",
+      "bytes": 10542,
+      "sha256": "f3256516d86a38d6cf7a2d63b4c5339967bb230d2830a3273de271e73219b9f5"
+    },
+    {
+      "path": "scripts/ingest_world_bank_macro.py",
+      "bytes": 2407,
+      "sha256": "bc0561bada5af12a80c18e7551fd9cbdae6bc19ca722d4900ebfec5a9c07ff96"
+    },
+    {
+      "path": "scripts/normalize_core.py",
+      "bytes": 17026,
+      "sha256": "19852a29109c3c48197145694f352ca9df0dd7965f796750e6caedf471bdc085"
+    },
+    {
+      "path": "scripts/normalize_trade_expansion.py",
+      "bytes": 6954,
+      "sha256": "25d7425482fba21dcd9d2f6a0288809b3763c9750d7d7805cb05229f7cbe2a20"
+    },
+    {
+      "path": "scripts/seed_legacy_from_excel.py",
+      "bytes": 3903,
+      "sha256": "9b5d2071e331e71e0f06c583a28de222fadb066f4fd6b86f3b5938f38bc9c4c0"
+    },
+    {
+      "path": "scripts/seed_market_instruments.py",
+      "bytes": 873,
+      "sha256": "c4ec2cf4e5eb7d3889e558a37c8a18dd6bb45cf04fe68a5e8b482c059ee43b9c"
+    },
+    {
+      "path": "scripts/seed_market_sample.py",
+      "bytes": 4295,
+      "sha256": "3d49f73dafe95d8ac758475b3c4fa0c3c5c353e15cf56bdb1a5f433f759c603c"
+    },
+    {
+      "path": "scripts/seed_open_source_registry.py",
+      "bytes": 1459,
+      "sha256": "ddcbf1942ede659c2a0c69bc6d05824aeea5ae0cd27b8b732071663364343ce2"
+    },
+    {
+      "path": "scripts/stage_ourairports.py",
+      "bytes": 2890,
+      "sha256": "05997c61fef7a8e468bd60a3019be842af0d1d58841b5e3e67322afda303a128"
+    },
+    {
+      "path": "scripts/stage_reference_datasets.py",
+      "bytes": 1032,
+      "sha256": "dd3449c3190afc034584a1402ba1a91fd75d4e1e7698756dd97642037858ef25"
+    },
+    {
+      "path": "scripts/verify_migration.py",
+      "bytes": 1780,
+      "sha256": "7fd4a6de660dbb6e7f1b0d1ff85e0bc55ab77448a91ec0088d97394b9ae9d162"
+    },
+    {
+      "path": "shared/__pycache__/pc_data_bridge.cpython-313.pyc",
+      "bytes": 9025,
+      "sha256": "b7d0f9c0711f81cf59bb4ee64788b74b2a5c1521c771ed1487d205c2214a533f"
+    },
+    {
+      "path": "shared/pc_ai.py",
+      "bytes": 2142,
+      "sha256": "629079c418777cc5aa4fd4fc24200fd228870ee7d8ce81bbd3cdbf6c0f4aabff"
+    },
+    {
+      "path": "shared/pc_auth.py",
+      "bytes": 5824,
+      "sha256": "bb08d770019d7815d044fef5aaaf2a00599e5582f30d9ce1318e01eb7565a6bb"
+    },
+    {
+      "path": "shared/pc_data_bridge.py",
+      "bytes": 6237,
+      "sha256": "1dc1f49f90e6754bfe4e731ef0fc083ae56b2e0df118d32b7ad3f259408eeb01"
+    },
+    {
+      "path": "shared/pc_db.py",
+      "bytes": 1583,
+      "sha256": "e9f2293e6cfdaa6e06229ba34b1a86a0b00e78a58d3d686181dddd7a73e0b944"
+    },
+    {
+      "path": "shared/pc_trade_system.py",
+      "bytes": 6175,
+      "sha256": "7a750d3b38958cfc40ed08374094bbe4012ba331e157e1d45bbc8885b86fca91"
+    },
+    {
+      "path": "shared/pc_workspace.py",
+      "bytes": 1313,
+      "sha256": "4fd34a58a740904d03e3709253183d8a2c12dff1ae1a73b66ca46ca0039315cb"
+    },
+    {
+      "path": "sql/001_core_platform.sql",
+      "bytes": 21310,
+      "sha256": "593c659e4db15741c1da6c09c8e6deb400f24aeaa98e3f8b679e77d9c131a103"
+    },
+    {
+      "path": "sql/002_rls_and_auth.sql",
+      "bytes": 10935,
+      "sha256": "2ee5cff28dea2042343bdbbc6aca572cfb91561135789720d46037f6bb12f58e"
+    },
+    {
+      "path": "sql/003_product_views.sql",
+      "bytes": 1850,
+      "sha256": "670dccca504c9c186cf005c504572683a10b77c3639185754e4e81c7da14bc97"
+    },
+    {
+      "path": "sql/004_governance_and_cleanup.sql",
+      "bytes": 3187,
+      "sha256": "085e1ae71c11482bf4e7a57c3e4884db460d420d2624ae8303ccb3e1beff0831"
+    },
+    {
+      "path": "sql/005_event_routing.sql",
+      "bytes": 2175,
+      "sha256": "eb7fba512049fc26d4dc5b2ab697b79b503e9145655a859ef84f59352c3aeeb8"
+    },
+    {
+      "path": "sql/006_validation.sql",
+      "bytes": 1028,
+      "sha256": "46a4962a883466646bd41e3d581884718fda080075c25b8372c277473e507363"
+    },
+    {
+      "path": "sql/007_auth_profile_trigger.sql",
+      "bytes": 697,
+      "sha256": "ac188aecebbf9f59d9c8dd0d5a15dfd38aa09e1c382e85f18b69659ad3b9131b"
+    },
+    {
+      "path": "sql/008_market_intelligence.sql",
+      "bytes": 4495,
+      "sha256": "2489f0315b1f14a4774cfa2910be24e2f077c806b3e3fbebe18ba684fd65c3cb"
+    },
+    {
+      "path": "sql/009_trade_system_expansion.sql",
+      "bytes": 18835,
+      "sha256": "133bf8a827489072bd9fcafecf4fa668e7a77b5e8578125effaaf8d85e981df0"
+    },
+    {
+      "path": "sql/010_reference_intelligence.sql",
+      "bytes": 4084,
+      "sha256": "6f13ad6dbe177cd6222b18332f05e6055165d5f7d6ae1e7b78e66334aa29b1e3"
+    },
+    {
+      "path": "staging/reference_staging_manifest.json",
+      "bytes": 1071,
+      "sha256": "0e91bf64600d9ddf0f85bd9dfbde8e121803fa30c39bf9b03b3751a12bd5b0e4"
+    }
   ]
 }

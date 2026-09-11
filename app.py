@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 import os
 import re
 from difflib import SequenceMatcher
@@ -12,12 +13,30 @@ from collections import defaultdict
 import pandas as pd
 import streamlit as st
 
+SHARED_DIR = Path(__file__).resolve().parent / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+from pc_data_bridge import load_sheet as bridge_load_sheet, workbook_sheets as bridge_workbook_sheets, backend_status
+from pc_workspace import save_query as save_workspace_query
+from pc_db import client as pc_db_client, safe_rows as pc_safe_rows
+from pc_trade_system import render_energy_industry, render_trade_flows_supply, render_country_macro, render_market_instruments
+try:
+    from pc_auth import require_login
+except Exception:
+    require_login = None
+
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.0.0"
-RELEASE_NAME = "Core Intelligence Model · Excel Deployment"
+APP_VERSION = "v3.3.0-reference-intelligence"
+RELEASE_NAME = "Global Trade-System Intelligence Graph · Legacy Excel + Research Reference + Supabase Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
+
+# Authentication is opt-in during migration. Set PC_REQUIRE_AUTH=true once tenant users are configured.
+if os.getenv("PC_REQUIRE_AUTH", "false").lower() == "true" and require_login is not None:
+    PC_USER_CONTEXT = require_login("TRADE", "P&C Trade")
+else:
+    PC_USER_CONTEXT = None
 
 st.markdown("""
 <style>
@@ -166,21 +185,21 @@ WORKBOOKS = {
     "Defence & Shipbuilding": "12_defence_shipbuilding.xlsx",
     "Events & Hazards": "13_events_hazards.xlsx",
     "Trade Policy & Compliance": "14_trade_policy_compliance.xlsx",
+    "Market Intelligence Reference": "15_market_intelligence_reference.xlsx",
+    "Global Ports Reference": "16_global_ports_reference.xlsx",
+    "Trade Connectivity Reference": "17_trade_connectivity_reference.xlsx",
+    "Official Maritime Security": "18_official_maritime_security.xlsx",
+    "Risk Benchmarks": "19_risk_benchmarks.xlsx",
 }
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300)
 def workbook_sheets(label):
-    path = DATA_DIR / WORKBOOKS[label]
-    if not path.exists(): return []
-    try: return pd.ExcelFile(path).sheet_names
-    except Exception: return []
+    return bridge_workbook_sheets(DATA_DIR, label)
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300)
 def load_sheet(label, sheet):
-    path = DATA_DIR / WORKBOOKS[label]
-    if not path.exists(): return pd.DataFrame()
-    try: return pd.read_excel(path, sheet_name=sheet, dtype=str).fillna("")
-    except Exception: return pd.DataFrame()
+    return bridge_load_sheet(DATA_DIR, label, sheet, dtype_str=True)
+
 
 HORMUZ_API_BASE = "https://hormuz.data-tracking.net/api"
 HORMUZ_API_PATHS = {"summary", "crossings/daily", "ships/by_zone"}
@@ -762,7 +781,7 @@ TABLES=all_tables()
 MISSING_WORKBOOKS = [filename for filename in WORKBOOKS.values() if not (DATA_DIR / filename).exists()]
 if MISSING_WORKBOOKS:
     st.error("This deployment is missing required data workbooks: " + ", ".join(MISSING_WORKBOOKS))
-    st.info("Place the 14 canonical XLSX files in the data/ directory using the filenames shown above.")
+    st.info("Place the required Excel workbooks in the data/ directory using the filenames shown above.")
     st.stop()
 
 # ---------- presentation cleanup ----------
@@ -3609,18 +3628,174 @@ def render_compliance_exposure_workspace():
         with st.expander("Underlying vessel restriction records"):
             display_df(restrictions,200)
 
+
+
+def _trade_alert_candidates():
+    """Return commercial/operational alerts, excluding routine corporate development."""
+    events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+    if events.empty:
+        return events
+    cols=[c for c in ["Event Family","Event Type","Title","Description","Operational Impact","Trade / Commercial Impact"] if c in events.columns]
+    blob=pd.Series("",index=events.index,dtype="string")
+    for c in cols:
+        blob=blob.str.cat(events[c].fillna("").astype(str),sep=" ")
+    include=r"strike|labour|weather|typhoon|cyclone|hurricane|flood|earthquake|wildfire|storm|closure|outage|disruption|grounding|collision|allision|capsize|sinking|fire|explosion|attack|missile|drone|piracy|seizure|interdiction|sanction|customs|tariff|border|canal|channel|low water|cyber|fraud|smuggl|crime"
+    corporate=r"new terminal|terminal opening|commissioning|new crane|crane order|equipment order|vessel order|fleet order|acquisition|investment|capex announcement|earnings|dividend|share buyback|service launch|office opening"
+    inc=blob.str.contains(include,case=False,regex=True,na=False)
+    corp=blob.str.contains(corporate,case=False,regex=True,na=False)
+    # A corporate story can still become an alert only when it independently contains disruption language.
+    view=events[inc & (~corp | blob.str.contains(r"closure|outage|strike|attack|weather|fire|explosion|disruption|sanction",case=False,regex=True,na=False))].copy()
+    if "Start Date" in view.columns:
+        view["_dt"]=pd.to_datetime(view["Start Date"],errors="coerce")
+        view=view.sort_values("_dt",ascending=False)
+    return view
+
+
+def render_trade_alerts_workspace():
+    header("Alerts & Disruptions","Commercially relevant disruption across ports, rail, trucking, aviation, weather, labour, policy and security spillover. Routine corporate development is excluded.")
+    ev=_trade_alert_candidates()
+    if ev.empty:
+        st.info("No trade-disruption alerts are currently classified.")
+        return
+    a,b,c,d=st.columns(4)
+    a.metric("Active alerts",len(ev))
+    fam=ev.get("Event Family",pd.Series(dtype=str)).fillna("").astype(str)
+    b.metric("Weather / natural",int(fam.str.contains("Weather|Natural",case=False,regex=True).sum()))
+    c.metric("Labour / civil",int(fam.str.contains("Labour|Industrial|Civil",case=False,regex=True).sum()))
+    d.metric("Security spillover",int(fam.str.contains("Security|Conflict|Maritime",case=False,regex=True).sum()))
+    tabs=st.tabs(["All alerts","Weather & Natural Hazards","Labour & Logistics","Trade / Policy","Security Spillover"])
+    filters=[None,"Weather|Natural|Storm|Flood|Typhoon|Cyclone|Earthquake|Wildfire","Labour|Industrial|Strike|Port|Rail|Road|Truck|Logistics","Trade|Policy|Customs|Tariff|Sanction|Border","Security|Conflict|Maritime|Attack|Piracy|Drone|Missile"]
+    for tab,pat in zip(tabs,filters):
+        with tab:
+            if pat is None:
+                view=ev
+            else:
+                blob=pd.Series("",index=ev.index,dtype="string")
+                for col in ["Event Family","Event Type","Title","Description","Operational Impact","Trade / Commercial Impact"]:
+                    if col in ev.columns:
+                        blob=blob.str.cat(ev[col].fillna("").astype(str),sep=" ")
+                view=ev[blob.str.contains(pat,case=False,regex=True,na=False)]
+            if view.empty: st.caption("No alerts in this category.")
+            else: render_event_cards(view,60)
+
+
+def _market_db_rows(table, columns="*", limit=2000, order=None):
+    """Read the normalized market layer when Supabase is configured."""
+    try:
+        sb=pc_db_client(service=True)
+        return pc_safe_rows(sb,table,columns,limit,order=order) if sb else []
+    except Exception:
+        return []
+
+
+def render_freight_commodity_markets():
+    header(
+        "Freight & Commodity Markets",
+        "Attributed freight, fleet-supply, congestion, commodity-flow and asset-market observations connected to the wider P&C network."
+    )
+    reports=_market_db_rows(
+        "pc_trade_market_reports",
+        "market_report_id,provider,report_family,report_title,report_date,week_number,market_scope,source_url,source_methodology",
+        1000,"report_date"
+    )
+    obs=_market_db_rows(
+        "pc_trade_market_observations",
+        "market_observation_id,market_report_id,observation_date,market,vessel_class,route_code,route_description,origin_text,destination_text,commodity,metric_family,metric_name,value_numeric,value_text,unit,currency,change_wow,change_yoy,benchmark,pc_market_signal,pc_direction,pc_driver,confidence,provider,report_family,report_title,report_date,week_number,report_url",
+        5000,"observation_date"
+    )
+    # Legacy Excel fallback: lets the old Streamlit platform test the market layer before Supabase is populated.
+    if not obs:
+        _excel_market=TABLES.get(("Market Intelligence Reference","Signal Market Observations"),pd.DataFrame()).copy()
+        if not _excel_market.empty:
+            obs=_excel_market.to_dict("records")
+    if not reports and obs:
+        _tmp=pd.DataFrame(obs)
+        _report_cols=[c for c in ["provider","report_family","report_title","report_date","week_number","source_url"] if c in _tmp.columns]
+        if _report_cols:
+            rdf0=_tmp[_report_cols].drop_duplicates().copy()
+            if "source_url" in rdf0.columns: rdf0=rdf0.rename(columns={"source_url":"source_url"})
+            reports=rdf0.to_dict("records")
+    if not reports and not obs:
+        st.info("No market observations are loaded. Add approved Supabase observations or use the bundled Excel reference layer.")
+        return
+
+    rdf=pd.DataFrame(reports)
+    df=pd.DataFrame(obs)
+    if not df.empty:
+        df["observation_date"]=pd.to_datetime(df.get("observation_date"),errors="coerce")
+        df=df.sort_values("observation_date",ascending=False)
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Approved observations",len(df))
+    c2.metric("Source reports",len(rdf))
+    c3.metric("Routes",int(df["route_code"].fillna("").astype(str).replace("",pd.NA).dropna().nunique()) if not df.empty and "route_code" in df else 0)
+    c4.metric("Commodities",int(df["commodity"].fillna("").astype(str).replace("",pd.NA).dropna().nunique()) if not df.empty and "commodity" in df else 0)
+
+    st.caption("Reported values remain attributed to their source. P&C signals/direction are analytical metadata layered on top of the reported observation.")
+    tabs=st.tabs(["Market Overview","Freight Rates","Fleet & Supply","Commodity Flows","Ports & Congestion","Asset Values","Source Reports"])
+
+    def filt(pattern):
+        if df.empty: return df
+        return df[df["metric_family"].fillna("").astype(str).str.contains(pattern,case=False,regex=True,na=False)].copy()
+
+    def market_table(view,height=360):
+        if view.empty:
+            st.caption("No approved observations in this category yet.")
+            return
+        cols=[c for c in ["observation_date","market","vessel_class","route_code","route_description","origin_text","destination_text","commodity","metric_name","value_numeric","value_text","unit","currency","change_wow","change_yoy","pc_market_signal","pc_direction","confidence","provider"] if c in view.columns]
+        display_df(view[cols],height)
+
+    with tabs[0]:
+        if df.empty:
+            st.caption("No approved observations yet.")
+        else:
+            a,b=st.columns([1,1])
+            with a:
+                st.markdown("### Latest observations")
+                market_table(df.head(40),380)
+            with b:
+                st.markdown("### Observation mix")
+                if "metric_family" in df:
+                    mix=df["metric_family"].fillna("Unknown").astype(str).value_counts().rename_axis("Metric family").reset_index(name="Observations")
+                    display_df(mix,300)
+            st.markdown("### Historical series")
+            candidates=df[(df["value_numeric"].notna()) & (df["observation_date"].notna())].copy() if "value_numeric" in df else pd.DataFrame()
+            if not candidates.empty:
+                candidates["series_label"]=(candidates["route_code"].fillna("").astype(str)+" · "+candidates["metric_name"].fillna("").astype(str)+" · "+candidates["vessel_class"].fillna("").astype(str)).str.strip(" ·")
+                labels=sorted([x for x in candidates["series_label"].unique() if x])
+                if labels:
+                    pick=st.selectbox("Series",labels,key="market_series_pick")
+                    series=candidates[candidates["series_label"].eq(pick)][["observation_date","value_numeric"]].dropna().sort_values("observation_date")
+                    if len(series)>=2:
+                        st.line_chart(series.set_index("observation_date"),use_container_width=True)
+                    else:
+                        st.caption("This series currently has only one approved observation; it will chart as the historical backfill grows.")
+
+    with tabs[1]: market_table(filt("FREIGHT_RATE|MARKET_INDEX"))
+    with tabs[2]: market_table(filt("FLEET_SUPPLY|SUPPLY_DEMAND|SECURITY_MARKET"))
+    with tabs[3]: market_table(filt("COMMODITY_FLOW"))
+    with tabs[4]: market_table(filt("PORT_CONDITION"))
+    with tabs[5]: market_table(filt("ASSET_VALUE"))
+    with tabs[6]:
+        if rdf.empty:
+            st.caption("No source reports approved yet.")
+        else:
+            cols=[c for c in ["report_date","report_family","report_title","provider","week_number","source_url","source_methodology"] if c in rdf.columns]
+            display_df(rdf[cols],380)
+
 # ---------- workspace navigation ----------
 st.sidebar.markdown("<div class='pc-kicker'>Power & Corridors Intelligence</div>",unsafe_allow_html=True)
 st.sidebar.markdown("### Trade System")
-st.sidebar.caption(f"{APP_VERSION} · Excel-backed test")
+_bst=backend_status()
+st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend")
 
 NAV_GROUPS={
     "Command Center":["Overview","Search"],
-    "Network":["Companies","Ports","Vessels","Rail","Aviation","Trucking","Ferries","Cruise","Corridors & Systems","Shipyards"],
-    "Operations":["Watch Areas","Maritime Disruptions","Port Activity","Hormuz Monitor","Live Feeds"],
-    "Markets & Policy":["Investments","Sanctions & Compliance","Trade Policy","Contracts"],
+    "Network":["Companies","Ports","Vessels","Rail","Aviation","Trucking","Ferries","Cruise","Corridors & Systems","Shipyards","Energy & Industry"],
+    "Operations":["Alerts & Disruptions","Watch Areas","Maritime Disruptions","Port Activity","Hormuz Monitor","Official Maritime Security","Live Feeds"],
+    "Markets & Policy":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Reference & Benchmarks","Investments","Sanctions & Compliance","Trade Policy","Contracts"],
     "Intelligence":["News & Signals","News & Events"],
-    "Data":["Data"],
+    "Data":["Reference Library","Data"],
 }
 PAGE_WORKSPACE={p:w for w,items in NAV_GROUPS.items() for p in items}
 # Deep links from the separate P&C Intelligence app.
@@ -3666,7 +3841,7 @@ with qa2:
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("<div class='pc-small'>ACTIVE DATA LAYERS</div>",unsafe_allow_html=True)
-st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> Excel model</span>",unsafe_allow_html=True)
+st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> Shared data model</span>",unsafe_allow_html=True)
 st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> PortWatch</span>",unsafe_allow_html=True)
 st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> Hormuz</span>",unsafe_allow_html=True)
 news_key_present=bool(_secret("NEWSDATA_API_KEY"))
@@ -3952,6 +4127,10 @@ if page=="Overview":
 elif page=="Search":
     header("Search P&C","One query across companies, ports, shipyards, vessels, contracts, transactions, news, events and systems.")
     q=st.text_input("Query",placeholder="Try: APM Africa terminals, Seaspan US Coast Guard, AD Ports Black Sea, Rotterdam strike, Fincantieri UAE contracts")
+    if q and PC_USER_CONTEXT:
+        if st.button("Save query to my workspace",key="save_trade_query"):
+            ok,msg=save_workspace_query(PC_USER_CONTEXT,"TRADE",q[:100],q,"search")
+            (st.success if ok else st.warning)(msg)
     if q:
         em=entity_search_matches(q,20)
         if not em.empty:
@@ -3988,6 +4167,9 @@ elif page=="Search":
                     readable_search_card(h)
         if em.empty and hits.empty:
             st.warning("No matching records found.")
+
+elif page=="Alerts & Disruptions":
+    render_trade_alerts_workspace()
 
 elif page=="Maritime Disruptions":
     header("Maritime Disruptions","Operational maritime casualties, groundings, SAR, pollution, attacks and official-source MARSEC reporting that can affect trade flows, vessels, ports and corridors.")
@@ -4389,6 +4571,25 @@ elif page=="Cruise":
         st.caption("Great Lakes cruise is kept as a geographic deployment layer so operators, vessels, ports and locks can connect back into the wider Great Lakes system.")
         clean_network_table(gl,["Vessel Name","Operating Area","Representative Ports / Infrastructure","Vessel / Service Type","Season","Status","Notes"],320)
 
+
+elif page=="Freight & Commodity Markets":
+    render_freight_commodity_markets()
+
+elif page=="Market Instruments":
+    header("Market Instruments","Canonical commodity, equity, freight, FX and energy benchmarks connected to companies and physical assets.")
+    render_market_instruments()
+
+elif page=="Trade Flows & Supply":
+    header("Trade Flows & Supply","Physical trade flows, production, inventories and supply-series context across commodities and corridors.")
+    render_trade_flows_supply()
+
+elif page=="Country & Macro":
+    header("Country & Macro","Macro, logistics and chokepoint context for trade and investment exposure.")
+    render_country_macro()
+
+elif page=="Energy & Industry":
+    header("Energy & Industry","Refineries, LNG, pipelines, mines, smelters, factories and logistics infrastructure as connected trade-system assets.")
+    render_energy_industry()
 
 elif page=="Investments":
     header("Investments","Track capital deployment, acquisitions, equity investments and infrastructure commitments across companies, regions and years.")
@@ -5527,6 +5728,45 @@ elif page=="Corridors & Systems":
             with tabs[4]:
                 render_event_cards(ev,50)
                 if not chains.empty: display_df(chains,100)
+
+
+elif page=="Official Maritime Security":
+    header("Official Maritime Security","IMO-confirmed incidents, theatre baselines, operational measures and chokepoint governance kept separate from media reporting.")
+    inc=TABLES.get(("Official Maritime Security","IMO Middle East Incidents"),pd.DataFrame()).copy()
+    theatre=TABLES.get(("Official Maritime Security","Theatre Baselines"),pd.DataFrame()).copy()
+    measures=TABLES.get(("Official Maritime Security","Operational Measures"),pd.DataFrame()).copy()
+    governance=TABLES.get(("Official Maritime Security","Chokepoint Governance"),pd.DataFrame()).copy()
+    a,b,c=st.columns(3)
+    a.metric("IMO confirmed incidents",len(inc))
+    b.metric("Named vessels",inc["Vessel"].nunique() if not inc.empty and "Vessel" in inc else 0)
+    c.metric("Theatre baselines",len(theatre))
+    q=st.text_input("Filter official maritime records",placeholder="Hercules Star, Hormuz, Red Sea, Black Sea...")
+    if q and not inc.empty: inc=_contains_any(inc,[q])
+    tabs=st.tabs(["Confirmed Incidents","Theatre Baselines","Operational Measures","Chokepoint Governance"])
+    with tabs[0]: display_df(inc,520)
+    with tabs[1]: display_df(theatre,320)
+    with tabs[2]: display_df(measures,320)
+    with tabs[3]: display_df(governance,320)
+
+elif page=="Reference & Benchmarks":
+    header("Reference & Benchmarks","Historical accident distributions, port/corridor reference data and market-transmission context for interpreting live intelligence.")
+    tabs=st.tabs(["Accident Types","Ship Types","Human Consequences","Port Reference","Trade Connectivity"])
+    with tabs[0]: display_df(TABLES.get(("Risk Benchmarks","Accident Casualty Type"),pd.DataFrame()),320)
+    with tabs[1]: display_df(TABLES.get(("Risk Benchmarks","Accident Ship Type"),pd.DataFrame()),320)
+    with tabs[2]: display_df(TABLES.get(("Risk Benchmarks","Human Consequences"),pd.DataFrame()),320)
+    with tabs[3]: display_df(TABLES.get(("Global Ports Reference","Top Throughput Ports"),pd.DataFrame()),420)
+    with tabs[4]: display_df(TABLES.get(("Trade Connectivity Reference","Priority Corridor Seeds"),pd.DataFrame()),420)
+
+elif page=="Reference Library":
+    header("Reference Library","Research-scale datasets are catalogued separately from live events and canonical entities; large source tables are lazy-loaded from external_data.")
+    registries=[]
+    for key in [("Global Ports Reference","Source Registry"),("Trade Connectivity Reference","Reference Datasets"),("Risk Benchmarks","Source Register")]:
+        d=TABLES.get(key,pd.DataFrame())
+        if not d.empty: registries.append(d)
+    if registries:
+        display_df(pd.concat(registries,ignore_index=True,sort=False),520)
+    else:
+        st.caption("Reference registries not loaded.")
 
 elif page=="Data":
     header("Data Explorer","Raw evidence and debugging tables. Internal IDs remain hidden unless explicitly enabled.")
