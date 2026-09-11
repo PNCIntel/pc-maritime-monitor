@@ -47,7 +47,7 @@ else:
 sb=service_client()
 st.sidebar.markdown("<div class='pc-k'>Power & Corridors</div>",unsafe_allow_html=True)
 st.sidebar.markdown("## Power Admin")
-PAGES=["Dashboard","Migration","Organizations","Users & Access","Research Jobs","Trade System Builder","Batch Staging","Review Queue","Market Data","Governance & Quality"]
+PAGES=["Dashboard","Migration","Database Coverage","Organizations","Users & Access","Research Jobs","Trade System Builder","Batch Staging","Review Queue","Market Data","Governance & Quality"]
 
 # ---------------------------------------------------------------------------
 # Bulk review / validation helpers
@@ -769,6 +769,261 @@ elif page=="Migration":
         leakage=count_rows(sb,"pc_events",{"intelligence_visible":True,"event_nature":"CORPORATE"})
         if leakage: st.error(f"{leakage} corporate events are leaking into P&C Intelligence.")
         else: st.success("No corporate-event leakage detected in P&C Intelligence routing.")
+
+
+elif page=="Database Coverage":
+    title(
+        "Database coverage",
+        "Search the live Supabase canonical database to confirm whether ports, terminals, vessels, companies and events actually migrated."
+    )
+
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        st.markdown("### Canonical database lookup")
+        st.caption(
+            "This searches canonical production tables, not Excel and not staging. "
+            "Use it to verify that migrated records are genuinely present in Supabase."
+        )
+
+        c1,c2,c3 = st.columns([2,1,1])
+        with c1:
+            q = st.text_input(
+                "Search name / title / IMO",
+                placeholder="e.g. Beirut, Itaqui, Nador West Med, Montevideo, MSC NITA, 9084607"
+            ).strip()
+        with c2:
+            scope = st.selectbox(
+                "Coverage",
+                ["All","Ports & assets","Companies","Vessels","Events"]
+            )
+        with c3:
+            max_rows = st.selectbox("Max results", [25,50,100,250], index=1)
+
+        def _contains(value, needle):
+            return needle.casefold() in str(value or "").casefold()
+
+        def _safe_query_rows(table, columns="*", limit=1000):
+            try:
+                return safe_rows(sb, table, columns, limit)
+            except Exception:
+                return []
+
+        def _asset_is_portish(r):
+            txt = " ".join(str(r.get(k) or "") for k in ("asset_type","subtype","name","region_city"))
+            t = txt.casefold()
+            return any(x in t for x in ("port","terminal","harbour","harbor","anchorage","jetty","quay"))
+
+        if q:
+            needle = q.casefold()
+            asset_rows=[]
+            entity_rows=[]
+            vessel_rows=[]
+            event_rows=[]
+
+            if scope in ("All","Ports & assets"):
+                rows = _safe_query_rows(
+                    "pc_assets",
+                    "asset_id,name,asset_type,subtype,country,region_city,latitude,longitude,owner_entity_id,operator_entity_id,status,record_status,data_quality,source_id,metadata",
+                    3000
+                )
+                asset_rows = [
+                    r for r in rows
+                    if (_contains(r.get("name"), needle)
+                        or _contains(r.get("country"), needle)
+                        or _contains(r.get("region_city"), needle)
+                        or _contains(r.get("asset_type"), needle)
+                        or _contains(r.get("subtype"), needle))
+                ]
+                if scope=="Ports & assets":
+                    # Keep non-port infrastructure if the user explicitly searched it;
+                    # otherwise favor port-like results first.
+                    asset_rows = sorted(asset_rows, key=lambda r: (not _asset_is_portish(r), str(r.get("name") or "")))
+
+            if scope in ("All","Companies"):
+                rows = _safe_query_rows(
+                    "pc_entities",
+                    "entity_id,name,entity_type,country,headquarters,parent_entity_id,status,record_status,source_id,metadata",
+                    3000
+                )
+                entity_rows = [
+                    r for r in rows
+                    if (_contains(r.get("name"), needle)
+                        or _contains(r.get("country"), needle)
+                        or _contains(r.get("entity_type"), needle)
+                        or _contains(r.get("headquarters"), needle))
+                ]
+
+            if scope in ("All","Vessels"):
+                rows = _safe_query_rows(
+                    "pc_mobile_assets",
+                    "mobile_asset_id,name,mobile_type,imo,mmsi,flag,country,owner_entity_id,operator_entity_id,status,record_status,source_id,metadata",
+                    5000
+                )
+                vessel_rows = [
+                    r for r in rows
+                    if (_contains(r.get("name"), needle)
+                        or _contains(r.get("imo"), needle)
+                        or _contains(r.get("mmsi"), needle)
+                        or _contains(r.get("flag"), needle)
+                        or _contains(r.get("mobile_type"), needle))
+                ]
+
+            if scope in ("All","Events"):
+                rows = _safe_query_rows(
+                    "pc_events",
+                    "event_id,start_date,end_date,event_nature,event_domain,event_family,event_type,severity,status,mode,countries,location,title,description,trade_relevance,intelligence_relevance,trade_visible,intelligence_visible,alert_worthy,record_status,source_id,metadata",
+                    5000
+                )
+                event_rows = [
+                    r for r in rows
+                    if (_contains(r.get("title"), needle)
+                        or _contains(r.get("location"), needle)
+                        or _contains(r.get("countries"), needle)
+                        or _contains(r.get("event_type"), needle)
+                        or _contains(r.get("description"), needle))
+                ]
+
+            total = len(asset_rows)+len(entity_rows)+len(vessel_rows)+len(event_rows)
+            st.markdown("### Results")
+            m1,m2,m3,m4,m5 = st.columns(5)
+            m1.metric("Total matches", total)
+            m2.metric("Assets / ports", len(asset_rows))
+            m3.metric("Companies", len(entity_rows))
+            m4.metric("Vessels", len(vessel_rows))
+            m5.metric("Events", len(event_rows))
+
+            if total == 0:
+                st.warning(
+                    "No canonical database match found. If the record exists only in an Excel workbook or staging queue, "
+                    "it has not yet been migrated/applied to the live canonical database."
+                )
+
+            if asset_rows:
+                st.markdown("#### Assets / ports")
+                df = pd.DataFrame(asset_rows[:max_rows])
+                preferred = [
+                    "name","asset_type","subtype","country","region_city","latitude","longitude",
+                    "status","record_status","data_quality","source_id","asset_id"
+                ]
+                cols=[c for c in preferred if c in df.columns]
+                st.dataframe(df[cols], use_container_width=True, hide_index=True)
+
+                selected_asset = st.selectbox(
+                    "Open asset / port",
+                    list(range(len(asset_rows[:max_rows]))),
+                    format_func=lambda i: f"{asset_rows[i].get('name','')} · {asset_rows[i].get('country','')} · {asset_rows[i].get('asset_type','')}",
+                    key="coverage_asset_select"
+                )
+                arow = asset_rows[selected_asset]
+                with st.expander("Asset detail", expanded=False):
+                    st.json(arow)
+
+                aid=arow.get("asset_id")
+                if aid:
+                    st.markdown("##### Connected records")
+                    cc1,cc2,cc3 = st.columns(3)
+
+                    terminals=[]
+                    try:
+                        # Some terminal models are still represented as pc_assets; this looks for linked
+                        # extension/logistics rows and event links conservatively.
+                        terminals = safe_rows(sb,"pc_logistics_facilities","*",500,{"asset_id":aid})
+                    except Exception:
+                        terminals=[]
+
+                    try:
+                        links = safe_rows(sb,"pc_event_links","*",500,{"linked_id":aid})
+                    except Exception:
+                        links=[]
+
+                    try:
+                        gov = safe_rows(sb,"pc_governance_links","*",500,{"governed_id":aid})
+                    except Exception:
+                        gov=[]
+
+                    cc1.metric("Logistics extensions",len(terminals))
+                    cc2.metric("Event links",len(links))
+                    cc3.metric("Governance links",len(gov))
+
+                    if terminals:
+                        st.markdown("**Logistics / terminal extensions**")
+                        dataframe(terminals)
+                    if links:
+                        st.markdown("**Event links**")
+                        dataframe(links)
+                    if gov:
+                        st.markdown("**Governance links**")
+                        dataframe(gov)
+
+            if entity_rows:
+                st.markdown("#### Companies / entities")
+                df=pd.DataFrame(entity_rows[:max_rows])
+                preferred=["name","entity_type","country","headquarters","status","record_status","source_id","entity_id"]
+                cols=[c for c in preferred if c in df.columns]
+                st.dataframe(df[cols],use_container_width=True,hide_index=True)
+
+            if vessel_rows:
+                st.markdown("#### Vessels / mobile assets")
+                df=pd.DataFrame(vessel_rows[:max_rows])
+                preferred=["name","mobile_type","imo","mmsi","flag","status","record_status","source_id","mobile_asset_id"]
+                cols=[c for c in preferred if c in df.columns]
+                st.dataframe(df[cols],use_container_width=True,hide_index=True)
+
+            if event_rows:
+                st.markdown("#### Events")
+                df=pd.DataFrame(event_rows[:max_rows])
+                preferred=[
+                    "start_date","title","event_nature","event_domain","event_family","event_type",
+                    "location","countries","severity","trade_visible","intelligence_visible","event_id"
+                ]
+                cols=[c for c in preferred if c in df.columns]
+                st.dataframe(df[cols],use_container_width=True,hide_index=True)
+
+        else:
+            st.info("Enter a name, place, vessel, IMO or event above to search the live database.")
+
+        st.divider()
+        st.markdown("### Migration coverage snapshot")
+
+        def _count_like(table, field, tokens):
+            rows=_safe_query_rows(table,"*",5000)
+            total=0
+            for r in rows:
+                s=str(r.get(field) or "").casefold()
+                if any(t in s for t in tokens):
+                    total += 1
+            return total
+
+        try:
+            assets_total=count_rows(sb,"pc_assets")
+            vessels_total=count_rows(sb,"pc_mobile_assets")
+            entities_total=count_rows(sb,"pc_entities")
+            events_total=count_rows(sb,"pc_events")
+            locations_total=count_rows(sb,"pc_event_locations")
+            observations_total=count_rows(sb,"pc_observations")
+            staged_pending=count_rows(sb,"pc_staged_records",{"review_status":"pending"})
+            staged_approved=count_rows(sb,"pc_staged_records",{"review_status":"approved"})
+        except Exception:
+            assets_total=vessels_total=entities_total=events_total=locations_total=observations_total=staged_pending=staged_approved=0
+
+        s1,s2,s3,s4 = st.columns(4)
+        s1.metric("Canonical assets",assets_total)
+        s2.metric("Canonical vessels",vessels_total)
+        s3.metric("Canonical entities",entities_total)
+        s4.metric("Canonical events",events_total)
+
+        s5,s6,s7,s8 = st.columns(4)
+        s5.metric("Event locations",locations_total)
+        s6.metric("Observations",observations_total)
+        s7.metric("Staged pending",staged_pending)
+        s8.metric("Approved waiting apply",staged_approved)
+
+        st.caption(
+            "A record appearing here is in Supabase. A record that exists only in Excel or Batch Staging "
+            "has not yet reached the canonical database."
+        )
+
 
 elif page=="Organizations":
     title("Organizations & subscriptions","P&C controls seat limits and product entitlements centrally.")
