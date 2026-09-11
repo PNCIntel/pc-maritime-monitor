@@ -56,7 +56,7 @@ PAGES=["Dashboard","Migration","Database Coverage","ReCAAP Vessel Resolver","Org
 REQUIRED_BY_TABLE = {
     "pc_entities": ["entity_id","name","entity_type"],
     "pc_assets": ["asset_id","name","asset_type"],
-    "pc_mobile_assets": ["mobile_asset_id","name","mobile_type"],
+    "pc_mobile_assets": ["mobile_asset_id","name","asset_type"],
     "pc_relationships": ["relationship_id","source_type","source_id","relationship_type","target_type","target_id"],
     "pc_events": ["event_id","event_type"],
     "pc_event_links": ["event_link_id","event_id","linked_type","linked_id","relationship"],
@@ -277,6 +277,22 @@ def validate_staged_for_bulk(sb,row):
     fk_ok,fk_problems=_fk_valid(sb,table,payload)
     duplicate,dup_reason=_duplicate_check(sb,table,payload)
     sources=_source_count(payload)
+
+    # A staged record can be source-backed through its own source_id. For
+    # relational event links, the canonical parent event source also counts
+    # as provenance; a separate URL on every link is not required.
+    if sources < 1 and row.get("source_id") not in (None, ""):
+        sources = 1
+    if sources < 1 and table == "pc_event_links" and payload.get("event_id"):
+        try:
+            parent = (sb.table("pc_events")
+                      .select("source_id")
+                      .eq("event_id", payload["event_id"])
+                      .limit(1).execute().data or [])
+            if parent and parent[0].get("source_id") not in (None, ""):
+                sources = 1
+        except Exception:
+            pass
 
     safe=(
         confidence >= 0.90
@@ -2022,8 +2038,35 @@ elif page=="Review Queue":
                 safe_count=sum(1 for x in validated if x["_safe"])
                 st.info(f"{safe_count} of {len(validated)} record(s) currently qualify as bulk-safe.")
 
+                # Streamlit data_editor persists its own widget state. The previous
+                # "Select all safe" button only displayed an info message, so it could
+                # not restore checkboxes after a user changed them. Rotate the editor
+                # key when a bulk selection command is requested so the new defaults
+                # are actually applied.
+                if "_bulk_review_editor_version" not in st.session_state:
+                    st.session_state["_bulk_review_editor_version"] = 0
+                if "_bulk_review_selection_mode" not in st.session_state:
+                    st.session_state["_bulk_review_selection_mode"] = "safe"
+
+                sel1,sel2,_sel_spacer=st.columns([1,1,3])
+                if sel1.button("Select all safe", key="bulk_select_all_safe"):
+                    st.session_state["_bulk_review_selection_mode"] = "safe"
+                    st.session_state["_bulk_review_editor_version"] += 1
+                    st.rerun()
+                if sel2.button("Clear selection", key="bulk_clear_selection"):
+                    st.session_state["_bulk_review_selection_mode"] = "none"
+                    st.session_state["_bulk_review_editor_version"] += 1
+                    st.rerun()
+
                 edit_df=pd.DataFrame(validated)
+                mode=st.session_state.get("_bulk_review_selection_mode","safe")
+                if mode == "none":
+                    edit_df["Apply?"] = False
+                else:
+                    edit_df["Apply?"] = edit_df["_safe"].astype(bool)
+
                 visible_cols=["Apply?","Record","Table","Confidence","Sources","Schema","FKs","Duplicate","Parent","Risk"]
+                editor_key=f"bulk_review_editor_{st.session_state['_bulk_review_editor_version']}"
 
                 edited=st.data_editor(
                     edit_df[visible_cols],
@@ -2037,7 +2080,7 @@ elif page=="Review Queue":
                         ),
                         "Confidence": st.column_config.NumberColumn(format="%.2f"),
                     },
-                    key="bulk_review_editor"
+                    key=editor_key
                 )
 
                 # Restore IDs by row order
@@ -2051,7 +2094,7 @@ elif page=="Review Queue":
                         "They will not be bulk-applied; use Manual review."
                     )
 
-                c1,c2,c3=st.columns(3)
+                c1,c2=st.columns(2)
 
                 if c1.button("Approve selected safe",type="primary",disabled=not selected):
                     approved=0
@@ -2135,13 +2178,10 @@ elif page=="Review Queue":
                         )
                     st.rerun()
 
-                if c3.button("Select all safe"):
-                    st.info("All currently safe records are already pre-selected in the table above.")
-
                 with st.expander("Bulk policy"):
                     st.code(
                         "confidence >= 0.90\n"
-                        "source URLs >= 1\n"
+                        "source-backed provenance >= 1\n"
                         "required schema fields present\n"
                         "foreign keys resolve\n"
                         "no exact duplicate\n"
