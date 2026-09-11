@@ -200,19 +200,248 @@ elif page=="Batch Staging":
                 sb.table("pc_ingestion_jobs").update({"status":"completed","stats":{"rows":len(rows)}}).eq("ingestion_job_id",job['ingestion_job_id']).execute(); st.success("Batch staged.")
 
 elif page=="Review Queue":
-    title("Review queue")
-    rows=safe_rows(sb,"pc_staged_records","staged_record_id,target_table,natural_key,action,confidence,validation_status,review_status,payload,created_at",250,{"review_status":"pending"},"created_at") if sb else []
-    dataframe(rows)
-    if sb and rows:
-        rid=st.selectbox("Open staged record",[r['staged_record_id'] for r in rows])
-        row=next(r for r in rows if r['staged_record_id']==rid)
-        st.json(row.get('payload',{}))
-        c1,c2=st.columns(2)
-        if c1.button("Approve for apply"):
-            sb.table("pc_staged_records").update({"review_status":"approved"}).eq("staged_record_id",rid).execute(); st.rerun()
-        if c2.button("Reject"):
-            sb.table("pc_staged_records").update({"review_status":"rejected"}).eq("staged_record_id",rid).execute(); st.rerun()
-    st.info("Applying approved staged records to canonical tables remains deliberately separate. Use deterministic import scripts or an explicit Apply action after schema validation.")
+    title("Review queue","Analyst review of AI-assisted and batch-staged proposals before any canonical write.")
+
+    if not sb:
+        st.error("Supabase is required for the review queue.")
+    else:
+        rows = safe_rows(
+            sb,
+            "pc_staged_records",
+            "staged_record_id,ingestion_job_id,target_table,natural_key,action,confidence,validation_status,review_status,payload,current_record,source_id,created_at",
+            500,
+            {"review_status":"pending"},
+            "created_at"
+        )
+
+        if not rows:
+            st.success("No pending staged records.")
+        else:
+            import pandas as _pd
+            import json as _json
+
+            review_df = _pd.DataFrame(rows)
+
+            # Compact reviewer-facing summary table.
+            summary_cols = [
+                c for c in [
+                    "target_table",
+                    "natural_key",
+                    "action",
+                    "confidence",
+                    "validation_status",
+                    "review_status",
+                    "source_id",
+                    "created_at",
+                ] if c in review_df.columns
+            ]
+
+            st.caption(f"{len(review_df):,} pending staged records")
+            st.dataframe(
+                review_df[summary_cols] if summary_cols else review_df,
+                use_container_width=True,
+                hide_index=True,
+                height=min(420, 40 + 35 * max(1, len(review_df))),
+            )
+
+            # Friendly selector text rather than UUID-only selection.
+            def _record_label(r):
+                nk = r.get("natural_key") or "(no natural key)"
+                tt = r.get("target_table") or "(no table)"
+                conf = r.get("confidence")
+                conf_txt = f"{float(conf):.2f}" if conf not in (None, "") else "n/a"
+                return f"{tt} | {nk} | confidence {conf_txt}"
+
+            labels = [_record_label(r) for r in rows]
+            selected_label = st.selectbox("Open staged record", labels, index=0)
+            row = rows[labels.index(selected_label)]
+
+            payload = row.get("payload") or {}
+            current_record = row.get("current_record") or {}
+
+            # Detail header
+            st.markdown("### Record review")
+            a,b,c,d = st.columns(4)
+            a.metric("Target table", row.get("target_table") or "—")
+            b.metric("Action", row.get("action") or "—")
+            c.metric("Confidence", row.get("confidence") if row.get("confidence") is not None else "—")
+            d.metric("Validation", row.get("validation_status") or "pending")
+
+            st.caption(
+                f"Natural key: {row.get('natural_key') or '—'}  ·  "
+                f"Created: {row.get('created_at') or '—'}  ·  "
+                f"Staged record: {row.get('staged_record_id')}"
+            )
+
+            left,right = st.columns([1.15,0.85])
+
+            with left:
+                st.markdown("#### Proposed payload")
+
+                # Render payload as readable field/value rows.
+                if isinstance(payload, dict):
+                    flat_rows=[]
+                    for k,v in payload.items():
+                        if isinstance(v,(dict,list)):
+                            display=_json.dumps(v,ensure_ascii=False,indent=2)
+                        else:
+                            display=v
+                        flat_rows.append({"Field":k,"Proposed value":display})
+                    st.dataframe(
+                        _pd.DataFrame(flat_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                        height=min(600, 60 + 34 * max(1, len(flat_rows))),
+                    )
+                else:
+                    st.code(str(payload))
+
+                # Extract source links from common payload/metadata structures.
+                st.markdown("#### Sources")
+                source_rows=[]
+
+                def _add_source(obj):
+                    if not isinstance(obj,dict):
+                        return
+                    url=obj.get("url") or obj.get("source_url")
+                    if not url:
+                        return
+                    source_rows.append({
+                        "Publisher": obj.get("publisher") or obj.get("source_name") or "",
+                        "Title": obj.get("title") or obj.get("source_title") or "",
+                        "URL": url,
+                    })
+
+                if isinstance(payload,dict):
+                    meta=payload.get("metadata") or {}
+                    if isinstance(meta,dict):
+                        for s in meta.get("research_sources") or []:
+                            _add_source(s)
+                        for s in meta.get("sources") or []:
+                            _add_source(s)
+                    for s in payload.get("sources") or []:
+                        _add_source(s)
+
+                if source_rows:
+                    for i,s in enumerate(source_rows,1):
+                        label = s["Title"] or s["Publisher"] or f"Source {i}"
+                        st.markdown(f"{i}. [{label}]({s['URL']})")
+                        if s["Publisher"] and s["Publisher"] != label:
+                            st.caption(s["Publisher"])
+                else:
+                    st.info("No source URLs were embedded in this staged payload.")
+
+            with right:
+                st.markdown("#### Existing canonical context")
+
+                # Query likely duplicate/current candidates conservatively.
+                target_table = row.get("target_table")
+                natural_key = row.get("natural_key")
+                candidates=[]
+
+                try:
+                    if target_table=="pc_entities":
+                        name = payload.get("name") if isinstance(payload,dict) else None
+                        if name:
+                            candidates = safe_rows(sb,"pc_entities","entity_id,name,entity_type,country,record_status",20)
+                            candidates = [x for x in candidates if str(x.get("name","")).strip().casefold()==str(name).strip().casefold()]
+                    elif target_table=="pc_assets":
+                        name = payload.get("name") if isinstance(payload,dict) else None
+                        country = payload.get("country") if isinstance(payload,dict) else None
+                        candidates = safe_rows(sb,"pc_assets","asset_id,name,asset_type,subtype,country,region_city,status,record_status",100)
+                        if name:
+                            nn=str(name).strip().casefold()
+                            candidates=[x for x in candidates if str(x.get("name","")).strip().casefold()==nn]
+                        if country and candidates:
+                            cc=str(country).strip().casefold()
+                            candidates=[x for x in candidates if not x.get("country") or str(x.get("country","")).strip().casefold()==cc]
+                    elif target_table=="pc_mobile_assets":
+                        imo = payload.get("imo") if isinstance(payload,dict) else None
+                        name = payload.get("name") if isinstance(payload,dict) else None
+                        candidates = safe_rows(sb,"pc_mobile_assets","mobile_asset_id,name,imo,mobile_type,flag,status,record_status",100)
+                        if imo:
+                            candidates=[x for x in candidates if str(x.get("imo","")).strip()==str(imo).strip()]
+                        elif name:
+                            nn=str(name).strip().casefold()
+                            candidates=[x for x in candidates if str(x.get("name","")).strip().casefold()==nn]
+                    elif target_table=="pc_transport_routes":
+                        rid = payload.get("route_id") if isinstance(payload,dict) else None
+                        if rid:
+                            candidates = safe_rows(sb,"pc_transport_routes","route_id,route_name,mode,current_status",50,{"route_id":rid})
+                except Exception:
+                    candidates=[]
+
+                if current_record:
+                    st.caption("Current record supplied by staging process")
+                    st.json(current_record)
+
+                if candidates:
+                    st.warning(f"Potential existing canonical match{'es' if len(candidates)!=1 else ''}: {len(candidates)}")
+                    st.dataframe(_pd.DataFrame(candidates),use_container_width=True,hide_index=True)
+                else:
+                    st.success("No obvious exact canonical match detected by the review UI.")
+
+                st.markdown("#### Reviewer decision")
+
+                notes = st.text_area(
+                    "Reviewer note",
+                    placeholder="Reason for approval, rejection, or requested changes.",
+                    key=f"note_{row['staged_record_id']}"
+                )
+
+                c1,c2,c3 = st.columns(3)
+
+                if c1.button("Approve", type="primary", key=f"approve_{row['staged_record_id']}"):
+                    sb.table("pc_staged_records").update({
+                        "review_status":"approved",
+                        "reviewed_at":"now()"
+                    }).eq("staged_record_id",row["staged_record_id"]).execute()
+                    st.success("Record approved for apply.")
+                    st.rerun()
+
+                if c2.button("Needs changes", key=f"changes_{row['staged_record_id']}"):
+                    payload_update = payload if isinstance(payload,dict) else {"raw_payload":payload}
+                    if notes:
+                        meta = payload_update.get("metadata") or {}
+                        if not isinstance(meta,dict):
+                            meta={}
+                        meta["review_note"]=notes
+                        payload_update["metadata"]=meta
+                    sb.table("pc_staged_records").update({
+                        "review_status":"needs_changes",
+                        "payload":payload_update,
+                        "reviewed_at":"now()"
+                    }).eq("staged_record_id",row["staged_record_id"]).execute()
+                    st.warning("Record marked as needing changes.")
+                    st.rerun()
+
+                if c3.button("Reject", key=f"reject_{row['staged_record_id']}"):
+                    payload_update = payload if isinstance(payload,dict) else {"raw_payload":payload}
+                    if notes:
+                        meta = payload_update.get("metadata") or {}
+                        if not isinstance(meta,dict):
+                            meta={}
+                        meta["review_note"]=notes
+                        payload_update["metadata"]=meta
+                    sb.table("pc_staged_records").update({
+                        "review_status":"rejected",
+                        "payload":payload_update,
+                        "reviewed_at":"now()"
+                    }).eq("staged_record_id",row["staged_record_id"]).execute()
+                    st.error("Record rejected.")
+                    st.rerun()
+
+                st.markdown("---")
+                st.markdown("#### Apply control")
+                st.caption(
+                    "Approval and application remain separate. This protects the canonical database "
+                    "from accidental AI writes."
+                )
+
+                if row.get("review_status")=="approved":
+                    st.info("This record is approved. Use the canonical apply workflow to write it.")
+                else:
+                    st.caption("Approve the record first; canonical apply remains intentionally disabled here.")
 
 elif page=="Market Data":
     title("Freight & commodity market data","Attributed public-source market observations, initially seeded from The Signal Group Weekly Market Monitor. Nothing is client-visible until approved.")
