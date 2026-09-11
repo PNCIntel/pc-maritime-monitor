@@ -779,6 +779,196 @@ def all_tables():
 
 TABLES=all_tables()
 
+
+# ---------- canonical DB port-terminal bridge ----------
+def _norm_port_bridge_name(v):
+    s=str(v or "").strip().casefold().replace("&"," and ")
+    s=re.sub(r"\b(port of|port|harbour|harbor|terminal|terminals|container|multipurpose|complex)\b"," ",s)
+    s=re.sub(r"[^a-z0-9]+"," ",s)
+    return re.sub(r"\s+"," ",s).strip()
+
+def _canonical_db_port_terminal_frame():
+    """Project Supabase terminal_of relationships into the legacy Port Terminals shape.
+
+    Critical detail: relationship target IDs are pc_assets IDs, while the Ports page
+    filters terminals by the legacy/canonical workbook Port ID. Resolve the parent
+    pc_assets record back to the displayed Ports row by name/country, then assign that
+    Port ID to the projected terminal row.
+    """
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame()
+
+        assets=pc_safe_rows(
+            sb,"pc_assets",
+            "asset_id,name,asset_type,subtype,country,region_city,status,metadata",
+            5000
+        )
+        facilities=pc_safe_rows(
+            sb,"pc_logistics_facilities",
+            "asset_id,facility_type,owner_entity_id,operator_entity_id,area_sqm,rail_connected,customs_bonded,source_id,metadata",
+            5000
+        )
+        rels=pc_safe_rows(
+            sb,"pc_relationships",
+            "relationship_id,source_type,source_id,relationship_type,target_type,target_id,record_status",
+            10000
+        )
+        entities=pc_safe_rows(
+            sb,"pc_entities",
+            "entity_id,name,entity_type,country",
+            5000
+        )
+    except Exception:
+        return pd.DataFrame()
+
+    if not assets or not facilities or not rels:
+        return pd.DataFrame()
+
+    asset_by_id={str(a.get("asset_id") or ""):a for a in assets if a.get("asset_id")}
+    entity_by_id={str(e.get("entity_id") or ""):e for e in entities if e.get("entity_id")}
+    facility_by_id={str(f.get("asset_id") or ""):f for f in facilities if f.get("asset_id")}
+
+    legacy_ports=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
+    if legacy_ports.empty or "Port ID" not in legacy_ports.columns:
+        return pd.DataFrame()
+
+    def resolve_display_port_id(parent_asset):
+        pname=str(parent_asset.get("name") or "").strip()
+        pcountry=str(parent_asset.get("country") or "").strip().casefold()
+        if not pname:
+            return None
+
+        # 1. Exact display-name match.
+        exact=legacy_ports[
+            legacy_ports.get("Port / Facility",pd.Series(index=legacy_ports.index,dtype=str))
+            .fillna("").astype(str).str.strip().str.casefold().eq(pname.casefold())
+        ].copy()
+        if pcountry and "Country" in exact.columns and not exact.empty:
+            same=exact[
+                exact["Country"].fillna("").astype(str).str.strip().str.casefold().eq(pcountry)
+            ]
+            if not same.empty:
+                exact=same
+        if len(exact)==1:
+            return str(exact.iloc[0]["Port ID"])
+
+        # 2. Conservative normalized-name + country match.
+        pkey=_norm_port_bridge_name(pname)
+        if not pkey:
+            return None
+        candidates=[]
+        for _,r in legacy_ports.iterrows():
+            rname=str(r.get("Port / Facility","") or "").strip()
+            rkey=_norm_port_bridge_name(rname)
+            if rkey != pkey:
+                continue
+            rcountry=str(r.get("Country","") or "").strip().casefold()
+            if pcountry and rcountry and rcountry != pcountry:
+                continue
+            candidates.append(r)
+        if len(candidates)==1:
+            return str(candidates[0].get("Port ID",""))
+        return None
+
+    rows=[]
+    seen=set()
+
+    for rel in rels:
+        rtype=str(rel.get("relationship_type") or "").strip().casefold().replace("-","_").replace(" ","_")
+        if rtype not in {"terminal_of","part_of","component_of"}:
+            continue
+        if str(rel.get("source_type") or "").strip().casefold()!="asset":
+            continue
+        if str(rel.get("target_type") or "").strip().casefold()!="asset":
+            continue
+
+        child_id=str(rel.get("source_id") or "").strip()
+        parent_id=str(rel.get("target_id") or "").strip()
+        child=asset_by_id.get(child_id)
+        parent=asset_by_id.get(parent_id)
+        facility=facility_by_id.get(child_id)
+        if not child or not parent or not facility:
+            continue
+
+        display_port_id=resolve_display_port_id(parent)
+        if not display_port_id:
+            continue
+
+        key=(child_id,display_port_id)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        meta={}
+        for candidate in (child.get("metadata"),facility.get("metadata")):
+            if isinstance(candidate,dict):
+                meta.update(candidate)
+        research=meta.get("research_attributes") if isinstance(meta.get("research_attributes"),dict) else {}
+
+        operator_id=str(facility.get("operator_entity_id") or "")
+        owner_id=str(facility.get("owner_entity_id") or "")
+        operator_name=(entity_by_id.get(operator_id) or {}).get("name","")
+        owner_name=(entity_by_id.get(owner_id) or {}).get("name","")
+
+        capacity=(
+            research.get("container_capacity_teu_per_year")
+            or research.get("container_capacity_teu_year")
+            or research.get("capacity_teu_per_year")
+            or research.get("capacity_teu")
+            or ""
+        )
+
+        rows.append({
+            "Terminal ID":child_id,
+            "Terminal / Facility":child.get("name") or child_id,
+            "Terminal":child.get("name") or child_id,
+            "Port ID":display_port_id,
+            "Parent Port":parent.get("name") or "",
+            "Port":parent.get("name") or "",
+            "Country":child.get("country") or parent.get("country") or "",
+            "City / Area":child.get("region_city") or "",
+            "Primary Operator Company ID":operator_id,
+            "Primary Operator":operator_name,
+            "Operator / Network":operator_name,
+            "Owner Company ID":owner_id,
+            "Owner":owner_name,
+            "Facility Type":facility.get("facility_type") or child.get("subtype") or "",
+            "Cargo Profile":research.get("cargo_profile") or research.get("cargo") or "",
+            "Container Capacity TEU/yr":capacity,
+            "Status":child.get("status") or "",
+            "Ownership / Structure":research.get("ownership_structure") or "",
+            "Source ID":facility.get("source_id") or "",
+            "Data Status":"Supabase canonical",
+        })
+
+    return pd.DataFrame(rows)
+
+def _merge_db_port_terminals():
+    db_terms=_canonical_db_port_terminal_frame()
+    if db_terms.empty:
+        return
+    key=("Maritime","Port Terminals")
+    existing=TABLES.get(key,pd.DataFrame()).copy()
+    if existing.empty:
+        TABLES[key]=db_terms
+        return
+
+    combined=pd.concat([existing,db_terms],ignore_index=True,sort=False)
+
+    # Prefer DB-canonical projection when Terminal ID collides.
+    if "Terminal ID" in combined.columns:
+        tid=combined["Terminal ID"].fillna("").astype(str).str.strip()
+        with_id=combined[tid.ne("")].copy()
+        without_id=combined[tid.eq("")].copy()
+        with_id=with_id.drop_duplicates(subset=["Terminal ID"],keep="last")
+        combined=pd.concat([without_id,with_id],ignore_index=True,sort=False)
+
+    TABLES[key]=combined
+
+_merge_db_port_terminals()
+
 def _canonical_db_event_frames():
     """Return normalized Supabase events/locations in the legacy dataframe shape.
 
