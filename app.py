@@ -30,7 +30,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.9-canonical-db-vessels"
+APP_VERSION = "v3.3.10-canonical-db-vessels-fix"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Legacy Excel + Research Reference + Supabase Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -871,6 +871,10 @@ def _canonical_db_vessel_frames():
     projected into the legacy dataframe column names so the existing Trade UI can use
     them without maintaining a second vessel implementation.
     """
+    def _db_norm_imo(value):
+        s = re.sub(r"[^0-9]", "", str(value or ""))
+        return s if len(s) == 7 else s
+
     try:
         sb = pc_db_client(service=True)
         if sb is None:
@@ -923,7 +927,7 @@ def _canonical_db_vessel_frames():
             vessels.append({
                 "Vessel ID": str(r.get("mobile_asset_id") or "").strip(),
                 "Vessel Name": str(r.get("name") or "").strip(),
-                "IMO": _norm_imo(r.get("imo")),
+                "IMO": _db_norm_imo(r.get("imo")),
                 "MMSI": str(r.get("mmsi") or "").strip(),
                 "Call Sign": str(r.get("call_sign") or "").strip(),
                 "Flag": str(r.get("flag") or "").strip(),
@@ -997,6 +1001,8 @@ def _canonical_db_vessel_frames():
 
 def _merge_canonical_vessels(legacy, canonical):
     """Merge DB vessels into the legacy display frame, preferring DB rows by ID/IMO."""
+    def _merge_merge_norm_imo(value):
+        return re.sub(r"[^0-9]", "", str(value or ""))
     if canonical is None or canonical.empty:
         return legacy.copy() if isinstance(legacy, pd.DataFrame) else pd.DataFrame()
     if legacy is None or legacy.empty:
@@ -1007,14 +1013,14 @@ def _merge_canonical_vessels(legacy, canonical):
 
     # Remove legacy rows superseded by the canonical ID or IMO.
     canon_ids = set(new.get("Vessel ID", pd.Series(dtype=str)).fillna("").astype(str))
-    canon_imos = set(new.get("IMO", pd.Series(dtype=str)).map(_norm_imo))
+    canon_imos = set(new.get("IMO", pd.Series(dtype=str)).map(_merge_merge_norm_imo))
     canon_imos.discard("")
 
     keep = pd.Series(True, index=old.index)
     if "Vessel ID" in old.columns and canon_ids:
         keep &= ~old["Vessel ID"].fillna("").astype(str).isin(canon_ids)
     if "IMO" in old.columns and canon_imos:
-        keep &= ~old["IMO"].map(_norm_imo).isin(canon_imos)
+        keep &= ~old["IMO"].map(_merge_merge_norm_imo).isin(canon_imos)
 
     return pd.concat([old[keep], new], ignore_index=True, sort=False)
 
