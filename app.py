@@ -4447,7 +4447,22 @@ news_label="NewsData" if news_key_present else "NewsData · key needed"
 st.sidebar.markdown(f"<span class='pc-feed-health'><span class='pc-dot {news_class}'></span> {news_label}</span>",unsafe_allow_html=True)
 st.sidebar.caption("CGMIX and GDELT remain deferred. Live API views keep the last successful session result if a refresh fails.")
 
-st.markdown(f"<div class='pc-breadcrumb'><b>{workspace}</b> &nbsp;/&nbsp; {page}</div>",unsafe_allow_html=True)
+# Resolve workspace label safely before breadcrumb rendering.
+workspace = globals().get("workspace")
+if not workspace:
+    _section_map = globals().get("NAV_SECTIONS", {})
+    if isinstance(_section_map, dict):
+        workspace = next(
+            (section for section, items in _section_map.items() if page in items),
+            "Trade System"
+        )
+    else:
+        workspace = "Trade System"
+
+st.markdown(
+    f"<div class='pc-breadcrumb'><b>{workspace}</b> &nbsp;/&nbsp; {page}</div>",
+    unsafe_allow_html=True
+)
 
 def page_company_selector():
     companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
