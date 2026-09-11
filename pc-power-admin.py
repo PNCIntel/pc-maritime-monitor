@@ -134,6 +134,95 @@ def _duplicate_check(sb,table,payload):
         pass
     return False,""
 
+
+def _slug(value):
+    s=re.sub(r"[^A-Z0-9]+","_",str(value or "").upper()).strip("_")
+    return s[:48] or "UNNAMED"
+
+def _deterministic_asset_id(name,country="",asset_type=""):
+    raw=f"{name}|{country}|{asset_type}".encode("utf-8")
+    digest=hashlib.sha1(raw).hexdigest()[:10].upper()
+    return f"ASSET_AI_{_slug(name)[:28]}_{digest}"
+
+def _name_from_staged(row,payload):
+    if isinstance(payload,dict):
+        for key in ("name","asset_name","facility_name","terminal_name","port_name","hub_name","route_name","title"):
+            if payload.get(key):
+                return str(payload[key]).strip()
+    nk=str(row.get("natural_key") or "").strip()
+    if " - " in nk:
+        return nk.rsplit(" - ",1)[0].strip()
+    return nk or "Unnamed asset"
+
+def _country_from_staged(row,payload):
+    if isinstance(payload,dict) and payload.get("country"):
+        return str(payload["country"]).strip()
+    nk=str(row.get("natural_key") or "")
+    if " - " in nk:
+        return nk.rsplit(" - ",1)[-1].strip()
+    return None
+
+def _extension_parent_plan(row):
+    """Return parent-asset plan for extension tables that require pc_assets.asset_id."""
+    table=row.get("target_table")
+    payload=row.get("payload") or {}
+    if table not in {"pc_logistics_facilities","pc_energy_assets","pc_industrial_assets"}:
+        return None
+    if payload.get("asset_id"):
+        return None
+
+    name=_name_from_staged(row,payload)
+    country=_country_from_staged(row,payload)
+    if table=="pc_logistics_facilities":
+        asset_type="Logistics facility"
+    elif table=="pc_energy_assets":
+        asset_type="Energy infrastructure"
+    else:
+        asset_type="Industrial asset"
+
+    return {
+        "asset_id":_deterministic_asset_id(name,country or "",asset_type),
+        "name":name,
+        "asset_type":asset_type,
+        "country":country,
+        "status":payload.get("operational_status") or payload.get("status"),
+        "record_status":"verified",
+        "metadata":{
+            "created_from_staged_record":row.get("staged_record_id"),
+            "ai_canonicalization":True,
+            "natural_key":row.get("natural_key"),
+        },
+    }
+
+def _ensure_parent_asset(sb,row,payload):
+    """Create/link a pc_assets parent for extension records that need asset_id."""
+    plan=_extension_parent_plan(row)
+    if not plan:
+        return payload,False
+
+    # Exact-name/country duplicate check first.
+    q=sb.table("pc_assets").select("asset_id,name,country,asset_type").eq("name",plan["name"])
+    hits=q.limit(10).execute().data or []
+    if plan.get("country"):
+        country=str(plan["country"]).strip().casefold()
+        same=[x for x in hits if not x.get("country") or str(x.get("country")).strip().casefold()==country]
+        if same:
+            plan["asset_id"]=same[0]["asset_id"]
+    elif hits:
+        plan["asset_id"]=hits[0]["asset_id"]
+
+    # Upsert parent canonical asset, preserving any existing exact-ID record.
+    sb.table("pc_assets").upsert(plan,on_conflict="asset_id").execute()
+
+    payload=dict(payload)
+    payload["asset_id"]=plan["asset_id"]
+    meta=payload.get("metadata") or {}
+    if not isinstance(meta,dict):
+        meta={}
+    meta["canonical_parent_asset_id"]=plan["asset_id"]
+    payload["metadata"]=meta
+    return payload,True
+
 def validate_staged_for_bulk(sb,row):
     payload=row.get("payload") or {}
     table=row.get("target_table")
@@ -142,6 +231,16 @@ def validate_staged_for_bulk(sb,row):
     except Exception: confidence=0.0
 
     schema_ok,missing=_schema_valid(table,payload)
+    parent_plan=_extension_parent_plan(row)
+
+    # For extension tables, a missing asset_id can be resolved safely by creating/linking
+    # the canonical pc_assets parent during apply.
+    parent_needed=False
+    if parent_plan and missing==["asset_id"]:
+        schema_ok=True
+        missing=[]
+        parent_needed=True
+
     fk_ok,fk_problems=_fk_valid(sb,table,payload)
     duplicate,dup_reason=_duplicate_check(sb,table,payload)
     sources=_source_count(payload)
@@ -162,6 +261,7 @@ def validate_staged_for_bulk(sb,row):
     if duplicate: risk.append("duplicate:"+dup_reason)
     if sources < 1: risk.append("no source URL")
     if table not in APPLY_CONFLICT_KEYS: risk.append("no configured apply key")
+    if parent_needed: risk.append("will create/link parent asset")
 
     return {
         "safe":safe,
@@ -170,6 +270,7 @@ def validate_staged_for_bulk(sb,row):
         "duplicate":duplicate,
         "sources":sources,
         "confidence":confidence,
+        "parent_needed":parent_needed,
         "risk":"; ".join(risk) if risk else "safe",
     }
 
@@ -386,6 +487,11 @@ def apply_staged_record(sb, row, edited_payload=None):
         raise ValueError("Canonical payload must be a non-empty JSON object.")
 
     payload=_jsonable(payload)
+
+    # Extension records such as logistics/energy/industrial rows require a canonical
+    # pc_assets parent. Create or link that parent automatically when asset_id is absent.
+    payload,parent_created=_ensure_parent_asset(sb,row,payload)
+
     conflict=APPLY_CONFLICT_KEYS.get(table)
     keys=[x.strip() for x in conflict.split(",")] if conflict else []
     can_upsert=bool(keys) and all(payload.get(k) not in (None,"") for k in keys)
@@ -703,8 +809,8 @@ elif page=="Review Queue":
             else:
                 st.markdown("### Automated validation")
                 st.caption(
-                    "Safe = confidence ≥ 0.90, at least one source URL, schema valid, "
-                    "foreign keys valid, no exact duplicate, and a configured canonical apply key."
+                    "Safe = confidence ≥ 0.90, source-backed, valid FKs, no exact duplicate, and a configured apply key. "
+                    "For logistics/energy/industrial extensions, a missing asset_id is resolved automatically by creating or linking the parent canonical asset."
                 )
 
                 validated=[]
@@ -720,6 +826,7 @@ elif page=="Review Queue":
                             "Schema": "✓" if v["schema_ok"] else "✗",
                             "FKs": "✓" if v["fk_ok"] else "✗",
                             "Duplicate": "Yes" if v["duplicate"] else "No",
+                            "Parent": "Create/link" if v.get("parent_needed") else "Ready",
                             "Risk": v["risk"],
                             "_id": r.get("staged_record_id"),
                             "_row": r,
@@ -730,7 +837,7 @@ elif page=="Review Queue":
                 st.info(f"{safe_count} of {len(validated)} record(s) currently qualify as bulk-safe.")
 
                 edit_df=pd.DataFrame(validated)
-                visible_cols=["Apply?","Record","Table","Confidence","Sources","Schema","FKs","Duplicate","Risk"]
+                visible_cols=["Apply?","Record","Table","Confidence","Sources","Schema","FKs","Duplicate","Parent","Risk"]
 
                 edited=st.data_editor(
                     edit_df[visible_cols],
@@ -952,13 +1059,14 @@ elif page=="Review Queue":
                         "Schema":"✓" if v["schema_ok"] else "✗",
                         "FKs":"✓" if v["fk_ok"] else "✗",
                         "Duplicate":"Yes" if v["duplicate"] else "No",
+                        "Parent":"Create/link" if v.get("parent_needed") else "Ready",
                         "Risk":v["risk"],
                         "_row":r,
                         "_safe":v["safe"],
                     })
 
                 frame=pd.DataFrame(rows)
-                cols=["Apply?","Record","Table","Confidence","Sources","Schema","FKs","Duplicate","Risk"]
+                cols=["Apply?","Record","Table","Confidence","Sources","Schema","FKs","Duplicate","Parent","Risk"]
                 edited=st.data_editor(
                     frame[cols],
                     use_container_width=True,
