@@ -4303,7 +4303,14 @@ news_label="NewsData" if news_key_present else "NewsData · key needed"
 st.sidebar.markdown(f"<span class='pc-feed-health'><span class='pc-dot {news_class}'></span> {news_label}</span>",unsafe_allow_html=True)
 st.sidebar.caption("CGMIX and GDELT remain deferred. Live API views keep the last successful session result if a refresh fails.")
 
-st.markdown(f"<div class='pc-breadcrumb'><b>{workspace}</b> &nbsp;/&nbsp; {page}</div>",unsafe_allow_html=True)
+workspace = next(
+    (section for section, items in NAV_SECTIONS.items() if page in items),
+    "TRADE SYSTEM",
+)
+st.markdown(
+    f"<div class='pc-breadcrumb'><b>{workspace}</b> &nbsp;/&nbsp; {page}</div>",
+    unsafe_allow_html=True,
+)
 
 def page_company_selector():
     companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
