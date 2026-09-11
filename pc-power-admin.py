@@ -32,6 +32,147 @@ sb=service_client()
 st.sidebar.markdown("<div class='pc-k'>Power & Corridors</div>",unsafe_allow_html=True)
 st.sidebar.markdown("## Power Admin")
 PAGES=["Dashboard","Migration","Organizations","Users & Access","Research Jobs","Trade System Builder","Batch Staging","Review Queue","Market Data","Governance & Quality"]
+
+# ---------------------------------------------------------------------------
+# Bulk review / validation helpers
+# ---------------------------------------------------------------------------
+
+REQUIRED_BY_TABLE = {
+    "pc_entities": ["entity_id","name","entity_type"],
+    "pc_assets": ["asset_id","name","asset_type"],
+    "pc_mobile_assets": ["mobile_asset_id","name","mobile_type"],
+    "pc_relationships": ["relationship_id","source_type","source_id","relationship_type","target_type","target_id"],
+    "pc_events": ["event_id","event_type"],
+    "pc_transactions": ["transaction_id"],
+    "pc_energy_assets": ["asset_id"],
+    "pc_industrial_assets": ["asset_id"],
+    "pc_logistics_facilities": ["asset_id"],
+    "pc_market_instruments": ["market_instrument_id","name"],
+    "pc_market_exposure_links": ["target_type","target_id","market_instrument_id","exposure_type"],
+    "pc_trade_flows": ["trade_flow_id"],
+    "pc_supply_series": ["supply_series_id"],
+    "pc_transport_routes": ["route_id","route_name","mode"],
+    "pc_chokepoints": ["chokepoint_id","name"],
+}
+
+FK_RULES = {
+    "pc_logistics_facilities": [
+        ("owner_entity_id","pc_entities","entity_id"),
+        ("operator_entity_id","pc_entities","entity_id"),
+    ],
+    "pc_energy_assets": [
+        ("operator_entity_id","pc_entities","entity_id"),
+        ("owner_entity_id","pc_entities","entity_id"),
+    ],
+    "pc_industrial_assets": [
+        ("operator_entity_id","pc_entities","entity_id"),
+        ("owner_entity_id","pc_entities","entity_id"),
+    ],
+    "pc_transport_routes": [
+        ("operator_entity_id","pc_entities","entity_id"),
+    ],
+    "pc_market_exposure_links": [
+        ("market_instrument_id","pc_market_instruments","market_instrument_id"),
+    ],
+}
+
+def _source_count(payload):
+    if not isinstance(payload,dict): return 0
+    count=0
+    meta=payload.get("metadata") or {}
+    if isinstance(meta,dict):
+        for key in ("research_sources","sources"):
+            seq=meta.get(key) or []
+            if isinstance(seq,list):
+                count += sum(1 for s in seq if isinstance(s,dict) and (s.get("url") or s.get("source_url")))
+    seq=payload.get("sources") or []
+    if isinstance(seq,list):
+        count += sum(1 for s in seq if isinstance(s,dict) and (s.get("url") or s.get("source_url")))
+    if payload.get("source_url"):
+        count += 1
+    return count
+
+def _schema_valid(table,payload):
+    if table not in AI_ALLOWED_TABLES or not isinstance(payload,dict):
+        return False, ["invalid target/payload"]
+    missing=[k for k in REQUIRED_BY_TABLE.get(table,[]) if payload.get(k) in (None,"")]
+    return len(missing)==0, missing
+
+def _fk_valid(sb,table,payload):
+    problems=[]
+    for field,ref_table,ref_col in FK_RULES.get(table,[]):
+        value=payload.get(field)
+        if value in (None,""):
+            continue
+        try:
+            hit=(sb.table(ref_table).select(ref_col).eq(ref_col,value).limit(1).execute().data or [])
+            if not hit:
+                problems.append(f"{field}→{ref_table}.{ref_col} missing")
+        except Exception:
+            problems.append(f"{field} FK check failed")
+    return len(problems)==0,problems
+
+def _duplicate_check(sb,table,payload):
+    """Conservative exact duplicate check on canonical identifiers and names."""
+    try:
+        conflict=APPLY_CONFLICT_KEYS.get(table)
+        if conflict:
+            keys=[x.strip() for x in conflict.split(",")]
+            if all(payload.get(k) not in (None,"") for k in keys):
+                q=sb.table(table).select("*")
+                for k in keys:
+                    q=q.eq(k,payload[k])
+                hit=q.limit(1).execute().data or []
+                if hit:
+                    return True,"conflict-key match"
+
+        if table in {"pc_entities","pc_assets","pc_mobile_assets"} and payload.get("name"):
+            hit=sb.table(table).select("*").eq("name",payload["name"]).limit(1).execute().data or []
+            if hit:
+                return True,"exact-name match"
+    except Exception:
+        pass
+    return False,""
+
+def validate_staged_for_bulk(sb,row):
+    payload=row.get("payload") or {}
+    table=row.get("target_table")
+    confidence=row.get("confidence")
+    try: confidence=float(confidence)
+    except Exception: confidence=0.0
+
+    schema_ok,missing=_schema_valid(table,payload)
+    fk_ok,fk_problems=_fk_valid(sb,table,payload)
+    duplicate,dup_reason=_duplicate_check(sb,table,payload)
+    sources=_source_count(payload)
+
+    safe=(
+        confidence >= 0.90
+        and schema_ok
+        and fk_ok
+        and not duplicate
+        and sources >= 1
+        and table in APPLY_CONFLICT_KEYS
+    )
+
+    risk=[]
+    if confidence < 0.90: risk.append("confidence<0.90")
+    if not schema_ok: risk.append("missing:"+",".join(missing))
+    if not fk_ok: risk.extend(fk_problems)
+    if duplicate: risk.append("duplicate:"+dup_reason)
+    if sources < 1: risk.append("no source URL")
+    if table not in APPLY_CONFLICT_KEYS: risk.append("no configured apply key")
+
+    return {
+        "safe":safe,
+        "schema_ok":schema_ok,
+        "fk_ok":fk_ok,
+        "duplicate":duplicate,
+        "sources":sources,
+        "confidence":confidence,
+        "risk":"; ".join(risk) if risk else "safe",
+    }
+
 page=st.sidebar.radio("Workspace",PAGES)
 
 if sb is None:
@@ -536,18 +677,146 @@ elif page=="Batch Staging":
 elif page=="Review Queue":
     title(
         "Review & apply queue",
-        "Review AI/batch proposals, approve them, then explicitly apply approved records to the canonical database."
+        "Bulk-review safe records; route ambiguous records to manual review. JSON is available only when you need to edit it."
     )
 
     if not sb:
         st.error("Supabase is required for review and apply.")
     else:
-        tabs=st.tabs(["Pending review","Approved — apply","History"])
+        tabs=st.tabs(["Bulk review","Manual review","Approved — apply","History"])
 
         # ---------------------------------------------------------------
-        # Pending review
+        # BULK REVIEW
         # ---------------------------------------------------------------
         with tabs[0]:
+            pending=safe_rows(
+                sb,
+                "pc_staged_records",
+                "staged_record_id,ingestion_job_id,target_table,natural_key,action,confidence,validation_status,review_status,payload,current_record,source_id,created_at",
+                500,
+                {"review_status":"pending"},
+                "created_at"
+            )
+
+            if not pending:
+                st.success("No pending records.")
+            else:
+                st.markdown("### Automated validation")
+                st.caption(
+                    "Safe = confidence ≥ 0.90, at least one source URL, schema valid, "
+                    "foreign keys valid, no exact duplicate, and a configured canonical apply key."
+                )
+
+                validated=[]
+                with st.spinner("Validating staged records..."):
+                    for r in pending:
+                        v=validate_staged_for_bulk(sb,r)
+                        validated.append({
+                            "Apply?": bool(v["safe"]),
+                            "Record": r.get("natural_key"),
+                            "Table": r.get("target_table"),
+                            "Confidence": round(v["confidence"],2),
+                            "Sources": v["sources"],
+                            "Schema": "✓" if v["schema_ok"] else "✗",
+                            "FKs": "✓" if v["fk_ok"] else "✗",
+                            "Duplicate": "Yes" if v["duplicate"] else "No",
+                            "Risk": v["risk"],
+                            "_id": r.get("staged_record_id"),
+                            "_row": r,
+                            "_safe": v["safe"],
+                        })
+
+                safe_count=sum(1 for x in validated if x["_safe"])
+                st.info(f"{safe_count} of {len(validated)} record(s) currently qualify as bulk-safe.")
+
+                edit_df=pd.DataFrame(validated)
+                visible_cols=["Apply?","Record","Table","Confidence","Sources","Schema","FKs","Duplicate","Risk"]
+
+                edited=st.data_editor(
+                    edit_df[visible_cols],
+                    use_container_width=True,
+                    hide_index=True,
+                    disabled=[c for c in visible_cols if c!="Apply?"],
+                    column_config={
+                        "Apply?": st.column_config.CheckboxColumn(
+                            "Apply?",
+                            help="Select records to approve/apply."
+                        ),
+                        "Confidence": st.column_config.NumberColumn(format="%.2f"),
+                    },
+                    key="bulk_review_editor"
+                )
+
+                # Restore IDs by row order
+                selected_idx=[i for i,v in enumerate(edited["Apply?"].tolist()) if bool(v)]
+                selected=[validated[i] for i in selected_idx]
+
+                unsafe_selected=[x for x in selected if not x["_safe"]]
+                if unsafe_selected:
+                    st.warning(
+                        f"{len(unsafe_selected)} selected record(s) are not classified as bulk-safe. "
+                        "They will not be bulk-applied; use Manual review."
+                    )
+
+                c1,c2,c3=st.columns(3)
+
+                if c1.button("Approve selected safe",type="primary",disabled=not selected):
+                    approved=0
+                    skipped=0
+                    for x in selected:
+                        if not x["_safe"]:
+                            skipped+=1
+                            continue
+                        sb.table("pc_staged_records").update({
+                            "review_status":"approved",
+                            "validation_status":"validated"
+                        }).eq("staged_record_id",x["_id"]).execute()
+                        approved+=1
+                    st.success(f"Approved {approved} safe record(s). Skipped {skipped}.")
+                    st.rerun()
+
+                if c2.button("Approve + apply selected safe",disabled=not selected):
+                    applied=0
+                    failures=[]
+                    for x in selected:
+                        if not x["_safe"]:
+                            continue
+                        row=x["_row"]
+                        try:
+                            sb.table("pc_staged_records").update({
+                                "review_status":"approved",
+                                "validation_status":"validated"
+                            }).eq("staged_record_id",x["_id"]).execute()
+                            row["review_status"]="approved"
+                            apply_staged_record(sb,row,row.get("payload") or {})
+                            applied+=1
+                        except Exception as exc:
+                            failures.append(f"{row.get('natural_key')}: {exc}")
+                    if applied:
+                        st.success(f"Approved and applied {applied} safe record(s).")
+                    if failures:
+                        st.error(f"{len(failures)} record(s) failed and remain reviewable.")
+                        with st.expander("Failure details"):
+                            for f in failures: st.write(f)
+                    st.rerun()
+
+                if c3.button("Select all safe"):
+                    st.info("All currently safe records are already pre-selected in the table above.")
+
+                with st.expander("Bulk policy"):
+                    st.code(
+                        "confidence >= 0.90\n"
+                        "source URLs >= 1\n"
+                        "required schema fields present\n"
+                        "foreign keys resolve\n"
+                        "no exact duplicate\n"
+                        "configured canonical apply key"
+                    )
+
+        # ---------------------------------------------------------------
+        # MANUAL REVIEW
+        # ---------------------------------------------------------------
+        with tabs[1]:
             rows=safe_rows(
                 sb,
                 "pc_staged_records",
@@ -560,131 +829,103 @@ elif page=="Review Queue":
             if not rows:
                 st.success("No pending staged records.")
             else:
-                review_df=pd.DataFrame(rows)
-                summary_cols=[
-                    c for c in [
-                        "target_table","natural_key","action","confidence",
-                        "validation_status","source_id","created_at"
-                    ] if c in review_df.columns
-                ]
-                st.caption(f"{len(rows):,} pending record(s)")
-                st.dataframe(
-                    review_df[summary_cols] if summary_cols else review_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=min(420,55+34*len(rows))
-                )
-
                 def _label(r):
-                    conf=r.get("confidence")
-                    try: conf=f"{float(conf):.2f}"
+                    try: conf=f"{float(r.get('confidence')):.2f}"
                     except Exception: conf="n/a"
-                    return f"{r.get('target_table')} | {r.get('natural_key')} | confidence {conf}"
+                    return f"{r.get('target_table')} | {r.get('natural_key')} | {conf}"
 
                 labels=[_label(r) for r in rows]
-                chosen=st.selectbox("Open staged record",labels,key="pending_record")
+                chosen=st.selectbox("Record",labels,key="manual_record")
                 row=rows[labels.index(chosen)]
                 payload=row.get("payload") or {}
+                v=validate_staged_for_bulk(sb,row)
 
-                st.markdown("### Proposed record")
-                h1,h2,h3,h4=st.columns(4)
-                h1.metric("Target",row.get("target_table") or "—")
-                h2.metric("Action",row.get("action") or "—")
-                h3.metric("Confidence",row.get("confidence") if row.get("confidence") is not None else "—")
-                h4.metric("Validation",row.get("validation_status") or "pending")
+                st.markdown(f"### {row.get('natural_key') or 'Staged record'}")
+                m1,m2,m3,m4,m5=st.columns(5)
+                m1.metric("Confidence",f"{v['confidence']:.2f}")
+                m2.metric("Sources",v["sources"])
+                m3.metric("Schema","✓" if v["schema_ok"] else "✗")
+                m4.metric("FKs","✓" if v["fk_ok"] else "✗")
+                m5.metric("Duplicate","Yes" if v["duplicate"] else "No")
 
-                left,right=st.columns([1.2,0.8])
+                if v["safe"]:
+                    st.success("This record meets the current bulk-safe policy.")
+                else:
+                    st.warning(v["risk"])
 
-                with left:
-                    st.markdown("#### Payload")
-                    if isinstance(payload,dict):
-                        payload_rows=[]
-                        for k,v in payload.items():
-                            payload_rows.append({
-                                "Field":k,
-                                "Proposed value":json.dumps(v,ensure_ascii=False,indent=2) if isinstance(v,(dict,list)) else v
-                            })
-                        st.dataframe(pd.DataFrame(payload_rows),use_container_width=True,hide_index=True)
-                    else:
-                        st.code(str(payload))
+                # Human-readable card
+                if isinstance(payload,dict):
+                    card_rows=[]
+                    for k,vv in payload.items():
+                        if k=="metadata": continue
+                        if isinstance(vv,(dict,list)):
+                            vv=json.dumps(vv,ensure_ascii=False)
+                        card_rows.append({"Field":k.replace("_"," ").title(),"Value":vv})
+                    st.dataframe(pd.DataFrame(card_rows),use_container_width=True,hide_index=True)
 
-                    st.markdown("#### Research sources")
-                    source_rows=[]
-                    if isinstance(payload,dict):
-                        meta=payload.get("metadata") or {}
-                        for s in (meta.get("research_sources") or []) if isinstance(meta,dict) else []:
-                            if isinstance(s,dict) and s.get("url"): source_rows.append(s)
-                        for s in payload.get("sources") or []:
-                            if isinstance(s,dict) and s.get("url"): source_rows.append(s)
+                    meta=payload.get("metadata") or {}
+                    sources=[]
+                    if isinstance(meta,dict):
+                        sources.extend(meta.get("research_sources") or [])
+                        sources.extend(meta.get("sources") or [])
+                    sources.extend(payload.get("sources") or [])
 
-                    if source_rows:
-                        for i,s in enumerate(source_rows,1):
-                            label=s.get("title") or s.get("publisher") or f"Source {i}"
-                            st.markdown(f"{i}. [{label}]({s['url']})")
-                            if s.get("publisher") and s.get("publisher")!=label:
-                                st.caption(s["publisher"])
-                    else:
-                        st.info("No embedded source URLs in this proposal.")
+                    if sources:
+                        st.markdown("#### Sources")
+                        for i,s in enumerate(sources,1):
+                            if isinstance(s,dict) and (s.get("url") or s.get("source_url")):
+                                url=s.get("url") or s.get("source_url")
+                                label=s.get("title") or s.get("publisher") or f"Source {i}"
+                                st.markdown(f"{i}. [{label}]({url})")
 
-                with right:
-                    st.markdown("#### Reviewer decision")
-                    note=st.text_area(
-                        "Reviewer note",
-                        key=f"pending_note_{row['staged_record_id']}",
-                        placeholder="Optional reason, correction or instruction."
+                with st.expander("Advanced: view/edit JSON"):
+                    raw=json.dumps(payload,ensure_ascii=False,indent=2)
+                    edited=st.text_area(
+                        "Payload JSON",
+                        value=raw,
+                        height=360,
+                        key=f"manual_json_{row['staged_record_id']}"
                     )
-                    c1,c2,c3=st.columns(3)
+                    try:
+                        edited_payload=json.loads(edited)
+                    except Exception as exc:
+                        edited_payload=None
+                        st.error(f"Invalid JSON: {exc}")
 
-                    if c1.button("Approve",type="primary",key=f"approve_{row['staged_record_id']}"):
-                        update={"review_status":"approved","validation_status":"reviewed"}
-                        if note and isinstance(payload,dict):
-                            meta=payload.get("metadata") or {}
-                            if not isinstance(meta,dict): meta={}
-                            meta["review_note"]=note
-                            payload["metadata"]=meta
-                            update["payload"]=payload
-                        sb.table("pc_staged_records").update(update).eq(
-                            "staged_record_id",row["staged_record_id"]
-                        ).execute()
-                        st.success("Approved. Record moved to the Apply tab.")
-                        st.rerun()
+                note=st.text_area(
+                    "Reviewer note",
+                    key=f"manual_note_{row['staged_record_id']}"
+                )
+                c1,c2,c3=st.columns(3)
 
-                    if c2.button("Needs changes",key=f"changes_{row['staged_record_id']}"):
-                        update={"review_status":"needs_changes"}
-                        if note and isinstance(payload,dict):
-                            meta=payload.get("metadata") or {}
-                            if not isinstance(meta,dict): meta={}
-                            meta["review_note"]=note
-                            payload["metadata"]=meta
-                            update["payload"]=payload
-                        sb.table("pc_staged_records").update(update).eq(
-                            "staged_record_id",row["staged_record_id"]
-                        ).execute()
-                        st.rerun()
+                if c1.button("Approve",type="primary",key=f"m_approve_{row['staged_record_id']}"):
+                    update={"review_status":"approved","validation_status":"reviewed"}
+                    if edited_payload is not None:
+                        update["payload"]=edited_payload
+                    sb.table("pc_staged_records").update(update).eq(
+                        "staged_record_id",row["staged_record_id"]
+                    ).execute()
+                    st.rerun()
 
-                    if c3.button("Reject",key=f"reject_{row['staged_record_id']}"):
-                        update={"review_status":"rejected"}
-                        if note and isinstance(payload,dict):
-                            meta=payload.get("metadata") or {}
-                            if not isinstance(meta,dict): meta={}
-                            meta["review_note"]=note
-                            payload["metadata"]=meta
-                            update["payload"]=payload
-                        sb.table("pc_staged_records").update(update).eq(
-                            "staged_record_id",row["staged_record_id"]
-                        ).execute()
-                        st.rerun()
+                if c2.button("Needs changes",key=f"m_changes_{row['staged_record_id']}"):
+                    update={"review_status":"needs_changes"}
+                    if edited_payload is not None:
+                        update["payload"]=edited_payload
+                    sb.table("pc_staged_records").update(update).eq(
+                        "staged_record_id",row["staged_record_id"]
+                    ).execute()
+                    st.rerun()
 
-                    st.markdown("#### Safety")
-                    st.caption(
-                        "Approve does not write to production. Approved records must be "
-                        "explicitly applied from the next tab."
-                    )
+                if c3.button("Reject",key=f"m_reject_{row['staged_record_id']}"):
+                    sb.table("pc_staged_records").update({
+                        "review_status":"rejected"
+                    }).eq("staged_record_id",row["staged_record_id"]).execute()
+                    st.rerun()
 
         # ---------------------------------------------------------------
-        # Approved apply queue
+        # APPROVED APPLY
         # ---------------------------------------------------------------
-        with tabs[1]:
+        with tabs[2]:
             approved=safe_rows(
                 sb,
                 "pc_staged_records",
@@ -695,83 +936,93 @@ elif page=="Review Queue":
             )
 
             if not approved:
-                st.info("No approved records waiting to be applied.")
+                st.info("No approved records waiting for apply.")
             else:
-                st.warning(
-                    f"{len(approved)} approved record(s) are waiting for canonical apply. "
-                    "Apply one at a time until the workflow is fully proven."
+                st.caption(f"{len(approved)} approved record(s) waiting.")
+
+                rows=[]
+                for r in approved:
+                    v=validate_staged_for_bulk(sb,r)
+                    rows.append({
+                        "Apply?":bool(v["safe"]),
+                        "Record":r.get("natural_key"),
+                        "Table":r.get("target_table"),
+                        "Confidence":round(v["confidence"],2),
+                        "Sources":v["sources"],
+                        "Schema":"✓" if v["schema_ok"] else "✗",
+                        "FKs":"✓" if v["fk_ok"] else "✗",
+                        "Duplicate":"Yes" if v["duplicate"] else "No",
+                        "Risk":v["risk"],
+                        "_row":r,
+                        "_safe":v["safe"],
+                    })
+
+                frame=pd.DataFrame(rows)
+                cols=["Apply?","Record","Table","Confidence","Sources","Schema","FKs","Duplicate","Risk"]
+                edited=st.data_editor(
+                    frame[cols],
+                    use_container_width=True,
+                    hide_index=True,
+                    disabled=[c for c in cols if c!="Apply?"],
+                    key="approved_apply_editor"
                 )
 
-                labels=[
-                    f"{r.get('target_table')} | {r.get('natural_key')} | {r.get('confidence')}"
-                    for r in approved
-                ]
-                chosen=st.selectbox("Approved record",labels,key="approved_record")
+                selected=[rows[i] for i,x in enumerate(edited["Apply?"].tolist()) if bool(x)]
+
+                if st.button("Apply selected safe records",type="primary",disabled=not selected):
+                    applied=0
+                    failed=[]
+                    for x in selected:
+                        if not x["_safe"]:
+                            continue
+                        try:
+                            apply_staged_record(sb,x["_row"],x["_row"].get("payload") or {})
+                            applied+=1
+                        except Exception as exc:
+                            failed.append(f"{x['_row'].get('natural_key')}: {exc}")
+                    st.success(f"Applied {applied} record(s).")
+                    if failed:
+                        st.error(f"{len(failed)} failed.")
+                        with st.expander("Failure details"):
+                            for f in failed: st.write(f)
+                    st.rerun()
+
+                st.markdown("### Single-record advanced apply")
+                labels=[f"{r.get('target_table')} | {r.get('natural_key')}" for r in approved]
+                chosen=st.selectbox("Approved record",labels,key="single_approved")
                 row=approved[labels.index(chosen)]
-                payload=row.get("payload") or {}
-
-                st.markdown("### Canonical apply")
-                a,b,c=st.columns(3)
-                a.metric("Target table",row.get("target_table") or "—")
-                b.metric("Natural key",row.get("natural_key") or "—")
-                c.metric("Confidence",row.get("confidence") if row.get("confidence") is not None else "—")
-
-                st.caption(
-                    "You may edit the JSON before apply. The edited payload is saved back "
-                    "to staging so the audit trail matches what was written."
-                )
-
-                initial_json=json.dumps(payload,ensure_ascii=False,indent=2)
-                edited=st.text_area(
-                    "Canonical JSON payload",
-                    value=initial_json,
-                    height=440,
-                    key=f"apply_json_{row['staged_record_id']}"
-                )
-
-                try:
-                    edited_payload=json.loads(edited)
-                    if not isinstance(edited_payload,dict):
-                        st.error("Canonical payload must be a JSON object.")
-                        edited_payload=None
-                    else:
-                        st.success("JSON is valid.")
-                except Exception as exc:
-                    st.error(f"Invalid JSON: {exc}")
-                    edited_payload=None
-
-                conflict=APPLY_CONFLICT_KEYS.get(row.get("target_table"))
-                if conflict:
-                    st.caption(f"Configured conflict key: `{conflict}`")
-                else:
-                    st.caption("No configured conflict key: apply will use INSERT.")
-
-                confirm=st.checkbox(
-                    "I reviewed this payload and authorize a canonical database write.",
-                    key=f"confirm_apply_{row['staged_record_id']}"
-                )
-
-                if st.button(
-                    "Apply approved record",
-                    type="primary",
-                    disabled=not (confirm and edited_payload),
-                    key=f"apply_{row['staged_record_id']}"
-                ):
+                with st.expander("Edit canonical JSON before apply"):
+                    edited_json=st.text_area(
+                        "Canonical JSON",
+                        value=json.dumps(row.get("payload") or {},ensure_ascii=False,indent=2),
+                        height=360,
+                        key=f"approved_json_{row['staged_record_id']}"
+                    )
                     try:
-                        with st.spinner("Writing canonical record..."):
-                            result,mode=apply_staged_record(sb,row,edited_payload)
-                        st.success(
-                            f"Canonical {mode} succeeded. Staged record marked as applied."
-                        )
-                        st.rerun()
+                        edited_payload=json.loads(edited_json)
                     except Exception as exc:
-                        st.error("Canonical write failed. The record remains approved and can be corrected/retried.")
-                        st.exception(exc)
+                        edited_payload=None
+                        st.error(str(exc))
+                    confirm=st.checkbox(
+                        "I authorize this canonical write.",
+                        key=f"confirm_{row['staged_record_id']}"
+                    )
+                    if st.button(
+                        "Apply this record",
+                        disabled=not (confirm and isinstance(edited_payload,dict)),
+                        key=f"apply_one_{row['staged_record_id']}"
+                    ):
+                        try:
+                            apply_staged_record(sb,row,edited_payload)
+                            st.success("Applied.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.exception(exc)
 
         # ---------------------------------------------------------------
-        # History
+        # HISTORY
         # ---------------------------------------------------------------
-        with tabs[2]:
+        with tabs[3]:
             history=[]
             for status in ["applied","rejected","needs_changes"]:
                 history.extend(
