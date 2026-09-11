@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-import os, sys, json, uuid
+import os, sys, json, uuid, hashlib, re
 import pandas as pd
 import streamlit as st
 
@@ -763,22 +763,187 @@ elif page=="Trade System Builder":
 10. Verify client views""")
 
 elif page=="Batch Staging":
-    title("Batch staging","Upload structured CSV/JSON for AI-assisted or deterministic review before canonical writes.")
-    target=st.selectbox("Target table",["pc_entities","pc_assets","pc_mobile_assets","pc_relationships","pc_events","pc_transactions","pc_security_compliance","pc_energy_assets","pc_industrial_assets","pc_logistics_facilities","pc_market_instruments","pc_market_prices","pc_trade_flows","pc_supply_series","pc_port_metrics","pc_port_capabilities","pc_transport_routes","pc_chokepoints","pc_macro_indicators","pc_observations","pc_market_reports","pc_market_observations"])
+    title(
+        "Batch staging",
+        "Upload structured CSV/JSON into the controlled staging queue. Known JSON fields are normalized before review."
+    )
+
+    target=st.selectbox(
+        "Target table",
+        [
+            "pc_entities","pc_assets","pc_mobile_assets","pc_relationships","pc_events",
+            "pc_transactions","pc_security_compliance","pc_energy_assets",
+            "pc_industrial_assets","pc_logistics_facilities","pc_market_instruments",
+            "pc_market_prices","pc_trade_flows","pc_supply_series","pc_port_metrics",
+            "pc_port_capabilities","pc_transport_routes","pc_chokepoints",
+            "pc_macro_indicators","pc_observations","pc_market_reports",
+            "pc_market_observations"
+        ]
+    )
+
     up=st.file_uploader("CSV or JSON",type=["csv","json"])
+
+    def _parse_jsonish(v):
+        if isinstance(v,(dict,list)) or v is None:
+            return v
+        s=str(v).strip()
+        if not s:
+            return None
+        if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
+            try:
+                return json.loads(s)
+            except Exception:
+                return v
+        return v
+
+    def _clean_scalar(v):
+        if v is None:
+            return None
+        if isinstance(v,float) and pd.isna(v):
+            return None
+        s=str(v).strip()
+        return None if s=="" or s.lower()=="nan" else v
+
+    def _normalize_incoming_row(r,target_table):
+        row={k:_clean_scalar(v) for k,v in dict(r).items()}
+
+        # JSONB-like fields commonly used by the canonical model.
+        for col in ("raw_value","derived_value","metadata","source_scope","stats","payload","current_record"):
+            if col in row:
+                row[col]=_parse_jsonish(row[col])
+
+        # Normalize booleans from CSV.
+        for col in ("attribution_required","active"):
+            if col in row and row[col] is not None and not isinstance(row[col],bool):
+                row[col]=str(row[col]).strip().lower() in {"1","true","yes","y"}
+
+        # ReCAAP observation convenience mapping.
+        if target_table=="pc_observations":
+            src_name=str(row.get("source_name") or "").lower()
+            src_url=str(row.get("source_url") or "").lower()
+            if "recaap" in src_name or "recaap" in src_url:
+                row["source_id"]=row.get("source_id") or "SRC_OPEN_RECAAP_ISC"
+                row["source_name"]=row.get("source_name") or "ReCAAP Information Sharing Centre"
+                row["source_type"]=row.get("source_type") or "official_maritime_security"
+                row["redistribution_status"]=row.get("redistribution_status") or "attribution_required"
+                row["attribution_required"]=True
+
+        return {k:v for k,v in row.items() if v is not None}
+
+    def _natural_key_for_row(r,target_table,index):
+        if target_table=="pc_observations":
+            raw=r.get("raw_value")
+            meta=r.get("metadata")
+            if isinstance(raw,dict):
+                for k in ("observation_id","source_record_id","canonical_event_id"):
+                    if raw.get(k):
+                        return str(raw[k])
+            if isinstance(meta,dict):
+                for k in ("source_record_id","legacy_observation_id"):
+                    if meta.get(k):
+                        return str(meta[k])
+
+        for key in (
+            "entity_id","asset_id","mobile_asset_id","relationship_id","event_id",
+            "transaction_id","route_id","chokepoint_id","market_instrument_id",
+            "trade_flow_id","supply_series_id","observation_id","name","title"
+        ):
+            if r.get(key):
+                return str(r[key])
+
+        return str(index)
+
     if up:
-        if up.name.lower().endswith('.csv'): rows=pd.read_csv(up).fillna('').to_dict('records')
-        else:
-            obj=json.load(up); rows=obj if isinstance(obj,list) else obj.get('records',[obj])
-        st.caption(f"{len(rows)} incoming rows")
-        st.dataframe(pd.DataFrame(rows).head(50),use_container_width=True)
-        if st.button("Stage batch"):
-            if not sb: st.error("Supabase required.")
+        try:
+            if up.name.lower().endswith(".csv"):
+                incoming=pd.read_csv(up,dtype=object)
+                rows=incoming.to_dict("records")
             else:
-                job=sb.table("pc_ingestion_jobs").insert({"job_type":"BATCH_IMPORT","title":up.name,"status":"running"}).execute().data[0]
-                payloads=[{"ingestion_job_id":job['ingestion_job_id'],"target_table":target,"natural_key":str(i),"action":"REVIEW","payload":r,"confidence":1.0,"validation_status":"pending","review_status":"pending"} for i,r in enumerate(rows,1)]
-                for i in range(0,len(payloads),250): sb.table("pc_staged_records").insert(payloads[i:i+250]).execute()
-                sb.table("pc_ingestion_jobs").update({"status":"completed","stats":{"rows":len(rows)}}).eq("ingestion_job_id",job['ingestion_job_id']).execute(); st.success("Batch staged.")
+                obj=json.load(up)
+                rows=obj if isinstance(obj,list) else obj.get("records",[obj])
+
+            rows=[_normalize_incoming_row(r,target) for r in rows]
+
+            st.caption(f"{len(rows):,} incoming rows")
+            preview=pd.DataFrame(rows[:50])
+            st.dataframe(preview,use_container_width=True,hide_index=True)
+
+            # Helpful ReCAAP summary.
+            if target=="pc_observations" and rows:
+                recaap_count=sum(
+                    1 for r in rows
+                    if r.get("source_id")=="SRC_OPEN_RECAAP_ISC"
+                )
+                if recaap_count:
+                    st.info(
+                        f"Recognized {recaap_count:,} ReCAAP observation row(s). "
+                        "JSON fields will be stored as objects and source_id will be normalized."
+                    )
+
+            if st.button("Stage batch",type="primary"):
+                if not sb:
+                    st.error("Supabase required.")
+                else:
+                    # Ensure canonical ReCAAP source exists if this is a ReCAAP batch.
+                    if target=="pc_observations" and any(
+                        r.get("source_id")=="SRC_OPEN_RECAAP_ISC" for r in rows
+                    ):
+                        sb.table("pc_sources").upsert({
+                            "source_id":"SRC_OPEN_RECAAP_ISC",
+                            "publisher":"ReCAAP Information Sharing Centre",
+                            "source_name":"ReCAAP ISC",
+                            "source_type":"official_maritime_security",
+                            "coverage":"Piracy and armed robbery against ships in Asia-Pacific waters",
+                            "url":"https://www.recaap.org/alerts",
+                            "reliability":"high",
+                            "ingestion_method":"curated structured import",
+                            "redistribution_status":"attribution_required",
+                            "attribution_required":True,
+                            "active":True,
+                            "notes":"Canonical source record for ReCAAP ISC structured observations."
+                        },on_conflict="source_id").execute()
+
+                    job=sb.table("pc_ingestion_jobs").insert({
+                        "job_type":"BATCH_IMPORT",
+                        "title":up.name,
+                        "source_scope":{"target_table":target,"rows":len(rows)},
+                        "status":"running"
+                    }).execute().data[0]
+
+                    payloads=[]
+                    for i,r in enumerate(rows,1):
+                        payloads.append({
+                            "ingestion_job_id":job["ingestion_job_id"],
+                            "target_table":target,
+                            "natural_key":_natural_key_for_row(r,target,i),
+                            "action":"REVIEW",
+                            "payload":r,
+                            "confidence":1.0,
+                            "validation_status":"pending",
+                            "review_status":"pending"
+                        })
+
+                    total_batches=max(1,(len(payloads)+249)//250)
+                    progress=st.progress(0.0,text="Staging batch...")
+                    for batch_no,i in enumerate(range(0,len(payloads),250),start=1):
+                        sb.table("pc_staged_records").insert(payloads[i:i+250]).execute()
+                        progress.progress(
+                            batch_no/total_batches,
+                            text=f"Staging batch {batch_no}/{total_batches}"
+                        )
+
+                    sb.table("pc_ingestion_jobs").update({
+                        "status":"completed",
+                        "stats":{"rows":len(rows),"target_table":target}
+                    }).eq("ingestion_job_id",job["ingestion_job_id"]).execute()
+
+                    progress.progress(1.0,text="Batch staged.")
+                    st.success(
+                        f"Staged {len(rows):,} row(s). Go to Review Queue → Bulk review."
+                    )
+
+        except Exception as exc:
+            st.exception(exc)
 
 elif page=="Review Queue":
     title(
