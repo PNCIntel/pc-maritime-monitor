@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-import os, sys, json, uuid, hashlib, re
+import os, sys, json, uuid, hashlib, re, hashlib, re
 import pandas as pd
 import streamlit as st
 
@@ -493,6 +493,160 @@ def stage_ai_result(sb, job_id, result):
     return len(staged),rejected
 
 
+
+# Canonical columns that this admin is allowed to send to selected tables.
+# Unknown AI/research fields are preserved in metadata instead of being sent
+# as non-existent PostgREST columns.
+TABLE_WRITE_COLUMNS = {
+    "pc_logistics_facilities": {
+        "asset_id","facility_type","owner_entity_id","operator_entity_id",
+        "area_sqm","rail_connected","customs_bonded","source_id","metadata"
+    },
+    "pc_energy_assets": {
+        "asset_id","energy_asset_type","operator_entity_id","owner_entity_id",
+        "operational_status","source_id","metadata"
+    },
+    "pc_industrial_assets": {
+        "asset_id","industrial_asset_type","operator_entity_id","owner_entity_id",
+        "operational_status","source_id","metadata"
+    },
+}
+
+PARENT_ASSET_FIELDS = {
+    "name","asset_name","facility_name","terminal_name","port_name","hub_name",
+    "country","city","region_city","latitude","longitude","status","operational_status"
+}
+
+def _canonicalize_extension_payload(row, payload):
+    """Split AI research payload into parent-asset fields and extension fields.
+
+    Non-schema research fields are retained in extension metadata so no evidence
+    is lost and PostgREST never receives unknown columns such as `capacity`
+    or `city` for pc_logistics_facilities.
+    """
+    table = str(row.get("target_table") or "")
+    if table not in TABLE_WRITE_COLUMNS or not isinstance(payload, dict):
+        return payload, {}
+
+    allowed = TABLE_WRITE_COLUMNS[table]
+    clean = {}
+    overflow = {}
+    parent = {}
+
+    existing_meta = payload.get("metadata")
+    if isinstance(existing_meta, dict):
+        clean["metadata"] = dict(existing_meta)
+    else:
+        clean["metadata"] = {}
+
+    for key, value in payload.items():
+        if key == "metadata":
+            continue
+
+        if key in allowed:
+            clean[key] = value
+        elif key in PARENT_ASSET_FIELDS:
+            parent[key] = value
+        else:
+            overflow[key] = value
+
+    # Preserve every unsupported research field instead of dropping it.
+    if overflow:
+        clean["metadata"].setdefault("research_attributes", {}).update(overflow)
+
+    if parent:
+        clean["metadata"].setdefault("parent_asset_attributes", {}).update(parent)
+
+    return clean, parent
+
+
+def _parent_asset_from_payload(row, payload):
+    """Build a parent pc_assets record using research fields when available."""
+    table = row.get("target_table")
+    if table not in {"pc_logistics_facilities","pc_energy_assets","pc_industrial_assets"}:
+        return None
+
+    clean, parent = _canonicalize_extension_payload(row, payload)
+    if clean.get("asset_id"):
+        return None
+
+    name = (
+        parent.get("name")
+        or parent.get("asset_name")
+        or parent.get("facility_name")
+        or parent.get("terminal_name")
+        or parent.get("port_name")
+        or parent.get("hub_name")
+        or _name_from_staged(row, payload)
+    )
+    country = parent.get("country") or _country_from_staged(row, payload)
+    city = parent.get("city") or parent.get("region_city")
+
+    if table == "pc_logistics_facilities":
+        asset_type = "Logistics facility"
+    elif table == "pc_energy_assets":
+        asset_type = "Energy infrastructure"
+    else:
+        asset_type = "Industrial asset"
+
+    plan = {
+        "asset_id": _deterministic_asset_id(name, country or "", asset_type),
+        "name": name,
+        "asset_type": asset_type,
+        "country": country,
+        "region_city": city,
+        "status": parent.get("status") or parent.get("operational_status"),
+        "record_status": "verified",
+        "metadata": {
+            "created_from_staged_record": row.get("staged_record_id"),
+            "ai_canonicalization": True,
+            "natural_key": row.get("natural_key"),
+        },
+    }
+
+    # Keep only non-empty values so we don't overwrite good canonical data with nulls.
+    return {k:v for k,v in plan.items() if v not in (None,"")}
+
+
+def _ensure_parent_asset_schema_safe(sb, row, payload):
+    """Create/link the parent asset and return a schema-safe extension payload."""
+    clean, parent_attrs = _canonicalize_extension_payload(row, payload)
+    plan = _parent_asset_from_payload(row, payload)
+
+    if not plan:
+        return clean, False
+
+    # Reuse an existing exact-name asset where sensible.
+    try:
+        hits = (
+            sb.table("pc_assets")
+            .select("asset_id,name,country,region_city,asset_type")
+            .eq("name", plan["name"])
+            .limit(20)
+            .execute()
+            .data or []
+        )
+        if plan.get("country"):
+            country = str(plan["country"]).strip().casefold()
+            same = [
+                x for x in hits
+                if not x.get("country")
+                or str(x.get("country")).strip().casefold() == country
+            ]
+            if same:
+                plan["asset_id"] = same[0]["asset_id"]
+        elif hits:
+            plan["asset_id"] = hits[0]["asset_id"]
+    except Exception:
+        pass
+
+    sb.table("pc_assets").upsert(plan, on_conflict="asset_id").execute()
+
+    clean["asset_id"] = plan["asset_id"]
+    clean.setdefault("metadata", {})
+    clean["metadata"]["canonical_parent_asset_id"] = plan["asset_id"]
+
+    return clean, True
 def apply_staged_record(sb, row, edited_payload=None):
     """Apply one approved staged record to a canonical table.
 
@@ -516,9 +670,13 @@ def apply_staged_record(sb, row, edited_payload=None):
 
     payload=_jsonable(payload)
 
-    # Extension records such as logistics/energy/industrial rows require a canonical
-    # pc_assets parent. Create or link that parent automatically when asset_id is absent.
-    payload,parent_created=_ensure_parent_asset(sb,row,payload)
+    # For extension tables, first separate parent-asset attributes from extension
+    # attributes and move unsupported research fields into metadata. This prevents
+    # PostgREST errors such as "column capacity/city not found".
+    if table in TABLE_WRITE_COLUMNS:
+        payload,parent_created=_ensure_parent_asset_schema_safe(sb,row,payload)
+    else:
+        parent_created=False
 
     conflict=APPLY_CONFLICT_KEYS.get(table)
     keys=[x.strip() for x in conflict.split(",")] if conflict else []
