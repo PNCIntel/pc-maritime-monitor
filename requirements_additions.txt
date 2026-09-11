@@ -1,0 +1,6 @@
+# Already present in the current P&C stack in most builds.
+# Add/confirm these in requirements.txt:
+openai>=3.13.0
+requests>=2.31
+beautifulsoup4>=4.12
+python-dotenv>=1.0
