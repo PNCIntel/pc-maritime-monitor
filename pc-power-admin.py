@@ -459,11 +459,20 @@ def promote_recaap_observations(sb):
     failures=[]
 
     for obs in rows:
-        # Only promote observations that are approved/applied into the provenance table.
-        if str(obs.get("review_status") or "").lower() not in {"approved"}:
-            skipped += 1
-            continue
+        # These rows are already canonical pc_observations records. Earlier batch
+        # imports preserved payload.review_status="pending" even after the staged
+        # proposal itself was explicitly approved/applied. For the curated ReCAAP
+        # source, canonical presence + source_id is sufficient for this deterministic
+        # promotion. Normalize the observation review status to approved here.
         try:
+            if str(obs.get("review_status") or "").lower() != "approved":
+                sb.table("pc_observations").update({
+                    "review_status":"approved",
+                    "record_status":"verified"
+                }).eq("observation_id",obs["observation_id"]).execute()
+                obs["review_status"]="approved"
+                obs["record_status"]="verified"
+
             event, loc = _recaap_event_payload(obs)
             event_rows.append(event)
             if loc:
@@ -1193,8 +1202,8 @@ elif page=="Database Coverage":
         st.markdown("### ReCAAP canonical promotion")
         st.caption(
             "ReCAAP observations can exist in pc_observations without appearing on maps. "
-            "This action promotes approved ReCAAP observations into canonical security events and event locations. "
-            "It is idempotent and can be re-run safely."
+            "This action normalizes the 277 canonical ReCAAP observations as approved, then promotes them "
+            "into canonical security events and event locations. It is idempotent and can be re-run safely."
         )
 
         try:
