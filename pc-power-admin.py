@@ -47,7 +47,7 @@ else:
 sb=service_client()
 st.sidebar.markdown("<div class='pc-k'>Power & Corridors</div>",unsafe_allow_html=True)
 st.sidebar.markdown("## Power Admin")
-PAGES=["Dashboard","Migration","Database Coverage","Organizations","Users & Access","Research Jobs","Trade System Builder","Batch Staging","Review Queue","Market Data","Governance & Quality"]
+PAGES=["Dashboard","Migration","Database Coverage","ReCAAP Vessel Resolver","Organizations","Users & Access","Research Jobs","Trade System Builder","Batch Staging","Review Queue","Market Data","Governance & Quality"]
 
 # ---------------------------------------------------------------------------
 # Bulk review / validation helpers
@@ -59,6 +59,7 @@ REQUIRED_BY_TABLE = {
     "pc_mobile_assets": ["mobile_asset_id","name","mobile_type"],
     "pc_relationships": ["relationship_id","source_type","source_id","relationship_type","target_type","target_id"],
     "pc_events": ["event_id","event_type"],
+    "pc_event_links": ["event_link_id","event_id","linked_type","linked_id","relationship"],
     "pc_transactions": ["transaction_id"],
     "pc_energy_assets": ["asset_id"],
     "pc_industrial_assets": ["asset_id"],
@@ -72,6 +73,9 @@ REQUIRED_BY_TABLE = {
 }
 
 FK_RULES = {
+    "pc_event_links": [
+        ("event_id","pc_events","event_id"),
+    ],
     "pc_logistics_facilities": [
         ("owner_entity_id","pc_entities","entity_id"),
         ("operator_entity_id","pc_entities","entity_id"),
@@ -126,6 +130,19 @@ def _fk_valid(sb,table,payload):
                 problems.append(f"{field}→{ref_table}.{ref_col} missing")
         except Exception:
             problems.append(f"{field} FK check failed")
+
+    # pc_event_links uses a polymorphic linked_id. Validate vessel links explicitly.
+    if table=="pc_event_links" and str(payload.get("linked_type") or "").lower() in {"mobile_asset","vessel"}:
+        value=payload.get("linked_id")
+        if value not in (None,""):
+            try:
+                hit=(sb.table("pc_mobile_assets").select("mobile_asset_id").eq(
+                    "mobile_asset_id",value
+                ).limit(1).execute().data or [])
+                if not hit:
+                    problems.append("linked_id→pc_mobile_assets.mobile_asset_id missing")
+            except Exception:
+                problems.append("linked_id vessel FK check failed")
     return len(problems)==0,problems
 
 def _duplicate_check(sb,table,payload):
@@ -496,6 +513,188 @@ def promote_recaap_observations(sb):
     }
 
 
+
+# ---------------------------------------------------------------------------
+# ReCAAP vessel resolution helpers
+# ---------------------------------------------------------------------------
+
+def _norm_vessel_name(value):
+    s=str(value or "").upper().strip()
+    s=re.sub(r"\b(MV|M/V|MT|M/T|MV\.|MT\.)\b"," ",s)
+    s=re.sub(r"[^A-Z0-9]+"," ",s)
+    return re.sub(r"\s+"," ",s).strip()
+
+
+def _recaap_events_for_resolution(sb):
+    rows=safe_rows(
+        sb,
+        "pc_events",
+        "event_id,start_date,title,event_type,source_id,metadata",
+        5000,
+        {"source_id":"SRC_OPEN_RECAAP_ISC"},
+        "start_date"
+    )
+    out=[]
+    for r in rows:
+        meta=r.get("metadata") or {}
+        if not isinstance(meta,dict):
+            meta={}
+        vessel=meta.get("vessel_name")
+        if not vessel:
+            title=str(r.get("title") or "")
+            vessel=title.split("—",1)[-1].strip() if "—" in title else None
+        if vessel:
+            rr=dict(r)
+            rr["_vessel_name"]=vessel
+            rr["_norm_name"]=_norm_vessel_name(vessel)
+            out.append(rr)
+    return out
+
+
+def _canonical_vessels_for_resolution(sb):
+    rows=safe_rows(
+        sb,
+        "pc_mobile_assets",
+        "mobile_asset_id,name,mobile_type,imo,mmsi,flag,owner_entity_id,operator_entity_id,status,record_status,source_id,metadata",
+        10000
+    )
+    for r in rows:
+        r["_norm_name"]=_norm_vessel_name(r.get("name"))
+    return rows
+
+
+def _existing_event_vessel_links(sb):
+    rows=safe_rows(sb,"pc_event_links","event_link_id,event_id,linked_type,linked_id,linked_name,relationship,confidence,source_id,metadata",10000)
+    return {
+        r.get("event_id"):r for r in rows
+        if str(r.get("linked_type") or "").lower() in {"mobile_asset","vessel"}
+    }
+
+
+def _link_id(event_id,mobile_asset_id):
+    digest=hashlib.sha1(f"{event_id}|{mobile_asset_id}".encode("utf-8")).hexdigest()[:14].upper()
+    return f"EVLINK_RECAAP_{digest}"
+
+
+def stage_recaap_exact_vessel_links(sb):
+    """Stage exact canonical vessel-name matches for ReCAAP events."""
+    events=_recaap_events_for_resolution(sb)
+    vessels=_canonical_vessels_for_resolution(sb)
+    existing=_existing_event_vessel_links(sb)
+
+    by_name={}
+    for v in vessels:
+        n=v.get("_norm_name")
+        if n:
+            by_name.setdefault(n,[]).append(v)
+
+    proposals=[]
+    unresolved=[]
+    ambiguous=[]
+    already=0
+
+    job=None
+    for e in events:
+        if e["event_id"] in existing:
+            already+=1
+            continue
+        matches=by_name.get(e.get("_norm_name") or "",[])
+        if len(matches)==1:
+            v=matches[0]
+            payload={
+                "event_link_id":_link_id(e["event_id"],v["mobile_asset_id"]),
+                "event_id":e["event_id"],
+                "linked_type":"mobile_asset",
+                "linked_id":v["mobile_asset_id"],
+                "linked_name":v.get("name"),
+                "relationship":"involved vessel",
+                "confidence":"high",
+                "source_id":"SRC_OPEN_RECAAP_ISC",
+                "metadata":{
+                    "resolution_method":"normalized exact vessel-name match",
+                    "recaap_vessel_name":e.get("_vessel_name"),
+                    "imo":v.get("imo"),
+                }
+            }
+            proposals.append({
+                "target_table":"pc_event_links",
+                "natural_key":payload["event_link_id"],
+                "payload":payload,
+                "confidence":0.99,
+            })
+        elif len(matches)>1:
+            ambiguous.append({
+                "event_id":e["event_id"],
+                "vessel_name":e.get("_vessel_name"),
+                "candidate_count":len(matches),
+                "candidates":" | ".join(f"{x.get('name')} IMO {x.get('imo') or '—'}" for x in matches[:5]),
+            })
+        else:
+            unresolved.append({
+                "event_id":e["event_id"],
+                "vessel_name":e.get("_vessel_name"),
+                "event_date":e.get("start_date"),
+                "event_type":e.get("event_type"),
+            })
+
+    if proposals:
+        job=sb.table("pc_ingestion_jobs").insert({
+            "job_type":"DETERMINISTIC_ENTITY_RESOLUTION",
+            "title":"ReCAAP exact vessel-link resolution",
+            "query_text":"Exact normalized vessel-name resolution against pc_mobile_assets.",
+            "source_scope":{"dataset":"ReCAAP","target_table":"pc_event_links"},
+            "status":"running",
+        }).execute().data[0]
+        job_id=job["ingestion_job_id"]
+
+        staged=[]
+        for p in proposals:
+            staged.append({
+                "ingestion_job_id":job_id,
+                "target_table":"pc_event_links",
+                "natural_key":p["natural_key"],
+                "action":"REVIEW",
+                "payload":p["payload"],
+                "confidence":p["confidence"],
+                "validation_status":"pending",
+                "review_status":"pending",
+            })
+        for i in range(0,len(staged),250):
+            sb.table("pc_staged_records").insert(staged[i:i+250]).execute()
+        sb.table("pc_ingestion_jobs").update({
+            "status":"completed",
+            "stats":{
+                "staged_exact_links":len(staged),
+                "unresolved":len(unresolved),
+                "ambiguous":len(ambiguous),
+                "already_linked":already,
+            }
+        }).eq("ingestion_job_id",job_id).execute()
+
+    return {
+        "events":len(events),
+        "staged":len(proposals),
+        "unresolved":unresolved,
+        "ambiguous":ambiguous,
+        "already":already,
+    }
+
+
+RECAAP_AI_RESOLVER_PROMPT = """Resolve unresolved ReCAAP maritime-security event vessel identities.
+
+Rules:
+1. Match by IMO when an IMO is established by an authoritative or reliable maritime source.
+2. Otherwise resolve the exact vessel identity conservatively using vessel name, incident date, vessel type, flag, operator/owner and event geography.
+3. Never guess between same-name vessels.
+4. If the vessel already exists in the supplied canonical P&C vessel candidates, propose ONLY a pc_event_links record.
+5. If the vessel is demonstrably missing from the canonical vessel registry, propose a pc_mobile_assets record with a stable mobile_asset_id, name, mobile_type, IMO where verified, flag, status, source_id where available, and metadata containing research_sources; then also propose its pc_event_links record.
+6. pc_event_links must use linked_type='mobile_asset', relationship='involved vessel', and the exact ReCAAP event_id supplied.
+7. Every proposed new vessel must have at least one source URL. Prefer IMO/GISIS/equivalent official records, classification/flag/owner sources, ReCAAP, and reputable maritime databases or reporting.
+8. Return unresolved/ambiguous cases in conflicts rather than inventing an identity.
+9. Do not create duplicate canonical vessels.
+"""
+
+
 page=st.sidebar.radio("Workspace",PAGES)
 
 if sb is None:
@@ -532,6 +731,7 @@ AI_ALLOWED_TABLES = {
     "pc_mobile_assets",
     "pc_relationships",
     "pc_events",
+    "pc_event_links",
     "pc_transactions",
     "pc_security_compliance",
     "pc_energy_assets",
@@ -557,6 +757,7 @@ APPLY_CONFLICT_KEYS = {
     "pc_mobile_assets": "mobile_asset_id",
     "pc_relationships": "relationship_id",
     "pc_events": "event_id",
+    "pc_event_links": "event_link_id",
     "pc_transactions": "transaction_id",
     "pc_security_compliance": "security_compliance_id",
     "pc_energy_assets": "asset_id",
@@ -576,6 +777,12 @@ APPLY_CONFLICT_KEYS = {
 }
 
 AI_CAMPAIGNS = {
+    "Resolve ReCAAP vessel links": (
+        "Resolve the supplied unresolved ReCAAP event vessel identities. Link events to existing "
+        "pc_mobile_assets when confidently matched; create missing vessel records only with reliable "
+        "source evidence; stage pc_event_links using linked_type=mobile_asset and relationship=involved vessel. "
+        "Do not guess ambiguous vessel identities."
+    ),
     "African ports & terminals": (
         "Research major commercial ports, container terminals, dry ports and "
         "port-linked logistics zones across Africa. Prioritize operator, owner, "
@@ -653,7 +860,7 @@ def _record_key(payload, natural_key=""):
         return str(natural_key)
     if isinstance(payload,dict):
         for k in (
-            "entity_id","asset_id","mobile_asset_id","relationship_id","event_id",
+            "entity_id","asset_id","mobile_asset_id","relationship_id","event_id","event_link_id",
             "transaction_id","route_id","chokepoint_id","market_instrument_id",
             "trade_flow_id","supply_series_id","observation_id"
         ):
@@ -1271,6 +1478,90 @@ elif page=="Database Coverage":
         )
 
 
+
+elif page=="ReCAAP Vessel Resolver":
+    title(
+        "ReCAAP vessel resolver",
+        "Link canonical ReCAAP security events to canonical vessel records; stage safe matches first and route unresolved identities to AI research."
+    )
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        events=_recaap_events_for_resolution(sb)
+        vessels=_canonical_vessels_for_resolution(sb)
+        existing=_existing_event_vessel_links(sb)
+
+        c1,c2,c3=st.columns(3)
+        c1.metric("ReCAAP events with vessel names",len(events))
+        c2.metric("Canonical vessels",len(vessels))
+        c3.metric("Already vessel-linked",sum(1 for e in events if e["event_id"] in existing))
+
+        st.markdown("### Step 1 · Stage deterministic matches")
+        st.caption(
+            "This does not use AI. It matches normalized vessel names against the canonical vessel registry "
+            "and stages only unique exact matches into pc_event_links for normal Review Queue approval."
+        )
+        if st.button("Stage exact vessel matches",type="primary"):
+            with st.status("Resolving exact vessel matches...",expanded=True) as status:
+                result=stage_recaap_exact_vessel_links(sb)
+                st.write(f"ReCAAP events examined: {result['events']}")
+                st.write(f"Exact links staged: {result['staged']}")
+                st.write(f"Already linked: {result['already']}")
+                st.write(f"Unresolved: {len(result['unresolved'])}")
+                st.write(f"Ambiguous: {len(result['ambiguous'])}")
+                status.update(label="Exact-match resolution complete",state="complete",expanded=False)
+
+            st.session_state["_recaap_unresolved"]=result["unresolved"]
+            st.session_state["_recaap_ambiguous"]=result["ambiguous"]
+            st.success(
+                f"{result['staged']} exact vessel link(s) sent to Review Queue. "
+                "Approve + apply those before using AI for unresolved vessels."
+            )
+
+        unresolved=st.session_state.get("_recaap_unresolved")
+        ambiguous=st.session_state.get("_recaap_ambiguous")
+        if unresolved is not None:
+            st.markdown("### Unresolved after exact matching")
+            if unresolved:
+                st.dataframe(pd.DataFrame(unresolved),use_container_width=True,hide_index=True)
+            else:
+                st.success("No unresolved ReCAAP vessel names.")
+            if ambiguous:
+                st.markdown("### Ambiguous names")
+                st.dataframe(pd.DataFrame(ambiguous),use_container_width=True,hide_index=True)
+
+        st.markdown("### Step 2 · AI research for unresolved identities")
+        st.caption(
+            "After applying the exact links in Review Queue, use Research Jobs for the remaining vessels. "
+            "The prompt below instructs AI to stage either a missing canonical vessel + event link, or just the event link."
+        )
+
+        unresolved_now=[]
+        existing_now=_existing_event_vessel_links(sb)
+        for e in _recaap_events_for_resolution(sb):
+            if e["event_id"] not in existing_now:
+                unresolved_now.append({
+                    "event_id":e["event_id"],
+                    "vessel_name":e.get("_vessel_name"),
+                    "event_date":e.get("start_date"),
+                    "event_type":e.get("event_type"),
+                })
+
+        st.metric("Currently unresolved / unlinked",len(unresolved_now))
+
+        batch_size=st.selectbox("AI research batch size",[10,20,30,50],index=1)
+        start=st.number_input("Start at unresolved record",min_value=0,max_value=max(0,len(unresolved_now)-1),value=0,step=batch_size)
+        batch=unresolved_now[int(start):int(start)+int(batch_size)]
+
+        prompt=RECAAP_AI_RESOLVER_PROMPT + "\n\nUnresolved ReCAAP events for this batch:\n" + json.dumps(batch,indent=2,default=str)
+        st.text_area("AI resolver prompt",value=prompt,height=360,key="recaap_ai_prompt")
+
+        st.info(
+            "Copy this prompt into Research Jobs → Custom research with 'Use current web research' enabled. "
+            "AI proposals will return to Review Queue; they still require approval before canonical writes."
+        )
+
+
 elif page=="Organizations":
     title("Organizations & subscriptions","P&C controls seat limits and product entitlements centrally.")
     orgs=safe_rows(sb,"pc_organizations","*",500) if sb else []
@@ -1487,7 +1778,7 @@ elif page=="Batch Staging":
     target=st.selectbox(
         "Target table",
         [
-            "pc_entities","pc_assets","pc_mobile_assets","pc_relationships","pc_events",
+            "pc_entities","pc_assets","pc_mobile_assets","pc_relationships","pc_events","pc_event_links",
             "pc_transactions","pc_security_compliance","pc_energy_assets",
             "pc_industrial_assets","pc_logistics_facilities","pc_market_instruments",
             "pc_market_prices","pc_trade_flows","pc_supply_series","pc_port_metrics",
