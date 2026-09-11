@@ -318,6 +318,175 @@ def _show_action_feedback():
             for item in details:
                 st.write(item)
 
+
+# ---------------------------------------------------------------------------
+# ReCAAP observation -> canonical security event promotion
+# ---------------------------------------------------------------------------
+
+def _recaap_obs_identity(obs):
+    raw = obs.get("raw_value") or {}
+    meta = obs.get("metadata") or {}
+    for key in ("source_record_id","observation_id","canonical_event_id"):
+        if isinstance(raw,dict) and raw.get(key):
+            return str(raw[key])
+    for key in ("source_record_id","legacy_observation_id"):
+        if isinstance(meta,dict) and meta.get(key):
+            return str(meta[key])
+    return str(obs.get("observation_id") or uuid.uuid4())
+
+
+def _recaap_event_id(obs):
+    ident = _recaap_obs_identity(obs)
+    digest = hashlib.sha1(ident.encode("utf-8")).hexdigest()[:16].upper()
+    return f"EVT_RECAAP_{digest}"
+
+
+def _recaap_location_id(event_id):
+    return f"LOC_{event_id}"
+
+
+def _recaap_event_payload(obs):
+    raw = obs.get("raw_value") or {}
+    der = obs.get("derived_value") or {}
+    meta = obs.get("metadata") or {}
+
+    if not isinstance(raw,dict): raw={}
+    if not isinstance(der,dict): der={}
+    if not isinstance(meta,dict): meta={}
+
+    event_id = _recaap_event_id(obs)
+    vessel = (
+        der.get("vessel_name")
+        or raw.get("subject_name")
+        or meta.get("vessel_name")
+        or "Unknown vessel"
+    )
+    source_type = str(raw.get("event_type") or der.get("event_type") or "").strip().lower()
+    is_attempt = "attempt" in source_type or str(der.get("event_type") or "").lower().startswith("attempted")
+
+    event_type = "Attempted Piracy / Armed Robbery" if is_attempt else "Piracy / Armed Robbery"
+    location = der.get("location_name") or raw.get("location") or meta.get("location")
+    country = der.get("country") or raw.get("country") or meta.get("country_inferred_for_display")
+    display_region = der.get("display_region") or meta.get("display_region") or raw.get("region_theatre")
+
+    desc = raw.get("description") or ""
+    outcome = raw.get("outcome_damage")
+    if outcome:
+        desc = (desc + " Outcome: " + str(outcome)).strip()
+
+    title = f"ReCAAP: {event_type} — {vessel}"
+    start_date = obs.get("observation_date") or raw.get("date")
+
+    event = {
+        "event_id": event_id,
+        "start_date": start_date,
+        "event_nature": "SECURITY",
+        "event_domain": "maritime",
+        "event_family": "Maritime Crime",
+        "event_type": event_type,
+        "severity": raw.get("severity"),
+        "status": "Recorded",
+        "mode": "Maritime",
+        "countries": country,
+        "location": location,
+        "title": title,
+        "description": desc or None,
+        "operational_impact": raw.get("operational_impact"),
+        "commercial_impact": raw.get("trade_impact"),
+        "confidence": obs.get("confidence") or raw.get("confidence") or "high",
+        "trade_relevance": 2,
+        "intelligence_relevance": 4,
+        "trade_visible": True,
+        "intelligence_visible": True,
+        "alert_worthy": False,
+        "record_status": "verified" if obs.get("review_status")=="approved" else "provisional",
+        "source_id": obs.get("source_id") or "SRC_OPEN_RECAAP_ISC",
+        "metadata": {
+            "source_dataset": raw.get("source_dataset") or meta.get("dataset") or "recaap_incidents_2024_2026",
+            "source_record_id": raw.get("source_record_id") or meta.get("source_record_id"),
+            "observation_id": obs.get("observation_id"),
+            "recaap_category": der.get("recaap_category") or meta.get("recaap_category"),
+            "display_region": display_region,
+            "vessel_name": vessel,
+            "asset_type": der.get("asset_type") or raw.get("asset_type"),
+            "promoted_from_observation": True,
+        },
+    }
+    event = {k:v for k,v in event.items() if v is not None}
+
+    lat = der.get("latitude")
+    lon = der.get("longitude")
+    if lat is None: lat = raw.get("latitude")
+    if lon is None: lon = raw.get("longitude")
+
+    location_row = None
+    if lat is not None and lon is not None:
+        location_row = {
+            "event_location_id": _recaap_location_id(event_id),
+            "event_id": event_id,
+            "location_name": location,
+            "country": country,
+            "latitude": lat,
+            "longitude": lon,
+            "accuracy": "ReCAAP reported coordinates",
+            "notes": f"Promoted from pc_observations; dataset={event['metadata']['source_dataset']}",
+        }
+        location_row = {k:v for k,v in location_row.items() if v is not None}
+
+    return event, location_row
+
+
+def promote_recaap_observations(sb):
+    """Promote approved ReCAAP observations into canonical pc_events / pc_event_locations.
+
+    Idempotent: deterministic IDs and upsert mean the action can be run again safely.
+    """
+    rows = safe_rows(
+        sb,
+        "pc_observations",
+        "observation_id,source_id,source_name,source_url,source_type,observation_date,raw_value,derived_value,confidence,review_status,record_status,metadata",
+        5000,
+        {"source_id":"SRC_OPEN_RECAAP_ISC"},
+        "observation_date"
+    )
+
+    if not rows:
+        return {"observations":0,"events":0,"locations":0,"skipped":0,"failures":[]}
+
+    event_rows=[]
+    location_rows=[]
+    skipped=0
+    failures=[]
+
+    for obs in rows:
+        # Only promote observations that are approved/applied into the provenance table.
+        if str(obs.get("review_status") or "").lower() not in {"approved"}:
+            skipped += 1
+            continue
+        try:
+            event, loc = _recaap_event_payload(obs)
+            event_rows.append(event)
+            if loc:
+                location_rows.append(loc)
+        except Exception as exc:
+            failures.append(f"{obs.get('observation_id')}: {exc}")
+
+    # Upsert events first because locations FK to them.
+    for i in range(0,len(event_rows),100):
+        sb.table("pc_events").upsert(event_rows[i:i+100],on_conflict="event_id").execute()
+
+    for i in range(0,len(location_rows),100):
+        sb.table("pc_event_locations").upsert(location_rows[i:i+100],on_conflict="event_location_id").execute()
+
+    return {
+        "observations":len(rows),
+        "events":len(event_rows),
+        "locations":len(location_rows),
+        "skipped":skipped,
+        "failures":failures,
+    }
+
+
 page=st.sidebar.radio("Workspace",PAGES)
 
 if sb is None:
@@ -1018,6 +1187,74 @@ elif page=="Database Coverage":
         s6.metric("Observations",observations_total)
         s7.metric("Staged pending",staged_pending)
         s8.metric("Approved waiting apply",staged_approved)
+
+
+        st.divider()
+        st.markdown("### ReCAAP canonical promotion")
+        st.caption(
+            "ReCAAP observations can exist in pc_observations without appearing on maps. "
+            "This action promotes approved ReCAAP observations into canonical security events and event locations. "
+            "It is idempotent and can be re-run safely."
+        )
+
+        try:
+            recaap_obs_count = count_rows(sb,"pc_observations",{"source_id":"SRC_OPEN_RECAAP_ISC"})
+        except Exception:
+            recaap_obs_count = 0
+
+        rc1,rc2,rc3 = st.columns(3)
+        rc1.metric("ReCAAP observations",recaap_obs_count)
+        rc2.metric("Canonical events now",events_total)
+        rc3.metric("Event locations now",locations_total)
+
+        if recaap_obs_count:
+            confirm_recaap = st.checkbox(
+                "I understand this will create/update canonical ReCAAP security events and map locations.",
+                key="confirm_recaap_promote"
+            )
+            if st.button(
+                "Promote ReCAAP observations",
+                type="primary",
+                disabled=not confirm_recaap,
+                key="promote_recaap_button"
+            ):
+                try:
+                    with st.status("Promoting ReCAAP observations...",expanded=True) as status:
+                        result = promote_recaap_observations(sb)
+                        st.write(f"Observations found: {result['observations']}")
+                        st.write(f"Canonical events written: {result['events']}")
+                        st.write(f"Event locations written: {result['locations']}")
+                        st.write(f"Skipped: {result['skipped']}")
+                        if result["failures"]:
+                            for item in result["failures"][:25]:
+                                st.write(item)
+                            status.update(
+                                label=f"Promotion completed with {len(result['failures'])} warning(s)",
+                                state="error",
+                                expanded=True
+                            )
+                        else:
+                            status.update(
+                                label="ReCAAP promotion complete",
+                                state="complete",
+                                expanded=False
+                            )
+                    if result["failures"]:
+                        st.warning(
+                            f"Promotion finished: {result['events']} events and {result['locations']} locations written; "
+                            f"{len(result['failures'])} failures."
+                        )
+                    else:
+                        st.success(
+                            f"Promotion complete — {result['events']} canonical events and "
+                            f"{result['locations']} event locations written."
+                        )
+                    st.rerun()
+                except Exception as exc:
+                    st.exception(exc)
+        else:
+            st.info("No canonical ReCAAP observations found yet.")
+
 
         st.caption(
             "A record appearing here is in Supabase. A record that exists only in Excel or Batch Staging "
