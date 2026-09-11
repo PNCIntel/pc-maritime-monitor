@@ -555,7 +555,7 @@ def _canonical_vessels_for_resolution(sb):
     rows=safe_rows(
         sb,
         "pc_mobile_assets",
-        "mobile_asset_id,name,mobile_type,imo,mmsi,flag,owner_entity_id,operator_entity_id,status,record_status,source_id,metadata",
+        "mobile_asset_id,name,asset_type,subtype,imo,mmsi,registration,call_sign,flag,year_built,dwt,owner_entity_id,operator_entity_id,manager_entity_id,status,record_status,data_quality,source_id,metadata",
         10000
     )
     for r in rows:
@@ -687,7 +687,7 @@ Rules:
 2. Otherwise resolve the exact vessel identity conservatively using vessel name, incident date, vessel type, flag, operator/owner and event geography.
 3. Never guess between same-name vessels.
 4. If the vessel already exists in the supplied canonical P&C vessel candidates, propose ONLY a pc_event_links record.
-5. If the vessel is demonstrably missing from the canonical vessel registry, propose a pc_mobile_assets record with a stable mobile_asset_id, name, mobile_type, IMO where verified, flag, status, source_id where available, and metadata containing research_sources; then also propose its pc_event_links record.
+5. If the vessel is demonstrably missing from the canonical vessel registry, propose a pc_mobile_assets record with a stable mobile_asset_id, name, asset_type, subtype where useful, IMO where verified, flag, status, source_id where available, and metadata containing research_sources; then also propose its pc_event_links record.
 6. pc_event_links must use linked_type='mobile_asset', relationship='involved vessel', and the exact ReCAAP event_id supplied.
 7. Every proposed new vessel must have at least one source URL. Prefer IMO/GISIS/equivalent official records, classification/flag/owner sources, ReCAAP, and reputable maritime databases or reporting.
 8. Return unresolved/ambiguous cases in conflicts rather than inventing an identity.
@@ -1496,12 +1496,20 @@ elif page=="ReCAAP Vessel Resolver":
         c2.metric("Canonical vessels",len(vessels))
         c3.metric("Already vessel-linked",sum(1 for e in events if e["event_id"] in existing))
 
+        if not vessels:
+            st.error(
+                "Canonical vessel query returned 0 rows. The resolver will not run AI research until "
+                "pc_mobile_assets is readable, because doing so would waste research calls and risk duplicates."
+            )
+        else:
+            st.success(f"Canonical vessel registry loaded: {len(vessels):,} records.")
+
         st.markdown("### Step 1 · Stage deterministic matches")
         st.caption(
             "This does not use AI. It matches normalized vessel names against the canonical vessel registry "
             "and stages only unique exact matches into pc_event_links for normal Review Queue approval."
         )
-        if st.button("Stage exact vessel matches",type="primary"):
+        if st.button("Stage exact vessel matches",type="primary",disabled=not bool(vessels)):
             with st.status("Resolving exact vessel matches...",expanded=True) as status:
                 result=stage_recaap_exact_vessel_links(sb)
                 st.write(f"ReCAAP events examined: {result['events']}")
