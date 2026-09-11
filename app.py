@@ -30,7 +30,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.8-canonical-db-events"
+APP_VERSION = "v3.3.9-canonical-db-vessels"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Legacy Excel + Research Reference + Supabase Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -861,6 +861,195 @@ if not _CANON_EVENTS.empty:
     TABLES[("Events & Hazards","Events")] = _CANON_EVENTS
 if not _CANON_EVENT_LOCS.empty:
     TABLES[("Events & Hazards","Event Locations")] = _CANON_EVENT_LOCS
+
+
+@st.cache_data(show_spinner=False, ttl=180)
+def _canonical_db_vessel_frames():
+    """Load canonical Supabase vessels, vessel/company relationships and event links.
+
+    The normalized database is authoritative for newly-created vessels.  Results are
+    projected into the legacy dataframe column names so the existing Trade UI can use
+    them without maintaining a second vessel implementation.
+    """
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+        vrows = pc_safe_rows(
+            sb,
+            "pc_mobile_assets",
+            "mobile_asset_id,name,asset_type,subtype,imo,mmsi,registration,call_sign,flag,year_built,dwt,capacity_value,capacity_unit,owner_entity_id,operator_entity_id,manager_entity_id,status,record_status,data_quality,source_id,metadata,created_at,updated_at",
+            5000,
+            order="name",
+        )
+        erows = pc_safe_rows(
+            sb,
+            "pc_entities",
+            "entity_id,name,entity_type,subtype,hq_city,hq_country,status,record_status,metadata",
+            5000,
+            order="name",
+        )
+        lrows = pc_safe_rows(
+            sb,
+            "pc_event_links",
+            "event_link_id,event_id,linked_type,linked_id,linked_name,relationship,confidence,source_id,metadata",
+            10000,
+        )
+
+        if not vrows:
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+        entities = {str(r.get("entity_id") or ""): str(r.get("name") or "") for r in (erows or [])}
+        vessels = []
+        relationships = []
+
+        for r in vrows:
+            meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+            owner_id = str(r.get("owner_entity_id") or "").strip()
+            operator_id = str(r.get("operator_entity_id") or "").strip()
+            manager_id = str(r.get("manager_entity_id") or "").strip()
+            owner_name = entities.get(owner_id, owner_id)
+            operator_name = entities.get(operator_id, operator_id)
+            manager_name = entities.get(manager_id, manager_id)
+
+            # Build a readable owner/operator line without duplicating the same company.
+            oo = []
+            for x in [owner_name, operator_name]:
+                if x and x not in oo:
+                    oo.append(x)
+            owner_operator = " / ".join(oo)
+
+            vessels.append({
+                "Vessel ID": str(r.get("mobile_asset_id") or "").strip(),
+                "Vessel Name": str(r.get("name") or "").strip(),
+                "IMO": _norm_imo(r.get("imo")),
+                "MMSI": str(r.get("mmsi") or "").strip(),
+                "Call Sign": str(r.get("call_sign") or "").strip(),
+                "Flag": str(r.get("flag") or "").strip(),
+                "Vessel Type": str(r.get("asset_type") or "").strip(),
+                "Subtype / Class": str(r.get("subtype") or "").strip(),
+                "Year Built": r.get("year_built"),
+                "DWT": r.get("dwt"),
+                "Capacity": r.get("capacity_value"),
+                "Capacity Unit": str(r.get("capacity_unit") or "").strip(),
+                "Owner Company ID": owner_id,
+                "Operator Company ID": operator_id,
+                "Manager Company ID": manager_id,
+                "Owner": owner_name,
+                "Operator": operator_name,
+                "Manager": manager_name,
+                "Owner / Operator Text": owner_operator,
+                "Status": str(r.get("status") or r.get("record_status") or "").strip(),
+                "Record Status": str(r.get("record_status") or "").strip(),
+                "Data Quality": str(r.get("data_quality") or "").strip(),
+                "Source ID": str(r.get("source_id") or "").strip(),
+                "Notes": str(meta.get("note") or meta.get("notes") or "").strip(),
+                "Completeness Note": (
+                    "Canonical Supabase mobile-asset record."
+                    if not str(meta.get("recaap_input_name") or "").strip()
+                    else "Canonical Supabase vessel resolved from ReCAAP incident data."
+                ),
+                "Metadata": meta,
+            })
+
+            for role, eid, ename in [
+                ("Owner", owner_id, owner_name),
+                ("Operator", operator_id, operator_name),
+                ("Manager", manager_id, manager_name),
+            ]:
+                if not eid:
+                    continue
+                relationships.append({
+                    "Vessel ID": str(r.get("mobile_asset_id") or "").strip(),
+                    "Vessel Name": str(r.get("name") or "").strip(),
+                    "Company ID": eid,
+                    "Company": ename,
+                    "Relationship": role,
+                    "Role": role,
+                    "Source ID": str(r.get("source_id") or "").strip(),
+                })
+
+        event_links = []
+        for r in (lrows or []):
+            linked_type = str(r.get("linked_type") or "").strip().casefold()
+            if linked_type not in {"mobile_asset", "vessel"}:
+                continue
+            event_links.append({
+                "Link ID": str(r.get("event_link_id") or "").strip(),
+                "Event ID": str(r.get("event_id") or "").strip(),
+                "Asset ID": str(r.get("linked_id") or "").strip(),
+                "Asset": str(r.get("linked_name") or "").strip(),
+                "Relationship": str(r.get("relationship") or "").strip(),
+                "Confidence": str(r.get("confidence") or "").strip(),
+                "Source ID": str(r.get("source_id") or "").strip(),
+                "Metadata": r.get("metadata") or {},
+            })
+
+        return (
+            pd.DataFrame(vessels),
+            pd.DataFrame(relationships),
+            pd.DataFrame(event_links),
+        )
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+
+def _merge_canonical_vessels(legacy, canonical):
+    """Merge DB vessels into the legacy display frame, preferring DB rows by ID/IMO."""
+    if canonical is None or canonical.empty:
+        return legacy.copy() if isinstance(legacy, pd.DataFrame) else pd.DataFrame()
+    if legacy is None or legacy.empty:
+        return canonical.copy()
+
+    old = legacy.copy()
+    new = canonical.copy()
+
+    # Remove legacy rows superseded by the canonical ID or IMO.
+    canon_ids = set(new.get("Vessel ID", pd.Series(dtype=str)).fillna("").astype(str))
+    canon_imos = set(new.get("IMO", pd.Series(dtype=str)).map(_norm_imo))
+    canon_imos.discard("")
+
+    keep = pd.Series(True, index=old.index)
+    if "Vessel ID" in old.columns and canon_ids:
+        keep &= ~old["Vessel ID"].fillna("").astype(str).isin(canon_ids)
+    if "IMO" in old.columns and canon_imos:
+        keep &= ~old["IMO"].map(_norm_imo).isin(canon_imos)
+
+    return pd.concat([old[keep], new], ignore_index=True, sort=False)
+
+
+_CANON_VESSELS, _CANON_VESSEL_RELS, _CANON_VESSEL_EVENT_LINKS = _canonical_db_vessel_frames()
+
+if not _CANON_VESSELS.empty:
+    TABLES[("Maritime","Vessels")] = _merge_canonical_vessels(
+        TABLES.get(("Maritime","Vessels"), pd.DataFrame()),
+        _CANON_VESSELS,
+    )
+
+if not _CANON_VESSEL_RELS.empty:
+    _legacy_vrels = TABLES.get(("Maritime","Vessel Relationships"), pd.DataFrame())
+    TABLES[("Maritime","Vessel Relationships")] = pd.concat(
+        [_legacy_vrels, _CANON_VESSEL_RELS],
+        ignore_index=True,
+        sort=False,
+    ).drop_duplicates(
+        subset=[c for c in ["Vessel ID","Company ID","Relationship"] if c in pd.concat([_legacy_vrels, _CANON_VESSEL_RELS], ignore_index=True, sort=False).columns],
+        keep="last",
+    )
+
+if not _CANON_VESSEL_EVENT_LINKS.empty:
+    _legacy_eal = TABLES.get(("Events & Hazards","Event Asset Links"), pd.DataFrame())
+    _combined_eal = pd.concat(
+        [_legacy_eal, _CANON_VESSEL_EVENT_LINKS],
+        ignore_index=True,
+        sort=False,
+    )
+    _dedupe_cols = [c for c in ["Event ID","Asset ID","Relationship"] if c in _combined_eal.columns]
+    TABLES[("Events & Hazards","Event Asset Links")] = (
+        _combined_eal.drop_duplicates(subset=_dedupe_cols, keep="last")
+        if _dedupe_cols else _combined_eal
+    )
 
 
 # ---------- v3.3.3 geographic + cruise integration ----------
