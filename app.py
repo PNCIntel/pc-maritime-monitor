@@ -30,7 +30,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.7-compact-multimodal-ui"
+APP_VERSION = "v3.3.8-canonical-db-events"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Legacy Excel + Research Reference + Supabase Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -778,6 +778,89 @@ def all_tables():
     return out
 
 TABLES=all_tables()
+
+def _canonical_db_event_frames():
+    """Return normalized Supabase events/locations in the legacy dataframe shape.
+
+    Canonical normalized tables are authoritative when available. The existing
+    workbook/legacy bridge remains a fallback if Supabase is unavailable.
+    """
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame(), pd.DataFrame()
+
+        erows = pc_safe_rows(
+            sb,
+            "pc_events",
+            "event_id,start_date,end_date,event_nature,event_domain,event_family,event_type,severity,status,mode,countries,location,title,description,operational_impact,commercial_impact,confidence,trade_relevance,intelligence_relevance,trade_visible,intelligence_visible,alert_worthy,record_status,source_id,metadata",
+            5000,
+            order="start_date",
+        )
+        lrows = pc_safe_rows(
+            sb,
+            "pc_event_locations",
+            "event_location_id,event_id,location_name,country,latitude,longitude,accuracy,notes",
+            5000,
+        )
+
+        if not erows:
+            return pd.DataFrame(), pd.DataFrame()
+
+        events = pd.DataFrame(erows).rename(columns={
+            "event_id":"Event ID",
+            "start_date":"Start Date",
+            "end_date":"End Date",
+            "event_nature":"Event Nature",
+            "event_domain":"Event Domain",
+            "event_family":"Event Family",
+            "event_type":"Event Type",
+            "severity":"Severity",
+            "status":"Status",
+            "mode":"Mode",
+            "countries":"Country / Countries",
+            "location":"Location",
+            "title":"Title",
+            "description":"Description",
+            "operational_impact":"Operational Impact",
+            "commercial_impact":"Trade / Commercial Impact",
+            "confidence":"Confidence",
+            "trade_relevance":"Trade Relevance",
+            "intelligence_relevance":"Intelligence Relevance",
+            "trade_visible":"Trade Visible",
+            "intelligence_visible":"Intelligence Visible",
+            "alert_worthy":"Alert Worthy",
+            "record_status":"Record Status",
+            "source_id":"Source ID",
+            "metadata":"Metadata",
+        })
+
+        if lrows:
+            locations = pd.DataFrame(lrows).rename(columns={
+                "event_location_id":"Location Record",
+                "event_id":"Event ID",
+                "location_name":"Location",
+                "country":"Country",
+                "latitude":"Latitude",
+                "longitude":"Longitude",
+                "accuracy":"Accuracy",
+                "notes":"Notes",
+            })
+        else:
+            locations = pd.DataFrame()
+
+        return events, locations
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame()
+
+# Normalized canonical event tables supersede the mirrored workbook event layer.
+# This is what allows newly-promoted ReCAAP records (and future DB-native events)
+# to appear immediately without rebuilding an Excel workbook.
+_CANON_EVENTS, _CANON_EVENT_LOCS = _canonical_db_event_frames()
+if not _CANON_EVENTS.empty:
+    TABLES[("Events & Hazards","Events")] = _CANON_EVENTS
+if not _CANON_EVENT_LOCS.empty:
+    TABLES[("Events & Hazards","Event Locations")] = _CANON_EVENT_LOCS
 
 
 # ---------- v3.3.3 geographic + cruise integration ----------
@@ -2305,47 +2388,12 @@ def render_investment_dashboard(base_df=None, company_id=None, compact=False):
     c1,c2=st.columns(2)
     with c1:
         st.markdown("#### Investment activity by region")
-        if "Region" in df.columns and df["Region"].replace("", pd.NA).notna().any():
-            reg=(
-                df.assign(Region=df["Region"].replace("", "Unspecified"))
-                .groupby("Region",dropna=False)
-                .size()
-                .sort_values(ascending=False)
-            )
-            st.bar_chart(reg)
-        elif "Country" in df.columns and df["Country"].replace("", pd.NA).notna().any():
-            st.caption("Region is not populated for these records; showing country activity instead.")
-            reg=(
-                df.assign(Country=df["Country"].replace("", "Unspecified"))
-                .groupby("Country",dropna=False)
-                .size()
-                .sort_values(ascending=False)
-            )
-            st.bar_chart(reg)
-        else:
-            st.caption("No region or country field is available for these investment records.")
-
+        reg=df.groupby("Region",dropna=False).size().sort_values(ascending=False)
+        st.bar_chart(reg)
     with c2:
         st.markdown("#### Investment activity by spend type")
-        if "Spend Type" in df.columns and df["Spend Type"].replace("", pd.NA).notna().any():
-            typ=(
-                df.assign(**{"Spend Type": df["Spend Type"].replace("", "Unspecified")})
-                .groupby("Spend Type",dropna=False)
-                .size()
-                .sort_values(ascending=False)
-            )
-            st.bar_chart(typ)
-        elif "Investment Class" in df.columns and df["Investment Class"].replace("", pd.NA).notna().any():
-            st.caption("Spend type is not populated for these records; showing investment class instead.")
-            typ=(
-                df.assign(**{"Investment Class": df["Investment Class"].replace("", "Unspecified")})
-                .groupby("Investment Class",dropna=False)
-                .size()
-                .sort_values(ascending=False)
-            )
-            st.bar_chart(typ)
-        else:
-            st.caption("No spend-type or investment-class field is available for these records.")
+        typ=df.groupby("Spend Type",dropna=False).size().sort_values(ascending=False)
+        st.bar_chart(typ)
     if "Month" in df.columns and df["Month"].replace("NaT",pd.NA).notna().any():
         st.markdown("#### Activity through the year")
         monthly=df[df["Month"].ne("NaT")].groupby("Month").size().sort_index()
@@ -4203,7 +4251,7 @@ TRADE_REGIONS = {
     "Central America & Caribbean": {"center": (18.0, -78.0), "zoom": 3.0, "countries": ["Panama","Costa Rica","Guatemala","Honduras","El Salvador","Nicaragua","Belize","Bahamas","Haiti","Jamaica","Dominican Republic","Cuba","Trinidad and Tobago"]},
     "South America": {"center": (-18.0, -60.0), "zoom": 2.5, "countries": ["Brazil","Argentina","Chile","Uruguay","Colombia","Ecuador","Peru","Venezuela","Guyana","Suriname","Paraguay","Bolivia"]},
     "South Asia": {"center": (21.0, 78.0), "zoom": 3.0, "countries": ["India","Pakistan","Bangladesh","Sri Lanka","Nepal","Maldives"]},
-    "Asia-Pacific": {"center": (16.0, 116.0), "zoom": 2.4, "countries": ["China","Japan","South Korea","Taiwan","Philippines","Indonesia","Malaysia","Singapore","Vietnam","Thailand","Australia","New Zealand","Papua New Guinea"]},
+    "Asia-Pacific": {"center": (16.0, 116.0), "zoom": 2.4, "countries": ["China","Japan","South Korea","Taiwan","Philippines","Indonesia","Malaysia","Singapore","Vietnam","Thailand","Australia","New Zealand","Papua New Guinea","South China Sea"]},
     "Central Asia": {"center": (43.0, 66.0), "zoom": 3.2, "countries": ["Kazakhstan","Uzbekistan","Turkmenistan","Kyrgyzstan","Tajikistan","Azerbaijan"]},
     "Arctic": {"center": (70.0, 10.0), "zoom": 2.1, "countries": ["Canada","United States","Russia","Norway","Finland","Sweden","Denmark","Iceland"]},
 }
@@ -4219,11 +4267,72 @@ def _trade_region_filter(df, region, country_cols):
     pattern="|".join(re.escape(x) for x in countries)
     return df[blob.str.contains(pattern,case=False,regex=True,na=False)].copy()
 
+
+def _trade_recaap_projection():
+    """Legacy ReCAAP projection fallback.
+
+    When canonical DB ReCAAP events exist, do not project the same observations
+    from Excel again.
+    """
+    canonical = TABLES.get(("Events & Hazards","Events"), pd.DataFrame())
+    if not canonical.empty and "Event ID" in canonical.columns:
+        if canonical["Event ID"].fillna("").astype(str).str.startswith("EVT_RECAAP_").any():
+            return pd.DataFrame(), pd.DataFrame()
+    obs=TABLES.get(("Intelligence","Event Observations"),pd.DataFrame()).copy()
+    if obs.empty or "Source Dataset" not in obs.columns:
+        return pd.DataFrame(),pd.DataFrame()
+    r=obs[obs["Source Dataset"].fillna("").astype(str).str.casefold().eq("recaap_incidents_2024_2026")].copy()
+    if r.empty:
+        return pd.DataFrame(),pd.DataFrame()
+
+    def _clean(v):
+        if pd.isna(v): return ""
+        return str(v).strip()
+    def _country(row):
+        c=_clean(row.get("Country",""))
+        if c: return c
+        t=_clean(row.get("Region / Theatre", ""))
+        tl=t.casefold()
+        for name in ["Bangladesh","India","Indonesia","Malaysia","Philippines","Singapore","Vietnam"]:
+            if name.casefold() in tl: return name
+        if "malacca" in tl or "singapore" in tl: return "Singapore / Malaysia / Indonesia"
+        if "south china sea" in tl: return "South China Sea"
+        return t
+
+    erows=[]; lrows=[]
+    for _,row in r.iterrows():
+        oid=_clean(row.get("Observation ID","")) or _clean(row.get("Source Record ID",""))
+        if not oid: continue
+        eid=f"RECAAP_{oid}"
+        vessel=_clean(row.get("Subject Name","")); raw_type=_clean(row.get("Event Type",""))
+        title=f"ReCAAP: {raw_type or 'Piracy / armed robbery'}" + (f" — {vessel}" if vessel else "")
+        country=_country(row); loc=_clean(row.get("Location",""))
+        normalized_type="Attempted piracy / armed robbery" if "attempt" in raw_type.casefold() else "Piracy / armed robbery"
+        erows.append({
+            "Event ID":eid,"Start Date":row.get("Date",""),"End Date":"","Event Family":"Maritime Crime",
+            "Event Type":normalized_type,"Severity":_clean(row.get("Severity","")),"Status":"Recorded","Mode":"Maritime",
+            "Country / Countries":country,"Location":loc,"Title":title,"Description":_clean(row.get("Description","")),
+            "Operational Impact":_clean(row.get("Operational Impact","")),"Trade / Commercial Impact":_clean(row.get("Trade Impact","")),
+            "Confidence":_clean(row.get("Confidence","")),"Source Record":oid,"Primary Source URL":_clean(row.get("Source Reference",""))
+        })
+        lat=pd.to_numeric(pd.Series([row.get("Latitude")]),errors="coerce").iloc[0]
+        lon=pd.to_numeric(pd.Series([row.get("Longitude")]),errors="coerce").iloc[0]
+        if pd.notna(lat) and pd.notna(lon):
+            lrows.append({"Location Record":f"RECAAP_LOC_{oid}","Event ID":eid,"Location":loc,"Country":country,
+                          "Latitude":float(lat),"Longitude":float(lon),"Accuracy":"ReCAAP reported coordinates",
+                          "Notes":f"ReCAAP category: {_clean(row.get('Subtype',''))}"})
+    return pd.DataFrame(erows),pd.DataFrame(lrows)
+
 def render_trade_regional_maps():
     header("Regional Maps","A shared regional operating picture across ports, disruptions and trade exposure. Use the filters to move from geography to mode and event impact.")
     region=st.selectbox("Region",list(TRADE_REGIONS),key="trade_region_map")
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     locs=TABLES.get(("Events & Hazards","Event Locations"),pd.DataFrame()).copy()
+    recaap_events,recaap_locs=_trade_recaap_projection()
+    if not recaap_events.empty:
+        events=pd.concat([events,recaap_events],ignore_index=True,sort=False)
+    if not recaap_locs.empty:
+        locs=pd.concat([locs,recaap_locs],ignore_index=True,sort=False)
     ports_df=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
     events=_trade_region_filter(events,region,["Country / Countries","Location","Title"])
     ports_view=_trade_region_filter(ports_df,region,["Country","Port / Facility"])
@@ -4338,14 +4447,7 @@ news_label="NewsData" if news_key_present else "NewsData · key needed"
 st.sidebar.markdown(f"<span class='pc-feed-health'><span class='pc-dot {news_class}'></span> {news_label}</span>",unsafe_allow_html=True)
 st.sidebar.caption("CGMIX and GDELT remain deferred. Live API views keep the last successful session result if a refresh fails.")
 
-workspace = next(
-    (section for section, items in NAV_SECTIONS.items() if page in items),
-    "TRADE SYSTEM",
-)
-st.markdown(
-    f"<div class='pc-breadcrumb'><b>{workspace}</b> &nbsp;/&nbsp; {page}</div>",
-    unsafe_allow_html=True,
-)
+st.markdown(f"<div class='pc-breadcrumb'><b>{workspace}</b> &nbsp;/&nbsp; {page}</div>",unsafe_allow_html=True)
 
 def page_company_selector():
     companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())

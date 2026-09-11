@@ -14,6 +14,7 @@ if str(SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_DIR))
 from pc_data_bridge import load_sheet as bridge_load_sheet, backend_status
 from pc_workspace import save_query as save_workspace_query
+from pc_db import client as pc_db_client, safe_rows as pc_safe_rows
 try:
     from pc_auth import require_login
 except Exception:
@@ -186,6 +187,88 @@ def normalize_imo(v):
 
 
 
+
+
+def recaap_observations_to_events(obs: pd.DataFrame):
+    """Project ReCAAP observation rows into the shared event/location shape for UI use.
+
+    This is a non-destructive display projection: the source-of-truth remains
+    09_intelligence.xlsx / Event Observations until a canonical resolver assigns
+    a Canonical Event ID.
+    """
+    if obs is None or obs.empty or "Source Dataset" not in obs.columns:
+        return pd.DataFrame(), pd.DataFrame()
+    r=obs[obs["Source Dataset"].fillna("").astype(str).str.casefold().eq("recaap_incidents_2024_2026")].copy()
+    if r.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    def country_from(row):
+        c=clean_display_text(row.get("Country",""))
+        if c:
+            return c
+        theatre=clean_display_text(row.get("Region / Theatre",""))
+        tl=theatre.casefold()
+        for name in ["Bangladesh","India","Indonesia","Malaysia","Philippines","Singapore","Vietnam"]:
+            if name.casefold() in tl:
+                return name
+        if "malacca" in tl or "singapore" in tl:
+            return "Singapore / Malaysia / Indonesia"
+        if "south china sea" in tl:
+            return "South China Sea"
+        return theatre
+
+    def event_type(row):
+        raw=clean_display_text(row.get("Event Type",""))
+        if "attempt" in raw.casefold():
+            return "Attempted piracy / armed robbery"
+        return "Piracy / armed robbery"
+
+    events=[]; locs=[]
+    for _,row in r.iterrows():
+        oid=clean_display_text(row.get("Observation ID","")) or clean_display_text(row.get("Source Record ID",""))
+        eid=f"RECAAP_{oid}" if oid else ""
+        if not eid:
+            continue
+        vessel=clean_display_text(row.get("Subject Name",""))
+        loc=clean_display_text(row.get("Location",""))
+        raw_type=clean_display_text(row.get("Event Type",""))
+        title=f"ReCAAP: {raw_type or 'Piracy / armed robbery'}"
+        if vessel:
+            title += f" — {vessel}"
+        country=country_from(row)
+        events.append({
+            "Event ID":eid,
+            "Start Date":row.get("Date",""),
+            "End Date":"",
+            "Event Family":"Maritime Crime",
+            "Event Type":event_type(row),
+            "Severity":clean_display_text(row.get("Severity","")),
+            "Status":"Recorded",
+            "Mode":"Maritime",
+            "Country / Countries":country,
+            "Location":loc,
+            "Title":title,
+            "Description":clean_display_text(row.get("Description","")),
+            "Operational Impact":clean_display_text(row.get("Operational Impact","")),
+            "Trade / Commercial Impact":clean_display_text(row.get("Trade Impact","")),
+            "Confidence":clean_display_text(row.get("Confidence","")),
+            "Source Record":oid,
+            "Primary Source URL":clean_display_text(row.get("Source Reference","")),
+        })
+        lat=pd.to_numeric(pd.Series([row.get("Latitude")]),errors="coerce").iloc[0]
+        lon=pd.to_numeric(pd.Series([row.get("Longitude")]),errors="coerce").iloc[0]
+        if pd.notna(lat) and pd.notna(lon):
+            locs.append({
+                "Location Record":f"RECAAP_LOC_{oid}",
+                "Event ID":eid,
+                "Location":loc,
+                "Country":country,
+                "Latitude":float(lat),
+                "Longitude":float(lon),
+                "Accuracy":"ReCAAP reported coordinates",
+                "Notes":f"Source dataset: recaap_incidents_2024_2026; ReCAAP category: {clean_display_text(row.get('Subtype',''))}",
+            })
+    return pd.DataFrame(events), pd.DataFrame(locs)
 
 def intelligence_event_filter(df: pd.DataFrame) -> pd.DataFrame:
     """Strict P&C Intelligence gate.
@@ -396,6 +479,81 @@ def render_connected_context(event_id):
         show_df(view, ["System", "Relationship", "Confidence"], 180)
 
 
+
+def _canonical_db_event_frames():
+    """Return normalized Supabase events/locations in the legacy dataframe shape.
+
+    Canonical normalized tables are authoritative when available. The existing
+    workbook/legacy bridge remains a fallback if Supabase is unavailable.
+    """
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame(), pd.DataFrame()
+
+        erows = pc_safe_rows(
+            sb,
+            "pc_events",
+            "event_id,start_date,end_date,event_nature,event_domain,event_family,event_type,severity,status,mode,countries,location,title,description,operational_impact,commercial_impact,confidence,trade_relevance,intelligence_relevance,trade_visible,intelligence_visible,alert_worthy,record_status,source_id,metadata",
+            5000,
+            order="start_date",
+        )
+        lrows = pc_safe_rows(
+            sb,
+            "pc_event_locations",
+            "event_location_id,event_id,location_name,country,latitude,longitude,accuracy,notes",
+            5000,
+        )
+
+        if not erows:
+            return pd.DataFrame(), pd.DataFrame()
+
+        events = pd.DataFrame(erows).rename(columns={
+            "event_id":"Event ID",
+            "start_date":"Start Date",
+            "end_date":"End Date",
+            "event_nature":"Event Nature",
+            "event_domain":"Event Domain",
+            "event_family":"Event Family",
+            "event_type":"Event Type",
+            "severity":"Severity",
+            "status":"Status",
+            "mode":"Mode",
+            "countries":"Country / Countries",
+            "location":"Location",
+            "title":"Title",
+            "description":"Description",
+            "operational_impact":"Operational Impact",
+            "commercial_impact":"Trade / Commercial Impact",
+            "confidence":"Confidence",
+            "trade_relevance":"Trade Relevance",
+            "intelligence_relevance":"Intelligence Relevance",
+            "trade_visible":"Trade Visible",
+            "intelligence_visible":"Intelligence Visible",
+            "alert_worthy":"Alert Worthy",
+            "record_status":"Record Status",
+            "source_id":"Source ID",
+            "metadata":"Metadata",
+        })
+
+        if lrows:
+            locations = pd.DataFrame(lrows).rename(columns={
+                "event_location_id":"Location Record",
+                "event_id":"Event ID",
+                "location_name":"Location",
+                "country":"Country",
+                "latitude":"Latitude",
+                "longitude":"Longitude",
+                "accuracy":"Accuracy",
+                "notes":"Notes",
+            })
+        else:
+            locations = pd.DataFrame()
+
+        return events, locations
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame()
+
 # Core canonical datasets
 companies = xl("01_core_entities.xlsx", "Companies")
 ports = xl("02_maritime.xlsx", "Ports")
@@ -425,9 +583,19 @@ sources = xl("10_sources_evidence.xlsx", "Sources")
 source_feeds = xl("10_sources_evidence.xlsx", "Source Feeds")
 
 # Canonical events/hazards
-hazard_events_raw = xl("13_events_hazards.xlsx", "Events")
+_db_events, _db_event_locations = _canonical_db_event_frames()
+hazard_events_raw = _db_events if not _db_events.empty else xl("13_events_hazards.xlsx", "Events")
+event_locations = _db_event_locations if not _db_event_locations.empty else xl("13_events_hazards.xlsx", "Event Locations")
+
+# ReCAAP observations are an approved operational display feed. Project them into
+# the shared event/location shape without mutating the underlying canonical workbooks.
+if _db_events.empty:
+    recaap_events, recaap_locations = recaap_observations_to_events(observations)
+    if not recaap_events.empty:
+        hazard_events_raw = pd.concat([hazard_events_raw, recaap_events], ignore_index=True, sort=False)
+    if not recaap_locations.empty:
+        event_locations = pd.concat([event_locations, recaap_locations], ignore_index=True, sort=False)
 hazard_events = intelligence_event_filter(hazard_events_raw)
-event_locations = xl("13_events_hazards.xlsx", "Event Locations")
 event_asset_links = xl("13_events_hazards.xlsx", "Event Asset Links")
 event_company_links = xl("13_events_hazards.xlsx", "Event Company Links")
 event_system_links = xl("13_events_hazards.xlsx", "Event System Links")
