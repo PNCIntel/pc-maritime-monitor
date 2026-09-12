@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.17-live-vessels-fix"
+APP_VERSION = "v3.3.19-dpworld-asset-vessel-rollup"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2133,25 +2133,38 @@ def company_scope_ids(entity_id, max_depth=3):
     scope={str(entity_id)}
     rel=TABLES.get(("Core Entities","Relationships"),pd.DataFrame())
     if rel.empty: return scope
-    ownership_terms=("OWNS","PARENT","CONTROLS","CONTROLLED","SUBSIDIARY","JV_PARTNER","OWNS_51","OWNS_49")
+    downward_terms=(
+        "OWNS","PARENT","CONTROLS","CONTROLLED","SUBSIDIARY","JV_PARTNER",
+        "OWNS_51","OWNS_49","PARENT_OF","CONTROLS","CONSOLIDATES"
+    )
+    reverse_terms=("SUBSIDIARY_OF","OWNED_BY","CONTROLLED_BY","PART_OF","MEMBER_OF")
     frontier={str(entity_id)}
     for _ in range(max_depth):
         nxt=set()
         for src in frontier:
             rows=rel[rel.get("Source Entity",pd.Series(dtype=str)).astype(str).eq(src)]
             for _,r in rows.iterrows():
-                relationship=str(r.get("Relationship","")).upper()
+                relationship=str(r.get("Relationship","")).upper().replace(" ","_").replace("-","_")
                 tgt=str(r.get("Target Entity","")).strip()
-                if tgt and any(term in relationship for term in ownership_terms):
+                if tgt and any(term in relationship for term in downward_terms):
                     if tgt not in scope:
                         scope.add(tgt); nxt.add(tgt)
-            # Group operating-ecosystem links are deliberately traversable in
-            # reverse so a Noatum Maritime profile can surface SAFEEN service
-            # craft without claiming those sister businesses are subsidiaries.
+
+                # Some legacy/canonical rows are written as child -> SUBSIDIARY_OF -> parent.
+                # Do not traverse those forward when building a parent's operating scope.
+                # They are handled through the inbound pass below.
+
             inbound=rel[rel.get("Target Entity",pd.Series(dtype=str)).astype(str).eq(src)]
             for _,r in inbound.iterrows():
-                relationship=str(r.get("Relationship","")).upper()
+                relationship=str(r.get("Relationship","")).upper().replace(" ","_").replace("-","_")
                 source_entity=str(r.get("Source Entity","")).strip()
+
+                if source_entity and any(term in relationship for term in reverse_terms):
+                    if source_entity not in scope:
+                        scope.add(source_entity); nxt.add(source_entity)
+
+                # Group operating-ecosystem links are deliberately traversable in
+                # reverse so group profiles can expose operating sister businesses.
                 if source_entity and "GROUP_ECOSYSTEM_LINK" in relationship:
                     if source_entity not in scope:
                         scope.add(source_entity); nxt.add(source_entity)
@@ -2240,7 +2253,35 @@ def build_company_profile(entity_id, entity_name):
         if "Source Entity" in rel.columns: m |= rel["Source Entity"].astype(str).isin(scope_ids)
         if "Target Entity" in rel.columns: m |= rel["Target Entity"].astype(str).isin(scope_ids)
         prof["relationships"]=rel[m].copy()
-    else: prof["relationships"]=pd.DataFrame()
+    else:
+        prof["relationships"]=pd.DataFrame()
+
+    # Canonical graph-derived operational targets.
+    # These are authoritative when owner/operator IDs have not yet been denormalized
+    # into pc_assets / pc_mobile_assets.
+    graph_asset_ids=set()
+    graph_vessel_ids=set()
+    if not prof["relationships"].empty:
+        _rr=prof["relationships"].copy()
+        for _,_r in _rr.iterrows():
+            _src=str(_r.get("Source Entity","")).strip()
+            _tgt=str(_r.get("Target Entity","")).strip()
+            _tt=str(_r.get("Target Type","")).strip().casefold()
+            _rel=str(_r.get("Relationship","")).strip().casefold().replace("-","_").replace(" ","_")
+            if _src not in scope_ids or not _tgt:
+                continue
+            if _tt=="asset" and _rel in {
+                "operates","owns","manages","controls","administers",
+                "concession_holder","invested_in","develops"
+            }:
+                graph_asset_ids.add(_tgt)
+            if _tt in {"mobile_asset","vessel"} and _rel in {
+                "operates","owns","manages","charters","controls"
+            }:
+                graph_vessel_ids.add(_tgt)
+
+    prof["graph_asset_ids"]=graph_asset_ids
+    prof["graph_vessel_ids"]=graph_vessel_ids
 
     # Shipyards owned / operated by this company
     yards=TABLES.get(("Defence & Shipbuilding","Shipyards"),pd.DataFrame())
@@ -2277,13 +2318,60 @@ def build_company_profile(entity_id, entity_name):
         for c in ["Owner Company ID","Operator Company ID"]:
             if c in v.columns: vm |= v[c].astype(str).isin(scope_ids)
     related_vessel_ids=set()
-    if not vr.empty and "Company ID" in vr.columns:
-        vrs=vr[vr["Company ID"].astype(str).isin(scope_ids)].copy()
+    if not vr.empty:
+        _vrmask=pd.Series(False,index=vr.index)
+
+        # Primary match: canonical company IDs in the current corporate scope.
+        if "Company ID" in vr.columns:
+            _vrmask |= vr["Company ID"].fillna("").astype(str).isin(scope_ids)
+
+        # Name fallback is intentional. During staged/canonical migration a company
+        # can exist under a second canonical ID while the graph edge has the correct
+        # readable company name. Do not let that hide its vessels from the profile.
+        _scope_company_names=set([entity_name] + company_scope_names(scope_ids))
+        if "Company" in vr.columns:
+            _company_text=vr["Company"].fillna("").astype(str).str.strip()
+            for _nm in _scope_company_names:
+                if _nm:
+                    _vrmask |= _company_text.str.casefold().eq(str(_nm).strip().casefold())
+
+        vrs=vr[_vrmask].copy()
         prof["vessel_relationships"]=vrs
-        if "Vessel ID" in vrs.columns: related_vessel_ids.update(vrs["Vessel ID"].astype(str).tolist())
-    else: prof["vessel_relationships"]=pd.DataFrame()
-    if not v.empty and related_vessel_ids and "Vessel ID" in v.columns: vm |= v["Vessel ID"].astype(str).isin(related_vessel_ids)
+        if "Vessel ID" in vrs.columns:
+            related_vessel_ids.update(
+                x for x in vrs["Vessel ID"].fillna("").astype(str).tolist() if x
+            )
+    else:
+        prof["vessel_relationships"]=pd.DataFrame()
+
+    # Direct vessel owner/operator IDs plus graph-linked vessel IDs.
+    if not v.empty and "Vessel ID" in v.columns:
+        if related_vessel_ids:
+            vm |= v["Vessel ID"].fillna("").astype(str).isin(related_vessel_ids)
+        if graph_vessel_ids:
+            vm |= v["Vessel ID"].fillna("").astype(str).isin(graph_vessel_ids)
+
+    # Final readable-name fallback for canonical graph rows whose vessel ID differs
+    # from a duplicate/legacy registry row but whose vessel name is authoritative.
+    if not v.empty and not prof["vessel_relationships"].empty and "Vessel Name" in v.columns:
+        _linked_names=set(
+            prof["vessel_relationships"].get("Vessel Name",pd.Series(dtype=str))
+            .fillna("").astype(str).str.strip().str.casefold()
+        )
+        _linked_names.discard("")
+        if _linked_names:
+            vm |= v["Vessel Name"].fillna("").astype(str).str.strip().str.casefold().isin(_linked_names)
+
     prof["maritime_vessels"]=v[vm].copy() if not v.empty else pd.DataFrame()
+
+    # De-duplicate the profile vessel list on the strongest available identity.
+    if not prof["maritime_vessels"].empty:
+        _mv=prof["maritime_vessels"].copy()
+        _dedupe_cols=[c for c in ["Vessel ID","IMO"] if c in _mv.columns]
+        if _dedupe_cols:
+            prof["maritime_vessels"]=_mv.drop_duplicates(subset=_dedupe_cols,keep="last")
+        elif "Vessel Name" in _mv.columns:
+            prof["maritime_vessels"]=_mv.drop_duplicates(subset=["Vessel Name"],keep="last")
 
     # Vessel build records matching owned yards / sample defence vessels.
     builds=TABLES.get(("Maritime","Vessel Build Records"),pd.DataFrame())
@@ -2329,6 +2417,12 @@ def build_company_profile(entity_id, entity_name):
         "Entity ID",
     ]
     prof["assets"]=_match_any(assets,_asset_company_cols,asset_scope_ids)
+    if not assets.empty and graph_asset_ids and "Asset ID" in assets.columns:
+        _graph_assets=assets[assets["Asset ID"].fillna("").astype(str).isin(graph_asset_ids)].copy()
+        if not _graph_assets.empty:
+            _am=pd.concat([prof["assets"],_graph_assets],ignore_index=True,sort=False)
+            _ad=[c for c in ["Asset ID","Asset"] if c in _am.columns]
+            prof["assets"]=_am.drop_duplicates(subset=_ad,keep="last") if _ad else _am
 
     # Name fallback for legacy/backfill rows where only a readable owner/operator survived.
     if not assets.empty:
@@ -2487,6 +2581,8 @@ def build_company_profile(entity_id, entity_name):
                 for _nm in _scope_names:
                     if _nm:
                         tm |= _s.str.contains(re.escape(str(_nm)),case=False,na=False)
+    if not pt.empty and graph_asset_ids and "Terminal ID" in pt.columns:
+        tm |= pt["Terminal ID"].fillna("").astype(str).isin(graph_asset_ids)
     direct_terms=pt[tm].copy() if not pt.empty else pd.DataFrame()
 
     # direct port owner/operator/authority rows.
@@ -2505,6 +2601,8 @@ def build_company_profile(entity_id, entity_name):
                 for _nm in _scope_names:
                     if _nm:
                         pm |= _s.str.contains(re.escape(str(_nm)),case=False,na=False)
+        if graph_asset_ids and "Port ID" in ports.columns:
+            pm |= ports["Port ID"].fillna("").astype(str).isin(graph_asset_ids)
         direct_ports=ports[pm].copy()
 
     # ownership / JV rows can surface terminals even where primary operator differs

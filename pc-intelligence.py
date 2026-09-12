@@ -616,7 +616,7 @@ st.sidebar.caption("Refresh after Power Admin applies new events, vessels, asset
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 
 NAV = {
-    "INTELLIGENCE DESK": ["Operating Picture", "Alerts & Incidents"],
+    "INTELLIGENCE DESK": ["Operating Picture", "Regional Maps", "Alerts & Incidents"],
     "FORWARD MONITORING": ["Watch Areas", "Monitoring & Indicators"],
     "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
     "DISCOVERY": ["Intelligence Search", "Source Monitor"],
@@ -1222,6 +1222,53 @@ elif page == "Alerts & Incidents":
                 if not chains.empty:
                     st.markdown("**Impact chain**")
                     show_df(chains, ["Step","Trigger","Direct Impact","Secondary Impact","Tertiary Impact","Strategic / Commercial Outcome"], 220)
+
+# -----------------------------------------------------------------------------
+# REGIONAL MAPS
+# -----------------------------------------------------------------------------
+elif page == "Regional Maps":
+    section(
+        "Operating picture",
+        "Regional Maps",
+        "Map-first theatre views using the shared canonical event and event-location layers."
+    )
+    st.caption(
+        "Only events with supported coordinates are plotted. Unmapped incidents remain available "
+        "in Regional Security rather than being assigned invented coordinates."
+    )
+
+    _region_names=list(REGIONAL_SECURITY_AREAS.keys())
+    _map_tabs=st.tabs(_region_names)
+
+    for _tab,_region_name in zip(_map_tabs,_region_names):
+        with _tab:
+            _events=regional_events(_region_name,operational_only=True)
+            _mapped=regional_event_map_points(_events)
+
+            _m1,_m2,_m3=st.columns(3)
+            _m1.metric("Regional events",len(_events))
+            _m2.metric("Mapped points",len(_mapped))
+            if not _events.empty and not _mapped.empty and "Event ID" in _mapped.columns:
+                _mapped_events=_mapped["Event ID"].fillna("").astype(str).nunique()
+            else:
+                _mapped_events=0
+            _m3.metric("Events without map point",max(len(_events)-_mapped_events,0))
+
+            render_regional_incident_map(_region_name,_events)
+
+            if not _mapped.empty:
+                st.markdown("### Mapped incident register")
+                _cols=[c for c in [
+                    "Start Date","Date","Title","Incident","Mapped Location",
+                    "Severity","Severity Label","Status","Operational",
+                    "Commercial","Map Accuracy"
+                ] if c in _mapped.columns]
+                if _cols:
+                    show_df(_mapped,_cols,380)
+            elif not _events.empty:
+                st.info("Regional incidents are loaded, but none currently have supported coordinates.")
+            else:
+                st.info("No qualifying operational incidents are currently loaded for this theatre.")
 
 # -----------------------------------------------------------------------------
 # REGIONAL SECURITY
