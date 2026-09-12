@@ -965,6 +965,106 @@ def _apply_ready_generic_relationships(sb, job_id=None):
     data=_rpc_data(sb,"pc_apply_ready_generic_relationships",params)
     return data or {}
 
+
+def _stage_corporate_relationship(sb, job_id, source_name, target_name, relationship_type="parent_of",
+                                  source_id=None, target_id=None, evidence_source_id=None,
+                                  confidence=1.0, ownership_percent=None, operating_control=None,
+                                  notes=None, metadata=None):
+    """SQL 020: stage and resolve one entity->entity corporate relationship."""
+    params={
+        "p_ingestion_job_id":str(job_id),
+        "p_source_name":source_name,
+        "p_target_name":target_name,
+        "p_relationship_type":relationship_type,
+        "p_source_id":source_id,
+        "p_target_id":target_id,
+        "p_evidence_source_id":evidence_source_id,
+        "p_confidence":confidence,
+        "p_ownership_percent":ownership_percent,
+        "p_operating_control":operating_control,
+        "p_notes":notes,
+        "p_metadata":metadata or {},
+    }
+    return _rpc_data(sb,"pc_stage_corporate_relationship",params) or {}
+
+
+def _canonical_corporate_relationships(sb, limit=5000):
+    try:
+        return (sb.table("pc_v_corporate_relationships")
+                .select("*")
+                .limit(limit).execute().data or [])
+    except Exception:
+        return []
+
+
+def _staged_corporate_relationships(sb, limit=5000, job_id=None):
+    try:
+        q=sb.table("pc_v_staged_corporate_relationships").select("*")
+        if job_id:
+            q=q.eq("ingestion_job_id",str(job_id))
+        return q.order("created_at",desc=True).limit(limit).execute().data or []
+    except Exception:
+        return []
+
+
+def _corporate_entity_candidates(sb, job_id=None):
+    """Canonical + staged entity candidates for the corporate-link builder."""
+    rows=[]
+    seen=set()
+
+    try:
+        canonical=(sb.table("pc_entities")
+                   .select("entity_id,name,entity_type,subtype")
+                   .order("name").limit(10000).execute().data or [])
+    except Exception:
+        canonical=[]
+
+    for r in canonical:
+        name=str(r.get("name") or "").strip()
+        if not name:
+            continue
+        key=("canonical",str(r.get("entity_id") or ""),name.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "label":f"{name} — canonical",
+            "name":name,
+            "entity_id":r.get("entity_id"),
+            "origin":"canonical",
+            "source_id":None,
+            "metadata":{},
+        })
+
+    if job_id:
+        try:
+            staged=(sb.table("pc_staged_records")
+                    .select("staged_record_id,natural_key,payload,source_id,resolution_status,resolved_entity_id,review_status")
+                    .eq("ingestion_job_id",str(job_id))
+                    .eq("target_table","pc_entities")
+                    .limit(1000).execute().data or [])
+        except Exception:
+            staged=[]
+
+        for r in staged:
+            p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+            name=str(p.get("name") or r.get("natural_key") or "").strip()
+            if not name:
+                continue
+            eid=r.get("resolved_entity_id") or p.get("entity_id")
+            # Keep staged candidates even if they are not canonical yet; SQL 013 will
+            # classify the corporate edge PARTIAL until the endpoint is applied.
+            label=f"{name} — staged {r.get('resolution_status') or 'UNRESOLVED'}"
+            rows.append({
+                "label":label,
+                "name":name,
+                "entity_id":eid,
+                "origin":"staged",
+                "source_id":r.get("source_id"),
+                "metadata":p.get("metadata") if isinstance(p.get("metadata"),dict) else {},
+            })
+    return rows
+
 def _canonical_event_vessel_links(sb, limit=5000):
     try:
         return sb.table("pc_v_event_vessel_links").select("*").order("event_date",desc=True).limit(limit).execute().data or []
@@ -1350,6 +1450,18 @@ For pc_relationships records specifically, ALWAYS include human-readable endpoin
 - target_name: researched/canonical human-readable target name
 - target_id: canonical P&C ID only when supplied in canonical context and deterministically matched; otherwise omit/null
 Do not return a pc_relationships proposal without source_name and target_name.
+
+Corporate graph requirement:
+- When research identifies parent/subsidiary, ownership, control, affiliate, joint-venture,
+  acquisition or corporate-investment relationships between companies/entities, return
+  separate pc_relationships records for those company-to-company edges.
+- Use source_type='entity' and target_type='entity'.
+- Preferred relationship_type values are parent_of, owns, controls, affiliate_of,
+  joint_venture_with, invested_in, or acquired.
+- Do not infer ownership merely from similar branding or names. Every corporate edge must
+  be supported by at least one research source URL.
+- Do not return both directions of the same relationship; store the authoritative direction
+  and let the application derive the inverse presentation.
 """
 
 
@@ -2927,6 +3039,187 @@ elif page=="Staging Resolution":
                         st.dataframe(vdf[vcols],use_container_width=True,hide_index=True)
                     else:
                         st.info("No canonical event-vessel links are visible through pc_v_event_vessel_links yet. Run SQL 012, then apply READY relationships.")
+
+            st.divider()
+            st.markdown("## Corporate company links")
+            st.caption(
+                "SQL 020 treats company → company relationships as first-class graph edges. "
+                "Stage only source-backed parent, ownership, control, affiliate, joint-venture, "
+                "investment or acquisition relationships; SQL 013 resolves both entity endpoints "
+                "before anything can be written to canonical pc_relationships."
+            )
+
+            _corp_canonical=_canonical_corporate_relationships(sb,5000)
+            _cc1,_cc2=st.columns(2)
+            _cc1.metric("Canonical company-company links",len(_corp_canonical))
+            if _corp_canonical:
+                _corp_types=sorted({str(x.get("relationship_type") or "") for x in _corp_canonical if x.get("relationship_type")})
+                _cc2.metric("Corporate relationship types",len(_corp_types))
+                with st.expander("Canonical corporate graph",expanded=False):
+                    _cdf=pd.DataFrame(_corp_canonical)
+                    _ccols=[c for c in [
+                        "source_name","relationship_type","target_name","ownership_percent",
+                        "operating_control","confidence","record_status","evidence_source_id","relationship_id"
+                    ] if c in _cdf.columns]
+                    st.dataframe(_cdf[_ccols],use_container_width=True,hide_index=True)
+            else:
+                _cc2.metric("Corporate relationship types",0)
+                st.info("No canonical entity-to-entity corporate links are present yet.")
+
+            try:
+                _corp_jobs=(sb.table("pc_ingestion_jobs")
+                            .select("ingestion_job_id,title,status,created_at")
+                            .order("created_at",desc=True).limit(100).execute().data or [])
+            except Exception:
+                _corp_jobs=[]
+
+            if _corp_jobs:
+                _corp_labels=[f"{j.get('title') or 'Untitled'} | {j.get('ingestion_job_id')}" for j in _corp_jobs]
+                _corp_choice=st.selectbox("Corporate-link ingestion job",_corp_labels,key="corporate_link_job")
+                _corp_job=_corp_jobs[_corp_labels.index(_corp_choice)]
+                _corp_job_id=_corp_job.get("ingestion_job_id")
+                _corp_candidates=_corporate_entity_candidates(sb,_corp_job_id)
+
+                if _corp_candidates:
+                    _label_to_candidate={}
+                    for _cand in _corp_candidates:
+                        _label=_cand.get("label")
+                        # Preserve every visible candidate even when names collide.
+                        if _label in _label_to_candidate:
+                            _label=f"{_label} [{len(_label_to_candidate)+1}]"
+                        _label_to_candidate[_label]=_cand
+
+                    _source_label=st.selectbox(
+                        "Parent / source company",
+                        list(_label_to_candidate.keys()),
+                        key="corporate_source_entity"
+                    )
+                    _source=_label_to_candidate[_source_label]
+
+                    _target_options=[
+                        lab for lab,cand in _label_to_candidate.items()
+                        if not (
+                            cand.get("entity_id") and _source.get("entity_id") and cand.get("entity_id")==_source.get("entity_id")
+                        ) and cand.get("name") != _source.get("name")
+                    ]
+                    _targets=st.multiselect(
+                        "Target company/entities",
+                        _target_options,
+                        key="corporate_target_entities"
+                    )
+
+                    _cr1,_cr2,_cr3=st.columns([1.2,1,1])
+                    with _cr1:
+                        _rel_type=st.selectbox(
+                            "Corporate relationship",
+                            ["parent_of","owns","controls","affiliate_of","joint_venture_with","invested_in","acquired"],
+                            key="corporate_relationship_type"
+                        )
+                    with _cr2:
+                        _confidence=st.number_input(
+                            "Confidence",min_value=0.0,max_value=1.0,value=0.95,step=0.01,
+                            key="corporate_relationship_confidence"
+                        )
+                    with _cr3:
+                        _ownership_text=st.text_input(
+                            "Ownership % (optional)",value="",key="corporate_ownership_percent"
+                        )
+
+                    _corp_notes=st.text_input(
+                        "Relationship notes / evidence context (optional)",
+                        value="",key="corporate_relationship_notes"
+                    )
+
+                    _source_urls=[]
+                    _smd=_source.get("metadata") or {}
+                    if isinstance(_smd.get("research_sources"),list):
+                        _source_urls.extend(_smd.get("research_sources") or [])
+                    st.caption(
+                        "The selected job's staged entity evidence is preserved as metadata. "
+                        "Only stage links you have source support for; naming similarity alone is not evidence."
+                    )
+
+                    if st.button(
+                        f"Stage selected corporate links ({len(_targets)})",
+                        type="primary",
+                        disabled=(len(_targets)==0),
+                        key="stage_corporate_links"
+                    ):
+                        _results=[]
+                        _ownership=None
+                        if str(_ownership_text).strip():
+                            try:
+                                _ownership=float(_ownership_text)
+                            except Exception:
+                                st.error("Ownership % must be numeric, e.g. 100 or 49.")
+                                _ownership="INVALID"
+
+                        if _ownership!="INVALID":
+                            with st.status("Staging and resolving corporate links...",expanded=True) as _status:
+                                for _lab in _targets:
+                                    _target=_label_to_candidate[_lab]
+                                    _tmd=_target.get("metadata") or {}
+                                    _research_sources=[]
+                                    for _md in (_smd,_tmd):
+                                        if isinstance(_md.get("research_sources"),list):
+                                            _research_sources.extend(_md.get("research_sources") or [])
+                                    # Deduplicate source objects/URLs conservatively.
+                                    _seen_src=set()
+                                    _dedup_sources=[]
+                                    for _rs in _research_sources:
+                                        if isinstance(_rs,dict):
+                                            _rk=str(_rs.get("url") or _rs)
+                                        else:
+                                            _rk=str(_rs)
+                                        if _rk and _rk not in _seen_src:
+                                            _seen_src.add(_rk)
+                                            _dedup_sources.append(_rs)
+                                    try:
+                                        _res=_stage_corporate_relationship(
+                                            sb,_corp_job_id,
+                                            _source.get("name"),_target.get("name"),_rel_type,
+                                            source_id=_source.get("entity_id"),
+                                            target_id=_target.get("entity_id"),
+                                            evidence_source_id=_target.get("source_id") or _source.get("source_id"),
+                                            confidence=_confidence,
+                                            ownership_percent=_ownership,
+                                            notes=_corp_notes or None,
+                                            metadata={
+                                                "research_sources":_dedup_sources,
+                                                "source_origin":_source.get("origin"),
+                                                "target_origin":_target.get("origin"),
+                                            }
+                                        )
+                                        _results.append(_res)
+                                        st.write(f"{_source.get('name')} → {_rel_type} → {_target.get('name')}: {_res.get('resolution',{}).get('status','STAGED')}")
+                                    except Exception as _exc:
+                                        st.error(f"{_target.get('name')}: {_exc}")
+                                _status.update(label="Corporate-link staging complete",state="complete")
+                            st.success(f"Staged {len(_results)} corporate relationship proposal(s).")
+                            st.rerun()
+
+                _corp_staged=_staged_corporate_relationships(sb,5000,_corp_job_id)
+                if _corp_staged:
+                    st.markdown("### Staged corporate links")
+                    _csdf=pd.DataFrame(_corp_staged)
+                    _cscols=[c for c in [
+                        "source_name","relationship_type","target_name",
+                        "source_id","target_id","source_resolution_method","target_resolution_method",
+                        "resolution_status","apply_status","confidence","canonical_relationship_id"
+                    ] if c in _csdf.columns]
+                    st.dataframe(_csdf[_cscols],use_container_width=True,hide_index=True)
+                    _cstat=_csdf.get("resolution_status",pd.Series([],dtype=str)).fillna("UNRESOLVED")
+                    _sc1,_sc2,_sc3=st.columns(3)
+                    _sc1.metric("Corporate READY",int((_cstat=="READY").sum()))
+                    _sc2.metric("Corporate PARTIAL",int((_cstat=="PARTIAL").sum()))
+                    _sc3.metric("Corporate already exists",int((_cstat=="ALREADY_EXISTS").sum()))
+                    if st.button("Re-resolve corporate links in this job",key="resolve_corporate_links"):
+                        try:
+                            _cres=_process_generic_relationship_backlog(sb,_corp_job_id)
+                            st.success(f"Corporate relationship resolution complete: {_cres}")
+                            st.rerun()
+                        except Exception as _exc:
+                            st.exception(_exc)
 
             st.divider()
             st.markdown("## Generic graph relationships")
