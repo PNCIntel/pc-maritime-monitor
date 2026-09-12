@@ -47,7 +47,7 @@ else:
 sb=service_client()
 st.sidebar.markdown("<div class='pc-k'>Power & Corridors</div>",unsafe_allow_html=True)
 st.sidebar.markdown("## Power Admin")
-PAGES=["Dashboard","Migration","Database Coverage","Model Registry","Batch Staging","Staging Resolution","Review Queue","ReCAAP Vessel Resolver","Organizations","Users & Access","Research Jobs","Trade System Builder","Market Data","Governance & Quality"]
+PAGES=["Dashboard","Migration","Database Coverage","Data Completion","Model Registry","Batch Staging","Staging Resolution","Review Queue","ReCAAP Vessel Resolver","Organizations","Users & Access","Research Jobs","Trade System Builder","Market Data","Governance & Quality"]
 
 # ---------------------------------------------------------------------------
 # Bulk review / validation helpers
@@ -786,6 +786,138 @@ def _resolution_rows(sb, limit=1000, filters=None):
 def _process_job_resolution(sb, job_id):
     data=_rpc_data(sb,"pc_process_ingestion_job",{"p_ingestion_job_id":str(job_id)})
     return data or {}
+
+# ---------------------------------------------------------------------------
+# Existing-data completion / deterministic repair helpers
+# ---------------------------------------------------------------------------
+
+def _all_rows(sb, table, columns="*", limit=10000):
+    try:
+        return safe_rows(sb, table, columns, limit)
+    except Exception:
+        return []
+
+
+def _blank(v):
+    return v is None or (isinstance(v,str) and not v.strip())
+
+
+def _is_vessel_row(r):
+    text=" ".join(str(r.get(k) or "") for k in ("asset_type","mobile_type","subtype","name")).casefold()
+    return any(x in text for x in ("vessel","ship","tanker","carrier","bulker","ro-ro","roro","containership","container ship","lng","lpg","ferry","cruise"))
+
+
+def _is_portish_row(r):
+    text=" ".join(str(r.get(k) or "") for k in ("asset_type","subtype","name","region_city")).casefold()
+    return any(x in text for x in ("port","terminal","harbour","harbor","anchorage","jetty","quay","dry port"))
+
+
+def _completion_inventory(sb):
+    vessels=_all_rows(sb,"pc_mobile_assets","*",10000)
+    assets=_all_rows(sb,"pc_assets","*",10000)
+    events=_all_rows(sb,"pc_events","*",10000)
+    links=_all_rows(sb,"pc_event_links","*",20000)
+    locations=_all_rows(sb,"pc_event_locations","*",20000)
+    staged=_all_rows(sb,"pc_v_staging_resolution","*",10000)
+    issues=_all_rows(sb,"pc_data_quality_issues","*",10000)
+
+    vessel_rows=[r for r in vessels if _is_vessel_row(r)]
+    vessel_identity=[r for r in vessel_rows if _blank(r.get("imo"))]
+    vessel_relationship=[r for r in vessel_rows if _blank(r.get("owner_entity_id")) or _blank(r.get("operator_entity_id"))]
+    vessel_provenance=[r for r in vessel_rows if _blank(r.get("source_id")) or str(r.get("record_status") or "").casefold()=="provisional" or str(r.get("data_quality") or "").casefold() in {"low","medium"}]
+
+    port_assets=[r for r in assets if _is_portish_row(r)]
+    asset_geo=[r for r in port_assets if r.get("latitude") is None or r.get("longitude") is None]
+    asset_relationship=[r for r in assets if _blank(r.get("owner_entity_id")) or _blank(r.get("operator_entity_id"))]
+    asset_provenance=[r for r in assets if _blank(r.get("source_id")) or str(r.get("record_status") or "").casefold()=="provisional" or str(r.get("data_quality") or "").casefold() in {"low","medium"}]
+
+    linked_event_ids={str(r.get("event_id")) for r in links if r.get("event_id")}
+    located_event_ids={str(r.get("event_id")) for r in locations if r.get("event_id") and r.get("latitude") is not None and r.get("longitude") is not None}
+    event_links=[r for r in events if str(r.get("event_id")) not in linked_event_ids]
+    event_geo=[r for r in events if str(r.get("event_id")) not in located_event_ids]
+    event_provenance=[r for r in events if _blank(r.get("source_id")) or str(r.get("record_status") or "").casefold()=="provisional"]
+
+    backlog=[r for r in staged if str(r.get("resolution_status") or "UNRESOLVED").upper() in {"UNRESOLVED","NEW","AMBIGUOUS","CONFLICT","INVALID"}]
+    open_issues=[r for r in issues if str(r.get("status") or "open").casefold()=="open"]
+    return {
+        "vessels":vessel_rows,"assets":assets,"events":events,"links":links,"locations":locations,
+        "vessel_identity":vessel_identity,"vessel_relationship":vessel_relationship,"vessel_provenance":vessel_provenance,
+        "asset_geo":asset_geo,"asset_relationship":asset_relationship,"asset_provenance":asset_provenance,
+        "event_links":event_links,"event_geo":event_geo,"event_provenance":event_provenance,
+        "staging_backlog":backlog,"open_issues":open_issues,
+    }
+
+
+def _event_vessel_candidates(inv):
+    """High-confidence internal candidates only: IMO in event text, or unique vessel name phrase."""
+    vessels=inv.get("vessels") or []
+    links=inv.get("links") or []
+    events=inv.get("events") or []
+    already={(str(r.get("event_id")),str(r.get("linked_id"))) for r in links if str(r.get("linked_type") or "").casefold() in {"mobile_asset","vessel"}}
+    imo_map={str(r.get("imo")).strip():r for r in vessels if not _blank(r.get("imo"))}
+    name_map={}
+    for r in vessels:
+        name=str(r.get("name") or "").strip()
+        if len(name)>=5:
+            key=re.sub(r"\s+"," ",name.casefold())
+            name_map.setdefault(key,[]).append(r)
+    unique_names={k:v[0] for k,v in name_map.items() if len(v)==1}
+    out=[]
+    for e in events:
+        eid=str(e.get("event_id") or "")
+        if not eid: continue
+        domain=str(e.get("event_domain") or "").casefold()
+        text=" ".join(str(e.get(k) or "") for k in ("title","description","location","operational_impact","commercial_impact"))
+        if e.get("metadata"):
+            try: text += " " + json.dumps(e.get("metadata"),ensure_ascii=False)
+            except Exception: pass
+        tcf=re.sub(r"\s+"," ",text.casefold())
+        seen=set()
+        for imo in set(re.findall(r"(?<!\d)(\d{7})(?!\d)",text)):
+            v=imo_map.get(imo)
+            if v and (eid,str(v.get("mobile_asset_id"))) not in already:
+                key=(eid,str(v.get("mobile_asset_id")))
+                if key not in seen:
+                    seen.add(key); out.append({"event_id":eid,"event_title":e.get("title"),"mobile_asset_id":v.get("mobile_asset_id"),"vessel_name":v.get("name"),"imo":imo,"match_method":"IMO_IN_EVENT_TEXT","confidence":1.0,"source_id":e.get("source_id")})
+        if "maritime" in domain or any(w in tcf for w in ("vessel","ship","tanker","carrier","merchant")):
+            for n,v in unique_names.items():
+                if len(n)<6 or n in {"freedom","victory","prosperity","harmony","fortune"}: continue
+                if n in tcf and (eid,str(v.get("mobile_asset_id"))) not in already:
+                    key=(eid,str(v.get("mobile_asset_id")))
+                    if key not in seen:
+                        seen.add(key); out.append({"event_id":eid,"event_title":e.get("title"),"mobile_asset_id":v.get("mobile_asset_id"),"vessel_name":v.get("name"),"imo":v.get("imo"),"match_method":"UNIQUE_NAME_IN_EVENT_TEXT","confidence":0.98,"source_id":e.get("source_id")})
+    return out
+
+
+def _stage_event_vessel_repairs(sb, candidates):
+    if not candidates: return {"staged":0,"job_id":None}
+    job=sb.table("pc_ingestion_jobs").insert({
+        "job_type":"DATA_COMPLETION",
+        "title":"Internal deterministic event-vessel repair",
+        "status":"running",
+        "source_scope":{"method":"existing_database_only","candidate_count":len(candidates)}
+    }).execute().data[0]
+    rows=[]
+    for c in candidates:
+        raw=f"{c['event_id']}|{c['mobile_asset_id']}|involved vessel".encode("utf-8")
+        link_id="ELINK_AUTO_"+hashlib.sha1(raw).hexdigest()[:20].upper()
+        payload={
+            "event_link_id":link_id,
+            "event_id":c["event_id"],
+            "linked_type":"mobile_asset",
+            "linked_id":c["mobile_asset_id"],
+            "linked_name":c.get("vessel_name"),
+            "relationship":"involved vessel",
+            "confidence":"high",
+            "source_id":c.get("source_id"),
+            "metadata":{"completion_method":c.get("match_method"),"completion_confidence":c.get("confidence"),"existing_database_only":True,"imo":c.get("imo")}
+        }
+        rows.append({"ingestion_job_id":job["ingestion_job_id"],"target_entity_type":"event_link","target_table":"pc_event_links","source_record_key":link_id,"natural_key":link_id,"action":"REVIEW","payload":payload,"current_record":None,"confidence":c.get("confidence"),"validation_status":"pending","review_status":"pending","resolution_status":"NEW","source_id":c.get("source_id")})
+    for i in range(0,len(rows),250): sb.table("pc_staged_records").insert(rows[i:i+250]).execute()
+    try: _process_job_resolution(sb,job["ingestion_job_id"])
+    except Exception: pass
+    sb.table("pc_ingestion_jobs").update({"status":"completed","completed_at":pd.Timestamp.utcnow().isoformat(),"stats":{"staged":len(rows)}}).eq("ingestion_job_id",job["ingestion_job_id"]).execute()
+    return {"staged":len(rows),"job_id":job["ingestion_job_id"]}
 
 # ---------------------------------------------------------------------------
 # Controlled AI staging + canonical apply helpers
@@ -1842,6 +1974,138 @@ elif page=="Trade System Builder":
 8. Review staged enrichments
 9. Approve canonical writes
 10. Verify client views""")
+
+elif page=="Data Completion":
+    title(
+        "Data completion",
+        "Turn gaps already present in Supabase into a controlled enrichment queue. Internal deterministic repairs are staged for review; nothing writes directly to canonical tables."
+    )
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        with st.spinner("Scanning canonical and staging tables for incomplete records..."):
+            inv=_completion_inventory(sb)
+
+        m1,m2,m3,m4,m5,m6=st.columns(6)
+        m1.metric("Vessels missing IMO",len(inv["vessel_identity"]))
+        m2.metric("Vessel owner/operator gaps",len(inv["vessel_relationship"]))
+        m3.metric("Ports missing coordinates",len(inv["asset_geo"]))
+        m4.metric("Events missing links",len(inv["event_links"]))
+        m5.metric("Events missing mapped location",len(inv["event_geo"]))
+        m6.metric("Resolution backlog",len(inv["staging_backlog"]))
+
+        st.caption("Counts are live from the canonical Supabase database. A record can appear in more than one gap category.")
+        tabs=st.tabs(["Priority queue","Vessels","Assets & ports","Events","Resolution backlog","Deterministic repairs","Open DQ issues"])
+
+        with tabs[0]:
+            summary=[
+                {"Priority":1,"Workstream":"Vessel identity","Records":len(inv["vessel_identity"]),"Why":"IMO is the strongest vessel identity key."},
+                {"Priority":2,"Workstream":"Events without entity links","Records":len(inv["event_links"]),"Why":"Unlinked incidents cannot roll up to vessel/company/asset pages."},
+                {"Priority":3,"Workstream":"Ports without coordinates","Records":len(inv["asset_geo"]),"Why":"Prevents reliable mapping and geographic event correlation."},
+                {"Priority":4,"Workstream":"Vessel owner/operator","Records":len(inv["vessel_relationship"]),"Why":"Breaks company-fleet and exposure relationships."},
+                {"Priority":5,"Workstream":"Events without mapped location","Records":len(inv["event_geo"]),"Why":"Limits Intelligence map coverage."},
+                {"Priority":6,"Workstream":"Staging resolution backlog","Records":len(inv["staging_backlog"]),"Why":"Already-collected work is waiting for identity decisions."},
+            ]
+            st.dataframe(pd.DataFrame(summary),use_container_width=True,hide_index=True)
+            st.info("Start with deterministic internal repairs first. Only genuine gaps should be sent to external/AI research afterward.")
+
+        with tabs[1]:
+            vt=st.tabs(["Missing IMO","Missing owner/operator","Provenance / quality"])
+            with vt[0]:
+                rows=inv["vessel_identity"]
+                st.caption(f"{len(rows):,} vessel record(s) have no IMO in canonical pc_mobile_assets.")
+                if rows:
+                    df=pd.DataFrame(rows)
+                    cols=[c for c in ["name","mobile_asset_id","asset_type","subtype","mmsi","flag","owner_entity_id","operator_entity_id","source_id","record_status","data_quality"] if c in df.columns]
+                    st.dataframe(df[cols],use_container_width=True,hide_index=True)
+            with vt[1]:
+                rows=inv["vessel_relationship"]
+                if rows:
+                    df=pd.DataFrame(rows); cols=[c for c in ["name","mobile_asset_id","imo","flag","owner_entity_id","operator_entity_id","manager_entity_id","source_id"] if c in df.columns]
+                    st.dataframe(df[cols],use_container_width=True,hide_index=True)
+                else: st.success("No vessel owner/operator gaps detected.")
+            with vt[2]:
+                rows=inv["vessel_provenance"]
+                if rows:
+                    df=pd.DataFrame(rows); cols=[c for c in ["name","mobile_asset_id","imo","source_id","record_status","data_quality"] if c in df.columns]
+                    st.dataframe(df[cols],use_container_width=True,hide_index=True)
+                else: st.success("No vessel provenance/quality gaps detected.")
+
+        with tabs[2]:
+            at=st.tabs(["Ports missing coordinates","Owner/operator gaps","Provenance / quality"])
+            with at[0]:
+                rows=inv["asset_geo"]
+                if rows:
+                    df=pd.DataFrame(rows); cols=[c for c in ["name","asset_id","asset_type","subtype","country","region_city","latitude","longitude","owner_entity_id","operator_entity_id","source_id"] if c in df.columns]
+                    st.dataframe(df[cols],use_container_width=True,hide_index=True)
+                else: st.success("All detected port/terminal assets have coordinates.")
+            with at[1]:
+                rows=inv["asset_relationship"]
+                if rows:
+                    df=pd.DataFrame(rows); cols=[c for c in ["name","asset_id","asset_type","country","owner_entity_id","operator_entity_id","source_id"] if c in df.columns]
+                    st.dataframe(df[cols],use_container_width=True,hide_index=True)
+            with at[2]:
+                rows=inv["asset_provenance"]
+                if rows:
+                    df=pd.DataFrame(rows); cols=[c for c in ["name","asset_id","asset_type","country","source_id","record_status","data_quality"] if c in df.columns]
+                    st.dataframe(df[cols],use_container_width=True,hide_index=True)
+
+        with tabs[3]:
+            et=st.tabs(["Missing links","Missing mapped location","Provenance"])
+            with et[0]:
+                rows=inv["event_links"]
+                if rows:
+                    df=pd.DataFrame(rows); cols=[c for c in ["start_date","title","event_id","event_domain","event_type","location","source_id","record_status"] if c in df.columns]
+                    st.dataframe(df[cols],use_container_width=True,hide_index=True)
+                else: st.success("Every canonical event has at least one linked object.")
+            with et[1]:
+                rows=inv["event_geo"]
+                if rows:
+                    df=pd.DataFrame(rows); cols=[c for c in ["start_date","title","event_id","event_domain","location","countries","source_id"] if c in df.columns]
+                    st.dataframe(df[cols],use_container_width=True,hide_index=True)
+                else: st.success("Every canonical event has a mapped event location.")
+            with et[2]:
+                rows=inv["event_provenance"]
+                if rows:
+                    df=pd.DataFrame(rows); cols=[c for c in ["start_date","title","event_id","source_id","record_status","confidence"] if c in df.columns]
+                    st.dataframe(df[cols],use_container_width=True,hide_index=True)
+
+        with tabs[4]:
+            rows=inv["staging_backlog"]
+            if not rows:
+                st.success("No unresolved metadata-driven staging backlog.")
+            else:
+                df=pd.DataFrame(rows)
+                cols=[c for c in ["created_at","target_entity_type","target_table","natural_key","resolution_status","resolution_method","resolution_confidence","candidate_count","review_status","validation_status","staged_record_id"] if c in df.columns]
+                st.dataframe(df[cols],use_container_width=True,hide_index=True)
+                st.caption("Use Staging Resolution for record-level identity review and Review Queue for canonical approval/apply.")
+
+        with tabs[5]:
+            st.markdown("### Existing-database event → vessel repair")
+            st.caption("This uses no AI and no web research. It looks only for an IMO explicitly present in event text or a unique canonical vessel name explicitly present in a maritime event. Candidates are staged as pc_event_links for normal review.")
+            candidates=_event_vessel_candidates(inv)
+            st.metric("High-confidence internal candidates",len(candidates))
+            if candidates:
+                cdf=pd.DataFrame(candidates)
+                edited=st.data_editor(
+                    cdf.assign(**{"Stage?":True})[["Stage?","event_title","event_id","vessel_name","imo","mobile_asset_id","match_method","confidence"]],
+                    use_container_width=True,hide_index=True,
+                    disabled=["event_title","event_id","vessel_name","imo","mobile_asset_id","match_method","confidence"],
+                    key="completion_event_vessel_candidates"
+                )
+                chosen=[candidates[i] for i,val in enumerate(edited["Stage?"].tolist()) if bool(val)]
+                if st.button("Stage selected deterministic links",type="primary",disabled=not bool(chosen)):
+                    with st.spinner("Staging deterministic event-vessel links..."):
+                        result=_stage_event_vessel_repairs(sb,chosen)
+                    st.success(f"Staged {result['staged']} event-vessel link proposal(s). Review them in Staging Resolution / Review Queue before canonical apply.")
+                    st.rerun()
+            else:
+                st.info("No new high-confidence event-vessel links can be derived from the existing database at this time.")
+
+        with tabs[6]:
+            rows=inv["open_issues"]
+            if rows: dataframe(rows)
+            else: st.success("No open data-quality issues.")
 
 elif page=="Model Registry":
     title(
