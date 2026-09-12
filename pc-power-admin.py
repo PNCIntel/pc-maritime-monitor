@@ -819,6 +819,22 @@ def _repair_unresolved_identity_candidates(sb, job_id):
     return data or {}
 
 
+def _prepare_research_population(sb, job_id):
+    """SQL 022: unified staging-first company population preparation."""
+    data=_rpc_data(sb,"pc_prepare_research_population",{"p_ingestion_job_id":str(job_id)})
+    return data or {}
+
+
+def _population_pipeline_status(sb, limit=200):
+    try:
+        return (sb.table("pc_v_population_pipeline_status")
+                .select("*")
+                .order("created_at",desc=True)
+                .limit(limit).execute().data or [])
+    except Exception:
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Semantic completion helpers
 # ---------------------------------------------------------------------------
@@ -1402,6 +1418,15 @@ APPLY_CONFLICT_KEYS = {
 }
 
 AI_CAMPAIGNS = {
+    "Full company population": (
+        "Build a complete, source-backed Power & Corridors company population. "
+        "Research the named company, its parent/subsidiaries/business units, owned/operated/chartered fleets, "
+        "ports/terminals/logistics facilities and other material infrastructure, operating routes/services where supported, "
+        "corporate investments/acquisitions, and the relationships connecting all of those objects. "
+        "Return canonical identity proposals plus company-to-company, company-to-asset and company-to-mobile-asset relationships. "
+        "Prefer primary company, regulator, port/terminal, exchange/filing and vessel/flag/class sources; use reputable specialist reporting to fill gaps. "
+        "Every record must carry at least one valid research source URL. Do not invent P&C IDs, ownership percentages, vessel IMO numbers, capacities or dates."
+    ),
     "Resolve ReCAAP vessel links": (
         "Resolve the supplied unresolved ReCAAP event vessel identities. Link events to existing "
         "pc_mobile_assets when confidently matched; create missing vessel records only with reliable "
@@ -1441,6 +1466,58 @@ AI_CAMPAIGNS = {
     ),
     "Custom research": "",
 }
+
+def full_company_population_prompt(company_name):
+    company_name=str(company_name or "").strip()
+    return f"""Research and build a complete Power & Corridors population for {company_name}.
+
+OBJECTIVE
+Create a source-backed operational and corporate graph, not a flat company profile.
+
+IDENTITY / CORPORATE
+- Resolve the main company against supplied canonical P&C context.
+- Identify material parent companies, subsidiaries, controlled operating companies, business units that are legally distinct,
+  joint ventures, acquisitions and strategic equity investments.
+- Stage each distinct company/entity in pc_entities.
+- Stage source-backed entity→entity corporate edges in pc_relationships using parent_of, owns, controls,
+  affiliate_of, joint_venture_with, invested_in or acquired as appropriate.
+- Do not treat branding similarity as ownership evidence.
+
+FLEET / MOBILE ASSETS
+- Identify current material owned, operated or chartered vessels/mobile assets where public evidence is reliable.
+- For vessels, capture IMO first where verifiable; include vessel name, type, flag and owner/operator where supported.
+- Stage each vessel/mobile asset in pc_mobile_assets.
+- Stage company→mobile_asset relationships such as owns, operates, manages or charters only where sourced.
+- Do not guess IMO numbers or fleet status.
+
+PORTS / TERMINALS / LOGISTICS INFRASTRUCTURE
+- Identify ports, container terminals, inland depots, logistics facilities, rail/intermodal facilities, warehouses and other
+  infrastructure the company owns, operates, manages, leases, controls or materially invests in.
+- Stage physical infrastructure in pc_assets (and extension tables only when appropriate).
+- Include country, city/region, coordinates, capacity and dates only when explicitly supported.
+- Stage company→asset relationships with the correct role.
+
+ROUTES / SERVICES
+- Include named transport routes/services/corridors only where they are materially part of the company's network and supported
+  by public evidence. Use pc_transport_routes when appropriate and preserve source links.
+
+SOURCE / QUALITY RULES
+- Every populated record must contain metadata.research_sources with at least one valid URL.
+- Prefer primary company pages, SEC/exchange filings, port/terminal authorities, regulators, flag/class/owner records and
+  other authoritative sources. Supplement with reputable maritime/logistics reporting.
+- Check supplied canonical P&C candidates before proposing NEW records.
+- Reuse a canonical ID only for a deterministic match. Otherwise omit internal IDs and let staging create them.
+- Do not invent ownership percentages, capacities, coordinates, IMO numbers, dates or corporate relationships.
+- If evidence conflicts, return the conflict rather than choosing silently.
+
+RELATIONSHIP CONTRACT
+- Every pc_relationships proposal must include source_type, source_name, relationship_type, target_type and target_name.
+- Return company→company relationships as well as company→asset and company→mobile_asset relationships.
+- Store one authoritative relationship direction; do not duplicate inverse edges.
+
+This is a population job: breadth matters, but only include records that can be source-backed with reasonable confidence.
+"""
+
 
 AI_OUTPUT_CONTRACT = """
 Return JSON with this shape:
@@ -1485,6 +1562,7 @@ For pc_relationships records specifically, ALWAYS include human-readable endpoin
 - target_name: researched/canonical human-readable target name
 - target_id: canonical P&C ID only when supplied in canonical context and deterministically matched; otherwise omit/null
 Do not return a pc_relationships proposal without source_name and target_name.
+Every identity, asset, mobile asset and relationship record must include at least one valid URL in payload.metadata.research_sources.
 
 Corporate graph requirement:
 - When research identifies parent/subsidiary, ownership, control, affiliate, joint-venture,
@@ -2367,11 +2445,22 @@ elif page=="Research Jobs":
         campaign=st.selectbox("Campaign",list(AI_CAMPAIGNS))
         seed_prompt=AI_CAMPAIGNS[campaign]
 
+        company_name=""
+        if campaign=="Full company population":
+            company_name=st.text_input(
+                "Company to populate",
+                value="Matson",
+                placeholder="e.g. Matson, CMA CGM, AD Ports Group",
+                key="full_population_company"
+            )
+            seed_prompt=full_company_population_prompt(company_name)
+
         prompt=st.text_area(
             "Research query",
             value=seed_prompt,
             placeholder="Describe exactly what you want the AI researcher to find, verify and stage.",
-            height=180
+            height=320 if campaign=="Full company population" else 180,
+            key=f"research_prompt_{campaign}"
         )
         c1,c2,c3=st.columns(3)
         with c1:
@@ -2450,6 +2539,25 @@ elif page=="Research Jobs":
                         st.write("Research returned. Validating structured proposals...")
                         staged,rejected,resolution=stage_ai_result(sb,job_id,result)
 
+                        # SQL 022 turns the raw staged population into deterministic identity
+                        # decisions + resolved graph proposals. It remains staging-only.
+                        population_pipeline={}
+                        if staged:
+                            try:
+                                st.write("Preparing identities and relationship graph...")
+                                population_pipeline=_prepare_research_population(sb,job_id)
+                                resolution["population_pipeline"]=population_pipeline
+                                st.write(
+                                    "Population preparation: "
+                                    f"{(population_pipeline.get('identity') or {}).get('matched',0)} matched · "
+                                    f"{(population_pipeline.get('identity') or {}).get('new',0)} new · "
+                                    f"{(population_pipeline.get('relationships') or {}).get('ready',0)} relationships ready · "
+                                    f"{(population_pipeline.get('relationships') or {}).get('partial',0)} partial."
+                                )
+                            except Exception as exc:
+                                resolution["population_pipeline_error"]=str(exc)
+                                st.warning(f"Population preparation did not complete automatically: {exc}")
+
                         # If the model returned raw/unstructured output, preserve it
                         # as a research bundle rather than losing the result.
                         if staged==0 and result:
@@ -2482,7 +2590,12 @@ elif page=="Research Jobs":
                             expanded=False
                         )
 
-                    st.success(f"Research complete. {staged} proposal(s) sent to Review Queue.")
+                    st.success(f"Research complete. {staged} proposal(s) sent to staging/review.")
+                    if campaign=="Full company population":
+                        st.info(
+                            "Next: review only exceptions and safe NEW/MATCHED identity candidates. "
+                            "Apply approved identities first, then rerun the population pipeline so PARTIAL relationships can become READY."
+                        )
                     st.rerun()
 
                 except Exception as exc:
@@ -2491,6 +2604,38 @@ elif page=="Research Jobs":
                         "error_text":str(exc)
                     }).eq("ingestion_job_id",job_id).execute()
                     st.error(str(exc))
+
+        st.divider()
+        st.markdown("### Population pipeline")
+        _pop_status=_population_pipeline_status(sb,100)
+        if _pop_status:
+            _psdf=pd.DataFrame(_pop_status)
+            _show=[c for c in [
+                "created_at","title","job_status","staged_records","matched_records","new_records",
+                "ambiguous_records","unresolved_identity_records","staged_relationships",
+                "ready_relationships","partial_relationships","existing_relationships","relationship_exceptions",
+                "ingestion_job_id"
+            ] if c in _psdf.columns]
+            st.dataframe(_psdf[_show],use_container_width=True,hide_index=True)
+
+            _pop_labels=[
+                f"{r.get('title') or 'Ingestion job'} | {r.get('ingestion_job_id')}"
+                for r in _pop_status
+            ]
+            _pop_choice=st.selectbox(
+                "Re-run population preparation for job",
+                _pop_labels,
+                key="population_pipeline_job"
+            )
+            _pop_job=_pop_status[_pop_labels.index(_pop_choice)]
+            _pop_job_id=_pop_job.get("ingestion_job_id")
+            if st.button("Prepare identities + graph",type="primary",key="rerun_population_pipeline"):
+                try:
+                    _res=_prepare_research_population(sb,_pop_job_id)
+                    st.success(f"Population pipeline complete: {_res}")
+                    st.rerun()
+                except Exception as exc:
+                    st.exception(exc)
 
 elif page=="Trade System Builder":
     title("Trade system builder","Build the global trade-system graph in controlled research campaigns: energy, industrial assets, flows, markets, ports, corridors and macro layers.")
