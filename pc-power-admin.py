@@ -817,6 +817,26 @@ def _apply_ready_event_relationships(sb, job_id=None):
     data=_rpc_data(sb,"pc_apply_ready_event_relationships",params)
     return data or {}
 
+def _generic_relationship_resolution_rows(sb, limit=5000, filters=None):
+    """SQL 013 generic company/asset/entity relationship decisions."""
+    try:
+        q=sb.table("pc_v_generic_relationship_resolution").select("*")
+        for k,v in (filters or {}).items():
+            q=q.eq(k,v)
+        return q.order("created_at",desc=True).limit(limit).execute().data or []
+    except Exception:
+        return []
+
+def _process_generic_relationship_backlog(sb, job_id=None):
+    params={"p_ingestion_job_id":str(job_id)} if job_id else {}
+    data=_rpc_data(sb,"pc_process_generic_relationship_backlog",params)
+    return data or {}
+
+def _apply_ready_generic_relationships(sb, job_id=None):
+    params={"p_ingestion_job_id":str(job_id)} if job_id else {}
+    data=_rpc_data(sb,"pc_apply_ready_generic_relationships",params)
+    return data or {}
+
 def _canonical_event_vessel_links(sb, limit=5000):
     try:
         return sb.table("pc_v_event_vessel_links").select("*").order("event_date",desc=True).limit(limit).execute().data or []
@@ -2696,7 +2716,7 @@ elif page=="Staging Resolution":
                         st.exception(exc)
 
         with relationship_tab:
-            rels=_relationship_resolution_rows(sb,5000)
+            rels=[r for r in _relationship_resolution_rows(sb,10000) if r.get("target_table")=="pc_event_links"]
             if not rels:
                 st.warning("No relationship-resolution rows are visible. Run SQL 011 first; it backfills the existing pc_event_links staging backlog without writing canonical data.")
             else:
@@ -2758,6 +2778,84 @@ elif page=="Staging Resolution":
                         st.dataframe(vdf[vcols],use_container_width=True,hide_index=True)
                     else:
                         st.info("No canonical event-vessel links are visible through pc_v_event_vessel_links yet. Run SQL 012, then apply READY relationships.")
+
+            st.divider()
+            st.markdown("## Generic graph relationships")
+            st.caption(
+                "SQL 013 resolves ordinary P&C graph edges such as company → operates → terminal, "
+                "company → owns → company, and entity → operates → vessel. Endpoints are resolved against "
+                "the canonical registry before anything can be written to pc_relationships."
+            )
+            grels=_generic_relationship_resolution_rows(sb,10000)
+            if grels:
+                gdf=pd.DataFrame(grels)
+                gstatuses=gdf["resolution_status"].fillna("UNRESOLVED") if "resolution_status" in gdf.columns else pd.Series([],dtype=str)
+                g1,g2,g3,g4,g5,g6=st.columns(6)
+                g1.metric("Total",len(gdf))
+                g2.metric("Ready",int((gstatuses=="READY").sum()))
+                g3.metric("Already exists",int((gstatuses=="ALREADY_EXISTS").sum()))
+                g4.metric("Partial",int((gstatuses=="PARTIAL").sum()))
+                g5.metric("Ambiguous",int((gstatuses=="AMBIGUOUS").sum()))
+                g6.metric("Broken",int((gstatuses=="BROKEN_REFERENCE").sum()))
+
+                goptions=["ALL"]+sorted(str(x) for x in gdf["resolution_status"].dropna().unique())
+                gstatus=st.selectbox("Generic relationship status",goptions,key="generic_relationship_resolution_status")
+                gview=gdf if gstatus=="ALL" else gdf[gdf["resolution_status"]==gstatus]
+                gcols=[c for c in [
+                    "created_at","natural_key","relationship_type",
+                    "from_entity_type","from_name","from_source_key","resolved_from_entity_id","from_resolution_method",
+                    "to_entity_type","to_name","to_source_key","resolved_to_entity_id","to_resolution_method",
+                    "resolution_status","apply_status","canonical_relationship_id","existing_relationship_id",
+                    "review_status","staged_record_id"
+                ] if c in gview.columns]
+                st.dataframe(gview[gcols],use_container_width=True,hide_index=True)
+
+                gapplied=gdf.get("apply_status",pd.Series(["PENDING"]*len(gdf))).fillna("PENDING")
+                gpending=int(((gstatuses=="READY") & (~gapplied.isin(["APPLIED","SKIPPED_EXISTS"]))).sum())
+                gg1,gg2,gg3=st.columns(3)
+                gg1.metric("READY awaiting apply",gpending)
+                gg2.metric("Applied",int((gapplied=="APPLIED").sum()))
+                gg3.metric("Canonical graph relationships",count_rows(sb,"pc_relationships"))
+
+                gconfirm=st.checkbox(
+                    "I confirm: promote all currently READY generic relationships to canonical pc_relationships",
+                    key="confirm_ready_generic_relationship_apply"
+                )
+                if st.button(
+                    f"Apply READY graph relationships ({gpending})",
+                    type="primary",
+                    disabled=(not gconfirm or gpending==0),
+                    key="apply_ready_generic_relationships"
+                ):
+                    try:
+                        with st.spinner("Revalidating relationship endpoints and writing canonical graph edges..."):
+                            result=_apply_ready_generic_relationships(sb)
+                        st.success(
+                            f"Graph apply complete — {result.get('applied',0)} applied, "
+                            f"{result.get('already_exists',0)} already existed, {result.get('blocked',0)} blocked, "
+                            f"{result.get('errors',0)} errors."
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.exception(exc)
+            else:
+                st.info("No generic relationship-resolution rows yet. Run SQL 013; it will backfill existing staged pc_relationships proposals.")
+
+            try:
+                gjobs=(sb.table("pc_ingestion_jobs").select("ingestion_job_id,title,status,created_at,stats").order("created_at",desc=True).limit(100).execute().data or [])
+            except Exception:
+                gjobs=[]
+            if gjobs:
+                glabels=[f"{j.get('title') or 'Untitled'} | {j.get('ingestion_job_id')}" for j in gjobs]
+                gchosen=st.selectbox("Generic relationship ingestion job",glabels,key="generic_relationship_job")
+                gjob=gjobs[glabels.index(gchosen)]
+                if st.button("Prepare + resolve generic relationships in this job",key="resolve_generic_relationship_job"):
+                    try:
+                        result=_process_generic_relationship_backlog(sb,gjob["ingestion_job_id"])
+                        st.success(f"Generic relationship resolution complete: {result}")
+                        st.rerun()
+                    except Exception as exc:
+                        st.exception(exc)
 
             c1,c2=st.columns(2)
             if c1.button("Resolve all pending event-link relationships",type="primary",key="resolve_relationship_backlog"):
