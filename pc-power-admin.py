@@ -2810,6 +2810,42 @@ elif page=="Staging Resolution":
                 ] if c in gview.columns]
                 st.dataframe(gview[gcols],use_container_width=True,hide_index=True)
 
+                # Visual relationship network preview. This is deliberately driven by
+                # the currently filtered staged relationship set, not by invented data.
+                st.markdown("### Relationship network preview")
+                st.caption("Visual preview of the currently filtered graph edges. Limit is 60 edges for readability; use the table above for the complete set.")
+                preview=gview.head(60)
+                if not preview.empty:
+                    def _dot_escape(v):
+                        return str(v or "").replace("\\","\\\\").replace('"','\\"').replace("\n"," ")
+                    dot=[
+                        'digraph PCGraph {',
+                        'rankdir=LR;',
+                        'graph [bgcolor="transparent", pad="0.25", nodesep="0.35", ranksep="0.6"];',
+                        'node [shape=box, style="rounded,filled", fillcolor="#111827", fontcolor="white", color="#4b5563", fontname="Arial", fontsize=10];',
+                        'edge [color="#9ca3af", fontcolor="#d1d5db", fontname="Arial", fontsize=9];'
+                    ]
+                    seen=set()
+                    for _,gr in preview.iterrows():
+                        fid=str(gr.get("resolved_from_entity_id") or gr.get("from_source_key") or gr.get("from_name") or "source")
+                        tid=str(gr.get("resolved_to_entity_id") or gr.get("to_source_key") or gr.get("to_name") or "target")
+                        flabel=str(gr.get("from_name") or gr.get("resolved_from_entity_id") or gr.get("from_source_key") or "Source")
+                        tlabel=str(gr.get("to_name") or gr.get("resolved_to_entity_id") or gr.get("to_source_key") or "Target")
+                        rel=str(gr.get("relationship_type") or "related to")
+                        fn="n"+hashlib.sha1(fid.encode("utf-8")).hexdigest()[:12]
+                        tn="n"+hashlib.sha1(tid.encode("utf-8")).hexdigest()[:12]
+                        if fn not in seen:
+                            dot.append(f'{fn} [label="{_dot_escape(flabel)}"];')
+                            seen.add(fn)
+                        if tn not in seen:
+                            dot.append(f'{tn} [label="{_dot_escape(tlabel)}"];')
+                            seen.add(tn)
+                        dot.append(f'{fn} -> {tn} [label="{_dot_escape(rel)}"];')
+                    dot.append('}')
+                    st.graphviz_chart("\n".join(dot),use_container_width=True)
+                else:
+                    st.info("No relationship edges are available for the current filter.")
+
                 gapplied=gdf.get("apply_status",pd.Series(["PENDING"]*len(gdf))).fillna("PENDING")
                 gpending=int(((gstatuses=="READY") & (~gapplied.isin(["APPLIED","SKIPPED_EXISTS"]))).sum())
                 gg1,gg2,gg3=st.columns(3)
