@@ -813,6 +813,110 @@ def _prepare_canonical_candidates(sb, job_id):
     return data or {}
 
 
+# ---------------------------------------------------------------------------
+# Semantic completion helpers
+# ---------------------------------------------------------------------------
+SEMANTIC_REQUIRED_FIELDS = {
+    "pc_entities": "entity_type",
+    "pc_assets": "asset_type",
+    "pc_mobile_assets": "asset_type",
+    "pc_events": "event_type",
+}
+
+def _semantic_suggestion(table, payload, natural_key=""):
+    """Conservative stage-only suggestion for a required semantic classifier.
+
+    Suggestions are never auto-applied. They exist to speed analyst review and are
+    deliberately broad when the research payload does not already contain a type.
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    text = " ".join(str(x or "") for x in [natural_key, payload.get("name"), payload.get("subtype"), payload.get("description")]).casefold()
+    if table == "pc_entities":
+        # Research populations in pc_entities represent organizations/companies unless
+        # the analyst chooses a more specific value. Keep the suggestion broad.
+        if any(k in text for k in ["authority", "ministry", "government"]):
+            return "Government entity"
+        if any(k in text for k in ["port authority", "ports authority"]):
+            return "Port authority"
+        return "Company"
+    if table == "pc_assets":
+        if "inland" in text and "depot" in text:
+            return "Inland container depot"
+        if "logistics park" in text or "logistics_park" in text:
+            return "Logistics park"
+        if "corridor" in text:
+            return "Trade corridor"
+        if "terminal" in text:
+            return "Container terminal"
+        if "port" in text:
+            return "Port"
+        if "feeder service" in text or "feeder_service" in text:
+            return "Maritime service"
+        return "Logistics facility"
+    if table == "pc_mobile_assets":
+        return payload.get("subtype") or "Vessel"
+    if table == "pc_events":
+        return payload.get("event_domain") or "Research event"
+    return ""
+
+def _semantic_gap_rows(rows, job_id=None):
+    gaps=[]
+    for r in rows or []:
+        if job_id and str(r.get("ingestion_job_id")) != str(job_id):
+            continue
+        table=str(r.get("target_table") or "")
+        field=SEMANTIC_REQUIRED_FIELDS.get(table)
+        if not field:
+            continue
+        payload=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+        if payload.get(field) not in (None,""):
+            continue
+        gaps.append({
+            "Apply?": True,
+            "Record": r.get("natural_key"),
+            "Table": table,
+            "Name": payload.get("name") or payload.get("title") or r.get("natural_key"),
+            "Required field": field,
+            "Suggested value": _semantic_suggestion(table,payload,r.get("natural_key") or ""),
+            "Value": _semantic_suggestion(table,payload,r.get("natural_key") or ""),
+            "_id": r.get("staged_record_id"),
+        })
+    return gaps
+
+def _save_semantic_completions(sb, rows, pending_by_id):
+    saved=0
+    skipped=0
+    for item in rows or []:
+        if not item.get("Apply?"):
+            continue
+        sid=item.get("_id")
+        field=str(item.get("Required field") or "").strip()
+        value=str(item.get("Value") or "").strip()
+        original=pending_by_id.get(str(sid)) or {}
+        if not sid or not field or not value or not original:
+            skipped+=1
+            continue
+        payload=dict(original.get("payload") or {})
+        payload[field]=value
+        md=dict(payload.get("metadata") or {})
+        md["semantic_completion"]={
+            "field":field,
+            "value":value,
+            "method":"analyst_review",
+        }
+        payload["metadata"]=md
+        sb.table("pc_staged_records").update({
+            "payload":payload,
+            "validation_status":"pending",
+        }).eq("staged_record_id",sid).execute()
+        try:
+            _rpc_data(sb,"pc_expand_staged_payload",{"p_staged_record_id":str(sid)})
+        except Exception:
+            pass
+        saved+=1
+    return {"saved":saved,"skipped":skipped}
+
+
 def _relationship_resolution_rows(sb, limit=2000, filters=None):
     """SQL 011 staged relationship decisions."""
     try:
@@ -1223,6 +1327,13 @@ Return JSON with this shape:
 
 Allowed target tables:
 """ + ", ".join(sorted(AI_ALLOWED_TABLES)) + """
+
+For canonical identity records, ALWAYS include the required semantic classifier:
+- pc_entities: entity_type (for example Company, Port authority, Government entity)
+- pc_assets: asset_type (for example Port, Container terminal, Inland container depot, Logistics park)
+- pc_mobile_assets: asset_type
+- pc_events: event_type
+Do not omit these semantic fields merely because an internal P&C ID is unknown. Internal IDs are resolved/generated by staging.
 
 For pc_relationships records specifically, ALWAYS include human-readable endpoint labels as well as types:
 - source_type: logical endpoint type (entity, asset, mobile_asset, geography, event)
@@ -3096,6 +3207,38 @@ elif page=="Review Queue":
                             st.rerun()
                         except Exception as exc:
                             st.exception(exc)
+
+                    # Semantic completion is analyst-controlled. Suggestions are stage-only
+                    # and no classifier is written unless the analyst confirms it.
+                    _semantic_gaps=_semantic_gap_rows(pending,_prep_choice)
+                    if _semantic_gaps:
+                        st.markdown("### Semantic completion")
+                        st.caption(
+                            "These staged identity records have a canonical ID path but are missing a required semantic classifier. "
+                            "Review the suggested values, edit where needed, then save to staging and re-run candidate resolution."
+                        )
+                        _sem_df=pd.DataFrame(_semantic_gaps)
+                        _sem_edit=st.data_editor(
+                            _sem_df[["Apply?","Record","Table","Name","Required field","Suggested value","Value","_id"]],
+                            use_container_width=True,
+                            hide_index=True,
+                            disabled=["Record","Table","Name","Required field","Suggested value","_id"],
+                            column_config={"_id":None},
+                            key=f"semantic_completion_{_prep_choice}",
+                        )
+                        _sc1,_sc2=st.columns([1,2])
+                        if _sc1.button("Save semantic completion + re-resolve",key=f"save_semantic_{_prep_choice}",type="primary"):
+                            try:
+                                _pending_by_id={str(r.get("staged_record_id")):r for r in pending}
+                                _saved=_save_semantic_completions(sb,_sem_edit.to_dict("records"),_pending_by_id)
+                                _prep_result=_prepare_canonical_candidates(sb,_prep_choice)
+                                st.success(f"Semantic completion saved: {_saved}. Candidate resolution: {_prep_result}")
+                                st.rerun()
+                            except Exception as exc:
+                                st.exception(exc)
+                        _sc2.caption(
+                            "Suggestions are not auto-applied. Leave Apply? unchecked for anything that should be remapped or researched further."
+                        )
 
                 validated=[]
                 with st.spinner("Validating staged records..."):
