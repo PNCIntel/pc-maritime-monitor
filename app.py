@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.20-company-name-rollup-fix"
+APP_VERSION = "v3.3.21-group-scope-recompute-fix"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2258,23 +2258,47 @@ def build_company_profile(entity_id, entity_name):
     prof["company_id"]=entity_id
     prof["name"]=entity_name
     scope_ids=company_scope_ids(entity_id)
-    investment_ids=company_investment_exposure_ids(scope_ids)
-    asset_scope_ids=set(scope_ids) | set(investment_ids)
 
+    # Expand a group profile with obvious canonical branded variants, then traverse
+    # each variant's corporate graph. This is important for groups such as DP World,
+    # AD Ports Group and Matson where ports/vessels may sit under regional/subsidiary IDs.
     _companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
+    _brand_ids=set()
     if not _companies.empty and "Company ID" in _companies.columns and "Company" in _companies.columns:
         _root=_company_name_key(entity_name)
         if _root:
-            _brand_mask=_companies["Company"].fillna("").astype(str).map(_company_name_key).str.startswith(_root+" ",na=False)
-            for _cid in _companies.loc[_brand_mask,"Company ID"].fillna("").astype(str):
-                if _cid:
-                    scope_ids.add(_cid)
+            _brand_keys=_companies["Company"].fillna("").astype(str).map(_company_name_key)
+            _brand_mask=_brand_keys.eq(_root) | _brand_keys.str.startswith(_root+" ",na=False)
+            _brand_ids.update(
+                x for x in _companies.loc[_brand_mask,"Company ID"].fillna("").astype(str).tolist()
+                if x
+            )
+
+    # Include branded IDs and their controlled/subsidiary scope.
+    for _cid in list(_brand_ids):
+        scope_ids.add(_cid)
+        try:
+            scope_ids.update(company_scope_ids(_cid))
+        except Exception:
+            pass
+
+    # IMPORTANT: compute investment/asset scope only AFTER group expansion.
+    # Earlier builds calculated this before branded subsidiaries were added,
+    # leaving DP World ports and vessels invisible even though they existed in data.
+    investment_ids=company_investment_exposure_ids(scope_ids)
+    asset_scope_ids=set(scope_ids) | set(investment_ids)
 
     prof["scope_ids"]=scope_ids
     prof["scope_names"]=company_scope_names(scope_ids)
     prof["investment_ids"]=investment_ids
     prof["investment_names"]=company_scope_names(investment_ids)
     prof["asset_scope_ids"]=asset_scope_ids
+    prof["scope_debug"]={
+        "group_scope_ids":len(scope_ids),
+        "investment_scope_ids":len(investment_ids),
+        "asset_scope_ids":len(asset_scope_ids),
+        "branded_ids":len(_brand_ids),
+    }
 
     # Corporate relationships
     rel=TABLES.get(("Core Entities","Relationships"),pd.DataFrame())
