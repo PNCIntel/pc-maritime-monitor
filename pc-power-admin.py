@@ -1214,11 +1214,52 @@ def _record_key(payload, natural_key=""):
     return str(uuid.uuid4())
 
 
+def _prepare_staged_job_for_resolution(sb, job_id):
+    """Backfill logical entity type/source key on staged rows before SQL 010 resolution.
+
+    AI research historically staged target_table but not target_entity_type. SQL 010
+    requires the logical entity type to choose match rules. This helper repairs both
+    new and already-staged jobs using pc_meta_entity_types without touching canonical data.
+    Relationship rows remain relationship proposals and are not forced through entity resolution.
+    """
+    meta_map=_meta_table_map(sb)
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,target_entity_type,source_record_key,natural_key")
+              .eq("ingestion_job_id",str(job_id)).limit(5000).execute().data or [])
+    except Exception:
+        return {"updated":0,"resolvable":0,"relationship_rows":0}
+
+    updated=0
+    resolvable=0
+    relationship_rows=0
+    for row in rows:
+        table=row.get("target_table")
+        meta=meta_map.get(table) or {}
+        logical=meta.get("entity_type")
+        patch={}
+        if logical:
+            resolvable+=1
+            if not row.get("target_entity_type"):
+                patch["target_entity_type"]=logical
+        elif table in {"pc_relationships","pc_event_links"}:
+            relationship_rows+=1
+            if not row.get("target_entity_type"):
+                patch["target_entity_type"]="relationship" if table=="pc_relationships" else "event_link"
+        if not row.get("source_record_key"):
+            patch["source_record_key"]=row.get("natural_key") or str(row.get("staged_record_id"))
+        if patch:
+            sb.table("pc_staged_records").update(patch).eq("staged_record_id",row["staged_record_id"]).execute()
+            updated+=1
+    return {"updated":updated,"resolvable":resolvable,"relationship_rows":relationship_rows}
+
+
 def stage_ai_result(sb, job_id, result):
-    """Stage structured AI result. Returns (staged_count, rejected_count)."""
+    """Stage structured AI result, attach model metadata, and resolve registered entities."""
     records=(result or {}).get("records") or []
     staged=[]
     rejected=0
+    meta_map=_meta_table_map(sb)
 
     for rec in records:
         if not isinstance(rec,dict):
@@ -1232,22 +1273,49 @@ def stage_ai_result(sb, job_id, result):
             rejected+=1
             continue
 
+        meta=meta_map.get(table) or {}
+        logical=meta.get("entity_type")
+        if not logical and table=="pc_event_links":
+            logical="event_link"
+        elif not logical and table=="pc_relationships":
+            logical="relationship"
+
+        natural_key=_record_key(payload,rec.get("natural_key") or "")
         staged.append({
             "ingestion_job_id":job_id,
+            "target_entity_type":logical,
             "target_table":table,
-            "natural_key":_record_key(payload,rec.get("natural_key") or ""),
+            "source_record_key":natural_key,
+            "natural_key":natural_key,
             "action":"REVIEW",
             "payload":_jsonable(payload),
             "confidence":rec.get("confidence"),
             "validation_status":"pending",
             "review_status":"pending",
+            "resolution_status":"UNRESOLVED",
         })
 
     for i in range(0,len(staged),100):
         sb.table("pc_staged_records").insert(staged[i:i+100]).execute()
 
-    return len(staged),rejected
+    resolution={}
+    if staged:
+        prep=_prepare_staged_job_for_resolution(sb,job_id)
+        resolution["prepared"]=prep
+        # SQL 010 handles registered canonical entity tables.
+        if prep.get("resolvable"):
+            try:
+                resolution["entities"]=_process_job_resolution(sb,job_id)
+            except Exception as exc:
+                resolution["entity_resolution_error"]=str(exc)
+        # SQL 011/012 currently specializes event-link relationships.
+        if any(r.get("target_table")=="pc_event_links" for r in staged):
+            try:
+                resolution["event_relationships"]=_process_relationship_backlog(sb,job_id)
+            except Exception as exc:
+                resolution["relationship_resolution_error"]=str(exc)
 
+    return len(staged),rejected,resolution
 
 
 # Canonical columns that this admin is allowed to send to selected tables.
@@ -2067,7 +2135,7 @@ elif page=="Research Jobs":
                         )
 
                         st.write("Research returned. Validating structured proposals...")
-                        staged,rejected=stage_ai_result(sb,job_id,result)
+                        staged,rejected,resolution=stage_ai_result(sb,job_id,result)
 
                         # If the model returned raw/unstructured output, preserve it
                         # as a research bundle rather than losing the result.
@@ -2091,6 +2159,7 @@ elif page=="Research Jobs":
                                 "discarded_invalid_records":rejected,
                                 "campaign":campaign,
                                 "product":context,
+                                "resolution":resolution,
                             }
                         }).eq("ingestion_job_id",job_id).execute()
 
@@ -2617,10 +2686,11 @@ elif page=="Staging Resolution":
                 labels=[f"{j.get('title') or 'Untitled'} | {j.get('ingestion_job_id')}" for j in jobs]
                 chosen=st.selectbox("Ingestion job",labels,key="entity_resolution_job")
                 job=jobs[labels.index(chosen)]
-                if st.button("Resolve entity records in this job again",key="rerun_entity_resolution"):
+                if st.button("Prepare + resolve entity records in this job",key="rerun_entity_resolution"):
                     try:
+                        prep=_prepare_staged_job_for_resolution(sb,job["ingestion_job_id"])
                         result=_process_job_resolution(sb,job["ingestion_job_id"])
-                        st.success(f"Entity resolution complete: {result}")
+                        st.success(f"Prepared {prep.get('updated',0)} staged row(s). Entity resolution complete: {result}")
                         st.rerun()
                     except Exception as exc:
                         st.exception(exc)
