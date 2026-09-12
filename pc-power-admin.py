@@ -1007,62 +1007,97 @@ def _staged_corporate_relationships(sb, limit=5000, job_id=None):
         return []
 
 
-def _corporate_entity_candidates(sb, job_id=None):
-    """Canonical + staged entity candidates for the corporate-link builder."""
+def _corporate_entity_candidates(sb, job_id=None, scope="all"):
+    """SQL 021: discover corporate candidates across canonical + staged + relationship endpoints.
+
+    scope='job' prefers the selected ingestion job plus canonical entities.
+    scope='all' exposes every candidate because older research rows can be attached
+    to incorrect ingestion-job metadata.
+    """
     rows=[]
     seen=set()
 
     try:
-        canonical=(sb.table("pc_entities")
-                   .select("entity_id,name,entity_type,subtype")
-                   .order("name").limit(10000).execute().data or [])
+        q=sb.table("pc_v_corporate_entity_candidates").select("*").limit(20000)
+        raw=q.execute().data or []
     except Exception:
-        canonical=[]
+        raw=[]
 
-    for r in canonical:
+    # If SQL 021 has not been deployed yet, retain a canonical fallback.
+    if not raw:
+        try:
+            canonical=(sb.table("pc_entities")
+                       .select("entity_id,name,entity_type,subtype")
+                       .order("name").limit(10000).execute().data or [])
+        except Exception:
+            canonical=[]
+        for r in canonical:
+            raw.append({
+                "candidate_origin":"canonical",
+                "entity_id":r.get("entity_id"),
+                "name":r.get("name"),
+                "entity_type":r.get("entity_type"),
+                "subtype":r.get("subtype"),
+                "ingestion_job_id":None,
+                "ingestion_job_title":None,
+                "resolution_status":"MATCHED",
+                "source_id":None,
+                "metadata":{},
+            })
+
+    # Prefer canonical candidates over staged duplicates with the same normalized name.
+    origin_rank={"canonical":0,"staged_entity":1,"relationship_endpoint":2}
+    raw=sorted(
+        raw,
+        key=lambda r:(
+            origin_rank.get(str(r.get("candidate_origin") or ""),9),
+            str(r.get("name") or "").casefold()
+        )
+    )
+
+    canonical_names=set()
+    for r in raw:
         name=str(r.get("name") or "").strip()
         if not name:
             continue
-        key=("canonical",str(r.get("entity_id") or ""),name.casefold())
-        if key in seen:
+        origin=str(r.get("candidate_origin") or "unknown")
+        jid=str(r.get("ingestion_job_id") or "")
+        if scope=="job" and origin!="canonical" and job_id and jid!=str(job_id):
             continue
-        seen.add(key)
+
+        norm=" ".join(name.casefold().split())
+        if origin!="canonical" and norm in canonical_names:
+            continue
+
+        eid=r.get("entity_id")
+        if origin=="canonical":
+            canonical_names.add(norm)
+
+        dedupe_key=(norm,str(eid or ""),origin,jid)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        job_title=str(r.get("ingestion_job_title") or "").strip()
+        status=str(r.get("resolution_status") or "UNRESOLVED")
+        if origin=="canonical":
+            suffix="canonical"
+        elif job_title:
+            suffix=f"{origin} · {status} · {job_title}"
+        else:
+            suffix=f"{origin} · {status}"
+
         rows.append({
-            "label":f"{name} — canonical",
+            "label":f"{name} — {suffix}",
             "name":name,
-            "entity_id":r.get("entity_id"),
-            "origin":"canonical",
-            "source_id":None,
-            "metadata":{},
+            "entity_id":eid,
+            "origin":origin,
+            "ingestion_job_id":r.get("ingestion_job_id"),
+            "ingestion_job_title":r.get("ingestion_job_title"),
+            "resolution_status":status,
+            "source_id":r.get("source_id"),
+            "metadata":r.get("metadata") if isinstance(r.get("metadata"),dict) else {},
         })
-
-    if job_id:
-        try:
-            staged=(sb.table("pc_staged_records")
-                    .select("staged_record_id,natural_key,payload,source_id,resolution_status,resolved_entity_id,review_status")
-                    .eq("ingestion_job_id",str(job_id))
-                    .eq("target_table","pc_entities")
-                    .limit(1000).execute().data or [])
-        except Exception:
-            staged=[]
-
-        for r in staged:
-            p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
-            name=str(p.get("name") or r.get("natural_key") or "").strip()
-            if not name:
-                continue
-            eid=r.get("resolved_entity_id") or p.get("entity_id")
-            # Keep staged candidates even if they are not canonical yet; SQL 013 will
-            # classify the corporate edge PARTIAL until the endpoint is applied.
-            label=f"{name} — staged {r.get('resolution_status') or 'UNRESOLVED'}"
-            rows.append({
-                "label":label,
-                "name":name,
-                "entity_id":eid,
-                "origin":"staged",
-                "source_id":r.get("source_id"),
-                "metadata":p.get("metadata") if isinstance(p.get("metadata"),dict) else {},
-            })
     return rows
 
 def _canonical_event_vessel_links(sb, limit=5000):
@@ -3078,9 +3113,26 @@ elif page=="Staging Resolution":
                 _corp_choice=st.selectbox("Corporate-link ingestion job",_corp_labels,key="corporate_link_job")
                 _corp_job=_corp_jobs[_corp_labels.index(_corp_choice)]
                 _corp_job_id=_corp_job.get("ingestion_job_id")
-                _corp_candidates=_corporate_entity_candidates(sb,_corp_job_id)
+                _candidate_scope=st.radio(
+                    "Company candidate scope",
+                    ["All canonical + staged companies","Selected job + canonical only"],
+                    horizontal=True,
+                    key="corporate_candidate_scope",
+                    help="Use all candidates when older research records were staged under the wrong ingestion-job metadata."
+                )
+                _corp_scope="all" if _candidate_scope.startswith("All ") else "job"
+                _corp_candidates=_corporate_entity_candidates(sb,_corp_job_id,_corp_scope)
 
                 if _corp_candidates:
+                    _candidate_names=[str(x.get("name") or "") for x in _corp_candidates]
+                    _expected_gt=["GT Ports","GT Logistics","GT Parks","GT Maritime","GT Lines","Momentum Logistics","GT USA","GSCCO"]
+                    _missing_gt=[n for n in _expected_gt if not any(n.casefold() in x.casefold() or x.casefold() in n.casefold() for x in _candidate_names)]
+                    st.caption(f"Corporate candidate pool: {len(_corp_candidates)} companies/entities.")
+                    if _missing_gt:
+                        st.warning(
+                            "Not found in candidate pool: " + ", ".join(_missing_gt) +
+                            ". These entities are not currently present as canonical entities, staged pc_entities rows, or entity endpoints in staged relationships."
+                        )
                     _label_to_candidate={}
                     for _cand in _corp_candidates:
                         _label=_cand.get("label")
@@ -3089,9 +3141,23 @@ elif page=="Staging Resolution":
                             _label=f"{_label} [{len(_label_to_candidate)+1}]"
                         _label_to_candidate[_label]=_cand
 
+                    _corp_filter=st.text_input(
+                        "Filter company choices",
+                        value="",
+                        key="corporate_company_filter",
+                        placeholder="e.g. Gulftainer, GT, Momentum"
+                    )
+                    _choice_labels=list(_label_to_candidate.keys())
+                    if _corp_filter.strip():
+                        _f=_corp_filter.casefold().strip()
+                        _choice_labels=[x for x in _choice_labels if _f in x.casefold()]
+                    if not _choice_labels:
+                        st.warning("No companies match the current filter.")
+                        _choice_labels=list(_label_to_candidate.keys())
+
                     _source_label=st.selectbox(
                         "Parent / source company",
-                        list(_label_to_candidate.keys()),
+                        _choice_labels,
                         key="corporate_source_entity"
                     )
                     _source=_label_to_candidate[_source_label]
