@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.19-dpworld-asset-vessel-rollup"
+APP_VERSION = "v3.3.20-company-name-rollup-fix"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2232,6 +2232,27 @@ def company_record(entity_id):
         if not x.empty: return x.iloc[0]
     return None
 
+def _company_name_key(value):
+    """Normalize company names for migration-era rollups."""
+    s=str(value or "").casefold()
+    s=re.sub(r"[^a-z0-9]+"," ",s).strip()
+    parts=[p for p in s.split() if p]
+    suffixes={
+        "inc","incorporated","llc","ltd","limited","plc","corp","corporation",
+        "company","co","holdings","holding","group","sa","ag","nv","bv"
+    }
+    while parts and parts[-1] in suffixes:
+        parts.pop()
+    return " ".join(parts)
+
+def _company_name_matches(series, names):
+    keys={_company_name_key(n) for n in names if _company_name_key(n)}
+    vals=series.fillna("").astype(str).map(_company_name_key)
+    mask=vals.isin(keys)
+    for root in [k for k in keys if len(k)>=6]:
+        mask |= vals.str.startswith(root+" ",na=False)
+    return mask
+
 def build_company_profile(entity_id, entity_name):
     prof={}
     prof["company_id"]=entity_id
@@ -2239,6 +2260,15 @@ def build_company_profile(entity_id, entity_name):
     scope_ids=company_scope_ids(entity_id)
     investment_ids=company_investment_exposure_ids(scope_ids)
     asset_scope_ids=set(scope_ids) | set(investment_ids)
+
+    _companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
+    if not _companies.empty and "Company ID" in _companies.columns and "Company" in _companies.columns:
+        _root=_company_name_key(entity_name)
+        if _root:
+            _brand_mask=_companies["Company"].fillna("").astype(str).map(_company_name_key).str.startswith(_root+" ",na=False)
+            for _cid in _companies.loc[_brand_mask,"Company ID"].fillna("").astype(str):
+                if _cid:
+                    scope_ids.add(_cid)
 
     prof["scope_ids"]=scope_ids
     prof["scope_names"]=company_scope_names(scope_ids)
@@ -2330,10 +2360,7 @@ def build_company_profile(entity_id, entity_name):
         # readable company name. Do not let that hide its vessels from the profile.
         _scope_company_names=set([entity_name] + company_scope_names(scope_ids))
         if "Company" in vr.columns:
-            _company_text=vr["Company"].fillna("").astype(str).str.strip()
-            for _nm in _scope_company_names:
-                if _nm:
-                    _vrmask |= _company_text.str.casefold().eq(str(_nm).strip().casefold())
+            _vrmask |= _company_name_matches(vr["Company"],_scope_company_names)
 
         vrs=vr[_vrmask].copy()
         prof["vessel_relationships"]=vrs
@@ -2431,10 +2458,7 @@ def build_company_profile(entity_id, entity_name):
         for _c in ["Company","Owner / Operator","Operator","Owner","Operator / Network","Relationship / Role"]:
             if _c not in assets.columns:
                 continue
-            _s=assets[_c].fillna("").astype(str)
-            for _nm in _scope_names:
-                if _nm:
-                    _asset_name_mask |= _s.str.contains(re.escape(str(_nm)),case=False,na=False)
+            _asset_name_mask |= _company_name_matches(assets[_c],_scope_names)
         _asset_named=assets[_asset_name_mask].copy()
         if not _asset_named.empty:
             _am=pd.concat([prof["assets"],_asset_named],ignore_index=True,sort=False)
@@ -2577,10 +2601,7 @@ def build_company_profile(entity_id, entity_name):
                 tm |= pt[_c].astype(str).isin(asset_scope_ids)
         for _c in ["Operator / Network","Operator","Owner","Ownership / Structure","Company"]:
             if _c in pt.columns:
-                _s=pt[_c].fillna("").astype(str)
-                for _nm in _scope_names:
-                    if _nm:
-                        tm |= _s.str.contains(re.escape(str(_nm)),case=False,na=False)
+                tm |= _company_name_matches(pt[_c],_scope_names)
     if not pt.empty and graph_asset_ids and "Terminal ID" in pt.columns:
         tm |= pt["Terminal ID"].fillna("").astype(str).isin(graph_asset_ids)
     direct_terms=pt[tm].copy() if not pt.empty else pd.DataFrame()
@@ -2597,10 +2618,7 @@ def build_company_profile(entity_id, entity_name):
                 pm |= ports[_c].astype(str).isin(asset_scope_ids)
         for _c in ["Operator","Owner","Operator / Network","Company","Ownership / Structure"]:
             if _c in ports.columns:
-                _s=ports[_c].fillna("").astype(str)
-                for _nm in _scope_names:
-                    if _nm:
-                        pm |= _s.str.contains(re.escape(str(_nm)),case=False,na=False)
+                pm |= _company_name_matches(ports[_c],_scope_names)
         if graph_asset_ids and "Port ID" in ports.columns:
             pm |= ports["Port ID"].fillna("").astype(str).isin(graph_asset_ids)
         direct_ports=ports[pm].copy()

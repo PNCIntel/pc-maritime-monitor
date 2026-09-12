@@ -1,8 +1,24 @@
 import streamlit as st
+import os, sys
 import pandas as pd
 import re
+try:
+    import pydeck as pdk
+except Exception:
+    pdk = None
 from pathlib import Path
 from datetime import datetime
+
+SHARED_DIR = Path(__file__).resolve().parent / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(SHARED_DIR))
+from pc_data_bridge import load_sheet as bridge_load_sheet, backend_status
+from pc_workspace import save_query as save_workspace_query
+from pc_db import client as pc_db_client, safe_rows as pc_safe_rows
+try:
+    from pc_auth import require_login
+except Exception:
+    require_login = None
 
 st.set_page_config(
     page_title="P&C Intelligence",
@@ -10,6 +26,11 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+if os.getenv("PC_REQUIRE_AUTH", "false").lower() == "true" and require_login is not None:
+    PC_USER_CONTEXT = require_login("INTELLIGENCE", "P&C Intelligence")
+else:
+    PC_USER_CONTEXT = None
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
@@ -141,13 +162,22 @@ if st.session_state.get("pc_intel_appearance","Dark") == "Light":
 # -----------------------------------------------------------------------------
 # Data helpers — all reads are from the same Excel-backed P&C model
 # -----------------------------------------------------------------------------
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300)
 def xl(file_name: str, sheet: str) -> pd.DataFrame:
-    try:
-        df = pd.read_excel(DATA / file_name, sheet_name=sheet)
-        return df.dropna(how="all")
-    except Exception:
-        return pd.DataFrame()
+    return bridge_load_sheet(DATA, file_name, sheet, dtype_str=False)
+
+
+def data_file_status(file_name: str) -> dict:
+    path = DATA / file_name
+    if not path.exists():
+        return {"file": file_name, "exists": False, "size": 0, "modified": ""}
+    stat = path.stat()
+    return {
+        "file": file_name,
+        "exists": True,
+        "size": stat.st_size,
+        "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 def text_col(df, col):
@@ -175,6 +205,47 @@ def normalize_imo(v):
         s = s[:-2]
     return s
 
+
+
+
+def intelligence_event_filter(df: pd.DataFrame) -> pd.DataFrame:
+    """Strict P&C Intelligence gate.
+
+    Include operational/security events: weather/natural hazards, fraud/crime,
+    smuggling/illicit trade, conflict/war, labour/civil unrest, casualties,
+    infrastructure/transport disruption, cyber, sanctions/enforcement.
+    Exclude routine corporate development such as new terminals, cranes,
+    investments, vessel orders and service launches unless the same record also
+    contains an independent disruption/security trigger.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+    blob=pd.Series("",index=df.index,dtype="string")
+    for c in ["Event Family","Event Type","Mode","Title","Description","Operational Impact","Trade / Commercial Impact"]:
+        if c in df.columns:
+            blob=blob.str.cat(df[c].fillna("").astype(str),sep=" ")
+    include=(
+        r"war|conflict|attack|missile|drone|piracy|hijack|boarding|seizure|interdiction|"
+        r"smuggl|traffick|fraud|crime|theft|terror|sabotage|mine|sanction|enforcement|"
+        r"weather|typhoon|hurricane|cyclone|flood|earthquake|wildfire|storm|low water|"
+        r"grounding|collision|allision|capsize|sinking|fire|explosion|pollution|sar|"
+        r"labour|industrial action|strike|protest|riot|civil unrest|closure|outage|"
+        r"disruption|border closure|customs restriction|airspace closure|cyber|ransomware"
+    )
+    corporate=(
+        r"new terminal|terminal opening|commissioning|new crane|crane order|equipment order|"
+        r"vessel order|fleet order|acquisition|investment|capex announcement|earnings|"
+        r"dividend|share buyback|service launch|office opening|warehouse opening"
+    )
+    hard_disruption=(
+        r"attack|missile|drone|piracy|seizure|smuggl|fraud|crime|weather|typhoon|flood|"
+        r"earthquake|grounding|collision|fire|explosion|strike|protest|closure|outage|"
+        r"disruption|sanction|cyber|interdiction"
+    )
+    inc=blob.str.contains(include,case=False,regex=True,na=False)
+    corp=blob.str.contains(corporate,case=False,regex=True,na=False)
+    override=blob.str.contains(hard_disruption,case=False,regex=True,na=False)
+    return df[inc & (~corp | override)].copy()
 
 def clean_display_text(v):
     """Clean transport/database formatting before anything reaches the UI."""
@@ -335,6 +406,81 @@ def render_connected_context(event_id):
         show_df(view, ["System", "Relationship", "Confidence"], 180)
 
 
+
+def _canonical_db_event_frames():
+    """Return normalized Supabase events/locations in the legacy dataframe shape.
+
+    Canonical normalized tables are authoritative when available. The existing
+    workbook/legacy bridge remains a fallback if Supabase is unavailable.
+    """
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame(), pd.DataFrame()
+
+        erows = pc_safe_rows(
+            sb,
+            "pc_events",
+            "event_id,start_date,end_date,event_nature,event_domain,event_family,event_type,severity,status,mode,countries,location,title,description,operational_impact,commercial_impact,confidence,trade_relevance,intelligence_relevance,trade_visible,intelligence_visible,alert_worthy,record_status,source_id,metadata",
+            5000,
+            order="start_date",
+        )
+        lrows = pc_safe_rows(
+            sb,
+            "pc_event_locations",
+            "event_location_id,event_id,location_name,country,latitude,longitude,accuracy,notes",
+            5000,
+        )
+
+        if not erows:
+            return pd.DataFrame(), pd.DataFrame()
+
+        events = pd.DataFrame(erows).rename(columns={
+            "event_id":"Event ID",
+            "start_date":"Start Date",
+            "end_date":"End Date",
+            "event_nature":"Event Nature",
+            "event_domain":"Event Domain",
+            "event_family":"Event Family",
+            "event_type":"Event Type",
+            "severity":"Severity",
+            "status":"Status",
+            "mode":"Mode",
+            "countries":"Country / Countries",
+            "location":"Location",
+            "title":"Title",
+            "description":"Description",
+            "operational_impact":"Operational Impact",
+            "commercial_impact":"Trade / Commercial Impact",
+            "confidence":"Confidence",
+            "trade_relevance":"Trade Relevance",
+            "intelligence_relevance":"Intelligence Relevance",
+            "trade_visible":"Trade Visible",
+            "intelligence_visible":"Intelligence Visible",
+            "alert_worthy":"Alert Worthy",
+            "record_status":"Record Status",
+            "source_id":"Source ID",
+            "metadata":"Metadata",
+        })
+
+        if lrows:
+            locations = pd.DataFrame(lrows).rename(columns={
+                "event_location_id":"Location Record",
+                "event_id":"Event ID",
+                "location_name":"Location",
+                "country":"Country",
+                "latitude":"Latitude",
+                "longitude":"Longitude",
+                "accuracy":"Accuracy",
+                "notes":"Notes",
+            })
+        else:
+            locations = pd.DataFrame()
+
+        return events, locations
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame()
+
 # Canonical vessel registry from Supabase.
 @st.cache_data(show_spinner=False, ttl=60)
 def _canonical_db_vessels():
@@ -414,8 +560,18 @@ sources = xl("10_sources_evidence.xlsx", "Sources")
 source_feeds = xl("10_sources_evidence.xlsx", "Source Feeds")
 
 # Canonical events/hazards
-hazard_events = xl("13_events_hazards.xlsx", "Events")
-event_locations = xl("13_events_hazards.xlsx", "Event Locations")
+# Normalized Supabase is authoritative; workbook-shaped data is fallback only.
+_db_events, _db_event_locations = _canonical_db_event_frames()
+if not _db_events.empty:
+    hazard_events_raw = _db_events
+else:
+    hazard_events_raw = xl("13_events_hazards.xlsx", "Events")
+hazard_events = intelligence_event_filter(hazard_events_raw)
+
+if not _db_event_locations.empty:
+    event_locations = _db_event_locations
+else:
+    event_locations = xl("13_events_hazards.xlsx", "Event Locations")
 event_asset_links = xl("13_events_hazards.xlsx", "Event Asset Links")
 event_company_links = xl("13_events_hazards.xlsx", "Event Company Links")
 event_system_links = xl("13_events_hazards.xlsx", "Event System Links")
@@ -460,9 +616,9 @@ st.sidebar.caption("Refresh after Power Admin applies new events, vessels, asset
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 
 NAV = {
-    "INTELLIGENCE DESK": ["Operating Picture", "Alerts & Incidents"],
+    "INTELLIGENCE DESK": ["Operating Picture", "Regional Maps", "Alerts & Incidents"],
     "FORWARD MONITORING": ["Watch Areas", "Monitoring & Indicators"],
-    "DOMAIN INTELLIGENCE": ["Maritime Security", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
+    "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
     "DISCOVERY": ["Intelligence Search", "Source Monitor"],
 }
 
@@ -475,7 +631,40 @@ for group, items in NAV.items():
 
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
-st.sidebar.caption("Excel-backed v3.0 · shared P&C canonical data")
+_bst=backend_status()
+st.sidebar.caption(f"v3.1 migration · {_bst.get('mode','excel').title()} backend · shared canonical model")
+
+with st.sidebar.expander("Data status", expanded=False):
+    _hazard_status = data_file_status("13_events_hazards.xlsx")
+    _intel_status = data_file_status("09_intelligence.xlsx")
+
+    if _hazard_status["exists"] or _bst.get("mode")=="supabase":
+        st.caption(f"Raw event universe: {len(hazard_events_raw):,}")
+        st.caption(f"P&C Intelligence routed events: {len(hazard_events):,}")
+        if _hazard_status["exists"]:
+            st.caption(f"Workbook: {_hazard_status['size'] / 1024:.1f} KB · modified {_hazard_status['modified']}")
+        if not hazard_events_raw.empty and "Start Date" in hazard_events_raw.columns:
+            _latest_dt = pd.to_datetime(hazard_events_raw["Start Date"], errors="coerce").max()
+            if pd.notna(_latest_dt):
+                st.caption(f"Latest raw event date: {_latest_dt.strftime('%Y-%m-%d')}")
+        corporate_leak = len(hazard_events[
+            contains_any(hazard_events,["Event Family","Event Type","Title"],["new terminal","new crane","acquisition","investment","vessel order"])
+        ]) if not hazard_events.empty else 0
+        if corporate_leak:
+            st.warning(f"{corporate_leak} possible corporate-development records still require classification review.")
+        else:
+            st.success("Strict Intelligence event gate active; routine corporate development excluded.")
+    else:
+        st.error("13_events_hazards.xlsx is missing from /data and Supabase is not serving the legacy mirror.")
+
+    if _intel_status["exists"]:
+        st.caption(f"Intelligence workbook: {_intel_status['size'] / 1024:.1f} KB")
+    else:
+        st.error("09_intelligence.xlsx is missing from /data.")
+
+    if st.button("Refresh database", key="refresh_excel_data"):
+        st.cache_data.clear()
+        st.rerun()
 
 # Header
 st.markdown('<div class="pc-kicker">Power & Corridors Intelligence</div>', unsafe_allow_html=True)
@@ -615,6 +804,324 @@ def render_watch_area_brief(rows,geography):
             st.markdown("**Dry ports / inland hubs**")
             show_df(related["Dry ports"],["Hub Name","Country","City / Region","Status","Linked Seaports / Gateways"],180)
 
+
+# -----------------------------------------------------------------------------
+# Regional security workspace helpers
+# -----------------------------------------------------------------------------
+REGIONAL_SECURITY_AREAS = {
+    "Middle East / Gulf": {
+        "center": (25.2, 51.5), "zoom": 4.2,
+        "phrases": [
+            "united arab emirates","uae","iran","iraq","saudi arabia","bahrain",
+            "qatar","kuwait","oman","persian gulf","arabian gulf","gulf of oman",
+            "strait of hormuz","hormuz","kharg","al-faw","dubai","abu dhabi",
+            "fujairah","doha","muscat","ras tanura","jazan","jizan","red sea","bab el-mandeb","mocha","jeddah","yanbu"
+        ],
+    },
+    "Black Sea": {
+        "center": (43.1, 34.0), "zoom": 4.3,
+        "phrases": [
+            "black sea","sea of azov","azov","ukraine","russia","azerbaijan",
+            "odesa","odessa","crimea","sevastopol","constanța","constanta",
+            "varna","burgas","novorossiysk","kerch","taganrog","mariupol",
+            "berdyansk","bosporus","bosphorus","turkish coast","danube delta"
+        ],
+    },
+    "Mediterranean": {
+        "center": (35.5, 18.0), "zoom": 3.4,
+        "phrases": [
+            "mediterranean","ionian","adriatic","aegean","crete","cyprus",
+            "malta","libya","tunisia","algeria","italy","genoa","sicily",
+            "greece","lebanon","israel","syria","levant","gibraltar",
+            "balearic","marseille","barcelona","taranto","trieste"
+        ],
+    },
+    "Baltic": {
+        "center": (57.0, 19.0), "zoom": 4.0,
+        "phrases": [
+            "baltic sea","baltic","estonia","latvia","lithuania","tallinn",
+            "riga","klaipeda","klaipėda","gdańsk","gdansk","gdynia",
+            "kiel","gotland","gulf of finland","gulf of riga","kaliningrad"
+        ],
+    },
+    "Caribbean": {
+        "center": (18.0, -72.0), "zoom": 3.8,
+        "phrases": [
+            "caribbean","bahamas","haiti","jamaica","dominican republic",
+            "puerto rico","cuba","trinidad","tobago","barbados","grenada",
+            "martinique","guadeloupe","aruba","curaçao","curacao",
+            "port-au-prince","varreux"
+        ],
+    },
+    "Asia-Pacific": {
+        "center": (18.0, 116.0), "zoom": 2.7,
+        "phrases": [
+            "asia-pacific","asia pacific","china","japan","taiwan","south korea",
+            "north korea","philippines","indonesia","malaysia","singapore",
+            "vietnam","thailand","australia","new zealand","hong kong",
+            "okinawa","shanghai","zhejiang","taiwan strait","incheon",
+            "sunda strait","jakarta","lampung","manila","south china sea",
+            "east china sea"
+        ],
+    },
+}
+
+REGIONAL_OPERATIONAL_TERMS = [
+    "security","conflict","attack","strike","drone","missile","mine","piracy",
+    "armed robbery","seizure","boarding","interdiction","detention","explosion",
+    "fire","casualty","grounding","collision","allision","capsiz","sinking",
+    "navigation","hazard","weather","typhoon","storm","earthquake","volcano",
+    "labour","industrial action","strike","closure","disruption","pollution",
+    "spill","sar","rescue","disabled","disabling fire","port incident",
+    "infrastructure incident","maritime"
+]
+
+def _regional_blob(df):
+    if df is None or df.empty:
+        return pd.Series(dtype="string")
+    blob = pd.Series("", index=df.index, dtype="string")
+    for c in [
+        "Country / Countries","Location","Title","Description","Event Family",
+        "Event Type","Mode","Operational Impact","Trade / Commercial Impact"
+    ]:
+        if c in df.columns:
+            blob = blob.str.cat(text_col(df,c), sep=" ")
+    return blob.str.casefold()
+
+def regional_events(region_name, operational_only=True):
+    """Return events relevant to a regional security theatre."""
+    if hazard_events.empty or region_name not in REGIONAL_SECURITY_AREAS:
+        return hazard_events.iloc[0:0].copy()
+    df=hazard_events.copy()
+    blob=_regional_blob(df)
+    phrases=REGIONAL_SECURITY_AREAS[region_name]["phrases"]
+    region_pattern="|".join(re.escape(p.casefold()) for p in phrases)
+    mask=blob.str.contains(region_pattern,regex=True,na=False)
+
+    if operational_only:
+        op_pattern="|".join(re.escape(t.casefold()) for t in REGIONAL_OPERATIONAL_TERMS)
+        mask &= blob.str.contains(op_pattern,regex=True,na=False)
+
+    return df[mask].copy()
+
+def regional_event_map_points(events):
+    """Join the regional event set to canonical Event Locations for map rendering."""
+    if events is None or events.empty or event_locations.empty:
+        return pd.DataFrame()
+
+    if "Event ID" not in events.columns or "Event ID" not in event_locations.columns:
+        return pd.DataFrame()
+
+    loc=event_locations.copy()
+    loc["Latitude"]=pd.to_numeric(loc.get("Latitude"),errors="coerce")
+    loc["Longitude"]=pd.to_numeric(loc.get("Longitude"),errors="coerce")
+    loc=loc[loc["Latitude"].notna() & loc["Longitude"].notna()].copy()
+    if loc.empty:
+        return pd.DataFrame()
+
+    cols=[
+        c for c in [
+            "Event ID","Start Date","Severity","Status","Event Family","Event Type",
+            "Title","Operational Impact","Trade / Commercial Impact","Confidence"
+        ] if c in events.columns
+    ]
+    pts=loc.merge(events[cols],on="Event ID",how="inner")
+    if pts.empty:
+        return pts
+
+    pts["Incident"]=pts.get("Title","").map(clean_display_text)
+    pts["Date"]=pts.get("Start Date","").astype(str).str[:10]
+    pts["Mapped Location"]=pts.get("Location","").map(clean_display_text)
+    pts["Severity Label"]=pts.get("Severity","").map(clean_display_text)
+    pts["Operational"]=pts.get("Operational Impact","").map(clean_display_text)
+    pts["Commercial"]=pts.get("Trade / Commercial Impact","").map(clean_display_text)
+    pts["Map Accuracy"]=pts.get("Accuracy","").map(clean_display_text)
+    return pts
+
+def render_regional_incident_map(region_name, events):
+    """Interactive incident map with hover details and a safe fallback."""
+    pts=regional_event_map_points(events)
+
+    st.markdown("### Incident map")
+    if pts.empty:
+        st.caption("No mapped coordinates are currently available for events in this regional view.")
+        return pts
+
+    cfg=REGIONAL_SECURITY_AREAS[region_name]
+
+    # Fit the regional map to the actual plotted incidents rather than relying
+    # on a fixed theatre centre. This prevents western Saudi / Red Sea points
+    # such as Jazan from falling outside a Gulf-centred viewport.
+    lat_min=float(pts["Latitude"].min())
+    lat_max=float(pts["Latitude"].max())
+    lon_min=float(pts["Longitude"].min())
+    lon_max=float(pts["Longitude"].max())
+
+    lat0=(lat_min+lat_max)/2
+    lon0=(lon_min+lon_max)/2
+
+    lat_span=max(lat_max-lat_min,0.8)
+    lon_span=max(lon_max-lon_min,0.8)
+    span=max(lat_span,lon_span)
+
+    # Conservative zoom heuristic for a 500px-high regional map.
+    if span >= 50:
+        auto_zoom=2.0
+    elif span >= 30:
+        auto_zoom=2.5
+    elif span >= 18:
+        auto_zoom=3.0
+    elif span >= 10:
+        auto_zoom=3.6
+    elif span >= 6:
+        auto_zoom=4.1
+    elif span >= 3:
+        auto_zoom=4.8
+    else:
+        auto_zoom=5.6
+
+    # Keep the theatre defaults as a ceiling only; never zoom in so far that
+    # mapped incidents disappear from the initial frame.
+    auto_zoom=min(auto_zoom,float(cfg["zoom"]))
+
+    if pdk is not None:
+        layer=pdk.Layer(
+            "ScatterplotLayer",
+            data=pts,
+            get_position="[Longitude, Latitude]",
+            get_radius=45000,
+            radius_min_pixels=5,
+            radius_max_pixels=16,
+            pickable=True,
+            auto_highlight=True,
+            get_fill_color=[216,180,90,190],
+            get_line_color=[240,224,180,255],
+            line_width_min_pixels=1,
+        )
+        view=pdk.ViewState(
+            latitude=lat0,
+            longitude=lon0,
+            zoom=auto_zoom,
+            pitch=0,
+            bearing=0,
+        )
+        tooltip={
+            "html": (
+                "<div style='max-width:360px;'>"
+                "<b>{Incident}</b><br/>"
+                "{Date} · {Severity Label}<br/>"
+                "<b>Location:</b> {Mapped Location}<br/>"
+                "<b>Operational impact:</b> {Operational}<br/>"
+                "<span style='opacity:.75'>Map accuracy: {Map Accuracy}</span>"
+                "</div>"
+            ),
+            "style":{
+                "backgroundColor":"#101820",
+                "color":"#F4EFE5",
+                "fontSize":"12px"
+            }
+        }
+        deck=pdk.Deck(
+            layers=[layer],
+            initial_view_state=view,
+            tooltip=tooltip,
+            map_style=None,
+        )
+        st.pydeck_chart(deck,use_container_width=True,height=500)
+    else:
+        # Streamlit's native map is less descriptive but keeps coordinates visible.
+        fallback=pts.rename(columns={"Latitude":"lat","Longitude":"lon"})
+        st.map(fallback[["lat","lon"]],latitude="lat",longitude="lon",use_container_width=True)
+
+    st.caption(
+        f"{len(pts)} mapped incident point{'s' if len(pts)!=1 else ''}. "
+        "Map view automatically fits all plotted incidents in this regional tab. "
+        "Hover over a point for incident details."
+    )
+    return pts
+
+def render_regional_event_workspace(region_name):
+    events=regional_events(region_name,operational_only=True)
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Regional events",len(events))
+    severe=events[text_col(events,"Severity").str.contains("High|Severe|Critical",case=False,regex=True,na=False)] if not events.empty else events
+    c2.metric("High / severe",len(severe))
+    active=events[text_col(events,"Status").str.contains("Active|Developing|Ongoing|Warning",case=False,regex=True,na=False)] if not events.empty else events
+    c3.metric("Active / developing",len(active))
+    mapped=regional_event_map_points(events)
+    c4.metric("Mapped points",len(mapped))
+
+    mapped_pts=render_regional_incident_map(region_name,events)
+
+    st.markdown("### Regional incident record")
+    if events.empty:
+        st.markdown('<div class="pc-empty">No operational/security events currently match this regional theatre.</div>',unsafe_allow_html=True)
+        return
+
+    events=events.copy()
+    if "Start Date" in events.columns:
+        events["_regional_sort"]=pd.to_datetime(events["Start Date"],errors="coerce")
+        events=events.sort_values("_regional_sort",ascending=False)
+
+    q=st.text_input(
+        "Search this region",
+        placeholder="vessel, port, drone, piracy, grounding, sanctions...",
+        key=f"regional_search_{region_name}"
+    )
+    if q.strip():
+        mask=contains_any(
+            events,
+            ["Title","Description","Location","Country / Countries","Event Family","Event Type",
+             "Operational Impact","Trade / Commercial Impact"],
+            [re.escape(q.strip())]
+        )
+        events=events[mask].copy()
+
+    show_df(
+        events,
+        ["Start Date","Event Family","Event Type","Severity","Status","Country / Countries",
+         "Location","Title","Operational Impact","Confidence"],
+        320
+    )
+
+    if events.empty:
+        return
+
+    detail=events.reset_index(drop=True)
+    pick=st.selectbox(
+        "Open regional incident",
+        range(len(detail)),
+        format_func=lambda i:f"{detail.iloc[i].get('Start Date','')} · {detail.iloc[i].get('Title','')}",
+        key=f"regional_event_pick_{region_name}"
+    )
+    row=detail.iloc[pick]
+    eid=str(row.get("Event ID","") or "")
+
+    left,right=st.columns([1.15,1])
+    with left:
+        event_card(row)
+        locs=event_locations[text_col(event_locations,"Event ID").eq(eid)] if not event_locations.empty else event_locations
+        if not locs.empty:
+            st.markdown("**Mapped location detail**")
+            show_df(locs,["Location","Country","Latitude","Longitude","Accuracy","Notes"],180)
+
+    with right:
+        section("Connected coverage","Entities, assets, systems & impact chain")
+        render_connected_context(eid)
+        chains=impact_chains[text_col(impact_chains,"Event ID").eq(eid)] if not impact_chains.empty else impact_chains
+        if not chains.empty:
+            st.markdown("**Impact chain**")
+            show_df(chains,["Step","Trigger","Direct Impact","Secondary Impact","Tertiary Impact","Strategic / Commercial Outcome"],220)
+
+    # Preserve events with no coordinates: they remain visible in the incident record.
+    mapped_ids=set(mapped_pts["Event ID"].astype(str)) if not mapped_pts.empty and "Event ID" in mapped_pts.columns else set()
+    unmapped=events[~events["Event ID"].astype(str).isin(mapped_ids)].copy() if "Event ID" in events.columns else pd.DataFrame()
+    if not unmapped.empty:
+        with st.expander(f"Events without mapped coordinates ({len(unmapped)})"):
+            show_df(unmapped,["Start Date","Severity","Country / Countries","Location","Title","Operational Impact"],240)
+
+
 # -----------------------------------------------------------------------------
 # 1. OPERATING PICTURE
 # -----------------------------------------------------------------------------
@@ -717,6 +1224,97 @@ elif page == "Alerts & Incidents":
                     show_df(chains, ["Step","Trigger","Direct Impact","Secondary Impact","Tertiary Impact","Strategic / Commercial Outcome"], 220)
 
 # -----------------------------------------------------------------------------
+# REGIONAL MAPS
+# -----------------------------------------------------------------------------
+elif page == "Regional Maps":
+    section(
+        "Operating picture",
+        "Regional Maps",
+        "Map-first theatre views using the shared canonical event and event-location layers."
+    )
+    st.caption(
+        "Only events with supported coordinates are plotted. Unmapped incidents remain available "
+        "in Regional Security rather than being assigned invented coordinates."
+    )
+
+    _region_names=list(REGIONAL_SECURITY_AREAS.keys())
+    _map_tabs=st.tabs(_region_names)
+
+    for _tab,_region_name in zip(_map_tabs,_region_names):
+        with _tab:
+            _events=regional_events(_region_name,operational_only=True)
+            _mapped=regional_event_map_points(_events)
+
+            _m1,_m2,_m3=st.columns(3)
+            _m1.metric("Regional events",len(_events))
+            _m2.metric("Mapped points",len(_mapped))
+            if not _events.empty and not _mapped.empty and "Event ID" in _mapped.columns:
+                _mapped_events=_mapped["Event ID"].fillna("").astype(str).nunique()
+            else:
+                _mapped_events=0
+            _m3.metric("Events without map point",max(len(_events)-_mapped_events,0))
+
+            render_regional_incident_map(_region_name,_events)
+
+            if not _mapped.empty:
+                st.markdown("### Mapped incident register")
+                _cols=[c for c in [
+                    "Start Date","Date","Title","Incident","Mapped Location",
+                    "Severity","Severity Label","Status","Operational",
+                    "Commercial","Map Accuracy"
+                ] if c in _mapped.columns]
+                if _cols:
+                    show_df(_mapped,_cols,380)
+            elif not _events.empty:
+                st.info("Regional incidents are loaded, but none currently have supported coordinates.")
+            else:
+                st.info("No qualifying operational incidents are currently loaded for this theatre.")
+
+# -----------------------------------------------------------------------------
+# REGIONAL SECURITY
+# -----------------------------------------------------------------------------
+elif page == "Regional Security":
+    section(
+        "Regional Security",
+        "Security theatres",
+        "Regional operating picture built from the shared event, location, entity and impact-chain layers."
+    )
+    st.caption(
+        "Mapped points use known event coordinates from Event Locations. "
+        "Events without coordinates remain in the regional incident record below the map."
+    )
+
+    _jazan_loaded = (
+        not hazard_events.empty
+        and contains_any(
+            hazard_events,
+            ["Title", "Location", "Description"],
+            ["Jazan", "Jizan", "Saudi Aramco"]
+        ).any()
+    )
+    if _jazan_loaded:
+        st.success("Latest Gulf dataset detected · Jazan refinery incident loaded.")
+    else:
+        st.warning(
+            "Latest Gulf dataset not detected. Replace /data/13_events_hazards.xlsx "
+            "with the latest workbook and use Data status → Refresh database."
+        )
+
+    region_names=list(REGIONAL_SECURITY_AREAS.keys())
+
+    _black_sea_count = len(regional_events("Black Sea", operational_only=True))
+    if _black_sea_count == 0:
+        st.warning(
+            "No Black Sea security records are currently loaded. The latest dataset should include "
+            "Odesa, Natra/Zirkon in the Sea of Azov, and the Novorossiysk strike."
+        )
+
+    region_tabs=st.tabs(region_names)
+    for tab,region_name in zip(region_tabs,region_names):
+        with tab:
+            render_regional_event_workspace(region_name)
+
+# -----------------------------------------------------------------------------
 # 3. WATCH AREAS
 # -----------------------------------------------------------------------------
 elif page == "Watch Areas":
@@ -763,61 +1361,630 @@ elif page == "Monitoring & Indicators":
 # 5. MARITIME SECURITY
 # -----------------------------------------------------------------------------
 elif page == "Maritime Security":
-    section("Domain intelligence", "Maritime Security", "Vessel attacks, piracy, groundings, SAR, pollution, seizures, restrictions and official coast-guard reporting.")
-    maritime_terms = ["Maritime","Vessel","Piracy","Ground","Collision","SAR","Pollution","Boarding","Seizure","Ship","Tanker","Container"]
-    me = hazard_events[contains_any(hazard_events,["Event Family","Event Type","Mode","Title","Description"], maritime_terms)] if not hazard_events.empty else hazard_events
-    f1,f2 = st.columns([1,1])
-    with f1:
-        st.metric("Maritime-relevant events", len(me))
-    with f2:
-        st.metric("Tracked vessel restrictions", len(vessel_restrictions))
-    tab1,tab2,tab3 = st.tabs(["Incidents", "Vessels & Restrictions", "Official MARSEC Sources"])
-    with tab1:
-        show_df(me, ["Start Date","Event Type","Severity","Status","Country / Countries","Location","Title","Operational Impact","Trade / Commercial Impact","Confidence"], 500)
-    with tab2:
-        show_df(vessel_restrictions, ["Vessel Name","IMO","Authority / Regime","Restriction Type","Status","Effective Date","Direct / Indirect","Basis","Last Verified","Notes"], 360)
-        if not vessels.empty and "Vessel Name" in vessels.columns:
-            choices = sorted(vessels["Vessel Name"].dropna().astype(str).unique().tolist())
-            vessel_name = st.selectbox("Open canonical vessel", choices)
-            vr = vessels[text_col(vessels,"Vessel Name").eq(vessel_name)]
-            show_df(vr, ["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Year Built","DWT","Status","Registered Owner (Legal)","Technical / ISM Manager","Completeness Note"], 180)
-            imo = normalize_imo(vr.iloc[0].get("IMO", "")) if not vr.empty else ""
-            rr = vessel_restrictions[vessel_restrictions["IMO"].map(normalize_imo).eq(imo)] if imo and not vessel_restrictions.empty else pd.DataFrame()
-            if not rr.empty:
-                st.caption("Security & compliance attached to this canonical vessel")
-                show_df(rr, ["Authority / Regime","Restriction Type","Status","Effective Date","Direct / Indirect","Basis","Last Verified","Notes"], 180)
-    with tab3:
-        sf = source_feeds[contains_any(source_feeds,["Source Name","Default Event Families","Coverage"], ["Coast Guard","Maritime","SAR","Grounding","Collision","Pollution","Rescue","UKMTO","ReCAAP"])] if not source_feeds.empty else source_feeds
-        show_df(sf, ["Source Name","Coverage","Default Event Families","Priority","Active","Last Checked","Notes"], 430)
+    section(
+        "Domain intelligence",
+        "Maritime Security",
+        "Operational picture of attacks, casualties, piracy, interdictions, navigation hazards and other incidents affecting commercial shipping."
+    )
+
+    maritime_terms = [
+        "Maritime","Vessel","Piracy","Ground","Collision","Allision","SAR",
+        "Pollution","Boarding","Seizure","Ship","Tanker","Container","Drone",
+        "Missile","Mine","Capsiz","Sinking","Fire","Disabled"
+    ]
+    me = (
+        hazard_events[
+            contains_any(
+                hazard_events,
+                ["Event Family","Event Type","Mode","Title","Description"],
+                maritime_terms
+            )
+        ].copy()
+        if not hazard_events.empty else hazard_events.copy()
+    )
+
+    if not me.empty and "Start Date" in me.columns:
+        me["_sort_date"] = pd.to_datetime(me["Start Date"], errors="coerce")
+        me = me.sort_values("_sort_date", ascending=False)
+
+    # Never treat workbook scaffolding/template rows as live intelligence.
+    live_restrictions = vessel_restrictions.copy()
+    if not live_restrictions.empty:
+        template_mask = contains_any(
+            live_restrictions,
+            ["Restriction ID","Status","Vessel Name","IMO","Notes"],
+            ["template","populate one row","none"]
+        )
+        live_restrictions = live_restrictions[~template_mask].copy()
+
+    # Direct vessel exposure comes from actual event-to-asset relationships,
+    # not from browsing the entire canonical vessel registry.
+    vessel_event_links = event_asset_links.copy()
+    if not vessel_event_links.empty:
+        vessel_mask = (
+            text_col(vessel_event_links,"Asset Type").str.contains("vessel|ship|tanker|carrier",case=False,regex=True,na=False)
+            | text_col(vessel_event_links,"Asset ID").str.startswith("VESSEL",na=False)
+        )
+        vessel_event_links = vessel_event_links[vessel_mask].copy()
+
+    exposed_event_ids = set(vessel_event_links["Event ID"].dropna().astype(str)) if not vessel_event_links.empty and "Event ID" in vessel_event_links.columns else set()
+    exposed_vessel_names = set(vessel_event_links["Asset"].dropna().astype(str)) if not vessel_event_links.empty and "Asset" in vessel_event_links.columns else set()
+
+    active_mask = (
+        text_col(me,"Status").str.contains("active|developing|ongoing|warning|investigation",case=False,regex=True,na=False)
+        if not me.empty else pd.Series(dtype=bool)
+    )
+    severe_mask = (
+        text_col(me,"Severity").str.contains("critical|severe|high",case=False,regex=True,na=False)
+        if not me.empty else pd.Series(dtype=bool)
+    )
+
+    m1,m2,m3,m4 = st.columns(4)
+    m1.metric("Maritime incidents", len(me))
+    m2.metric("Active / developing", int(active_mask.sum()) if len(active_mask) else 0)
+    m3.metric("High / critical", int(severe_mask.sum()) if len(severe_mask) else 0)
+    m4.metric("Named vessels affected", len(exposed_vessel_names))
+
+    tabs = st.tabs([
+        "Threat Picture",
+        "Incidents",
+        "Vessel Exposure",
+        "Official Warnings & Sources"
+    ])
+
+    with tabs[0]:
+        st.markdown("### Current maritime threat picture")
+        if me.empty:
+            st.info("No maritime-security incidents are currently loaded.")
+        else:
+            current = me[
+                text_col(me,"Status").str.contains(
+                    "active|developing|ongoing|warning|investigation|damaged|casualty",
+                    case=False,regex=True,na=False
+                )
+            ].copy()
+            if current.empty:
+                current = me.head(8).copy()
+            else:
+                current = current.head(8)
+
+            for idx, (_, row) in enumerate(current.iterrows()):
+                title = clean_display_text(row.get("Title","")) or clean_display_text(row.get("Event Type",""))
+                date = str(row.get("Start Date",""))[:10]
+                severity = clean_display_text(row.get("Severity","")) or "—"
+                status = clean_display_text(row.get("Status","")) or "—"
+                location = clean_display_text(row.get("Location","")) or clean_display_text(row.get("Country / Countries","")) or "Location not specified"
+                impact = clean_display_text(row.get("Operational Impact","")) or clean_display_text(row.get("Description",""))
+                st.markdown(
+                    (
+                        "<div class='pc-card'>"
+                        f"<div class='pc-label'>{date} · {severity} · {status}</div>"
+                        f"<div class='pc-big'>{title}</div>"
+                        f"<div style='margin-top:8px;'><b>{location}</b></div>"
+                        f"<div class='pc-search-details' style='margin-top:8px;'>{impact}</div>"
+                        "</div>"
+                    ),
+                    unsafe_allow_html=True
+                )
+
+            # Compact pattern read by event type / geography.
+            c1,c2 = st.columns(2)
+            with c1:
+                st.markdown("#### Leading incident types")
+                if "Event Type" in me.columns:
+                    t = (
+                        me["Event Type"].dropna().astype(str)
+                        .value_counts().head(8).rename_axis("Incident Type").reset_index(name="Events")
+                    )
+                    show_df(t, ["Incident Type","Events"], 260)
+            with c2:
+                st.markdown("#### Leading operating areas")
+                geo_col = "Country / Countries" if "Country / Countries" in me.columns else "Location"
+                if geo_col in me.columns:
+                    g = (
+                        me[geo_col].dropna().astype(str)
+                        .value_counts().head(8).rename_axis("Area").reset_index(name="Events")
+                    )
+                    show_df(g, ["Area","Events"], 260)
+
+    with tabs[1]:
+        st.markdown("### Incident record")
+        q = st.text_input(
+            "Search maritime incidents",
+            placeholder="vessel, port, piracy, drone, grounding, tanker...",
+            key="maritime_incident_search"
+        )
+        incident_view = me.copy()
+        if q.strip() and not incident_view.empty:
+            incident_view = incident_view[
+                contains_any(
+                    incident_view,
+                    ["Title","Description","Event Type","Country / Countries","Location","Operational Impact"],
+                    [q.strip()]
+                )
+            ].copy()
+
+        show_df(
+            incident_view,
+            ["Start Date","Severity","Status","Event Type","Country / Countries",
+             "Location","Title","Operational Impact","Confidence"],
+            360
+        )
+
+        if not incident_view.empty:
+            detail = incident_view.reset_index(drop=True)
+            pick = st.selectbox(
+                "Open incident",
+                range(len(detail)),
+                format_func=lambda i: f"{str(detail.iloc[i].get('Start Date',''))[:10]} · {detail.iloc[i].get('Title','')}",
+                key="maritime_incident_pick"
+            )
+            row = detail.iloc[pick]
+            eid = str(row.get("Event ID","") or "")
+            left,right = st.columns([1.15,1])
+            with left:
+                event_card(row)
+            with right:
+                section("Connected coverage","Vessels, assets, companies & systems")
+                render_connected_context(eid)
+                chains = impact_chains[text_col(impact_chains,"Event ID").eq(eid)] if not impact_chains.empty else impact_chains
+                if not chains.empty:
+                    st.markdown("**Impact chain**")
+                    show_df(
+                        chains,
+                        ["Trigger","Direct Impact","Secondary Impact","Tertiary Impact","Strategic / Commercial Outcome"],
+                        220
+                    )
+
+    with tabs[2]:
+        st.markdown("### Vessels exposed to maritime-security events")
+        st.caption(
+            "This is not the full vessel database. It shows vessels that are directly linked "
+            "to security incidents or have a real live restriction/compliance record."
+        )
+
+        exposure_rows = []
+        if not vessel_event_links.empty:
+            event_lookup = (
+                me.set_index("Event ID").to_dict("index")
+                if not me.empty and "Event ID" in me.columns else {}
+            )
+            for _, link in vessel_event_links.iterrows():
+                eid = str(link.get("Event ID","") or "")
+                er = event_lookup.get(eid,{})
+                exposure_rows.append({
+                    "Vessel": clean_display_text(link.get("Asset","")),
+                    "Relationship": clean_display_text(link.get("Relationship","")),
+                    "Incident": clean_display_text(er.get("Title","")),
+                    "Date": str(er.get("Start Date",""))[:10],
+                    "Severity": clean_display_text(er.get("Severity","")),
+                    "Status": clean_display_text(er.get("Status","")),
+                    "Location": clean_display_text(er.get("Location","")),
+                    "Event ID": eid,
+                })
+
+        exposure = pd.DataFrame(exposure_rows)
+        if not exposure.empty:
+            exposure = exposure.drop_duplicates(
+                subset=["Vessel","Incident","Date"],keep="first"
+            )
+            show_df(
+                exposure,
+                ["Vessel","Date","Severity","Status","Relationship","Location","Incident"],
+                340
+            )
+        else:
+            st.info("No named vessels are directly linked to maritime-security incidents.")
+
+        if not live_restrictions.empty:
+            st.markdown("### Live vessel restrictions")
+            show_df(
+                live_restrictions,
+                ["Vessel Name","IMO","Authority / Regime","Restriction Type",
+                 "Status","Effective Date","Direct / Indirect","Basis","Last Verified"],
+                260
+            )
+        else:
+            st.caption(
+                "No live vessel-restriction records are currently populated. "
+                "Template rows are intentionally hidden. Sanctions and compliance designations "
+                "are handled on the Sanctions & Compliance page."
+            )
+
+        vessel_choices = sorted(
+            set(exposure["Vessel"].dropna().astype(str).tolist()) if not exposure.empty else set()
+            | set(live_restrictions["Vessel Name"].dropna().astype(str).tolist()) if not live_restrictions.empty and "Vessel Name" in live_restrictions.columns else set()
+        )
+        vessel_choices = [x for x in vessel_choices if x and x.lower() not in {"none","nan"}]
+
+        if vessel_choices:
+            selected = st.selectbox(
+                "Inspect exposed vessel",
+                vessel_choices,
+                key="maritime_exposed_vessel"
+            )
+            canonical = vessels[text_col(vessels,"Vessel Name").str.casefold().eq(selected.casefold())] if not vessels.empty else pd.DataFrame()
+            if not canonical.empty:
+                st.markdown("**Canonical vessel record**")
+                show_df(
+                    canonical,
+                    ["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Year Built",
+                     "DWT","Status","Registered Owner (Legal)","Technical / ISM Manager","Completeness Note"],
+                    180
+                )
+            if not exposure.empty:
+                hist = exposure[exposure["Vessel"].str.casefold().eq(selected.casefold())]
+                if not hist.empty:
+                    st.markdown("**Security incident history**")
+                    show_df(hist,["Date","Severity","Status","Location","Incident","Relationship"],220)
+
+    with tabs[3]:
+        st.markdown("### Official maritime-security reporting")
+        sf = (
+            source_feeds[
+                contains_any(
+                    source_feeds,
+                    ["Source Name","Default Event Families","Coverage","Notes"],
+                    ["Coast Guard","Maritime","SAR","Grounding","Collision","Pollution",
+                     "Rescue","UKMTO","ReCAAP","Navy","Hydrographic","Navigation"]
+                )
+            ].copy()
+            if not source_feeds.empty else source_feeds.copy()
+        )
+
+        if sf.empty:
+            st.info("No official maritime-security source feeds are currently configured.")
+        else:
+            active_sources = sf[
+                text_col(sf,"Active").str.contains("yes|true|active",case=False,regex=True,na=False)
+            ] if "Active" in sf.columns else sf
+            s1,s2 = st.columns(2)
+            s1.metric("Configured sources",len(sf))
+            s2.metric("Active sources",len(active_sources))
+            show_df(
+                sf,
+                ["Source Name","Coverage","Default Event Families","Priority","Active","Last Checked","Notes"],
+                430
+            )
+
+        st.caption(
+            "This tab is the provenance/collection layer. Incident analysis belongs in the "
+            "Threat Picture and Incidents tabs rather than being mixed with the source registry."
+        )
 
 # -----------------------------------------------------------------------------
 # 6. PORTS & INFRASTRUCTURE
 # -----------------------------------------------------------------------------
 elif page == "Ports & Infrastructure":
-    section("Domain intelligence", "Ports & Critical Infrastructure", "Port incidents, attacks, explosions, weather, labour disruption and exposure across connected infrastructure.")
-    port_terms = ["Port","Terminal","Infrastructure","Explosion","Strike","Closure","Drone","Missile","Weather","Flood","Fire","Low water"]
-    pe = hazard_events[contains_any(hazard_events,["Event Family","Event Type","Mode","Title","Description"], port_terms)] if not hazard_events.empty else hazard_events
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Tracked ports", len(ports))
-    c2.metric("Infrastructure assets", len(infra_assets))
-    c3.metric("Port / infrastructure events", len(pe))
-    tab1,tab2,tab3 = st.tabs(["Events", "Port Drill-down", "Critical Infrastructure"])
-    with tab1:
-        show_df(pe, ["Start Date","Event Type","Severity","Country / Countries","Location","Title","Operational Impact","Trade / Commercial Impact","Confidence"], 470)
-    with tab2:
-        if not ports.empty:
-            pnames = sorted(ports["Port / Facility"].dropna().astype(str).unique().tolist())
-            pname = st.selectbox("Port / facility", pnames)
-            pr = ports[text_col(ports,"Port / Facility").eq(pname)]
-            show_df(pr, ["Port / Facility","Country","Operator","Facility Type","Key Role","Coverage Note"], 170)
-            pid = str(pr.iloc[0].get("Port ID", "")) if not pr.empty else ""
-            linked = event_asset_links[text_col(event_asset_links,"Asset ID").eq(pid)] if pid and not event_asset_links.empty else pd.DataFrame()
-            if linked.empty:
-                linked = event_asset_links[text_col(event_asset_links,"Asset").str.contains(pname, case=False, regex=False, na=False)] if not event_asset_links.empty else pd.DataFrame()
-            show_df(linked, ["Event ID","Asset","Asset Type","Relationship","Confidence","Notes"], 220)
-    with tab3:
-        show_df(infra_assets, ["Asset","Asset Type","Location","Country","Role / Function","Primary Mode","Status","Ownership / Operating Interest"], 350)
-        show_df(dry_ports, ["Hub Name","Country","City / Region","Hub Type","Status","Rail Access","Road Access","Air Access","Linked Seaports / Gateways"], 250)
+    section(
+        "Domain intelligence",
+        "Ports & Critical Infrastructure",
+        "Security and disruption picture for ports, terminals, energy nodes, logistics hubs and connected critical infrastructure."
+    )
+
+    port_terms = [
+        "Port","Terminal","Infrastructure","Explosion","Strike","Closure","Drone",
+        "Missile","Weather","Flood","Fire","Low water","Refinery","Pipeline",
+        "Tank farm","Berth","Channel","Anchorage","Labour","Power outage","Collision",
+        "Allision","Grounding"
+    ]
+
+    pe = (
+        hazard_events[
+            contains_any(
+                hazard_events,
+                ["Event Family","Event Type","Mode","Title","Description","Operational Impact"],
+                port_terms
+            )
+        ].copy()
+        if not hazard_events.empty else hazard_events.copy()
+    )
+
+    if not pe.empty and "Start Date" in pe.columns:
+        pe["_sort_date"] = pd.to_datetime(pe["Start Date"], errors="coerce")
+        pe = pe.sort_values("_sort_date", ascending=False)
+
+    # Infrastructure exposure should be driven by actual event links, not by
+    # dumping the whole asset registry into the intelligence product.
+    infra_links = event_asset_links.copy()
+    if not infra_links.empty:
+        infra_mask = (
+            text_col(infra_links,"Asset Type").str.contains(
+                "port|terminal|infrastructure|refinery|pipeline|tank|hub|airport|rail|energy",
+                case=False, regex=True, na=False
+            )
+            | text_col(infra_links,"Asset ID").str.startswith("PORT", na=False)
+            | text_col(infra_links,"Asset ID").str.startswith("ASSET", na=False)
+        )
+        infra_links = infra_links[infra_mask].copy()
+
+    active = (
+        text_col(pe,"Status").str.contains(
+            "active|developing|ongoing|warning|investigation|constrained|damaged|closed",
+            case=False, regex=True, na=False
+        )
+        if not pe.empty else pd.Series(dtype=bool)
+    )
+    severe = (
+        text_col(pe,"Severity").str.contains(
+            "critical|severe|high", case=False, regex=True, na=False
+        )
+        if not pe.empty else pd.Series(dtype=bool)
+    )
+
+    linked_asset_names = (
+        set(infra_links["Asset"].dropna().astype(str))
+        if not infra_links.empty and "Asset" in infra_links.columns else set()
+    )
+
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Infrastructure incidents", len(pe))
+    c2.metric("Active / developing", int(active.sum()) if len(active) else 0)
+    c3.metric("High / critical", int(severe.sum()) if len(severe) else 0)
+    c4.metric("Named assets affected", len(linked_asset_names))
+
+    tabs = st.tabs([
+        "Threat Picture",
+        "Incidents",
+        "Asset Exposure",
+        "Port Drill-down"
+    ])
+
+    with tabs[0]:
+        st.markdown("### Current infrastructure threat picture")
+
+        current = pe[
+            text_col(pe,"Status").str.contains(
+                "active|developing|ongoing|warning|investigation|damaged|constrained|closed",
+                case=False, regex=True, na=False
+            )
+        ].copy() if not pe.empty else pe
+
+        if current.empty and not pe.empty:
+            current = pe.head(8).copy()
+        elif not current.empty:
+            current = current.head(8)
+
+        if current.empty:
+            st.info("No active port or infrastructure-security events are currently loaded.")
+        else:
+            for _, row in current.iterrows():
+                title = clean_display_text(row.get("Title","")) or clean_display_text(row.get("Event Type",""))
+                date = str(row.get("Start Date",""))[:10]
+                severity = clean_display_text(row.get("Severity","")) or "—"
+                status = clean_display_text(row.get("Status","")) or "—"
+                location = clean_display_text(row.get("Location","")) or clean_display_text(row.get("Country / Countries","")) or "Location not specified"
+                impact = clean_display_text(row.get("Operational Impact","")) or clean_display_text(row.get("Description",""))
+
+                card = (
+                    "<div class='pc-card'>"
+                    f"<div class='pc-label'>{date} · {severity} · {status}</div>"
+                    f"<div class='pc-big'>{title}</div>"
+                    f"<div style='margin-top:8px;'><b>{location}</b></div>"
+                    f"<div class='pc-search-details' style='margin-top:8px;'>{impact}</div>"
+                    "</div>"
+                )
+                st.markdown(card, unsafe_allow_html=True)
+
+        a,b = st.columns(2)
+        with a:
+            st.markdown("#### Leading incident types")
+            if not pe.empty and "Event Type" in pe.columns:
+                types = (
+                    pe["Event Type"].dropna().astype(str)
+                    .value_counts().head(8)
+                    .rename_axis("Incident Type").reset_index(name="Events")
+                )
+                show_df(types, ["Incident Type","Events"], 250)
+
+        with b:
+            st.markdown("#### Leading affected areas")
+            if not pe.empty and "Country / Countries" in pe.columns:
+                areas = (
+                    pe["Country / Countries"].dropna().astype(str)
+                    .value_counts().head(8)
+                    .rename_axis("Area").reset_index(name="Events")
+                )
+                show_df(areas, ["Area","Events"], 250)
+
+    with tabs[1]:
+        st.markdown("### Port & infrastructure incident record")
+        q = st.text_input(
+            "Search infrastructure incidents",
+            placeholder="port, refinery, terminal, explosion, labour, weather...",
+            key="infra_incident_search"
+        )
+
+        incident_view = pe.copy()
+        if q.strip() and not incident_view.empty:
+            incident_view = incident_view[
+                contains_any(
+                    incident_view,
+                    ["Title","Description","Event Type","Country / Countries","Location","Operational Impact"],
+                    [q.strip()]
+                )
+            ].copy()
+
+        show_df(
+            incident_view,
+            ["Start Date","Severity","Status","Event Type","Country / Countries",
+             "Location","Title","Operational Impact","Confidence"],
+            360
+        )
+
+        if not incident_view.empty:
+            detail = incident_view.reset_index(drop=True)
+            pick = st.selectbox(
+                "Open infrastructure incident",
+                range(len(detail)),
+                format_func=lambda i: f"{str(detail.iloc[i].get('Start Date',''))[:10]} · {detail.iloc[i].get('Title','')}",
+                key="infra_incident_pick"
+            )
+
+            row = detail.iloc[pick]
+            eid = str(row.get("Event ID","") or "")
+
+            left,right = st.columns([1.15,1])
+            with left:
+                event_card(row)
+            with right:
+                section("Connected coverage","Ports, terminals, companies, systems & impact chain")
+                render_connected_context(eid)
+
+                chains = (
+                    impact_chains[text_col(impact_chains,"Event ID").eq(eid)]
+                    if not impact_chains.empty else impact_chains
+                )
+                if not chains.empty:
+                    st.markdown("**Impact chain**")
+                    show_df(
+                        chains,
+                        ["Trigger","Direct Impact","Secondary Impact",
+                         "Tertiary Impact","Strategic / Commercial Outcome"],
+                        220
+                    )
+
+    with tabs[2]:
+        st.markdown("### Infrastructure exposed to security events")
+        st.caption(
+            "This view is event-driven. It shows infrastructure actually connected to a "
+            "security/disruption event rather than the full infrastructure inventory."
+        )
+
+        event_lookup = (
+            pe.set_index("Event ID").to_dict("index")
+            if not pe.empty and "Event ID" in pe.columns else {}
+        )
+
+        exposure_rows = []
+        if not infra_links.empty:
+            for _, link in infra_links.iterrows():
+                eid = str(link.get("Event ID","") or "")
+                er = event_lookup.get(eid,{})
+                if not er:
+                    continue
+
+                exposure_rows.append({
+                    "Asset": clean_display_text(link.get("Asset","")),
+                    "Asset Type": clean_display_text(link.get("Asset Type","")),
+                    "Relationship": clean_display_text(link.get("Relationship","")),
+                    "Date": str(er.get("Start Date",""))[:10],
+                    "Severity": clean_display_text(er.get("Severity","")),
+                    "Status": clean_display_text(er.get("Status","")),
+                    "Location": clean_display_text(er.get("Location","")),
+                    "Incident": clean_display_text(er.get("Title","")),
+                })
+
+        exposure = pd.DataFrame(exposure_rows)
+
+        if exposure.empty:
+            st.info("No infrastructure assets are directly linked to current security events.")
+        else:
+            exposure = exposure.drop_duplicates(
+                subset=["Asset","Incident","Date"], keep="first"
+            )
+
+            show_df(
+                exposure,
+                ["Asset","Asset Type","Date","Severity","Status",
+                 "Relationship","Location","Incident"],
+                360
+            )
+
+            choices = sorted([
+                x for x in exposure["Asset"].dropna().astype(str).unique()
+                if x and x.lower() not in {"none","nan"}
+            ])
+            if choices:
+                chosen = st.selectbox(
+                    "Inspect exposed asset",
+                    choices,
+                    key="infra_exposed_asset"
+                )
+                hist = exposure[exposure["Asset"].eq(chosen)].copy()
+                st.markdown(f"### {chosen}")
+                show_df(
+                    hist,
+                    ["Date","Severity","Status","Location","Incident","Relationship"],
+                    220
+                )
+
+    with tabs[3]:
+        st.markdown("### Port drill-down")
+        st.caption(
+            "Local security context only. Deep commercial ownership, capacity and investment "
+            "analysis remains in P&C Trade."
+        )
+
+        if ports.empty or "Port / Facility" not in ports.columns:
+            st.info("No port records are currently loaded.")
+        else:
+            pnames = sorted(
+                ports["Port / Facility"].dropna().astype(str).unique().tolist()
+            )
+            pname = st.selectbox(
+                "Port / facility",
+                pnames,
+                key="intel_port_drilldown"
+            )
+
+            pr = ports[text_col(ports,"Port / Facility").eq(pname)].copy()
+            show_df(
+                pr,
+                ["Port / Facility","Country","Operator","Facility Type",
+                 "Key Role","Coverage Note"],
+                170
+            )
+
+            pid = str(pr.iloc[0].get("Port ID","")) if not pr.empty else ""
+
+            linked_terminals = (
+                port_terminals[text_col(port_terminals,"Port ID").eq(pid)].copy()
+                if pid and not port_terminals.empty else pd.DataFrame()
+            )
+            if not linked_terminals.empty:
+                st.markdown("**Linked terminals**")
+                show_df(
+                    linked_terminals,
+                    ["Terminal / Facility","City / Area","Asset Type","Cargo Profile",
+                     "Primary Operator","Status","Confidence","Notes"],
+                    220
+                )
+
+            related_ids = set()
+            if pid and not event_asset_links.empty:
+                related_ids |= set(
+                    event_asset_links[
+                        text_col(event_asset_links,"Asset ID").eq(pid)
+                    ]["Event ID"].dropna().astype(str)
+                )
+
+            if pname and not pe.empty:
+                name_hits = pe[
+                    contains_any(
+                        pe,
+                        ["Location","Title","Description"],
+                        [pname]
+                    )
+                ]
+                if "Event ID" in name_hits.columns:
+                    related_ids |= set(name_hits["Event ID"].dropna().astype(str))
+
+            related = (
+                pe[pe["Event ID"].astype(str).isin(related_ids)].copy()
+                if related_ids and not pe.empty and "Event ID" in pe.columns
+                else pd.DataFrame()
+            )
+
+            st.markdown("**Security & disruption history**")
+            if related.empty:
+                st.caption("No directly related security/disruption events are currently mapped to this port.")
+            else:
+                show_df(
+                    related,
+                    ["Start Date","Severity","Status","Event Type","Title","Operational Impact"],
+                    260
+                )
 
 # -----------------------------------------------------------------------------
 # 7. AVIATION & MOVEMENT
@@ -861,6 +2028,10 @@ elif page == "Sanctions & Compliance":
 elif page == "Intelligence Search":
     section("Discovery", "Intelligence Search", "Search incidents, monitoring, vessels, ports, companies, sanctions/compliance and source feeds from the shared Excel model.")
     q = st.text_input("Search the P&C intelligence base", placeholder="e.g. Hormuz, Mraweh, Rotterdam, PGSA, Japan Coast Guard, drone...")
+    if q and PC_USER_CONTEXT:
+        if st.button("Save query to my workspace",key="save_intel_query"):
+            ok,msg=save_workspace_query(PC_USER_CONTEXT,"INTELLIGENCE",q[:100],q,"search")
+            (st.success if ok else st.warning)(msg)
     if q:
         datasets = [
             ("Events", hazard_events, ["Title","Description","Location","Country / Countries","Event Family","Event Type"]),
@@ -905,4 +2076,4 @@ elif page == "Source Monitor":
 
 # Footer
 st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
-st.markdown('<div class="small-note">P&C Intelligence · Excel-backed v3.0 · Dedicated security and operational intelligence interface.</div>', unsafe_allow_html=True)
+st.markdown('<div class="small-note">P&C Intelligence · Shared P&C data model · Dedicated security and operational intelligence interface.</div>', unsafe_allow_html=True)
