@@ -317,7 +317,7 @@ def validate_staged_for_bulk(sb,row):
     # no canonical match was found; MATCHED means the database supplied the existing
     # canonical ID for an enrichment/update. An exact duplicate is expected for MATCHED.
     resolution_status=str(row.get("resolution_status") or "UNRESOLVED").upper()
-    identity_table=table in {"pc_entities","pc_assets","pc_mobile_assets","pc_events"}
+    identity_table=table in {"pc_entities","pc_assets","pc_mobile_assets","pc_events","pc_transport_routes"}
     identity_resolution_ok=(not identity_table) or resolution_status in {"NEW","MATCHED"}
     if identity_table and resolution_status=="MATCHED" and row.get("resolved_entity_id"):
         duplicate=False
@@ -3990,7 +3990,7 @@ elif page=="Review Queue":
                             "Table": r.get("target_table"),
                             "Resolution": r.get("resolution_status") or "UNRESOLVED",
                             "Resolved ID": r.get("resolved_entity_id"),
-                            "Candidate ID": (r.get("payload") or {}).get({"pc_entities":"entity_id","pc_assets":"asset_id","pc_mobile_assets":"mobile_asset_id","pc_events":"event_id"}.get(r.get("target_table"),"")) if isinstance(r.get("payload"),dict) else None,
+                            "Candidate ID": (r.get("payload") or {}).get({"pc_entities":"entity_id","pc_assets":"asset_id","pc_mobile_assets":"mobile_asset_id","pc_events":"event_id","pc_transport_routes":"route_id"}.get(r.get("target_table"),"")) if isinstance(r.get("payload"),dict) else None,
                             "Match": r.get("resolution_method"),
                             "Confidence": round(v["confidence"],2),
                             "Sources": v["sources"],
@@ -4006,6 +4006,16 @@ elif page=="Review Queue":
 
                 safe_count=sum(1 for x in validated if x["_safe"])
                 st.info(f"{safe_count} of {len(validated)} record(s) currently qualify as bulk-safe.")
+                if safe_count==0 and validated:
+                    _risk_counts={}
+                    for _vrow in validated:
+                        for _risk in _vrow.get("risk",[]) or []:
+                            _risk_counts[_risk]=_risk_counts.get(_risk,0)+1
+                    if _risk_counts:
+                        _risk_text=" · ".join(
+                            f"{k}: {v}" for k,v in sorted(_risk_counts.items(),key=lambda kv:(-kv[1],kv[0]))[:8]
+                        )
+                        st.caption("Current blockers: "+_risk_text)
 
                 # Streamlit data_editor persists its own widget state. The previous
                 # "Select all safe" button only displayed an info message, so it could
