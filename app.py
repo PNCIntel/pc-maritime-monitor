@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.26-security-business-risk"
+APP_VERSION = "v3.3.27-trade-first-security-rail"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -5982,6 +5982,52 @@ def _sbr_priority_score(df):
     score += impact.str.strip().ne("").astype(int)*2
     return score
 
+def render_security_business_rail(limit=6):
+    """Compact trade-first security rail for the Overview page."""
+    df=_security_business_event_frame()
+    st.markdown("### Security & disruption")
+    st.caption("Only incidents with a clear trade or operational consequence.")
+
+    if df is None or df.empty:
+        st.markdown(
+            "<div class='pc-card'><div class='pc-card-body'>No current security-linked trade disruptions.</div></div>",
+            unsafe_allow_html=True
+        )
+        return
+
+    df=df.copy()
+    df["_priority"]=_sbr_priority_score(df)
+    df["_date_sort"]=pd.to_datetime(df["Event Date"],errors="coerce")
+    df=df.sort_values(["_priority","_date_sort"],ascending=[False,False],na_position="last").head(limit)
+
+    high=int(df["Severity"].astype(str).str.contains("High|Severe|Critical",case=False,regex=True,na=False).sum())
+    active=int(df["Status"].astype(str).str.contains("Active|Ongoing|Developing",case=False,regex=True,na=False).sum())
+
+    m1,m2=st.columns(2)
+    m1.metric("High / severe",high)
+    m2.metric("Active",active)
+
+    for _,r in df.iterrows():
+        title=str(r.get("Title","") or "Security-linked disruption").strip()
+        sev=str(r.get("Severity","") or "Unrated").strip()
+        loc=str(r.get("Location","") or r.get("Country","") or "").strip()
+        impact=str(r.get("Trade / Commercial Impact","") or r.get("Operational Impact","") or "").strip()
+        dt=str(r.get("Event Date","") or "").strip()
+        meta=" · ".join(x for x in [dt,sev,loc] if x)
+        st.markdown(
+            f"""<div class="pc-card" style="padding:12px 14px;margin-bottom:9px;">
+            <div class="pc-label">{html_lib.escape(meta)}</div>
+            <div style="font-weight:700;margin:5px 0 6px;">{html_lib.escape(title)}</div>
+            <div class="pc-card-body">{html_lib.escape(impact[:180])}</div>
+            </div>""",
+            unsafe_allow_html=True
+        )
+
+    if st.button("Open security-to-business view →",use_container_width=True,key="overview_open_security_business"):
+        request_nav("Security & Business Risk")
+        st.rerun()
+
+
 def render_security_business_risk():
     df=_security_business_event_frame()
 
@@ -6347,13 +6393,13 @@ st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend
 
 NAV_SECTIONS={
     "OPERATING PICTURE":["Overview","Regional Maps","Alerts & Disruptions","Watch Areas"],
-    "DOMAINS":["Maritime","Rail","Aviation","Trucking","Government & Security","Security & Business Risk","Defence & Shipbuilding","Energy & Industry"],
+    "DOMAINS":["Maritime","Rail","Aviation","Trucking","Government & Security","Defence & Shipbuilding","Energy & Industry"],
     "TRADE NETWORK":["Ports & Terminals","Corridors & Systems","Companies","Vessels","Investments"],
     "MARKETS & POLICY":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Sanctions & Compliance","Trade Policy","Contracts"],
     "MONITORING & TOOLS":["Hormuz Monitor","Live Feeds","News & Signals","Search","Reference & Benchmarks","Data"],
 }
 VISIBLE_PAGES=[p for items in NAV_SECTIONS.values() for p in items]
-HIDDEN_ROUTES={"Ports","Shipyards","Network Map","News & Events","Reference Library","Ferries","Cruise","Maritime Security","Maritime Disruptions","Port Activity"}
+HIDDEN_ROUTES={"Ports","Shipyards","Network Map","News & Events","Reference Library","Ferries","Cruise","Maritime Security","Maritime Disruptions","Port Activity","Security & Business Risk"}
 # Deep links from the separate P&C Intelligence app.
 try:
     _qp=st.query_params
@@ -6796,22 +6842,6 @@ if page=="Overview":
     ]):
         box.metric(title,f"{value:,}")
 
-    st.markdown("### Risk & disruption snapshot")
-    compliance=TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()).copy()
-    restrictions=TABLES.get(("Maritime","Vessel Restrictions"),pd.DataFrame()).copy()
-    monitoring=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame()).copy()
-    security_events=events.copy()
-    if not security_events.empty and "Event Family" in security_events.columns:
-        security_events=security_events[security_events["Event Family"].astype(str).str.contains(
-            "Security|Conflict|Maritime|Port|Weather|Natural|Labour|Civil|Cyber",case=False,regex=True,na=False
-        )]
-    r1,r2,r3,r4=st.columns(4)
-    r1.metric("Security / disruption events",len(security_events))
-    r2.metric("Active monitoring",int(monitoring.get("Status",pd.Series(dtype=str)).astype(str).str.contains("Active",case=False,na=False).sum()) if not monitoring.empty else 0)
-    r3.metric("Vessel restrictions",len(restrictions))
-    r4.metric("Operational compliance",len(compliance))
-    st.caption("Security is shown here as trade exposure: disrupted assets, restricted vessels, watch areas and operational consequences. The dedicated P&C Intelligence app provides the deeper security workflow.")
-
     st.markdown("### Connected coverage")
     st.markdown("<div class='pc-section-note'>These are working entry points, not description cards. Search within a coverage family or open its full workspace.</div>",unsafe_allow_html=True)
     cov_tabs=st.tabs(["Commercial networks","Movement systems","Infrastructure","Intelligence","Compliance","Defence & shipbuilding"])
@@ -6845,12 +6875,20 @@ if page=="Overview":
     with cov_tabs[5]:
         coverage_search("defence","Seaspan, Fincantieri, shipyard, submarine, delivery...",["Shipyards","Programmes","Contracts","Sales & Delivery Routes","Vessel Build Records","Fleet Orders"],[("Shipyards","Shipyards"),("Contracts","Contracts")])
 
-    st.markdown("### Latest recorded events")
-    latest=events.copy()
-    if not latest.empty and "Date" in latest.columns:
-        latest["_dt"]=pd.to_datetime(latest["Date"],errors="coerce")
-        latest=latest.sort_values("_dt",ascending=False)
-    render_event_cards(latest,12)
+    st.markdown("---")
+    trade_col, security_col = st.columns([3.2,1.15], gap="large")
+
+    with trade_col:
+        st.markdown("### Latest trade & operational events")
+        st.caption("Commercial activity, infrastructure, movement systems and disruption remain the primary operating picture.")
+        latest=events.copy()
+        if not latest.empty and "Date" in latest.columns:
+            latest["_dt"]=pd.to_datetime(latest["Date"],errors="coerce")
+            latest=latest.sort_values("_dt",ascending=False)
+        render_event_cards(latest,12)
+
+    with security_col:
+        render_security_business_rail(6)
 
 elif page=="Search":
     header("Search P&C","One query across companies, ports, shipyards, vessels, contracts, transactions, news, events and systems.")
@@ -7872,7 +7910,7 @@ elif page=="Government & Security":
 elif page=="Security & Business Risk":
     header(
         "Security & Business Risk",
-        "Security incidents translated into operational and commercial consequences for trade, infrastructure, transport corridors and companies."
+        "A secondary drill-down for security incidents that materially affect trade, infrastructure, transport corridors or companies."
     )
     render_security_business_risk()
 
