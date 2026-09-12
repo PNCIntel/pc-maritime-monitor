@@ -810,6 +810,19 @@ def _process_relationship_backlog(sb, job_id=None):
     data=_rpc_data(sb,"pc_process_relationship_backlog",params)
     return data or {}
 
+
+def _apply_ready_event_relationships(sb, job_id=None):
+    """SQL 012: promote revalidated READY event relationships into canonical pc_event_links."""
+    params={"p_ingestion_job_id":str(job_id)} if job_id else {}
+    data=_rpc_data(sb,"pc_apply_ready_event_relationships",params)
+    return data or {}
+
+def _canonical_event_vessel_links(sb, limit=5000):
+    try:
+        return sb.table("pc_v_event_vessel_links").select("*").order("event_date",desc=True).limit(limit).execute().data or []
+    except Exception:
+        return []
+
 # ---------------------------------------------------------------------------
 # Existing-data completion / deterministic repair helpers
 # ---------------------------------------------------------------------------
@@ -863,7 +876,7 @@ def _completion_inventory(sb):
 
     backlog=[r for r in staged if str(r.get("resolution_status") or "UNRESOLVED").upper() in {"UNRESOLVED","NEW","AMBIGUOUS","CONFLICT","INVALID","PARTIAL","BROKEN_REFERENCE"}]
     relationship_backlog=[r for r in relationships if str(r.get("resolution_status") or "UNRESOLVED").upper() in {"UNRESOLVED","AMBIGUOUS","PARTIAL","BROKEN_REFERENCE","INVALID"}]
-    relationship_ready=[r for r in relationships if str(r.get("resolution_status") or "").upper()=="READY"]
+    relationship_ready=[r for r in relationships if str(r.get("resolution_status") or "").upper()=="READY" and str(r.get("apply_status") or "PENDING").upper() not in {"APPLIED","SKIPPED_EXISTS"}]
     relationship_existing=[r for r in relationships if str(r.get("resolution_status") or "").upper()=="ALREADY_EXISTS"]
     open_issues=[r for r in issues if str(r.get("status") or "open").casefold()=="open"]
     return {
@@ -2490,8 +2503,51 @@ elif page=="Staging Resolution":
                 roptions=["ALL"]+sorted(str(x) for x in rdf["resolution_status"].dropna().unique())
                 rstatus=st.selectbox("Relationship status",roptions,key="relationship_resolution_status")
                 rview=rdf if rstatus=="ALL" else rdf[rdf["resolution_status"]==rstatus]
-                rcols=[c for c in ["created_at","natural_key","relationship_type","from_entity_type","from_source_key","resolved_from_entity_id","from_resolution_method","to_entity_type","to_name","to_identifier_type","to_identifier_value","to_source_key","resolved_to_entity_id","to_resolution_method","to_candidate_count","resolution_status","existing_relationship_id","review_status","staged_record_id"] if c in rview.columns]
+                rcols=[c for c in ["created_at","natural_key","relationship_type","from_entity_type","from_source_key","resolved_from_entity_id","from_resolution_method","to_entity_type","to_name","to_identifier_type","to_identifier_value","to_source_key","resolved_to_entity_id","to_resolution_method","to_candidate_count","resolution_status","apply_status","canonical_relationship_id","applied_at","existing_relationship_id","review_status","staged_record_id"] if c in rview.columns]
                 st.dataframe(rview[rcols],use_container_width=True,hide_index=True)
+
+                pending_ready=int(((statuses=="READY") & (~rdf.get("apply_status",pd.Series(["PENDING"]*len(rdf))).fillna("PENDING").isin(["APPLIED","SKIPPED_EXISTS"]))).sum()) if len(rdf) else 0
+                st.markdown("### Canonical vessel → event apply")
+                st.caption(
+                    "SQL 011 resolved the endpoints; SQL 012 performs the missing final step: it writes the resolved vessel as a canonical pc_event_links row for the event. "
+                    "Every relationship is re-resolved immediately before insert, duplicates are skipped, and the write is audited."
+                )
+                a1,a2,a3=st.columns(3)
+                a1.metric("READY awaiting apply",pending_ready)
+                applied_count=int((rdf.get("apply_status",pd.Series([],dtype=str)).fillna("")=="APPLIED").sum()) if "apply_status" in rdf.columns else 0
+                a2.metric("Applied",applied_count)
+                a3.metric("Canonical event-vessel links",len(_canonical_event_vessel_links(sb,10000)))
+
+                confirm_apply=st.checkbox(
+                    "I confirm: promote all currently READY event relationships to canonical pc_event_links",
+                    key="confirm_ready_relationship_apply"
+                )
+                if st.button(
+                    f"Link READY vessels to events ({pending_ready})",
+                    type="primary",
+                    disabled=(not confirm_apply or pending_ready==0),
+                    key="apply_ready_event_relationships"
+                ):
+                    try:
+                        with st.spinner("Revalidating endpoints and linking vessels to canonical events..."):
+                            result=_apply_ready_event_relationships(sb)
+                        st.success(
+                            f"Canonical linking complete — {result.get('applied',0)} applied, "
+                            f"{result.get('already_exists',0)} already existed, {result.get('blocked',0)} blocked, "
+                            f"{result.get('errors',0)} errors."
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.exception(exc)
+
+                with st.expander("Verify canonical vessel-to-event links"):
+                    verified=_canonical_event_vessel_links(sb,5000)
+                    if verified:
+                        vdf=pd.DataFrame(verified)
+                        vcols=[c for c in ["event_date","event_id","event_title","mobile_asset_id","vessel_name","imo","mmsi","flag","vessel_type","relationship","confidence","event_link_id"] if c in vdf.columns]
+                        st.dataframe(vdf[vcols],use_container_width=True,hide_index=True)
+                    else:
+                        st.info("No canonical event-vessel links are visible through pc_v_event_vessel_links yet. Run SQL 012, then apply READY relationships.")
 
             c1,c2=st.columns(2)
             if c1.button("Resolve all pending event-link relationships",type="primary",key="resolve_relationship_backlog"):
