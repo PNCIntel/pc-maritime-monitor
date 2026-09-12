@@ -1744,6 +1744,67 @@ def stage_ai_result(sb, job_id, result):
 # Canonical columns that this admin is allowed to send to selected tables.
 # Unknown AI/research fields are preserved in metadata instead of being sent
 # as non-existent PostgREST columns.
+_TABLE_COLUMN_CACHE = {}
+
+def _live_table_columns(sb, table):
+    """Return live PostgreSQL columns for one canonical public table."""
+    table=str(table or "").strip()
+    if not table:
+        return set()
+    if table in _TABLE_COLUMN_CACHE:
+        return _TABLE_COLUMN_CACHE[table]
+    try:
+        data=_rpc_data(sb,"pc_get_table_write_columns",{"p_table_name":table})
+        cols=set(data or [])
+    except Exception:
+        # Fallback to the executable model registry if SQL 026 has not been installed.
+        try:
+            rows=(sb.table("pc_meta_columns")
+                  .select("column_name")
+                  .eq("table_name",table)
+                  .limit(1000).execute().data or [])
+            cols={str(r.get("column_name")) for r in rows if r.get("column_name")}
+        except Exception:
+            cols=set()
+    _TABLE_COLUMN_CACHE[table]=cols
+    return cols
+
+
+def _schema_safe_canonical_payload(sb, table, payload):
+    """Keep only real canonical columns and preserve all research overflow in metadata.
+
+    This is used for every canonical table, not only extension tables. It prevents
+    PostgREST errors such as pc_entities.country or pc_mobile_assets.capacity while
+    retaining those attributes under metadata.research_attributes.
+    """
+    if not isinstance(payload,dict):
+        return payload, {}
+
+    allowed=_live_table_columns(sb,table)
+    if not allowed:
+        # Fail closed: if we cannot determine the schema, do not silently drop fields.
+        return payload, {}
+
+    clean={}
+    overflow={}
+
+    for key,value in payload.items():
+        if key in allowed:
+            clean[key]=value
+        else:
+            overflow[key]=value
+
+    if "metadata" in allowed:
+        existing=clean.get("metadata")
+        if not isinstance(existing,dict):
+            existing={}
+        if overflow:
+            existing.setdefault("research_attributes",{}).update(overflow)
+        clean["metadata"]=existing
+
+    return clean, overflow
+
+
 TABLE_WRITE_COLUMNS = {
     "pc_logistics_facilities": {
         "asset_id","facility_type","owner_entity_id","operator_entity_id",
@@ -1887,6 +1948,7 @@ def _ensure_parent_asset_schema_safe(sb, row, payload):
     except Exception:
         pass
 
+    plan,_parent_overflow=_schema_safe_canonical_payload(sb,"pc_assets",plan)
     sb.table("pc_assets").upsert(plan, on_conflict="asset_id").execute()
 
     clean["asset_id"] = plan["asset_id"]
@@ -1924,6 +1986,16 @@ def apply_staged_record(sb, row, edited_payload=None):
         payload,parent_created=_ensure_parent_asset_schema_safe(sb,row,payload)
     else:
         parent_created=False
+
+    # SQL 026: enforce the LIVE PostgreSQL schema for every canonical write.
+    # Unsupported research attributes are retained in metadata.research_attributes.
+    payload,overflow=_schema_safe_canonical_payload(sb,table,payload)
+
+    if not payload:
+        raise ValueError(
+            f"No writable canonical fields remain for {table}. "
+            "Refresh Model Registry / run SQL 026 and inspect the staged payload."
+        )
 
     conflict=APPLY_CONFLICT_KEYS.get(table)
     keys=[x.strip() for x in conflict.split(",")] if conflict else []
