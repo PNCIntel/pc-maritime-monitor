@@ -835,6 +835,36 @@ def _population_pipeline_status(sb, limit=200):
         return []
 
 
+def _population_mobile_asset_coverage(sb, job_id, limit=5000):
+    try:
+        return (sb.table("pc_v_population_mobile_asset_coverage")
+                .select("*")
+                .eq("ingestion_job_id",str(job_id))
+                .order("mobile_asset_name")
+                .limit(limit).execute().data or [])
+    except Exception:
+        return []
+
+
+def _population_mobile_asset_stats(sb, job_id):
+    try:
+        return _rpc_data(sb,"pc_population_mobile_asset_stats",{"p_ingestion_job_id":str(job_id)}) or {}
+    except Exception:
+        return {}
+
+
+def _stage_missing_mobile_asset_links(sb, job_id, company_name, relationship_type="operates"):
+    return _rpc_data(
+        sb,
+        "pc_stage_missing_mobile_asset_links",
+        {
+            "p_ingestion_job_id":str(job_id),
+            "p_company_name":company_name,
+            "p_relationship_type":relationship_type,
+        },
+    ) or {}
+
+
 # ---------------------------------------------------------------------------
 # Semantic completion helpers
 # ---------------------------------------------------------------------------
@@ -1487,8 +1517,10 @@ FLEET / MOBILE ASSETS
 - Identify current material owned, operated or chartered vessels/mobile assets where public evidence is reliable.
 - For vessels, capture IMO first where verifiable; include vessel name, type, flag and owner/operator where supported.
 - Stage each vessel/mobile asset in pc_mobile_assets.
-- Stage company→mobile_asset relationships such as owns, operates, manages or charters only where sourced.
-- Do not guess IMO numbers or fleet status.
+- EVERY pc_mobile_assets record must have a corresponding source-backed pc_relationships record linking it to the relevant company/entity.
+- Stage company→mobile_asset relationships using owns, operates, manages or charters only where sourced.
+- A fleet/mobile-asset record without a company relationship is incomplete and must not be silently returned as an orphan.
+- Include IMO where verifiable; do not guess IMO numbers or fleet status.
 
 PORTS / TERMINALS / LOGISTICS INFRASTRUCTURE
 - Identify ports, container terminals, inland depots, logistics facilities, rail/intermodal facilities, warehouses and other
@@ -2636,6 +2668,96 @@ elif page=="Research Jobs":
                     st.rerun()
                 except Exception as exc:
                     st.exception(exc)
+
+            st.markdown("#### Fleet / mobile-asset coverage")
+            _fleet_stats=_population_mobile_asset_stats(sb,_pop_job_id)
+            _fleet_rows=_population_mobile_asset_coverage(sb,_pop_job_id,5000)
+
+            if _fleet_rows:
+                _fs1,_fs2,_fs3,_fs4=st.columns(4)
+                _fs1.metric("Mobile assets",int(_fleet_stats.get("mobile_assets",len(_fleet_rows)) or 0))
+                _fs2.metric("Linked to company",int(_fleet_stats.get("linked",0) or 0))
+                _fs3.metric("Unlinked",int(_fleet_stats.get("unlinked",0) or 0))
+                _fs4.metric("READY fleet links",int(_fleet_stats.get("ready_links",0) or 0))
+
+                _fdf=pd.DataFrame(_fleet_rows)
+                _fcols=[c for c in [
+                    "mobile_asset_name","imo","asset_type","identity_status",
+                    "company_name","relationship_type","relationship_status","has_company_link"
+                ] if c in _fdf.columns]
+                with st.expander("Fleet coverage rows",expanded=False):
+                    st.dataframe(_fdf[_fcols],use_container_width=True,hide_index=True)
+
+                _unlinked=int(_fleet_stats.get("unlinked",0) or 0)
+                if _unlinked:
+                    st.warning(
+                        f"{_unlinked} staged mobile asset(s) have no company graph relationship. "
+                        "You can stage source-backed fleet links below before canonical apply."
+                    )
+
+                    _fleet_entities=_corporate_entity_candidates(sb,_pop_job_id,"all")
+                    _fleet_labels={}
+                    for _e in _fleet_entities:
+                        _lab=_e.get("label")
+                        if _lab and _lab not in _fleet_labels:
+                            _fleet_labels[_lab]=_e
+
+                    # Prefer Matson/subject-like canonical candidates when possible.
+                    _default_idx=0
+                    _job_title=str(_pop_job.get("title") or "")
+                    _preferred_tokens=[]
+                    if "—" in _job_title:
+                        _preferred_tokens.append(_job_title.split("—",1)[1].strip().casefold())
+                    _preferred_tokens.extend(["matson navigation","matson"])
+                    _all_labels=list(_fleet_labels.keys())
+                    for _i,_lab in enumerate(_all_labels):
+                        _nm=str((_fleet_labels[_lab] or {}).get("name") or "").casefold()
+                        if any(tok and tok in _nm for tok in _preferred_tokens):
+                            _default_idx=_i
+                            break
+
+                    _fleet_company_label=st.selectbox(
+                        "Company to link orphaned mobile assets to",
+                        _all_labels,
+                        index=_default_idx if _all_labels else None,
+                        key="fleet_link_company"
+                    ) if _all_labels else None
+
+                    _fr1,_fr2=st.columns([1,2])
+                    with _fr1:
+                        _fleet_rel=st.selectbox(
+                            "Fleet relationship",
+                            ["operates","owns","manages","charters"],
+                            key="fleet_link_relationship"
+                        )
+                    with _fr2:
+                        _fleet_confirm=st.checkbox(
+                            "I confirm the selected relationship role is supported by the staged research sources for these mobile assets.",
+                            key="fleet_link_confirm"
+                        )
+
+                    if st.button(
+                        f"Stage missing fleet links ({_unlinked})",
+                        type="primary",
+                        disabled=(not _fleet_company_label or not _fleet_confirm),
+                        key="stage_missing_fleet_links"
+                    ):
+                        try:
+                            _company=_fleet_labels[_fleet_company_label]
+                            _fleet_res=_stage_missing_mobile_asset_links(
+                                sb,_pop_job_id,_company.get("name"),_fleet_rel
+                            )
+                            st.success(f"Fleet-link staging complete: {_fleet_res}")
+                            # Immediately rerun the unified pipeline so new fleet edges resolve.
+                            try:
+                                _prepare_research_population(sb,_pop_job_id)
+                            except Exception:
+                                pass
+                            st.rerun()
+                        except Exception as exc:
+                            st.exception(exc)
+            else:
+                st.info("No staged mobile assets are attached to this population job.")
 
             # Inline population graph preview for the selected job.
             st.markdown("#### Population graph preview")
