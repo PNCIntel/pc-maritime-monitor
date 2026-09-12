@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.32-compact-security-drawer"
+APP_VERSION = "v3.3.33-trade-home-information-architecture"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -7033,186 +7033,130 @@ def _trade_network_snapshot():
 def _render_trade_pulse():
     records=_recent_commercial_records()
     st.markdown("### Commercial pulse")
-    st.caption("Recent deals, contracts, investment and operating activity across the trade network.")
-
+    st.caption("Recent deals, contracts and investment — showing who, when, what and value where the source model provides it.")
     if records.empty:
         st.info("No recent commercial activity records available.")
         return
+    def c(names):
+        return _first_existing_col(records,names)
+    dc=c(["Date","Announcement Date","Transaction Date","Contract Date","Start Date","Effective Date","As Of"])
+    tc=c(["Title","Deal","Transaction","Contract","Name","Event"])
+    ac=c(["Buyer","Customer","Client","Awarding Authority","Contracting Authority","Investor","Acquirer","Company","Company Name"])
+    bc=c(["Seller","Supplier","Contractor","Counterparty","Target","Partner","Awardee"])
+    gc=c(["Country","Geography","Region","Location","Market"])
+    vc=c(["Value","Deal Value","Transaction Value","Contract Value","CAPEX","Capex","Investment"])
+    sc=c(["Status","Deal Status","Contract Status","Transaction Status"])
+    yc=c(["Type","Deal Type","Transaction Type","Contract Type","Category"])
+    rows=[]
+    for _,r in records.head(20).iterrows():
+        a=str(r.get(ac,'') if ac else '').strip(); b=str(r.get(bc,'') if bc else '').strip()
+        rows.append({
+            "Date":r.get(dc,'') if dc else '',
+            "Activity":r.get(tc,'') if tc else '',
+            "Who":" ↔ ".join(x for x in [a,b] if x),
+            "Type":r.get(yc,'') if yc else r.get('_source_type',''),
+            "Value / CAPEX":r.get(vc,'') if vc else '',
+            "Market":r.get(gc,'') if gc else '',
+            "Status":r.get(sc,'') if sc else '',
+        })
+    display_df(pd.DataFrame(rows),360)
 
-    title_col=_first_existing_col(records,["Title","Deal","Transaction","Contract","Name","Event"])
-    company_col=_first_existing_col(records,["Company","Company Name","Investor","Buyer","Operator","Entity"])
-    geography_col=_first_existing_col(records,["Country","Geography","Region","Location","Market"])
-    value_col=_first_existing_col(records,["Value","Deal Value","Transaction Value","CAPEX","Capex","Investment"])
-    date_col=_first_existing_col(records,["Date","Announcement Date","Transaction Date","Contract Date","Start Date"])
+def _render_recent_additions():
+    st.markdown("### Latest additions")
+    st.caption("Newest or recently refreshed records across companies, infrastructure, vessels, defence and corridors.")
+    blocks=[]
+    candidates=[
+        ("Companies",TABLES.get(("Core Entities","Companies"),pd.DataFrame()),["Company","Company Name","Name"],["updated_at","created_at","As Of","as_of"]),
+        ("Infrastructure",TABLES.get(("Infrastructure","Assets"),pd.DataFrame()),["Asset","Name","Port / Facility","Terminal / Facility"],["updated_at","created_at","As Of","as_of"]),
+        ("Vessels",TABLES.get(("Maritime","Vessels"),pd.DataFrame()),["Vessel Name","Name"],["updated_at","created_at","As Of","as_of"]),
+        ("Defence",TABLES.get(("Defence & Shipbuilding","Defence Vessels"),pd.DataFrame()),["Vessel","Programme","Contract"],["updated_at","created_at","Date","As Of"]),
+        ("Corridors",TABLES.get(("Infrastructure","Transport Routes"),pd.DataFrame()),["Route","Corridor","Name"],["updated_at","created_at","As Of","as_of"]),
+    ]
+    for label,df,ncands,dcands in candidates:
+        if df is None or df.empty: continue
+        nc=_first_existing_col(df,ncands); dc=_first_existing_col(df,dcands); x=df.copy()
+        if dc:
+            x['_d']=pd.to_datetime(x[dc],errors='coerce'); x=x.sort_values('_d',ascending=False,na_position='last')
+        for _,r in x.head(4).iterrows():
+            blocks.append({"Area":label,"Added / updated":r.get(dc,'') if dc else '',"Record":r.get(nc,'') if nc else ''})
+    if not blocks:
+        st.info("No recent-addition metadata is available in the current data layer.")
+        return
+    recent=pd.DataFrame(blocks); recent['_d']=pd.to_datetime(recent['Added / updated'],errors='coerce')
+    recent=recent.sort_values('_d',ascending=False,na_position='last').drop(columns=['_d'])
+    display_df(recent.head(18),330)
 
-    show=[]
-    for c in [date_col,title_col,company_col,geography_col,value_col,"_source_type"]:
-        if c and c in records.columns and c not in show:
-            show.append(c)
+def _render_business_infrastructure():
+    st.markdown("### Business & infrastructure")
+    st.caption("Core trade-network coverage with current companies, infrastructure, fleets, defence and corridors.")
+    tabs=st.tabs(["Companies","Ports & terminals","Vessels","Defence","Corridors"])
+    with tabs[0]:
+        _compact_trade_table(TABLES.get(("Core Entities","Companies"),pd.DataFrame()),["Company","Company Name","Name","Country","HQ Country","Sector","Business Segments","Status","As Of"],280)
+    with tabs[1]:
+        terms=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame()); ports=TABLES.get(("Maritime","Ports"),pd.DataFrame()); df=terms if not terms.empty else ports
+        _compact_trade_table(df,["Terminal / Facility","Port / Facility","Port","Country","City / Area","Operator / Network","Operator","Facility Type","Status"],280)
+    with tabs[2]:
+        _compact_trade_table(TABLES.get(("Maritime","Vessels"),pd.DataFrame()),["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Owner","Operator","Status"],280)
+    with tabs[3]:
+        df=TABLES.get(("Defence & Shipbuilding","Defence Vessels"),pd.DataFrame())
+        _compact_trade_table(df,["Vessel","Programme","Class / Type","Customer / Operator","Contract","Builder","Status","Delivery"],280)
+    with tabs[4]:
+        routes=TABLES.get(("Infrastructure","Transport Routes"),pd.DataFrame()); systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame()); df=routes if not routes.empty else systems
+        _compact_trade_table(df,["Route","Corridor","System","Name","Mode","Region","Origin","Destination","Status"],280)
 
-    if not show:
-        show=list(records.columns[:7])
+def _render_quick_access():
+    st.markdown("### Quick access")
+    for label,target in [("Companies","Companies"),("Ports & terminals","Ports"),("Vessels","Vessels"),("Corridors","Corridors & Systems"),("Defence","Defence & Shipbuilding"),("Regional maps","Regional Maps")]:
+        if st.button(label,use_container_width=True,key='homequick_'+label.replace(' ','_')):
+            request_nav(target); st.rerun()
 
-    x=records[show].head(12).copy()
-    if "_source_type" in x.columns:
-        x=x.rename(columns={"_source_type":"Activity"})
-    display_df(x,330)
-
-def _render_trade_network_panel():
-    snap=_trade_network_snapshot()
-    st.markdown("### Network snapshot")
-    st.caption("Core business coverage across companies, infrastructure, fleets and corridors.")
-
-    r1=st.columns(3)
-    for box,(label,val) in zip(r1,list(snap.items())[:3]):
-        box.metric(label,f"{val:,}")
-    r2=st.columns(3)
-    for box,(label,val) in zip(r2,list(snap.items())[3:]):
-        box.metric(label,f"{val:,}")
-
-    st.markdown("#### Open a workspace")
-    c1,c2=st.columns(2)
-    if c1.button("Companies",use_container_width=True,key="tradehome_companies"):
-        request_nav("Companies"); st.rerun()
-    if c2.button("Ports & terminals",use_container_width=True,key="tradehome_ports"):
-        request_nav("Ports"); st.rerun()
-    c3,c4=st.columns(2)
-    if c3.button("Vessels",use_container_width=True,key="tradehome_vessels"):
-        request_nav("Vessels"); st.rerun()
-    if c4.button("Corridors & systems",use_container_width=True,key="tradehome_corridors"):
-        request_nav("Corridors & Systems"); st.rerun()
-
-def _render_trade_watchlist():
-    st.markdown("### Network watch")
-    st.caption("Operational items worth checking without turning the homepage into an incident feed.")
-
+def _render_operational_brief():
+    st.markdown("### Operational brief")
+    st.caption("Short business-impact summary; full incident detail stays off the homepage.")
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     if events.empty:
-        st.caption("No current operational records.")
-        return
-
-    # Prefer business/operational impacts over pure security severity.
-    cols=[c for c in [
-        "Date","Title","Event Type","Location",
-        "Trade / Commercial Impact","Operational Impact","Status"
-    ] if c in events.columns]
-    if not cols:
-        cols=list(events.columns[:7])
-
-    x=events.copy()
-    date_col=_first_existing_col(x,["Date","Start Date","Event Date"])
-    if date_col:
-        x["_d"]=pd.to_datetime(x[date_col],errors="coerce")
-        x=x.sort_values("_d",ascending=False,na_position="last")
-
-    impact_col=_first_existing_col(x,["Trade / Commercial Impact","Commercial Impact","Operational Impact"])
-    if impact_col:
-        impacted=x[x[impact_col].astype(str).str.strip().ne("")]
-        if not impacted.empty:
-            x=impacted
-
-    display_df(x[cols].head(8),280)
-
+        st.caption("No current operational records."); return
+    dc=_first_existing_col(events,["Date","Start Date","Event Date"])
+    if dc:
+        events['_d']=pd.to_datetime(events[dc],errors='coerce'); events=events.sort_values('_d',ascending=False,na_position='last')
+    tc=_first_existing_col(events,["Title","Event","Event Title"]); ic=_first_existing_col(events,["Trade / Commercial Impact","Commercial Impact","Operational Impact"]); lc=_first_existing_col(events,["Location","Region","Country"]); sc=_first_existing_col(events,["Status","Event Status"])
+    rows=[]
+    for _,r in events.head(8).iterrows():
+        rows.append({"Date":r.get(dc,'') if dc else '',"Issue":r.get(tc,'') if tc else '',"Business impact":r.get(ic,'') if ic else '',"Location":r.get(lc,'') if lc else '',"Status":r.get(sc,'') if sc else ''})
+    display_df(pd.DataFrame(rows),280)
 
 if page=="Overview":
-    header(
-        "Trade System",
-        "Companies, infrastructure, fleets, corridors, investment and operational activity across the global trade network."
-    )
+    header("Trade System","Companies, infrastructure, fleets, contracts, investment, corridors and operating activity across the global trade network.")
 
-    # The homepage is deliberately commercial first. Security/disruption remains secondary.
-    snap=_trade_network_snapshot()
-    top=st.columns(6)
-    for box,(label,val) in zip(top,snap.items()):
-        box.metric(label,f"{val:,}")
+    q=st.text_input("Search the trade system",placeholder="Company, port, vessel, corridor, contract, programme, refinery, terminal...",key="trade_home_search_top")
+    if q.strip():
+        hits=ranked_search(q.strip(),limit=25)
+        if hits.empty: st.info("No matching records.")
+        else:
+            for _,h in hits.head(10).iterrows(): readable_search_card(h)
 
     st.markdown("---")
-
-    left,right=st.columns([3.25,1.0],gap="large")
-
-    with left:
+    main,right=st.columns([3.35,1.0],gap="large")
+    with main:
         _render_trade_pulse()
-
-        st.markdown("### Business & infrastructure")
-        st.caption("Fast entry into the core commercial model.")
-        quick=st.tabs(["Companies","Ports & terminals","Corridors","Vessels"])
-
-        with quick[0]:
-            companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame()).copy()
-            _compact_trade_table(
-                companies,
-                ["Company","Company Name","Name","Country","HQ Country","Sector","Business Segments","Status"],
-                260
-            )
-
-        with quick[1]:
-            ports=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
-            terms=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame()).copy()
-            if not terms.empty:
-                _compact_trade_table(
-                    terms,
-                    ["Terminal / Facility","Port","Country","City / Area","Operator / Network","Facility Type","Status"],
-                    260
-                )
-            else:
-                _compact_trade_table(
-                    ports,
-                    ["Port / Facility","Country","City / Area","Operator","Facility Type","Status"],
-                    260
-                )
-
-        with quick[2]:
-            systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame()).copy()
-            routes=TABLES.get(("Infrastructure","Transport Routes"),pd.DataFrame()).copy()
-            cview=routes if not routes.empty else systems
-            _compact_trade_table(
-                cview,
-                ["Route","Corridor","System","Name","Mode","Region","Origin","Destination","Status"],
-                260
-            )
-
-        with quick[3]:
-            vessels=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
-            _compact_trade_table(
-                vessels,
-                ["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Owner","Operator","Status"],
-                260
-            )
-
-        st.markdown("### Network watch")
-        _render_trade_watchlist()
-
+        st.markdown("---")
+        _render_recent_additions()
+        st.markdown("---")
+        _render_business_infrastructure()
     with right:
-        _render_trade_network_panel()
-
+        _render_quick_access()
+        st.markdown("---")
+        _render_operational_brief()
         st.markdown("---")
         render_security_business_rail(4)
 
-    # Search and operational events are useful, but deliberately secondary.
-    with st.expander("Search across the trade system",expanded=False):
-        q=st.text_input(
-            "Search",
-            placeholder="DP World, Jebel Ali, CMA CGM, Middle Corridor, LNG terminal...",
-            key="trade_home_search"
-        )
-        if q.strip():
-            hits=ranked_search(q.strip(),limit=25)
-            if hits.empty:
-                st.info("No matching records.")
-            else:
-                for _,h in hits.head(10).iterrows():
-                    readable_search_card(h)
-
-    with st.expander("Recent operational events (secondary)",expanded=False):
+    with st.expander("Detailed recent operational events",expanded=False):
         events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
         if not events.empty:
             if "Date" in events.columns:
-                events["_dt"]=pd.to_datetime(events["Date"],errors="coerce")
-                events=events.sort_values("_dt",ascending=False,na_position="last")
+                events['_dt']=pd.to_datetime(events['Date'],errors='coerce'); events=events.sort_values('_dt',ascending=False,na_position='last')
             render_event_cards(events,4)
-        else:
-            st.info("No recent operational events.")
-
+        else: st.info("No recent operational events.")
 
 elif page=="Search":
     header("Search P&C","One query across companies, ports, shipyards, vessels, contracts, transactions, news, events and systems.")
