@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.22-direct-canonical-company-rollup"
+APP_VERSION = "v3.3.23-country-government-security"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -5343,6 +5343,406 @@ def render_trade_alerts_workspace():
             else: render_event_cards(view,60)
 
 
+
+def _security_text(v):
+    return str(v or "").strip()
+
+def _security_norm(v):
+    return re.sub(r"[^a-z0-9]+"," ",_security_text(v).casefold()).strip()
+
+def _security_country_from_record(row):
+    """Best available country label from canonical entity/asset metadata."""
+    for key in ("hq_country","country","Country","HQ Country"):
+        v=_security_text(row.get(key))
+        if v:
+            return v
+    meta=row.get("metadata")
+    if isinstance(meta,dict):
+        for key in ("country","hq_country","jurisdiction"):
+            v=_security_text(meta.get(key))
+            if v:
+                return v
+        ra=meta.get("research_attributes")
+        if isinstance(ra,dict):
+            for key in ("country","hq_country","jurisdiction"):
+                v=_security_text(ra.get(key))
+                if v:
+                    return v
+    return ""
+
+def _security_category(row):
+    """Classify government/security entities without pretending commercial companies are state agencies."""
+    blob=" ".join([
+        _security_text(row.get("name")),
+        _security_text(row.get("entity_type")),
+        _security_text(row.get("subtype")),
+    ]).casefold()
+
+    if any(x in blob for x in ("coast guard","maritime safety agency","maritime security agency")):
+        return "Coast Guard / Maritime Security"
+    if any(x in blob for x in ("navy","naval force","naval forces","fleet command","marine corps")):
+        return "Navy / Naval Forces"
+    if any(x in blob for x in ("air force","air command","air defence","air defense")):
+        return "Air Force / Air Defence"
+    if any(x in blob for x in ("border guard","border force","customs","gendarmerie","maritime police","marine police")):
+        return "Border / Customs / Gendarmerie"
+    if any(x in blob for x in ("ministry of defence","ministry of defense","department of defense","department of defence","armed forces","joint forces","general staff")):
+        return "Defence Ministry / Armed Forces"
+    if any(x in blob for x in ("procurement","acquisition","materiel","armament","defence equipment","defense equipment")):
+        return "Defence Procurement / Acquisition"
+    if any(x in blob for x in ("operational command","area command","logistics center","logistics centre","support command")):
+        return "Operational / Support Command"
+    if any(x in blob for x in ("government","ministry","authority","agency","command")) and any(
+        x in blob for x in ("security","defence","defense","military","maritime","naval","border")
+    ):
+        return "Government Security Organisation"
+    return ""
+
+@st.cache_data(show_spinner=False, ttl=45)
+def _live_government_security_model():
+    """Canonical government/security discovery layer from the live Supabase graph."""
+    result={
+        "entities":pd.DataFrame(),
+        "relationships":pd.DataFrame(),
+        "vessels":pd.DataFrame(),
+        "assets":pd.DataFrame(),
+        "error":"",
+    }
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            result["error"]="No Supabase client"
+            return result
+
+        erows=pc_safe_rows(
+            sb,"pc_entities",
+            "entity_id,name,entity_type,subtype,hq_city,hq_country,status,record_status,metadata",
+            15000,order="name"
+        ) or []
+        rrows=pc_safe_rows(
+            sb,"pc_relationships",
+            "relationship_id,source_type,source_id,relationship_type,target_type,target_id,"
+            "ownership_percent,operating_control,confidence,record_status,evidence_source_id,notes,metadata",
+            40000
+        ) or []
+        mrows=pc_safe_rows(
+            sb,"pc_mobile_assets",
+            "mobile_asset_id,name,asset_type,subtype,imo,mmsi,registration,call_sign,flag,"
+            "year_built,dwt,capacity_value,capacity_unit,owner_entity_id,operator_entity_id,"
+            "manager_entity_id,status,record_status,data_quality,source_id,metadata",
+            25000,order="name"
+        ) or []
+        arows=pc_safe_rows(
+            sb,"pc_assets",
+            "asset_id,name,asset_type,subtype,country,region_city,latitude,longitude,"
+            "operator_entity_id,owner_entity_id,status,record_status,data_quality,source_id,metadata",
+            25000,order="name"
+        ) or []
+
+        by_id={_security_text(x.get("entity_id")):x for x in erows if _security_text(x.get("entity_id"))}
+        security_ids=set()
+        categories={}
+        countries={}
+
+        # First pass: direct classification and direct country.
+        for eid,row in by_id.items():
+            cat=_security_category(row)
+            if cat:
+                security_ids.add(eid)
+                categories[eid]=cat
+            c=_security_country_from_record(row)
+            if c:
+                countries[eid]=c
+
+        # Strong country hints for major state services where older rows lack hq_country.
+        service_country_hints={
+            "united states coast guard":"United States",
+            "us coast guard":"United States",
+            "u s coast guard":"United States",
+            "canadian coast guard":"Canada",
+            "royal canadian navy":"Canada",
+            "united states navy":"United States",
+            "u s navy":"United States",
+            "royal navy":"United Kingdom",
+            "royal australian navy":"Australia",
+            "australian border force":"Australia",
+            "japan coast guard":"Japan",
+            "indian coast guard":"India",
+            "indian navy":"India",
+        }
+        for eid,row in by_id.items():
+            nm=_security_norm(row.get("name"))
+            if not countries.get(eid):
+                for key,country in service_country_hints.items():
+                    if key in nm:
+                        countries[eid]=country
+                        break
+
+        # Propagate category/country down government command hierarchies.
+        hierarchy_rel={
+            "parent_of","controls","includes","contains","commands","command_of",
+            "subordinate_command","part_of","reports_to","component_of","under"
+        }
+        for _ in range(6):
+            changed=False
+            for rr in rrows:
+                if _security_text(rr.get("source_type")).casefold()!="entity" or _security_text(rr.get("target_type")).casefold()!="entity":
+                    continue
+                sid=_security_text(rr.get("source_id")); tid=_security_text(rr.get("target_id"))
+                rel=_security_text(rr.get("relationship_type")).casefold().replace("-","_").replace(" ","_")
+                if sid not in by_id or tid not in by_id:
+                    continue
+
+                if sid in security_ids and (rel in hierarchy_rel or "parent" in rel or "command" in rel or "part_of" in rel):
+                    if tid not in security_ids:
+                        security_ids.add(tid)
+                        categories[tid]=_security_category(by_id[tid]) or "Operational / Support Command"
+                        changed=True
+                    if countries.get(sid) and not countries.get(tid):
+                        countries[tid]=countries[sid]; changed=True
+
+                # Reverse-form relationship: child -> parent (PART_OF etc.).
+                if tid in security_ids and rel in {"part_of","reports_to","component_of","under","subordinate_to"}:
+                    if sid not in security_ids:
+                        security_ids.add(sid)
+                        categories[sid]=_security_category(by_id[sid]) or "Operational / Support Command"
+                        changed=True
+                    if countries.get(tid) and not countries.get(sid):
+                        countries[sid]=countries[tid]; changed=True
+            if not changed:
+                break
+
+        entity_rows=[]
+        for eid in sorted(security_ids):
+            row=by_id[eid]
+            entity_rows.append({
+                "Entity ID":eid,
+                "Organisation":_security_text(row.get("name")),
+                "Category":categories.get(eid) or _security_category(row) or "Government Security Organisation",
+                "Country":countries.get(eid) or _security_country_from_record(row),
+                "Entity Type":_security_text(row.get("entity_type")),
+                "Subtype":_security_text(row.get("subtype")),
+                "HQ City":_security_text(row.get("hq_city")),
+                "Status":_security_text(row.get("status")),
+                "Record Status":_security_text(row.get("record_status")),
+                "Metadata":row.get("metadata") or {},
+            })
+        edf=pd.DataFrame(entity_rows)
+
+        rel_rows=[]
+        linked_vessel_ids=set()
+        linked_asset_ids=set()
+
+        for rr in rrows:
+            sid=_security_text(rr.get("source_id")); tid=_security_text(rr.get("target_id"))
+            st=_security_text(rr.get("source_type")).casefold()
+            tt=_security_text(rr.get("target_type")).casefold()
+            if sid not in security_ids and tid not in security_ids:
+                continue
+            if tt in {"mobile_asset","vessel"} and sid in security_ids:
+                linked_vessel_ids.add(tid)
+            if tt=="asset" and sid in security_ids:
+                linked_asset_ids.add(tid)
+
+            rel_rows.append({
+                "Relationship ID":_security_text(rr.get("relationship_id")),
+                "Source ID":sid,
+                "Source":_security_text(by_id.get(sid,{}).get("name")) or sid,
+                "Relationship":pretty_relationship(rr.get("relationship_type")),
+                "Target Type":tt,
+                "Target ID":tid,
+                "Target":_security_text(by_id.get(tid,{}).get("name")) or tid,
+                "Confidence":rr.get("confidence"),
+                "Record Status":_security_text(rr.get("record_status")),
+            })
+
+        # Direct canonical owner/operator/manager IDs also count.
+        for m in mrows:
+            if any(_security_text(m.get(k)) in security_ids for k in ("owner_entity_id","operator_entity_id","manager_entity_id")):
+                linked_vessel_ids.add(_security_text(m.get("mobile_asset_id")))
+        for a in arows:
+            if any(_security_text(a.get(k)) in security_ids for k in ("owner_entity_id","operator_entity_id")):
+                linked_asset_ids.add(_security_text(a.get("asset_id")))
+
+        vessel_rows=[]
+        for m in mrows:
+            vid=_security_text(m.get("mobile_asset_id"))
+            if vid not in linked_vessel_ids:
+                continue
+            linked_org_ids=set()
+            for rr in rrows:
+                if _security_text(rr.get("target_id"))==vid and _security_text(rr.get("source_id")) in security_ids:
+                    linked_org_ids.add(_security_text(rr.get("source_id")))
+            for k in ("owner_entity_id","operator_entity_id","manager_entity_id"):
+                eid=_security_text(m.get(k))
+                if eid in security_ids:
+                    linked_org_ids.add(eid)
+            linked_orgs=[_security_text(by_id.get(x,{}).get("name")) or x for x in sorted(linked_org_ids)]
+            vcountries=[countries.get(x,"") for x in linked_org_ids if countries.get(x)]
+            vessel_rows.append({
+                "Vessel ID":vid,
+                "Vessel":_security_text(m.get("name")),
+                "IMO":_security_text(m.get("imo")),
+                "Hull / Registration":_security_text(m.get("registration")),
+                "Flag":_security_text(m.get("flag")),
+                "Type":_security_text(m.get("asset_type")),
+                "Subtype / Class":_security_text(m.get("subtype")),
+                "Organisation":" · ".join(linked_orgs),
+                "Country":vcountries[0] if vcountries else _security_text(m.get("flag")),
+                "Status":_security_text(m.get("status")),
+                "Record Status":_security_text(m.get("record_status")),
+                "Metadata":m.get("metadata") or {},
+            })
+
+        asset_rows=[]
+        for a in arows:
+            aid=_security_text(a.get("asset_id"))
+            if aid not in linked_asset_ids:
+                continue
+            linked_org_ids=set()
+            for rr in rrows:
+                if _security_text(rr.get("target_id"))==aid and _security_text(rr.get("source_id")) in security_ids:
+                    linked_org_ids.add(_security_text(rr.get("source_id")))
+            for k in ("owner_entity_id","operator_entity_id"):
+                eid=_security_text(a.get(k))
+                if eid in security_ids:
+                    linked_org_ids.add(eid)
+            linked_orgs=[_security_text(by_id.get(x,{}).get("name")) or x for x in sorted(linked_org_ids)]
+            acountries=[countries.get(x,"") for x in linked_org_ids if countries.get(x)]
+            asset_rows.append({
+                "Asset ID":aid,
+                "Facility / Base":_security_text(a.get("name")),
+                "Type":_security_text(a.get("asset_type")),
+                "Subtype":_security_text(a.get("subtype")),
+                "Country":_security_text(a.get("country")) or (acountries[0] if acountries else ""),
+                "City / Area":_security_text(a.get("region_city")),
+                "Organisation":" · ".join(linked_orgs),
+                "Status":_security_text(a.get("status")),
+                "Record Status":_security_text(a.get("record_status")),
+                "Latitude":a.get("latitude"),
+                "Longitude":a.get("longitude"),
+                "Metadata":a.get("metadata") or {},
+            })
+
+        result["entities"]=edf
+        result["relationships"]=pd.DataFrame(rel_rows)
+        result["vessels"]=pd.DataFrame(vessel_rows)
+        result["assets"]=pd.DataFrame(asset_rows)
+        return result
+    except Exception as exc:
+        result["error"]=f"{type(exc).__name__}: {exc}"
+        return result
+
+def render_government_security():
+    model=_live_government_security_model()
+    if model.get("error"):
+        st.warning("Live government/security layer could not be loaded: "+model["error"])
+
+    entities=model.get("entities",pd.DataFrame()).copy()
+    vessels=model.get("vessels",pd.DataFrame()).copy()
+    assets=model.get("assets",pd.DataFrame()).copy()
+    relationships=model.get("relationships",pd.DataFrame()).copy()
+
+    if entities.empty:
+        st.info("No canonical government/security organisations are currently classified.")
+        return
+
+    countries=sorted([x for x in entities.get("Country",pd.Series(dtype=str)).fillna("").astype(str).unique() if x.strip()])
+    country=st.selectbox("Country",["All countries"]+countries,key="govsec_country")
+    if country!="All countries":
+        eview=entities[entities["Country"].astype(str).eq(country)].copy()
+        ids=set(eview["Entity ID"].astype(str))
+        vview=vessels[
+            vessels.get("Country",pd.Series(index=vessels.index,dtype=str)).astype(str).eq(country)
+            | vessels.get("Organisation",pd.Series(index=vessels.index,dtype=str)).astype(str).apply(
+                lambda x:any(_security_text(entities.loc[entities["Entity ID"].astype(str).isin(ids),"Organisation"].astype(str).eq(org)).any() for org in x.split(" · ")) if x else False
+            )
+        ].copy() if not vessels.empty else vessels
+        aview=assets[assets.get("Country",pd.Series(index=assets.index,dtype=str)).astype(str).eq(country)].copy() if not assets.empty else assets
+        rview=relationships[
+            relationships.get("Source ID",pd.Series(index=relationships.index,dtype=str)).astype(str).isin(ids)
+            | relationships.get("Target ID",pd.Series(index=relationships.index,dtype=str)).astype(str).isin(ids)
+        ].copy() if not relationships.empty else relationships
+    else:
+        eview=entities; vview=vessels; aview=assets; rview=relationships
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Security organisations",len(eview))
+    c2.metric("Coast Guard / maritime",int(eview["Category"].astype(str).str.contains("Coast Guard|Maritime Security",case=False,regex=True).sum()))
+    c3.metric("Linked vessels / platforms",len(vview))
+    c4.metric("Linked facilities / bases",len(aview))
+
+    st.caption("This layer separates government/security organisations from commercial companies. It follows canonical entity relationships and direct owner/operator links rather than inferring state ownership from names alone.")
+
+    tabs=st.tabs([
+        "Directory",
+        "Coast Guard & Maritime",
+        "Defence / Navy",
+        "Vessels & Platforms",
+        "Bases & Facilities",
+        "Relationship Graph",
+    ])
+
+    with tabs[0]:
+        q=st.text_input("Find organisation",placeholder="United States Coast Guard, Royal Navy, border force...",key="govsec_org_q")
+        x=eview.copy()
+        if q.strip():
+            x=_contains_any(x,[q],["Organisation","Category","Country","Entity Type","Subtype"])
+        display_df(x[[c for c in ["Organisation","Category","Country","Entity Type","Subtype","HQ City","Status","Record Status"] if c in x.columns]],400)
+
+    with tabs[1]:
+        x=eview[eview["Category"].astype(str).str.contains("Coast Guard|Maritime Security|Border|Gendarmerie",case=False,regex=True,na=False)].copy()
+        if x.empty:
+            st.info("No coast guard / maritime-security organisations mapped for this selection.")
+        else:
+            display_df(x[[c for c in ["Organisation","Category","Country","Entity Type","Subtype","HQ City","Status"] if c in x.columns]],300)
+            cgids=set(x["Entity ID"].astype(str))
+            if not relationships.empty and not vessels.empty:
+                vids=set(relationships[
+                    relationships["Source ID"].astype(str).isin(cgids)
+                    & relationships["Target Type"].astype(str).isin(["mobile_asset","vessel"])
+                ]["Target ID"].astype(str))
+                cv=vessels[vessels["Vessel ID"].astype(str).isin(vids)].copy()
+                if not cv.empty:
+                    st.markdown("### Linked cutters, icebreakers and other platforms")
+                    display_df(cv[[c for c in ["Vessel","Subtype / Class","Flag","Organisation","Country","Status","IMO","Hull / Registration"] if c in cv.columns]],400)
+
+    with tabs[2]:
+        x=eview[eview["Category"].astype(str).str.contains("Defence|Navy|Naval|Air Force|Armed Forces|Procurement",case=False,regex=True,na=False)].copy()
+        if x.empty:
+            st.info("No defence/naval organisations mapped for this selection.")
+        else:
+            display_df(x[[c for c in ["Organisation","Category","Country","Entity Type","Subtype","HQ City","Status"] if c in x.columns]],300)
+
+    with tabs[3]:
+        q=st.text_input("Find vessel / platform",placeholder="USCGC Healy, CCGS Arpatuuq, cutter, icebreaker...",key="govsec_vessel_q")
+        x=vview.copy()
+        if q.strip() and not x.empty:
+            x=_contains_any(x,[q],["Vessel","Subtype / Class","Flag","Organisation","Country","Status","IMO","Hull / Registration"])
+        if x.empty:
+            st.info("No linked government/security vessels are mapped for this selection.")
+        else:
+            display_df(x[[c for c in ["Vessel","Subtype / Class","Type","Organisation","Country","Flag","Status","IMO","Hull / Registration","Record Status"] if c in x.columns]],500)
+
+    with tabs[4]:
+        if aview.empty:
+            st.info("No linked government/security facilities or bases are mapped for this selection yet.")
+        else:
+            display_df(aview[[c for c in ["Facility / Base","Type","Subtype","Organisation","Country","City / Area","Status","Record Status"] if c in aview.columns]],400)
+            m=aview.copy()
+            m["lat"]=pd.to_numeric(m.get("Latitude"),errors="coerce")
+            m["lon"]=pd.to_numeric(m.get("Longitude"),errors="coerce")
+            m=m.dropna(subset=["lat","lon"])
+            if not m.empty:
+                st.map(m[["lat","lon"]],use_container_width=True)
+
+    with tabs[5]:
+        if rview.empty:
+            st.info("No canonical relationships mapped for this selection.")
+        else:
+            display_df(rview[[c for c in ["Source","Relationship","Target","Target Type","Confidence","Record Status"] if c in rview.columns]],600)
+
+
 def _market_db_rows(table, columns="*", limit=2000, order=None):
     """Read the normalized market layer when Supabase is configured."""
     try:
@@ -5609,7 +6009,7 @@ st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend
 
 NAV_SECTIONS={
     "OPERATING PICTURE":["Overview","Regional Maps","Alerts & Disruptions","Watch Areas"],
-    "DOMAINS":["Maritime","Rail","Aviation","Trucking","Defence & Shipbuilding","Energy & Industry"],
+    "DOMAINS":["Maritime","Rail","Aviation","Trucking","Government & Security","Defence & Shipbuilding","Energy & Industry"],
     "TRADE NETWORK":["Ports & Terminals","Corridors & Systems","Companies","Vessels","Investments"],
     "MARKETS & POLICY":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Sanctions & Compliance","Trade Policy","Contracts"],
     "MONITORING & TOOLS":["Hormuz Monitor","Live Feeds","News & Signals","Search","Reference & Benchmarks","Data"],
@@ -7120,6 +7520,15 @@ elif page=="Live Feeds":
         showcols=[c for c in ["name","domain","access_model","status","authentication","persistence","ui_role"] if c in catalog.columns]
         display_df(catalog[showcols] if showcols else catalog,100,show_ids=True)
         st.caption("Design rule: green = immediately usable, amber = credential/contributor gated, trial = not a production dependency, grey = registered/deferred/excluded.")
+
+
+elif page=="Government & Security":
+    header(
+        "Government & Security",
+        "Country-first directory for defence ministries, armed forces, navies, coast guards, border organisations, operational commands, vessels and linked facilities."
+    )
+    render_government_security()
+
 
 elif page=="Defence & Shipbuilding":
     header("Defence & Shipbuilding","Shipyards, government procurement, naval and research-vessel programmes, contracts, delivery routes and industrial capacity.")
