@@ -615,6 +615,222 @@ def render_watch_area_brief(rows,geography):
             st.markdown("**Dry ports / inland hubs**")
             show_df(related["Dry ports"],["Hub Name","Country","City / Region","Status","Linked Seaports / Gateways"],180)
 
+
+def _monitor_horizon_rank(v):
+    """Sort monitoring horizons without inventing a probability."""
+    s=clean_display_text(v).casefold()
+    if not s:
+        return 99
+    if any(x in s for x in ["24h","24 h","24-hour","24 hour","immediate","today","hours"]):
+        return 1
+    if any(x in s for x in ["48h","48 h","48-hour","48 hour"]):
+        return 2
+    if any(x in s for x in ["72h","72 h","72-hour","72 hour","3 day","three day"]):
+        return 3
+    if any(x in s for x in ["7 day","one week","1 week","week"]):
+        return 4
+    if any(x in s for x in ["30 day","month"]):
+        return 5
+    return 10
+
+def _monitor_status_rank(v):
+    s=clean_display_text(v).casefold()
+    if "active" in s:
+        return 1
+    if "develop" in s:
+        return 2
+    if "monitor" in s:
+        return 3
+    return 9
+
+def _monitor_recent_activity_count(geography):
+    ev=watch_area_events(geography)
+    if ev is None or ev.empty:
+        return 0
+    if "Start Date" not in ev.columns:
+        return len(ev)
+    d=pd.to_datetime(ev["Start Date"],errors="coerce")
+    latest=d.max()
+    if pd.isna(latest):
+        return len(ev)
+    return int((d >= (latest-pd.Timedelta(days=7))).sum())
+
+def _monitor_queue(df):
+    if df is None or df.empty:
+        return df
+    x=df.copy()
+    x["_status_rank"]=text_col(x,"Status").map(_monitor_status_rank)
+    x["_horizon_rank"]=text_col(x,"Time Horizon").map(_monitor_horizon_rank)
+    x["_review_sort"]=pd.to_datetime(x.get("Last Reviewed"),errors="coerce") if "Last Reviewed" in x.columns else pd.NaT
+    x["_activity"]=x.get("Geography",pd.Series("",index=x.index)).map(_monitor_recent_activity_count)
+    return x.sort_values(
+        ["_status_rank","_horizon_rank","_activity","_review_sort"],
+        ascending=[True,True,False,False],
+        na_position="last"
+    )
+
+def _latest_intelligence_events(limit=8):
+    if hazard_events is None or hazard_events.empty:
+        return hazard_events
+    x=hazard_events.copy()
+    if "Start Date" in x.columns:
+        x["_intel_date"]=pd.to_datetime(x["Start Date"],errors="coerce")
+        x=x.sort_values("_intel_date",ascending=False,na_position="last")
+    return x.head(limit)
+
+def render_latest_intelligence_strip():
+    latest=_latest_intelligence_events(6)
+    section(
+        "LATEST INTELLIGENCE",
+        "Latest intelligence",
+        "Newest reporting and assessed incidents in the P&C intelligence base — surfaced first, not buried in the event register."
+    )
+    if latest is None or latest.empty:
+        st.markdown('<div class="pc-empty">No intelligence records available.</div>', unsafe_allow_html=True)
+        return
+
+    top=latest.head(3).reset_index(drop=True)
+    cols=st.columns(3)
+    for i,r in top.iterrows():
+        with cols[i]:
+            sev=clean_display_text(r.get("Severity","")) or "Unrated"
+            dt=clean_display_text(r.get("Start Date","")) or "Date not recorded"
+            geo=clean_display_text(r.get("Location","")) or clean_display_text(r.get("Country / Countries",""))
+            impact=clean_display_text(r.get("Operational Impact","")) or clean_display_text(r.get("Trade / Commercial Impact",""))
+            title=clean_display_text(r.get("Title","")) or "Untitled intelligence record"
+            st.markdown(
+                f"""<div class="pc-card" style="border-top:3px solid var(--accent);min-height:240px;">
+                <div class="pc-label">{dt} · {sev}</div>
+                <div class="pc-big">{title}</div>
+                <div class="pc-card-meta" style="margin-top:8px;">{geo}</div>
+                <div class="pc-search-details" style="margin-top:12px;">{impact[:360]}</div>
+                </div>""",
+                unsafe_allow_html=True
+            )
+
+    with st.expander("More latest intelligence",expanded=False):
+        show_df(
+            latest,
+            ["Start Date","Event Family","Event Type","Severity","Status","Country / Countries",
+             "Location","Title","Operational Impact","Trade / Commercial Impact","Confidence"],
+            300
+        )
+
+    if st.button("Open full Alerts & Incidents register →",key="home_open_alerts"):
+        st.session_state["pcintel_page"]="Alerts & Incidents"
+        st.rerun()
+
+def render_monitoring_command_view(df):
+    if df is None or df.empty:
+        st.info("No monitoring records available.")
+        return
+
+    active=df[text_col(df,"Status").str.contains("Active|Developing|Monitoring",case=False,regex=True,na=False)].copy()
+    queue=_monitor_queue(active)
+
+    urgent=0
+    if not queue.empty:
+        urgent=int(queue["_horizon_rank"].le(3).sum())
+
+    reviewed=pd.to_datetime(queue.get("Last Reviewed"),errors="coerce") if (not queue.empty and "Last Reviewed" in queue.columns) else pd.Series(dtype="datetime64[ns]")
+    stale=0
+    if not reviewed.empty and reviewed.notna().any():
+        ref=reviewed.max()
+        stale=int((reviewed < (ref-pd.Timedelta(days=7))).sum())
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Active monitors",len(queue))
+    c2.metric("24–72h horizons",urgent)
+    c3.metric("Recently active areas",int(queue["_activity"].gt(0).sum()) if not queue.empty else 0)
+    c4.metric("Review lag >7 days",stale)
+
+    st.markdown("### Priority monitoring queue")
+    st.caption("Ordered by active status, time horizon, recent matching activity and review recency. No probability is inferred where the source record does not provide one.")
+
+    if queue.empty:
+        st.info("No active/developing monitoring records.")
+        return
+
+    qshow=queue.copy()
+    qshow["Recent activity (7d)"]=qshow["_activity"]
+    show_df(
+        qshow,
+        ["Title","Family","Geography","Status","Time Horizon","Confidence","Recent activity (7d)",
+         "What Is Being Monitored","Trigger / Threshold","Last Reviewed","Next Review / Milestone"],
+        420
+    )
+
+    choices=list(range(len(queue)))
+    pick=st.selectbox(
+        "Open monitoring assessment",
+        choices,
+        format_func=lambda i:(
+            f"{clean_display_text(queue.iloc[i].get('Geography',''))} — "
+            f"{clean_display_text(queue.iloc[i].get('Title','Monitoring'))}"
+        ),
+        key="pc_monitor_assessment"
+    )
+    r=queue.iloc[pick]
+
+    st.markdown("### Current judgement & warning framework")
+    a,b,c,d=st.columns(4)
+    a.metric("Status",clean_display_text(r.get("Status","")) or "—")
+    b.metric("Horizon",clean_display_text(r.get("Time Horizon","")) or "—")
+    c.metric("Confidence",clean_display_text(r.get("Confidence","")) or "—")
+    d.metric("Recent matched events",int(r.get("_activity",0)))
+
+    judgement=clean_display_text(r.get("What Is Being Monitored",""))
+    notes=clean_display_text(r.get("Notes",""))
+    st.markdown(
+        f"""<div class="pc-card">
+        <div class="pc-label">CURRENT JUDGEMENT / MONITORING QUESTION</div>
+        <div class="pc-big">{clean_display_text(r.get('Title',''))}</div>
+        <div class="pc-search-details" style="margin-top:12px;">{judgement or 'No monitoring judgement has been recorded.'}</div>
+        {f"<div class='pc-card-body' style='margin-top:10px;'>{notes}</div>" if notes else ""}
+        </div>""",
+        unsafe_allow_html=True
+    )
+
+    inds=_split_indicators(r.get("Key Indicators",""))
+    l,rcol=st.columns([1.15,1])
+    with l:
+        st.markdown("#### Priority indicators")
+        if inds:
+            for n,item in enumerate(inds[:10],1):
+                st.markdown(f"**{n}.** {item}")
+        else:
+            st.caption("No structured indicators recorded.")
+    with rcol:
+        st.markdown("#### Trigger / threshold")
+        trig=clean_display_text(r.get("Trigger / Threshold",""))
+        nxt=clean_display_text(r.get("Next Review / Milestone",""))
+        st.markdown(
+            f"""<div class="pc-card">
+            <div class="pc-card-impact">{trig or 'No explicit threshold recorded.'}</div>
+            <div class="pc-label" style="margin-top:14px;">NEXT REVIEW / MILESTONE</div>
+            <div>{nxt or 'Not recorded.'}</div>
+            </div>""",
+            unsafe_allow_html=True
+        )
+
+    geo=clean_display_text(r.get("Geography",""))
+    ev=watch_area_events(geo)
+    st.markdown("#### Evidence / recent activity")
+    if ev is None or ev.empty:
+        st.caption("No matching event records currently support this monitoring area.")
+    else:
+        if "Start Date" in ev.columns:
+            ev=ev.copy()
+            ev["_d"]=pd.to_datetime(ev["Start Date"],errors="coerce")
+            ev=ev.sort_values("_d",ascending=False)
+        show_df(
+            ev.head(12),
+            ["Start Date","Event Type","Severity","Status","Location","Title",
+             "Operational Impact","Trade / Commercial Impact","Confidence"],
+            330
+        )
+
+
 # -----------------------------------------------------------------------------
 # Regional map helpers
 # -----------------------------------------------------------------------------
@@ -761,6 +977,8 @@ def pc_event_map_points(events):
 # 1. OPERATING PICTURE
 # -----------------------------------------------------------------------------
 if page == "Operating Picture":
+    render_latest_intelligence_strip()
+
     active_mon = monitoring[text_col(monitoring, "Status").str.contains("Active", case=False, na=False)] if not monitoring.empty else monitoring
     security_terms = ["Security", "Conflict", "Maritime", "Piracy", "Attack", "Ground", "Explosion", "SAR", "Pollution", "Drone", "Missile", "Seizure", "Boarding"]
     sec_events = hazard_events[contains_any(hazard_events, ["Event Family", "Event Type", "Mode", "Title"], security_terms)] if not hazard_events.empty else hazard_events
@@ -929,12 +1147,40 @@ elif page == "Watch Areas":
 # 4. MONITORING & INDICATORS
 # -----------------------------------------------------------------------------
 elif page == "Monitoring & Indicators":
-    section("04 · Forward", "Monitoring & Indicators", "Baselines, indicators and triggers that would strengthen, weaken or change the current judgement.")
-    active_only = st.toggle("Active monitoring only", value=True)
-    df = monitoring.copy()
-    if active_only and not df.empty:
-        df = df[text_col(df,"Status").str.contains("Active|Developing|Monitoring", case=False, regex=True, na=False)]
-    show_df(df, ["Title","Family","Geography","Status","Start Date","Time Horizon","What Is Being Monitored","Key Indicators","Trigger / Threshold","Confidence","Last Reviewed","Next Review / Milestone"], 560)
+    section(
+        "04 · Forward",
+        "Monitoring & Indicators",
+        "A warning framework rather than a flat register: prioritised monitors, current judgement, indicators, thresholds, evidence and review discipline."
+    )
+
+    df=monitoring.copy()
+    if df.empty:
+        st.info("No monitoring records available.")
+    else:
+        f1,f2,f3=st.columns(3)
+        status_opts=["All"]+sorted([x for x in text_col(df,"Status").unique() if x])
+        family_opts=["All"]+sorted([x for x in text_col(df,"Family").unique() if x])
+        geo_opts=["All"]+sorted([x for x in text_col(df,"Geography").unique() if x])
+        st_sel=f1.selectbox("Status",status_opts,key="monitor_status_filter")
+        fam_sel=f2.selectbox("Family",family_opts,key="monitor_family_filter")
+        geo_sel=f3.selectbox("Geography",geo_opts,key="monitor_geo_filter")
+        if st_sel!="All":
+            df=df[text_col(df,"Status").eq(st_sel)]
+        if fam_sel!="All":
+            df=df[text_col(df,"Family").eq(fam_sel)]
+        if geo_sel!="All":
+            df=df[text_col(df,"Geography").eq(geo_sel)]
+
+        render_monitoring_command_view(df)
+
+        with st.expander("Full monitoring register",expanded=False):
+            show_df(
+                df,
+                ["Title","Family","Geography","Status","Start Date","Time Horizon",
+                 "What Is Being Monitored","Key Indicators","Trigger / Threshold",
+                 "Confidence","Last Reviewed","Next Review / Milestone","Notes"],
+                500
+            )
 
 # -----------------------------------------------------------------------------
 # 5. MARITIME SECURITY
@@ -1082,4 +1328,4 @@ elif page == "Source Monitor":
 
 # Footer
 st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
-st.markdown('<div class="small-note">P&C Intelligence · Excel-backed v3.0 · Dedicated security and operational intelligence interface.</div>', unsafe_allow_html=True)
+st.markdown('<div class="small-note">P&C Intelligence · v3.5 · Latest-intelligence homepage + prioritised forward monitoring.</div>', unsafe_allow_html=True)
