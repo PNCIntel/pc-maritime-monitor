@@ -30,8 +30,8 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.10-canonical-db-vessels-fix"
-RELEASE_NAME = "Global Trade-System Intelligence Graph · Legacy Excel + Research Reference + Supabase Bridge"
+APP_VERSION = "v3.3.11-live-canonical-trade-bridge"
+RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -863,7 +863,7 @@ if not _CANON_EVENT_LOCS.empty:
     TABLES[("Events & Hazards","Event Locations")] = _CANON_EVENT_LOCS
 
 
-@st.cache_data(show_spinner=False, ttl=180)
+@st.cache_data(show_spinner=False, ttl=60)
 def _canonical_db_vessel_frames():
     """Load canonical Supabase vessels, vessel/company relationships and event links.
 
@@ -1055,6 +1055,330 @@ if not _CANON_VESSEL_EVENT_LINKS.empty:
     TABLES[("Events & Hazards","Event Asset Links")] = (
         _combined_eal.drop_duplicates(subset=_dedupe_cols, keep="last")
         if _dedupe_cols else _combined_eal
+    )
+
+
+# ---------- v3.3.11 live canonical trade bridge ----------
+def _merge_canonical_rows(legacy, canonical, id_col, name_col=None):
+    """Merge canonical DB rows into a legacy display frame, preferring DB rows by ID/name."""
+    if canonical is None or canonical.empty:
+        return legacy.copy() if isinstance(legacy, pd.DataFrame) else pd.DataFrame()
+    if legacy is None or legacy.empty:
+        return canonical.copy()
+
+    old = legacy.copy()
+    new = canonical.copy()
+    keep = pd.Series(True, index=old.index)
+
+    if id_col in old.columns and id_col in new.columns:
+        ids = set(new[id_col].fillna("").astype(str).str.strip())
+        ids.discard("")
+        if ids:
+            keep &= ~old[id_col].fillna("").astype(str).str.strip().isin(ids)
+
+    if name_col and name_col in old.columns and name_col in new.columns:
+        names = set(new[name_col].fillna("").astype(str).str.strip().str.casefold())
+        names.discard("")
+        if names:
+            keep &= ~old[name_col].fillna("").astype(str).str.strip().str.casefold().isin(names)
+
+    return pd.concat([old[keep], new], ignore_index=True, sort=False)
+
+
+def _canonical_relationship_role_maps(rels):
+    """Return asset->company role maps from canonical pc_relationships."""
+    operator = {}
+    owner = {}
+    all_roles = defaultdict(list)
+    if rels is None or rels.empty:
+        return operator, owner, all_roles
+
+    for _, r in rels.iterrows():
+        stype = str(r.get("source_type") or "").strip().casefold()
+        ttype = str(r.get("target_type") or "").strip().casefold()
+        if stype != "entity" or ttype != "asset":
+            continue
+        eid = str(r.get("source_id") or "").strip()
+        aid = str(r.get("target_id") or "").strip()
+        rel = str(r.get("relationship_type") or "").strip().casefold().replace("-", "_").replace(" ", "_")
+        if not eid or not aid:
+            continue
+        all_roles[aid].append((rel, eid))
+        if rel in {"operates", "manages", "operator_of", "concession_holder"} and aid not in operator:
+            operator[aid] = eid
+        if rel in {"owns", "controls", "owner_of", "parent_of"} and aid not in owner:
+            owner[aid] = eid
+    return operator, owner, all_roles
+
+
+@st.cache_data(show_spinner=False, ttl=60)
+def _canonical_db_core_trade_frames():
+    """Project live canonical Supabase entities/assets/relationships/routes into legacy Trade UI shapes."""
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return tuple(pd.DataFrame() for _ in range(7))
+
+        erows = pc_safe_rows(
+            sb, "pc_entities",
+            "entity_id,name,entity_type,subtype,hq_city,hq_country,status,record_status,metadata",
+            10000, order="name"
+        )
+        arows = pc_safe_rows(
+            sb, "pc_assets",
+            "asset_id,name,asset_type,subtype,country,region_city,latitude,longitude,status,record_status,metadata",
+            10000, order="name"
+        )
+        rrows = pc_safe_rows(
+            sb, "pc_relationships",
+            "relationship_id,source_type,source_id,relationship_type,target_type,target_id,ownership_percent,operating_control,valid_from,valid_to,confidence,record_status,evidence_source_id,notes,metadata",
+            20000
+        )
+        # Keep route select to fields known to exist in the executable model registry.
+        trrows = pc_safe_rows(
+            sb, "pc_transport_routes",
+            "route_id,route_name,mode,operator_entity_id",
+            10000, order="route_name"
+        )
+
+        entities_df = pd.DataFrame(erows or [])
+        assets_df = pd.DataFrame(arows or [])
+        rels_df = pd.DataFrame(rrows or [])
+        routes_df = pd.DataFrame(trrows or [])
+
+        # ---- Companies / entity registry ----
+        companies = []
+        entity_registry = []
+        entity_names = {}
+        for r in erows or []:
+            eid = str(r.get("entity_id") or "").strip()
+            name = str(r.get("name") or "").strip()
+            meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+            research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
+            entity_names[eid] = name
+            companies.append({
+                "Company ID": eid,
+                "Company": name,
+                "Entity Type": str(r.get("entity_type") or "").strip(),
+                "Subtype": str(r.get("subtype") or "").strip(),
+                "HQ City": str(r.get("hq_city") or research.get("hq_city") or "").strip(),
+                "HQ Country": str(r.get("hq_country") or research.get("country") or research.get("hq_country") or "").strip(),
+                "Country / Geography": str(r.get("hq_country") or research.get("country") or "").strip(),
+                "Status": str(r.get("status") or r.get("record_status") or "").strip(),
+                "Record Status": str(r.get("record_status") or "").strip(),
+                "Ownership": str(research.get("ownership") or "").strip(),
+                "Business Segments": str(research.get("business_segments") or "").strip(),
+                "Markets": str(research.get("markets") or "").strip(),
+                "Scale / Network Notes": str(research.get("scale") or research.get("network_notes") or "").strip(),
+                "Metadata": meta,
+            })
+            entity_registry.append({
+                "Entity ID": eid,
+                "Canonical Name": name,
+                "Entity Type": str(r.get("entity_type") or "").strip(),
+                "Subtype": str(r.get("subtype") or "").strip(),
+                "Country": str(r.get("hq_country") or research.get("country") or "").strip(),
+                "Status": str(r.get("status") or r.get("record_status") or "").strip(),
+                "Metadata": meta,
+            })
+
+        companies = pd.DataFrame(companies)
+        entity_registry = pd.DataFrame(entity_registry)
+
+        # ---- Canonical entity/entity and entity/asset graph ----
+        relationships = []
+        for r in rrows or []:
+            sid = str(r.get("source_id") or "").strip()
+            tid = str(r.get("target_id") or "").strip()
+            stype = str(r.get("source_type") or "").strip()
+            ttype = str(r.get("target_type") or "").strip()
+            relationships.append({
+                "Relationship ID": str(r.get("relationship_id") or "").strip(),
+                "Source Entity": sid,
+                "Source": entity_names.get(sid, sid),
+                "Source Type": stype,
+                "Relationship": str(r.get("relationship_type") or "").strip(),
+                "Target Entity": tid,
+                "Target": entity_names.get(tid, tid),
+                "Target Type": ttype,
+                "Ownership %": r.get("ownership_percent"),
+                "Operating Control": r.get("operating_control"),
+                "Confidence": r.get("confidence"),
+                "Record Status": str(r.get("record_status") or "").strip(),
+                "Source ID": str(r.get("evidence_source_id") or "").strip(),
+                "Notes": str(r.get("notes") or "").strip(),
+                "Metadata": r.get("metadata") or {},
+            })
+        relationships = pd.DataFrame(relationships)
+
+        op_map, owner_map, role_map = _canonical_relationship_role_maps(rels_df)
+
+        # ---- Infrastructure assets ----
+        infra_assets = []
+        port_rows = []
+        terminal_rows = []
+        for r in arows or []:
+            aid = str(r.get("asset_id") or "").strip()
+            name = str(r.get("name") or "").strip()
+            atype = str(r.get("asset_type") or "").strip()
+            subtype = str(r.get("subtype") or "").strip()
+            kind = f"{atype} {subtype}".casefold()
+            meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+            research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
+
+            operator_id = op_map.get(aid, "")
+            owner_id = owner_map.get(aid, "")
+            company_id = operator_id or owner_id
+            company_name = entity_names.get(company_id, company_id)
+            role_text = "; ".join(
+                f"{rel}:{entity_names.get(eid,eid)}" for rel, eid in role_map.get(aid, [])
+            )
+
+            base = {
+                "Asset ID": aid,
+                "Asset": name,
+                "Asset Type": atype,
+                "Subtype": subtype,
+                "Company ID": company_id,
+                "Owner / Operator Company ID": company_id,
+                "Company": company_name,
+                "Country": str(r.get("country") or research.get("country") or "").strip(),
+                "City / Area": str(r.get("region_city") or research.get("city") or research.get("region") or "").strip(),
+                "Latitude": r.get("latitude"),
+                "Longitude": r.get("longitude"),
+                "Status": str(r.get("status") or r.get("record_status") or "").strip(),
+                "Record Status": str(r.get("record_status") or "").strip(),
+                "Relationship / Role": role_text,
+                "Capacity": research.get("capacity") or research.get("capacity_teu") or research.get("capacity_teu_per_year") or "",
+                "Metadata": meta,
+            }
+            infra_assets.append(base)
+
+            # Port-level assets.
+            if ("port" in kind or "harbour" in kind or "harbor" in kind) and "terminal" not in kind:
+                port_rows.append({
+                    "Port ID": aid,
+                    "Port / Facility": name,
+                    "Country": base["Country"],
+                    "City / Area": base["City / Area"],
+                    "Facility Type": atype or subtype,
+                    "Operator Company ID": operator_id,
+                    "Operator": entity_names.get(operator_id, operator_id),
+                    "Owner Company ID": owner_id,
+                    "Status": base["Status"],
+                    "Latitude": base["Latitude"],
+                    "Longitude": base["Longitude"],
+                    "Key Role": str(research.get("role") or research.get("strategic_role") or "").strip(),
+                    "Metadata": meta,
+                })
+
+            # Terminal / depot / warehouse / logistics-facility assets.
+            if any(term in kind for term in ("terminal", "depot", "warehouse", "logistics", "crossdock", "yard")):
+                terminal_rows.append({
+                    "Terminal ID": aid,
+                    "Terminal / Facility": name,
+                    "Port ID": str(research.get("parent_port_id") or "").strip(),
+                    "Parent Port": str(research.get("parent_port") or "").strip(),
+                    "Country": base["Country"],
+                    "City / Area": base["City / Area"],
+                    "Primary Operator Company ID": operator_id or company_id,
+                    "Operator / Network": entity_names.get(operator_id or company_id, operator_id or company_id),
+                    "Status": base["Status"],
+                    "Ownership / Structure": role_text,
+                    "Facility Type": atype or subtype,
+                    "Latitude": base["Latitude"],
+                    "Longitude": base["Longitude"],
+                    "Metadata": meta,
+                })
+
+        infra_assets = pd.DataFrame(infra_assets)
+        ports = pd.DataFrame(port_rows)
+        terminals = pd.DataFrame(terminal_rows)
+
+        # ---- Transport routes ----
+        routes = []
+        for r in trrows or []:
+            oid = str(r.get("operator_entity_id") or "").strip()
+            routes.append({
+                "Route ID": str(r.get("route_id") or "").strip(),
+                "Route": str(r.get("route_name") or "").strip(),
+                "Route Name": str(r.get("route_name") or "").strip(),
+                "Mode": str(r.get("mode") or "").strip(),
+                "Operator Company ID": oid,
+                "Operator": entity_names.get(oid, oid),
+            })
+        routes = pd.DataFrame(routes)
+
+        return companies, entity_registry, relationships, infra_assets, ports, terminals, routes
+    except Exception:
+        return tuple(pd.DataFrame() for _ in range(7))
+
+
+(
+    _CANON_COMPANIES,
+    _CANON_ENTITY_REGISTRY,
+    _CANON_RELATIONSHIPS,
+    _CANON_INFRA_ASSETS,
+    _CANON_PORTS,
+    _CANON_TERMINALS,
+    _CANON_TRANSPORT_ROUTES,
+) = _canonical_db_core_trade_frames()
+
+if not _CANON_COMPANIES.empty:
+    TABLES[("Core Entities","Companies")] = _merge_canonical_rows(
+        TABLES.get(("Core Entities","Companies"), pd.DataFrame()),
+        _CANON_COMPANIES,
+        "Company ID",
+        "Company",
+    )
+
+if not _CANON_ENTITY_REGISTRY.empty:
+    TABLES[("Core Entities","Entity Registry")] = _merge_canonical_rows(
+        TABLES.get(("Core Entities","Entity Registry"), pd.DataFrame()),
+        _CANON_ENTITY_REGISTRY,
+        "Entity ID",
+        "Canonical Name",
+    )
+
+if not _CANON_RELATIONSHIPS.empty:
+    TABLES[("Core Entities","Relationships")] = _merge_canonical_rows(
+        TABLES.get(("Core Entities","Relationships"), pd.DataFrame()),
+        _CANON_RELATIONSHIPS,
+        "Relationship ID",
+        None,
+    )
+
+if not _CANON_INFRA_ASSETS.empty:
+    TABLES[("Infrastructure","Assets")] = _merge_canonical_rows(
+        TABLES.get(("Infrastructure","Assets"), pd.DataFrame()),
+        _CANON_INFRA_ASSETS,
+        "Asset ID",
+        "Asset",
+    )
+
+if not _CANON_PORTS.empty:
+    TABLES[("Maritime","Ports")] = _merge_canonical_rows(
+        TABLES.get(("Maritime","Ports"), pd.DataFrame()),
+        _CANON_PORTS,
+        "Port ID",
+        "Port / Facility",
+    )
+
+if not _CANON_TERMINALS.empty:
+    TABLES[("Maritime","Port Terminals")] = _merge_canonical_rows(
+        TABLES.get(("Maritime","Port Terminals"), pd.DataFrame()),
+        _CANON_TERMINALS,
+        "Terminal ID",
+        "Terminal / Facility",
+    )
+
+if not _CANON_TRANSPORT_ROUTES.empty:
+    # Keep a DB-native route table while also making routes discoverable in the Data/related-table layer.
+    TABLES[("Infrastructure","Transport Routes")] = _merge_canonical_rows(
+        TABLES.get(("Infrastructure","Transport Routes"), pd.DataFrame()),
+        _CANON_TRANSPORT_ROUTES,
+        "Route ID",
+        "Route",
     )
 
 
@@ -6941,4 +7265,8 @@ elif page=="Data":
     display_df(df,600,show_ids=show_debug_ids)
 
 st.sidebar.markdown("---")
+if st.sidebar.button("Refresh live database", use_container_width=True, key="refresh_live_canonical_db"):
+    st.cache_data.clear()
+    st.rerun()
+st.sidebar.caption("Canonical Supabase layers refresh automatically every ~60 seconds; use the button after a Power Admin apply.")
 st.sidebar.caption(f"{len(TABLES):,} tables loaded · {RELEASE_NAME}")
