@@ -30,7 +30,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.11-live-canonical-trade-bridge"
+APP_VERSION = "v3.3.12-live-canonical-dedupe-fix"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2348,7 +2348,12 @@ def build_company_profile(entity_id, entity_name):
 
     if not pt.empty and term_ids and "Terminal ID" in pt.columns:
         extra_terms=pt[pt["Terminal ID"].astype(str).isin(term_ids)]
-        prof["port_terminals"]=pd.concat([direct_terms,extra_terms],ignore_index=True).drop_duplicates()
+        _term_merge=pd.concat([direct_terms,extra_terms],ignore_index=True)
+        _term_dedupe=[c for c in ["Terminal ID","Terminal / Facility","Port ID"] if c in _term_merge.columns]
+        prof["port_terminals"]=(
+            _term_merge.drop_duplicates(subset=_term_dedupe,keep="last")
+            if _term_dedupe else _term_merge
+        )
     else:
         prof["port_terminals"]=direct_terms
 
@@ -2360,7 +2365,12 @@ def build_company_profile(entity_id, entity_name):
     terminal_parent_ports=ports[ports["Port ID"].astype(str).isin(port_ids)].copy() if (not ports.empty and port_ids and "Port ID" in ports.columns) else pd.DataFrame()
     port_frames=[x for x in [direct_ports,terminal_parent_ports] if isinstance(x,pd.DataFrame) and not x.empty]
     if port_frames:
-        prof["ports"]=pd.concat(port_frames,ignore_index=True).drop_duplicates()
+        _port_merge=pd.concat(port_frames,ignore_index=True)
+        _port_dedupe=[c for c in ["Port ID","Port / Facility"] if c in _port_merge.columns]
+        prof["ports"]=(
+            _port_merge.drop_duplicates(subset=_port_dedupe,keep="last")
+            if _port_dedupe else _port_merge
+        )
     else:
         prof["ports"]=pd.DataFrame()
 
