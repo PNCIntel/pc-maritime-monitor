@@ -2787,6 +2787,34 @@ elif page=="Staging Resolution":
                 "the canonical registry before anything can be written to pc_relationships."
             )
             grels=_generic_relationship_resolution_rows(sb,10000)
+
+            staged_graph_preview=[]
+            if not grels:
+                try:
+                    staged_rel_rows=(sb.table("pc_staged_records")
+                        .select("staged_record_id,ingestion_job_id,natural_key,payload,review_status,created_at")
+                        .eq("target_table","pc_relationships")
+                        .order("created_at",desc=True)
+                        .limit(500)
+                        .execute().data or [])
+                    for sr in staged_rel_rows:
+                        pld=sr.get("payload") or {}
+                        meta=pld.get("metadata") if isinstance(pld.get("metadata"),dict) else {}
+                        staged_graph_preview.append({
+                            "created_at":sr.get("created_at"),
+                            "natural_key":sr.get("natural_key"),
+                            "relationship_type":pld.get("relationship_type") or pld.get("relationship") or meta.get("relationship_type") or "related_to",
+                            "from_name":pld.get("source_name") or pld.get("from_name") or meta.get("source_name") or meta.get("from_name") or pld.get("source_id") or "Source",
+                            "from_source_key":pld.get("source_id"),
+                            "to_name":pld.get("target_name") or pld.get("to_name") or meta.get("target_name") or meta.get("to_name") or pld.get("target_id") or "Target",
+                            "to_source_key":pld.get("target_id"),
+                            "resolution_status":"STAGED",
+                            "review_status":sr.get("review_status"),
+                            "staged_record_id":sr.get("staged_record_id"),
+                        })
+                except Exception as exc:
+                    st.warning(f"Could not load staged graph fallback: {exc}")
+
             if grels:
                 gdf=pd.DataFrame(grels)
                 gstatuses=gdf["resolution_status"].fillna("UNRESOLVED") if "resolution_status" in gdf.columns else pd.Series([],dtype=str)
@@ -2875,7 +2903,47 @@ elif page=="Staging Resolution":
                     except Exception as exc:
                         st.exception(exc)
             else:
-                st.info("No generic relationship-resolution rows yet. Run SQL 013; it will backfill existing staged pc_relationships proposals.")
+                st.warning("No SQL 013 relationship-resolution rows are visible yet. Showing raw staged relationship proposals so the graph does not disappear.")
+                if staged_graph_preview:
+                    sdf=pd.DataFrame(staged_graph_preview)
+                    st.metric("Staged graph edges",len(sdf))
+                    st.dataframe(sdf[[c for c in ["created_at","natural_key","relationship_type","from_name","to_name","review_status"] if c in sdf.columns]],use_container_width=True,hide_index=True)
+                    st.markdown("### Relationship network preview")
+                    st.caption("Fallback preview built directly from staged pc_relationships proposals. These edges are not canonical until resolved and applied.")
+                    preview=sdf.head(60)
+                    def _dot_escape(v):
+                        return str(v or "").replace("\\","\\\\").replace('"','\\"').replace("\n"," ")
+                    dot=[
+                        'digraph PCGraph {',
+                        'rankdir=LR;',
+                        'graph [bgcolor="transparent", pad="0.25", nodesep="0.35", ranksep="0.6"];',
+                        'node [shape=box, style="rounded,filled", fillcolor="#111827", fontcolor="white", color="#4b5563", fontname="Arial", fontsize=10];',
+                        'edge [color="#9ca3af", fontcolor="#d1d5db", fontname="Arial", fontsize=9];'
+                    ]
+                    seen=set()
+                    for _,gr in preview.iterrows():
+                        fid=str(gr.get("from_source_key") or gr.get("from_name") or "source")
+                        tid=str(gr.get("to_source_key") or gr.get("to_name") or "target")
+                        flabel=str(gr.get("from_name") or "Source")
+                        tlabel=str(gr.get("to_name") or "Target")
+                        rel=str(gr.get("relationship_type") or "related to")
+                        fn="n"+hashlib.sha1(fid.encode("utf-8")).hexdigest()[:12]
+                        tn="n"+hashlib.sha1(tid.encode("utf-8")).hexdigest()[:12]
+                        if fn not in seen:
+                            dot.append(f'{fn} [label="{_dot_escape(flabel)}"];')
+                            seen.add(fn)
+                        if tn not in seen:
+                            dot.append(f'{tn} [label="{_dot_escape(tlabel)}"];')
+                            seen.add(tn)
+                        dot.append(f'{fn} -> {tn} [label="{_dot_escape(rel)}"];')
+                    dot.append('}')
+                    try:
+                        st.graphviz_chart("\n".join(dot),use_container_width=True)
+                    except Exception as exc:
+                        st.error(f"Graph rendering failed: {exc}")
+                        st.code("\n".join(dot),language="dot")
+                else:
+                    st.info("No staged pc_relationships proposals are present, so there are no graph edges to draw yet.")
 
             try:
                 gjobs=(sb.table("pc_ingestion_jobs").select("ingestion_job_id,title,status,created_at,stats").order("created_at",desc=True).limit(100).execute().data or [])
