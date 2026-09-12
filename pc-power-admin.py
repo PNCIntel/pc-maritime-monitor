@@ -47,7 +47,7 @@ else:
 sb=service_client()
 st.sidebar.markdown("<div class='pc-k'>Power & Corridors</div>",unsafe_allow_html=True)
 st.sidebar.markdown("## Power Admin")
-PAGES=["Dashboard","Migration","Database Coverage","ReCAAP Vessel Resolver","Organizations","Users & Access","Research Jobs","Trade System Builder","Batch Staging","Review Queue","Market Data","Governance & Quality"]
+PAGES=["Dashboard","Migration","Database Coverage","Model Registry","Batch Staging","Staging Resolution","Review Queue","ReCAAP Vessel Resolver","Organizations","Users & Access","Research Jobs","Trade System Builder","Market Data","Governance & Quality"]
 
 # ---------------------------------------------------------------------------
 # Bulk review / validation helpers
@@ -750,6 +750,42 @@ def dataframe(rows):
 def title(t,copy=""):
     st.markdown(f"<div class='pc-k'>P&C INTERNAL</div><h1>{t}</h1>",unsafe_allow_html=True)
     if copy: st.caption(copy)
+
+# ---------------------------------------------------------------------------
+# SQL 010 metadata-driven model / staging helpers
+# ---------------------------------------------------------------------------
+
+def _rpc_data(sb, function_name, params=None):
+    """Call a Supabase RPC and return its data payload."""
+    return sb.rpc(function_name, params or {}).execute().data
+
+def _meta_entity_types(sb):
+    try:
+        return (
+            sb.table("pc_meta_entity_types")
+            .select("entity_type,table_name,primary_key_column,display_name_column,id_prefix,canonical,active,allow_insert,allow_update,description")
+            .eq("active", True)
+            .order("entity_type")
+            .execute().data or []
+        )
+    except Exception:
+        return []
+
+def _meta_table_map(sb):
+    return {r.get("table_name"):r for r in _meta_entity_types(sb) if r.get("table_name")}
+
+def _resolution_rows(sb, limit=1000, filters=None):
+    try:
+        q=sb.table("pc_v_staging_resolution").select("*")
+        for k,v in (filters or {}).items():
+            q=q.eq(k,v)
+        return q.order("created_at",desc=True).limit(limit).execute().data or []
+    except Exception:
+        return []
+
+def _process_job_resolution(sb, job_id):
+    data=_rpc_data(sb,"pc_process_ingestion_job",{"p_ingestion_job_id":str(job_id)})
+    return data or {}
 
 # ---------------------------------------------------------------------------
 # Controlled AI staging + canonical apply helpers
@@ -1807,36 +1843,113 @@ elif page=="Trade System Builder":
 9. Approve canonical writes
 10. Verify client views""")
 
+elif page=="Model Registry":
+    title(
+        "Model registry",
+        "Executable metadata for the canonical P&C model: entity types, keys, columns, identifiers, relationships and match rules."
+    )
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        c1,c2,c3,c4=st.columns(4)
+        entities=safe_rows(sb,"pc_meta_entity_types","*",500)
+        columns=safe_rows(sb,"pc_meta_columns","*",5000)
+        reltypes=safe_rows(sb,"pc_meta_relationship_types","*",1000)
+        rules=safe_rows(sb,"pc_meta_match_rules","*",2000)
+        c1.metric("Entity types",len(entities))
+        c2.metric("Registered columns",len(columns))
+        c3.metric("Relationship types",len(reltypes))
+        c4.metric("Match rules",len(rules))
+
+        top1,top2=st.columns([1,3])
+        if top1.button("Refresh model registry",type="primary"):
+            with st.spinner("Refreshing PostgreSQL model metadata..."):
+                try:
+                    result=_rpc_data(sb,"pc_refresh_model_registry")
+                    st.success(f"Model registry refreshed{f': {result}' if result is not None else '.'}")
+                    st.rerun()
+                except Exception as exc:
+                    st.exception(exc)
+        top2.caption("Refresh introspects the canonical PostgreSQL tables defined in pc_meta_entity_types; it does not alter canonical business data.")
+
+        tabs=st.tabs(["Entity types","Columns & keys","Match rules","Relationships","Identifier registry"])
+        with tabs[0]:
+            dataframe(sorted(entities,key=lambda x:str(x.get("entity_type") or "")))
+        with tabs[1]:
+            if columns:
+                df=pd.DataFrame(columns)
+                preferred=[c for c in ["entity_type","table_name","ordinal_position","column_name","data_type","required","is_primary_key","is_natural_key","identifier_type","match_priority","reference_entity_type","reference_column","allow_stage","allow_update"] if c in df.columns]
+                st.dataframe(df[preferred],use_container_width=True,hide_index=True)
+            else:
+                st.caption("No registered columns. Run Refresh model registry.")
+        with tabs[2]:
+            dataframe(sorted(rules,key=lambda x:(str(x.get("entity_type") or ""),int(x.get("priority") or 9999))))
+        with tabs[3]:
+            dataframe(reltypes)
+        with tabs[4]:
+            ids=safe_rows(sb,"pc_entity_identifiers","*",2000)
+            dataframe(ids)
+
 elif page=="Batch Staging":
     title(
-        "Batch staging",
-        "Upload structured CSV/JSON into the controlled staging queue. Known JSON fields are normalized before review."
+        "Metadata-driven batch staging",
+        "Upload CSV/JSON into the controlled staging gateway. SQL 010 expands fields, resolves canonical identities, and leaves ambiguous records for review."
     )
 
-    target=st.selectbox(
-        "Target table",
-        [
-            "pc_entities","pc_assets","pc_mobile_assets","pc_relationships","pc_events","pc_event_links",
-            "pc_transactions","pc_security_compliance","pc_energy_assets",
-            "pc_industrial_assets","pc_logistics_facilities","pc_market_instruments",
-            "pc_market_prices","pc_trade_flows","pc_supply_series","pc_port_metrics",
-            "pc_port_capabilities","pc_transport_routes","pc_chokepoints",
-            "pc_macro_indicators","pc_observations","pc_market_reports",
-            "pc_market_observations"
-        ]
-    )
+    meta_entities=_meta_entity_types(sb) if sb else []
+    meta_by_table={r["table_name"]:r for r in meta_entities if r.get("table_name")}
+
+    legacy_targets=[
+        "pc_transactions","pc_security_compliance","pc_energy_assets","pc_energy_asset_connections",
+        "pc_industrial_assets","pc_logistics_facilities","pc_market_instruments","pc_market_prices",
+        "pc_market_exposure_links","pc_trade_flows","pc_supply_series","pc_port_metrics",
+        "pc_port_capabilities","pc_macro_indicators","pc_observations","pc_market_reports",
+        "pc_market_observations"
+    ]
+    registered_targets=[r.get("table_name") for r in meta_entities if r.get("table_name")]
+    all_targets=list(dict.fromkeys(registered_targets+legacy_targets))
+
+    if meta_entities:
+        st.success(f"SQL 010 metadata layer detected: {len(meta_entities)} active entity type(s).")
+    else:
+        st.warning("Metadata registry is not readable. Batch staging will use compatibility mode until pc_meta_entity_types is available.")
+
+    def _target_label(table):
+        m=meta_by_table.get(table)
+        if m:
+            return f"{m.get('entity_type')}  →  {table}"
+        return f"legacy / extension  →  {table}"
+
+    target=st.selectbox("Target logical entity / table",all_targets,format_func=_target_label)
+    target_meta=meta_by_table.get(target) or {}
+    target_entity_type=target_meta.get("entity_type")
+
+    if target_meta:
+        a,b,c=st.columns(3)
+        a.metric("Entity type",target_entity_type or "—")
+        b.metric("Primary key",target_meta.get("primary_key_column") or "—")
+        c.metric("Display field",target_meta.get("display_name_column") or "—")
+
+        try:
+            rules=(sb.table("pc_meta_match_rules").select("priority,rule_name,match_type,source_column,identifier_type,minimum_score")
+                   .eq("entity_type",target_entity_type).eq("active",True).order("priority").execute().data or [])
+        except Exception:
+            rules=[]
+        if rules:
+            with st.expander("Resolution rules for this entity type"):
+                st.dataframe(pd.DataFrame(rules),use_container_width=True,hide_index=True)
 
     up=st.file_uploader("CSV or JSON",type=["csv","json"])
 
     def _parse_jsonish(v):
         if isinstance(v,(dict,list)) or v is None:
             return v
-        s=str(v).strip()
-        if not s:
+        ss=str(v).strip()
+        if not ss:
             return None
-        if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
+        if (ss.startswith("{") and ss.endswith("}")) or (ss.startswith("[") and ss.endswith("]")):
             try:
-                return json.loads(s)
+                return json.loads(ss)
             except Exception:
                 return v
         return v
@@ -1846,23 +1959,17 @@ elif page=="Batch Staging":
             return None
         if isinstance(v,float) and pd.isna(v):
             return None
-        s=str(v).strip()
-        return None if s=="" or s.lower()=="nan" else v
+        ss=str(v).strip()
+        return None if ss=="" or ss.lower()=="nan" else v
 
     def _normalize_incoming_row(r,target_table):
         row={k:_clean_scalar(v) for k,v in dict(r).items()}
-
-        # JSONB-like fields commonly used by the canonical model.
         for col in ("raw_value","derived_value","metadata","source_scope","stats","payload","current_record"):
             if col in row:
                 row[col]=_parse_jsonish(row[col])
-
-        # Normalize booleans from CSV.
         for col in ("attribution_required","active"):
             if col in row and row[col] is not None and not isinstance(row[col],bool):
                 row[col]=str(row[col]).strip().lower() in {"1","true","yes","y"}
-
-        # ReCAAP observation convenience mapping.
         if target_table=="pc_observations":
             src_name=str(row.get("source_name") or "").lower()
             src_url=str(row.get("source_url") or "").lower()
@@ -1872,7 +1979,6 @@ elif page=="Batch Staging":
                 row["source_type"]=row.get("source_type") or "official_maritime_security"
                 row["redistribution_status"]=row.get("redistribution_status") or "attribution_required"
                 row["attribution_required"]=True
-
         return {k:v for k,v in row.items() if v is not None}
 
     def _natural_key_for_row(r,target_table,index):
@@ -1881,58 +1987,40 @@ elif page=="Batch Staging":
             meta=r.get("metadata")
             if isinstance(raw,dict):
                 for k in ("observation_id","source_record_id","canonical_event_id"):
-                    if raw.get(k):
-                        return str(raw[k])
+                    if raw.get(k): return str(raw[k])
             if isinstance(meta,dict):
                 for k in ("source_record_id","legacy_observation_id"):
-                    if meta.get(k):
-                        return str(meta[k])
-
-        for key in (
-            "entity_id","asset_id","mobile_asset_id","relationship_id","event_id",
-            "transaction_id","route_id","chokepoint_id","market_instrument_id",
-            "trade_flow_id","supply_series_id","observation_id","name","title"
-        ):
-            if r.get(key):
-                return str(r[key])
-
+                    if meta.get(k): return str(meta[k])
+        for key in ("entity_id","asset_id","mobile_asset_id","relationship_id","event_id","event_link_id",
+                    "transaction_id","route_id","chokepoint_id","market_instrument_id","trade_flow_id",
+                    "supply_series_id","observation_id","imo","mmsi","name","title","route_name"):
+            if r.get(key): return str(r[key])
         return str(index)
 
     if up:
         try:
             if up.name.lower().endswith(".csv"):
-                incoming=pd.read_csv(up,dtype=object)
-                rows=incoming.to_dict("records")
+                rows=pd.read_csv(up,dtype=object).to_dict("records")
             else:
                 obj=json.load(up)
                 rows=obj if isinstance(obj,list) else obj.get("records",[obj])
 
             rows=[_normalize_incoming_row(r,target) for r in rows]
+            st.caption(f"{len(rows):,} incoming row(s)")
+            st.dataframe(pd.DataFrame(rows[:50]),use_container_width=True,hide_index=True)
 
-            st.caption(f"{len(rows):,} incoming rows")
-            preview=pd.DataFrame(rows[:50])
-            st.dataframe(preview,use_container_width=True,hide_index=True)
+            auto_resolve=st.checkbox(
+                "Run metadata-driven resolution after staging",
+                value=bool(target_entity_type),
+                disabled=not bool(target_entity_type),
+                help="Uses pc_process_ingestion_job. Resolution never writes directly to canonical tables."
+            )
 
-            # Helpful ReCAAP summary.
-            if target=="pc_observations" and rows:
-                recaap_count=sum(
-                    1 for r in rows
-                    if r.get("source_id")=="SRC_OPEN_RECAAP_ISC"
-                )
-                if recaap_count:
-                    st.info(
-                        f"Recognized {recaap_count:,} ReCAAP observation row(s). "
-                        "JSON fields will be stored as objects and source_id will be normalized."
-                    )
-
-            if st.button("Stage batch",type="primary"):
+            if st.button("Stage & resolve batch" if auto_resolve else "Stage batch",type="primary"):
                 if not sb:
                     st.error("Supabase required.")
                 else:
-                    # Ensure canonical ReCAAP source exists if this is a ReCAAP batch.
-                    if target=="pc_observations" and any(
-                        r.get("source_id")=="SRC_OPEN_RECAAP_ISC" for r in rows
-                    ):
+                    if target=="pc_observations" and any(r.get("source_id")=="SRC_OPEN_RECAAP_ISC" for r in rows):
                         sb.table("pc_sources").upsert({
                             "source_id":"SRC_OPEN_RECAAP_ISC",
                             "publisher":"ReCAAP Information Sharing Centre",
@@ -1951,7 +2039,12 @@ elif page=="Batch Staging":
                     job=sb.table("pc_ingestion_jobs").insert({
                         "job_type":"BATCH_IMPORT",
                         "title":up.name,
-                        "source_scope":{"target_table":target,"rows":len(rows)},
+                        "source_scope":{
+                            "target_table":target,
+                            "target_entity_type":target_entity_type,
+                            "rows":len(rows),
+                            "metadata_driven":bool(target_entity_type)
+                        },
                         "status":"running"
                     }).execute().data[0]
 
@@ -1959,36 +2052,94 @@ elif page=="Batch Staging":
                     for i,r in enumerate(rows,1):
                         payloads.append({
                             "ingestion_job_id":job["ingestion_job_id"],
+                            "target_entity_type":target_entity_type,
                             "target_table":target,
+                            "source_record_key":_natural_key_for_row(r,target,i),
                             "natural_key":_natural_key_for_row(r,target,i),
                             "action":"REVIEW",
                             "payload":r,
                             "confidence":1.0,
                             "validation_status":"pending",
-                            "review_status":"pending"
+                            "review_status":"pending",
+                            "resolution_status":"UNRESOLVED"
                         })
 
                     total_batches=max(1,(len(payloads)+249)//250)
                     progress=st.progress(0.0,text="Staging batch...")
                     for batch_no,i in enumerate(range(0,len(payloads),250),start=1):
                         sb.table("pc_staged_records").insert(payloads[i:i+250]).execute()
-                        progress.progress(
-                            batch_no/total_batches,
-                            text=f"Staging batch {batch_no}/{total_batches}"
-                        )
+                        progress.progress(batch_no/total_batches,text=f"Staging batch {batch_no}/{total_batches}")
+
+                    resolution=None
+                    if auto_resolve and target_entity_type:
+                        progress.progress(0.95,text="Resolving canonical identities...")
+                        resolution=_process_job_resolution(sb,job["ingestion_job_id"])
 
                     sb.table("pc_ingestion_jobs").update({
                         "status":"completed",
-                        "stats":{"rows":len(rows),"target_table":target}
+                        "completed_at":pd.Timestamp.utcnow().isoformat(),
                     }).eq("ingestion_job_id",job["ingestion_job_id"]).execute()
+                    progress.progress(1.0,text="Batch staged and processed.")
 
-                    progress.progress(1.0,text="Batch staged.")
-                    st.success(
-                        f"Staged {len(rows):,} row(s). Go to Review Queue → Bulk review."
-                    )
+                    if resolution:
+                        st.success(
+                            f"Staged {len(rows):,} row(s): {resolution.get('matched',0)} matched, "
+                            f"{resolution.get('new',0)} new, {resolution.get('ambiguous',0)} ambiguous, "
+                            f"{resolution.get('invalid',0)} invalid."
+                        )
+                    else:
+                        st.success(f"Staged {len(rows):,} row(s).")
+                    st.info("Next: open Staging Resolution to inspect identity decisions, then Review Queue for canonical approval/apply.")
 
         except Exception as exc:
             st.exception(exc)
+
+
+elif page=="Staging Resolution":
+    title(
+        "Staging resolution",
+        "Inspect metadata-driven identity matching before canonical apply. MATCHED reuses an existing canonical ID; NEW proposes a new record; AMBIGUOUS requires analyst resolution."
+    )
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        rows=_resolution_rows(sb,2000)
+        if not rows:
+            st.info("No metadata-driven staging resolution records are available yet.")
+        else:
+            df=pd.DataFrame(rows)
+            statuses=df["resolution_status"].fillna("UNRESOLVED") if "resolution_status" in df.columns else pd.Series([],dtype=str)
+            c1,c2,c3,c4,c5=st.columns(5)
+            c1.metric("Total",len(df))
+            c2.metric("Matched",int((statuses=="MATCHED").sum()))
+            c3.metric("New",int((statuses=="NEW").sum()))
+            c4.metric("Ambiguous",int((statuses=="AMBIGUOUS").sum()))
+            c5.metric("Invalid",int((statuses=="INVALID").sum()))
+
+            options=["ALL"]+sorted(str(x) for x in df["resolution_status"].dropna().unique()) if "resolution_status" in df.columns else ["ALL"]
+            status_filter=st.selectbox("Resolution status",options)
+            view=df if status_filter=="ALL" else df[df["resolution_status"]==status_filter]
+            preferred=[c for c in ["created_at","target_entity_type","target_table","natural_key","resolution_status","resolved_entity_id","resolution_method","resolution_confidence","candidate_count","staged_value_count","validation_status","review_status","staged_record_id"] if c in view.columns]
+            st.dataframe(view[preferred],use_container_width=True,hide_index=True)
+
+            st.markdown("### Re-run resolution")
+            jobs=safe_rows(sb,"pc_ingestion_jobs","ingestion_job_id,title,status,created_at,stats",200,"", "created_at") if False else []
+            # Build job choices directly to avoid assumptions about safe_rows filter syntax.
+            try:
+                jobs=(sb.table("pc_ingestion_jobs").select("ingestion_job_id,title,status,created_at,stats").order("created_at",desc=True).limit(100).execute().data or [])
+            except Exception:
+                jobs=[]
+            if jobs:
+                labels=[f"{j.get('title') or 'Untitled'} | {j.get('ingestion_job_id')}" for j in jobs]
+                chosen=st.selectbox("Ingestion job",labels)
+                job=jobs[labels.index(chosen)]
+                if st.button("Resolve this job again"):
+                    try:
+                        result=_process_job_resolution(sb,job["ingestion_job_id"])
+                        st.success(f"Resolution complete: {result}")
+                        st.rerun()
+                    except Exception as exc:
+                        st.exception(exc)
 
 elif page=="Review Queue":
     title(
@@ -2014,7 +2165,7 @@ elif page=="Review Queue":
             pending=safe_rows(
                 sb,
                 "pc_staged_records",
-                "staged_record_id,ingestion_job_id,target_table,natural_key,action,confidence,validation_status,review_status,payload,current_record,source_id,created_at",
+                "staged_record_id,ingestion_job_id,target_entity_type,target_table,natural_key,source_record_key,action,confidence,validation_status,review_status,resolution_status,resolved_entity_id,resolution_method,resolution_confidence,candidate_count,payload,current_record,source_id,created_at",
                 500,
                 {"review_status":"pending"},
                 "created_at"
@@ -2037,6 +2188,9 @@ elif page=="Review Queue":
                             "Apply?": bool(v["safe"]),
                             "Record": r.get("natural_key"),
                             "Table": r.get("target_table"),
+                            "Resolution": r.get("resolution_status") or "UNRESOLVED",
+                            "Resolved ID": r.get("resolved_entity_id"),
+                            "Match": r.get("resolution_method"),
                             "Confidence": round(v["confidence"],2),
                             "Sources": v["sources"],
                             "Schema": "✓" if v["schema_ok"] else "✗",
@@ -2079,7 +2233,7 @@ elif page=="Review Queue":
                 else:
                     edit_df["Apply?"] = edit_df["_safe"].astype(bool)
 
-                visible_cols=["Apply?","Record","Table","Confidence","Sources","Schema","FKs","Duplicate","Parent","Risk"]
+                visible_cols=["Apply?","Record","Table","Resolution","Resolved ID","Match","Confidence","Sources","Schema","FKs","Duplicate","Parent","Risk"]
                 editor_key=f"bulk_review_editor_{st.session_state['_bulk_review_editor_version']}"
 
                 edited=st.data_editor(
@@ -2209,7 +2363,7 @@ elif page=="Review Queue":
             rows=safe_rows(
                 sb,
                 "pc_staged_records",
-                "staged_record_id,ingestion_job_id,target_table,natural_key,action,confidence,validation_status,review_status,payload,current_record,source_id,created_at",
+                "staged_record_id,ingestion_job_id,target_entity_type,target_table,natural_key,source_record_key,action,confidence,validation_status,review_status,resolution_status,resolved_entity_id,resolution_method,resolution_confidence,candidate_count,payload,current_record,source_id,created_at",
                 500,
                 {"review_status":"pending"},
                 "created_at"
@@ -2320,7 +2474,7 @@ elif page=="Review Queue":
             approved=safe_rows(
                 sb,
                 "pc_staged_records",
-                "staged_record_id,ingestion_job_id,target_table,natural_key,action,confidence,validation_status,review_status,payload,current_record,source_id,created_at",
+                "staged_record_id,ingestion_job_id,target_entity_type,target_table,natural_key,source_record_key,action,confidence,validation_status,review_status,resolution_status,resolved_entity_id,resolution_method,resolution_confidence,candidate_count,payload,current_record,source_id,created_at",
                 500,
                 {"review_status":"approved"},
                 "created_at"
