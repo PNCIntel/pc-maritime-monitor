@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.23-country-government-security"
+APP_VERSION = "v3.3.24-government-security-vessel-fallback"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -5398,6 +5398,69 @@ def _security_category(row):
         return "Government Security Organisation"
     return ""
 
+def _security_vessel_service_hint(row):
+    """Recover a government service/operator from canonical vessel metadata or naming."""
+    vals=[]
+
+    def add(v):
+        s=_security_text(v)
+        if s and s not in vals:
+            vals.append(s)
+
+    for k in ("service","operator","owner","manager","organisation","organization"):
+        add(row.get(k))
+
+    meta=row.get("metadata")
+    if isinstance(meta,dict):
+        for k in ("service","operator","owner","manager","organisation","organization"):
+            add(meta.get(k))
+        ra=meta.get("research_attributes")
+        if isinstance(ra,dict):
+            for k in ("service","operator","owner","manager","organisation","organization"):
+                add(ra.get(k))
+
+    name=_security_text(row.get("name"))
+    n=name.casefold()
+    if n.startswith("uscgc "):
+        add("United States Coast Guard")
+    if n.startswith("ccgs "):
+        add("Canadian Coast Guard")
+    if n.startswith("jcg "):
+        add("Japan Coast Guard")
+    if n.startswith("icgs "):
+        add("Indian Coast Guard")
+
+    return vals
+
+
+def _match_security_org_ids(service_values, by_id, security_ids):
+    """Match readable service/operator text to canonical government/security entities."""
+    found=set()
+    norms=[_security_norm(v) for v in service_values if _security_norm(v)]
+    if not norms:
+        return found
+
+    aliases={
+        "us coast guard":"united states coast guard",
+        "u s coast guard":"united states coast guard",
+        "uscg":"united states coast guard",
+        "ccg":"canadian coast guard",
+        "jcg":"japan coast guard",
+        "icg":"indian coast guard",
+    }
+    norms=[aliases.get(n,n) for n in norms]
+
+    for eid in security_ids:
+        en=_security_norm(by_id.get(eid,{}).get("name"))
+        if not en:
+            continue
+        for n in norms:
+            if en==n or en in n or n in en:
+                found.add(eid)
+                break
+    return found
+
+
 @st.cache_data(show_spinner=False, ttl=45)
 def _live_government_security_model():
     """Canonical government/security discovery layer from the live Supabase graph."""
@@ -5556,10 +5619,27 @@ def _live_government_security_model():
                 "Record Status":_security_text(rr.get("record_status")),
             })
 
-        # Direct canonical owner/operator/manager IDs also count.
+        # Direct canonical owner/operator/manager IDs count, but many newly researched
+        # government vessels intentionally arrive before those FK columns are populated.
+        # Recover their service from metadata / vessel prefix as a safe discovery fallback.
+        inferred_vessel_orgs={}
         for m in mrows:
-            if any(_security_text(m.get(k)) in security_ids for k in ("owner_entity_id","operator_entity_id","manager_entity_id")):
-                linked_vessel_ids.add(_security_text(m.get("mobile_asset_id")))
+            vid=_security_text(m.get("mobile_asset_id"))
+            direct={
+                _security_text(m.get(k))
+                for k in ("owner_entity_id","operator_entity_id","manager_entity_id")
+                if _security_text(m.get(k)) in security_ids
+            }
+            inferred=_match_security_org_ids(
+                _security_vessel_service_hint(m),
+                by_id,
+                security_ids
+            )
+            orgs=direct | inferred
+            if orgs:
+                linked_vessel_ids.add(vid)
+                inferred_vessel_orgs[vid]=orgs
+
         for a in arows:
             if any(_security_text(a.get(k)) in security_ids for k in ("owner_entity_id","operator_entity_id")):
                 linked_asset_ids.add(_security_text(a.get("asset_id")))
@@ -5577,6 +5657,7 @@ def _live_government_security_model():
                 eid=_security_text(m.get(k))
                 if eid in security_ids:
                     linked_org_ids.add(eid)
+            linked_org_ids.update(inferred_vessel_orgs.get(vid,set()))
             linked_orgs=[_security_text(by_id.get(x,{}).get("name")) or x for x in sorted(linked_org_ids)]
             vcountries=[countries.get(x,"") for x in linked_org_ids if countries.get(x)]
             vessel_rows.append({
