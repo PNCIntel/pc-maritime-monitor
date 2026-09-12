@@ -2689,7 +2689,7 @@ elif page=="Staging Resolution":
         entity_tab,relationship_tab=st.tabs(["Entity / record resolution","Relationship resolution"])
 
         with entity_tab:
-            rows=[r for r in _resolution_rows(sb,3000) if r.get("target_table")!="pc_event_links"]
+            rows=[r for r in _resolution_rows(sb,3000) if r.get("target_table") not in {"pc_event_links","pc_relationships","research_bundle"} and r.get("target_entity_type") not in {"event_link","relationship"}]
             if not rows:
                 st.info("No metadata-driven entity/record resolution rows are available yet.")
             else:
@@ -2719,9 +2719,12 @@ elif page=="Staging Resolution":
                 job=jobs[labels.index(chosen)]
                 if st.button("Prepare + resolve entity records in this job",key="rerun_entity_resolution"):
                     try:
-                        prep=_prepare_staged_job_for_resolution(sb,job["ingestion_job_id"])
-                        result=_process_job_resolution(sb,job["ingestion_job_id"])
-                        st.success(f"Prepared {prep.get('updated',0)} staged row(s). Entity resolution complete: {result}")
+                        result=_rpc_data(sb,"pc_prepare_and_resolve_entity_job",{"p_ingestion_job_id":str(job["ingestion_job_id"])}) or {}
+                        st.success(
+                            f"Prepared {result.get('prepared',0)} row(s); resolved {result.get('total',0)} entity record(s): "
+                            f"{result.get('matched',0)} matched, {result.get('new',0)} new, "
+                            f"{result.get('ambiguous',0)} ambiguous, {result.get('invalid',0)} invalid."
+                        )
                         st.rerun()
                     except Exception as exc:
                         st.exception(exc)
