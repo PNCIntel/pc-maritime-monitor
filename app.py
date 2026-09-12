@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.21-group-scope-recompute-fix"
+APP_VERSION = "v3.3.22-direct-canonical-company-rollup"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2253,6 +2253,334 @@ def _company_name_matches(series, names):
         mask |= vals.str.startswith(root+" ",na=False)
     return mask
 
+@st.cache_data(show_spinner=False, ttl=30)
+def _live_canonical_company_rollup(entity_id, entity_name):
+    """Direct canonical company roll-up from Supabase.
+
+    This intentionally bypasses the legacy workbook projection for company profiles.
+    It uses the live pc_entities / pc_relationships / pc_assets / pc_mobile_assets tables
+    so newly-applied assets and vessels become visible immediately.
+    """
+    empty = {
+        "scope_ids": set(),
+        "relationships": pd.DataFrame(),
+        "assets": pd.DataFrame(),
+        "ports": pd.DataFrame(),
+        "terminals": pd.DataFrame(),
+        "vessels": pd.DataFrame(),
+        "vessel_relationships": pd.DataFrame(),
+        "error": "",
+    }
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            empty["error"] = "No Supabase client"
+            return empty
+
+        erows = pc_safe_rows(
+            sb, "pc_entities",
+            "entity_id,name,entity_type,subtype,hq_city,hq_country,status,record_status,metadata",
+            10000, order="name"
+        )
+        rrows = pc_safe_rows(
+            sb, "pc_relationships",
+            "relationship_id,source_type,source_id,relationship_type,target_type,target_id,"
+            "ownership_percent,operating_control,confidence,record_status,evidence_source_id,notes,metadata",
+            30000
+        )
+        arows = pc_safe_rows(
+            sb, "pc_assets",
+            "asset_id,name,asset_type,subtype,country,region_city,latitude,longitude,"
+            "operator_entity_id,owner_entity_id,capacity_value,capacity_unit,status,record_status,"
+            "data_quality,source_id,metadata",
+            20000, order="name"
+        )
+        mrows = pc_safe_rows(
+            sb, "pc_mobile_assets",
+            "mobile_asset_id,name,asset_type,subtype,imo,mmsi,registration,call_sign,flag,"
+            "year_built,dwt,capacity_value,capacity_unit,owner_entity_id,operator_entity_id,"
+            "manager_entity_id,status,record_status,data_quality,source_id,metadata",
+            20000, order="name"
+        )
+
+        entities = {str(r.get("entity_id") or "").strip(): str(r.get("name") or "").strip()
+                    for r in (erows or [])}
+        relationships = rrows or []
+
+        # Start from exact selected canonical ID.
+        scope = {str(entity_id).strip()}
+
+        # Also include obvious branded canonical variants, e.g. DP World UAE / DP World Southampton.
+        root = _company_name_key(entity_name)
+        if root:
+            for r in erows or []:
+                eid = str(r.get("entity_id") or "").strip()
+                nm = _company_name_key(r.get("name"))
+                if eid and (nm == root or nm.startswith(root + " ")):
+                    scope.add(eid)
+
+        down = {
+            "owns","owns_group_company","parent_of","controls","controlled_entity",
+            "subsidiary","subsidiary_of_group","consolidates","group_company",
+            "owns_51_percent","owns_60_percent","owns_70_percent","owns_81_percent",
+        }
+        reverse = {"subsidiary_of","owned_by","controlled_by","part_of","member_of"}
+
+        # Traverse corporate hierarchy up to five levels.
+        for _ in range(5):
+            added = set()
+            for rr in relationships:
+                st = str(rr.get("source_type") or "").casefold()
+                tt = str(rr.get("target_type") or "").casefold()
+                if st != "entity" or tt != "entity":
+                    continue
+                sid = str(rr.get("source_id") or "").strip()
+                tid = str(rr.get("target_id") or "").strip()
+                rel = str(rr.get("relationship_type") or "").strip().casefold().replace("-","_").replace(" ","_")
+
+                if sid in scope:
+                    if (
+                        rel in down
+                        or rel.startswith("owns_")
+                        or rel.startswith("parent_")
+                        or "group_company" in rel
+                        or rel == "controls"
+                    ):
+                        if tid and tid not in scope:
+                            added.add(tid)
+
+                if tid in scope and rel in reverse:
+                    if sid and sid not in scope:
+                        added.add(sid)
+
+            if not added:
+                break
+            scope.update(added)
+
+        # Operational graph targets for this corporate scope.
+        graph_assets = set()
+        graph_vessels = set()
+        rel_display = []
+        vessel_rel_display = []
+
+        for rr in relationships:
+            sid = str(rr.get("source_id") or "").strip()
+            tid = str(rr.get("target_id") or "").strip()
+            st = str(rr.get("source_type") or "").strip().casefold()
+            tt = str(rr.get("target_type") or "").strip().casefold()
+            rel = str(rr.get("relationship_type") or "").strip()
+            rel_norm = rel.casefold().replace("-","_").replace(" ","_")
+
+            if sid not in scope:
+                continue
+
+            target_name = entities.get(tid, tid)
+            if tt == "asset":
+                for a in arows or []:
+                    if str(a.get("asset_id") or "").strip() == tid:
+                        target_name = str(a.get("name") or tid)
+                        break
+                if rel_norm in {"operates","owns","manages","controls","administers",
+                                "concession_holder","invested_in","develops"}:
+                    graph_assets.add(tid)
+
+            elif tt in {"mobile_asset","vessel"}:
+                for m in mrows or []:
+                    if str(m.get("mobile_asset_id") or "").strip() == tid:
+                        target_name = str(m.get("name") or tid)
+                        break
+                if rel_norm in {"operates","owns","manages","charters","controls"}:
+                    graph_vessels.add(tid)
+                    vessel_rel_display.append({
+                        "Vessel ID": tid,
+                        "Vessel Name": target_name,
+                        "Company ID": sid,
+                        "Company": entities.get(sid, sid),
+                        "Relationship": pretty_relationship(rel),
+                        "Role": pretty_relationship(rel),
+                        "Source ID": str(rr.get("evidence_source_id") or "").strip(),
+                    })
+
+            rel_display.append({
+                "Relationship ID": str(rr.get("relationship_id") or "").strip(),
+                "Source Entity": sid,
+                "Source": entities.get(sid, sid),
+                "Source Type": st,
+                "Relationship": rel,
+                "Target Entity": tid,
+                "Target": target_name,
+                "Target Type": tt,
+                "Ownership %": rr.get("ownership_percent"),
+                "Operating Control": rr.get("operating_control"),
+                "Confidence": rr.get("confidence"),
+                "Record Status": str(rr.get("record_status") or "").strip(),
+                "Source ID": str(rr.get("evidence_source_id") or "").strip(),
+                "Notes": str(rr.get("notes") or "").strip(),
+                "Metadata": rr.get("metadata") or {},
+            })
+
+        # Direct owner/operator links in pc_assets are equally authoritative.
+        live_assets = []
+        ports = []
+        terminals = []
+        for a in arows or []:
+            aid = str(a.get("asset_id") or "").strip()
+            owner = str(a.get("owner_entity_id") or "").strip()
+            operator = str(a.get("operator_entity_id") or "").strip()
+            if aid not in graph_assets and owner not in scope and operator not in scope:
+                continue
+
+            meta = a.get("metadata") if isinstance(a.get("metadata"), dict) else {}
+            research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
+            name = str(a.get("name") or "").strip()
+            atype = str(a.get("asset_type") or "").strip()
+            subtype = str(a.get("subtype") or "").strip()
+            company_id = operator or owner
+            company_name = entities.get(company_id, company_id)
+
+            base = {
+                "Asset ID": aid,
+                "Asset": name,
+                "Asset Type": atype,
+                "Subtype": subtype,
+                "Company ID": company_id,
+                "Owner / Operator Company ID": company_id,
+                "Company": company_name,
+                "Country": str(a.get("country") or research.get("country") or "").strip(),
+                "City / Area": str(a.get("region_city") or research.get("city_region") or research.get("city") or "").strip(),
+                "Latitude": a.get("latitude"),
+                "Longitude": a.get("longitude"),
+                "Status": str(a.get("status") or a.get("record_status") or "").strip(),
+                "Record Status": str(a.get("record_status") or "").strip(),
+                "Relationship / Role": "",
+                "Capacity": a.get("capacity_value") or research.get("capacity") or "",
+                "Metadata": meta,
+            }
+            live_assets.append(base)
+
+            nk = f"{name} {atype} {subtype}".casefold()
+            explicit_port = any(x in nk for x in (" port","port ","harbour","harbor"))
+            is_terminal = any(x in nk for x in ("terminal","depot","warehouse","logistics","yard","crossdock"))
+
+            if explicit_port:
+                ports.append({
+                    "Port ID": aid,
+                    "Port / Facility": name,
+                    "Country": base["Country"],
+                    "City / Area": base["City / Area"],
+                    "Facility Type": atype or subtype,
+                    "Operator Company ID": operator,
+                    "Operator": entities.get(operator, operator),
+                    "Owner Company ID": owner,
+                    "Status": base["Status"],
+                    "Latitude": base["Latitude"],
+                    "Longitude": base["Longitude"],
+                    "Key Role": str(research.get("operating_role") or research.get("strategic_role") or "").strip(),
+                    "Metadata": meta,
+                })
+
+            if is_terminal:
+                terminals.append({
+                    "Terminal ID": aid,
+                    "Terminal / Facility": name,
+                    "Port ID": str(research.get("parent_port_id") or "").strip(),
+                    "Parent Port": str(research.get("parent_port") or "").strip(),
+                    "Country": base["Country"],
+                    "City / Area": base["City / Area"],
+                    "Primary Operator Company ID": operator or owner,
+                    "Operator / Network": entities.get(operator or owner, operator or owner),
+                    "Status": base["Status"],
+                    "Ownership / Structure": "",
+                    "Facility Type": atype or subtype,
+                    "Latitude": base["Latitude"],
+                    "Longitude": base["Longitude"],
+                    "Metadata": meta,
+                })
+
+        # Direct owner/operator/manager links plus canonical graph vessel edges.
+        live_vessels = []
+        for m in mrows or []:
+            vid = str(m.get("mobile_asset_id") or "").strip()
+            owner = str(m.get("owner_entity_id") or "").strip()
+            operator = str(m.get("operator_entity_id") or "").strip()
+            manager = str(m.get("manager_entity_id") or "").strip()
+            if vid not in graph_vessels and owner not in scope and operator not in scope and manager not in scope:
+                continue
+
+            meta = m.get("metadata") if isinstance(m.get("metadata"), dict) else {}
+            research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
+            cap = m.get("capacity_value")
+            if cap in (None, ""):
+                cap = research.get("capacity")
+            live_vessels.append({
+                "Vessel ID": vid,
+                "Vessel Name": str(m.get("name") or "").strip(),
+                "IMO": str(m.get("imo") or "").strip(),
+                "MMSI": str(m.get("mmsi") or "").strip(),
+                "Call Sign": str(m.get("call_sign") or "").strip(),
+                "Flag": str(m.get("flag") or "").strip(),
+                "Vessel Type": str(m.get("asset_type") or "").strip(),
+                "Subtype / Class": str(m.get("subtype") or "").strip(),
+                "Year Built": m.get("year_built"),
+                "DWT": m.get("dwt"),
+                "Capacity": cap,
+                "Capacity Unit": str(m.get("capacity_unit") or "").strip(),
+                "Owner Company ID": owner,
+                "Operator Company ID": operator,
+                "Manager Company ID": manager,
+                "Owner": entities.get(owner, owner),
+                "Operator": entities.get(operator, operator),
+                "Manager": entities.get(manager, manager),
+                "Owner / Operator Text": " / ".join(
+                    x for x in [entities.get(owner, owner), entities.get(operator, operator)] if x
+                ),
+                "Status": str(m.get("status") or m.get("record_status") or "").strip(),
+                "Record Status": str(m.get("record_status") or "").strip(),
+                "Data Quality": str(m.get("data_quality") or "").strip(),
+                "Source ID": str(m.get("source_id") or "").strip(),
+                "Notes": str(meta.get("notes") or "").strip(),
+                "Metadata": meta,
+            })
+
+        return {
+            "scope_ids": scope,
+            "relationships": pd.DataFrame(rel_display),
+            "assets": pd.DataFrame(live_assets),
+            "ports": pd.DataFrame(ports),
+            "terminals": pd.DataFrame(terminals),
+            "vessels": pd.DataFrame(live_vessels),
+            "vessel_relationships": pd.DataFrame(vessel_rel_display),
+            "error": "",
+        }
+
+    except Exception as exc:
+        empty["error"] = f"{type(exc).__name__}: {exc}"
+        return empty
+
+
+def _overlay_live_company_rollup(prof, entity_id, entity_name):
+    live = _live_canonical_company_rollup(entity_id, entity_name)
+    prof["live_rollup_error"] = live.get("error","")
+    prof["live_scope_ids"] = live.get("scope_ids",set())
+
+    def _merge(existing, incoming, keys):
+        if incoming is None or incoming.empty:
+            return existing
+        if existing is None or existing.empty:
+            return incoming.copy()
+        combined = pd.concat([existing,incoming],ignore_index=True,sort=False)
+        dk=[k for k in keys if k in combined.columns]
+        return combined.drop_duplicates(subset=dk,keep="last") if dk else combined
+
+    prof["relationships"] = _merge(prof.get("relationships"), live.get("relationships"), ["Relationship ID"])
+    prof["assets"] = _merge(prof.get("assets"), live.get("assets"), ["Asset ID"])
+    prof["ports"] = _merge(prof.get("ports"), live.get("ports"), ["Port ID"])
+    prof["port_terminals"] = _merge(prof.get("port_terminals"), live.get("terminals"), ["Terminal ID"])
+    prof["maritime_vessels"] = _merge(prof.get("maritime_vessels"), live.get("vessels"), ["Vessel ID"])
+    prof["vessel_relationships"] = _merge(prof.get("vessel_relationships"), live.get("vessel_relationships"), ["Vessel ID","Company ID","Relationship"])
+    return prof
+
+
 def build_company_profile(entity_id, entity_name):
     prof={}
     prof["company_id"]=entity_id
@@ -2756,6 +3084,8 @@ def build_company_profile(entity_id, entity_name):
         prof["sanctions_links"]=pd.DataFrame()
     prof["sanctions_designations"]=des[des["Designation ID"].astype(str).isin(sanc_ids)].copy() if (sanc_ids and not des.empty and "Designation ID" in des.columns) else pd.DataFrame()
 
+    # Final authoritative live overlay: canonical DB wins over workbook/migration projections.
+    prof=_overlay_live_company_rollup(prof,entity_id,entity_name)
     return prof
 
 def profile_count(prof,key):
