@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.15-relationship-graph-runtime-fix"
+APP_VERSION = "v3.3.17-live-vessels-fix"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -173,6 +173,57 @@ div[data-testid="stLinkButton"] a:visited,
 
 </style>
 """, unsafe_allow_html=True)
+
+if st.session_state.get("pc_trade_appearance","Dark") == "Light":
+    st.markdown("""
+    <style>
+    :root{
+      --bg:#f5f7fa;--panel:#ffffff;--panel2:#f0f3f7;--border:#cbd5e1;
+      --text:#16202a;--muted:#5d6b7a;--gold:#9a7626;--blue:#176aa3
+    }
+    .stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"]{
+      background:var(--bg)!important;color:var(--text)!important
+    }
+    [data-testid="stSidebar"]{
+      background:#eef2f6!important;border-right:1px solid var(--border)!important
+    }
+    h1,h2,h3,h4,h5,h6,p,li,span,label{color:var(--text)!important}
+    .pc-card,.pc-feed,.pc-object-card,.pc-workspace-card,.pc-rel{
+      background:#ffffff!important;border-color:var(--border)!important
+    }
+    .pc-hero{background:linear-gradient(120deg,#ffffff,#eef3f8)!important;border-color:var(--border)!important}
+    .pc-sub,.pc-small,.pc-label,.pc-feed-meta,.pc-search-details,.pc-workspace-card p,.pc-hero-copy{
+      color:var(--muted)!important
+    }
+    div[role="radiogroup"] label{
+      background:#ffffff!important;border-color:var(--border)!important
+    }
+    div[role="radiogroup"] label:has(input:checked){
+      background:#e6edf5!important;border-color:#9a7626!important
+    }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:hover{background:#e4eaf1!important}
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked){
+      background:#dfe8f2!important;border-left:3px solid #9a7626!important
+    }
+    [data-baseweb="tab"]{color:#16202a!important}
+    [data-baseweb="select"]>div,[data-baseweb="input"]>div,.stTextInput input{
+      background:#ffffff!important;color:#16202a!important;border-color:#cbd5e1!important
+    }
+    .stButton > button,.stDownloadButton > button,
+    a[data-testid="stLinkButton"],div[data-testid="stLinkButton"] a,.stLinkButton a{
+      background:#ffffff!important;color:#29465f!important;border-color:#b8c3cf!important
+    }
+    .stButton > button p,.stDownloadButton > button p{color:#29465f!important}
+    .stDataFrame{border-color:#cbd5e1!important}
+    [data-testid="stHeader"],header[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecoration"]{
+      background:#f5f7fa!important;color:#16202a!important
+    }
+    [data-testid="stHeader"] *,[data-testid="stToolbar"] *{color:#16202a!important}
+    [data-testid="stHeader"] svg,[data-testid="stToolbar"] svg{fill:#16202a!important;color:#16202a!important}
+    .pc-bar-label,.pc-detail-value{color:#16202a!important}
+    .pc-bar-track{background:#e9eef4!important;border-color:#cbd5e1!important}
+    </style>
+    """, unsafe_allow_html=True)
 
 # ---------- workbook loading ----------
 WORKBOOKS = {
@@ -881,11 +932,15 @@ def _canonical_db_vessel_frames():
         if sb is None:
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
+        # Keep this projection deliberately limited to columns verified in the
+        # canonical pc_mobile_assets schema. Earlier builds requested optional fields
+        # such as capacity_value/dwt/data_quality; one absent field made PostgREST
+        # return no rows and the entire Trade vessel universe appeared as zero.
         vrows = pc_safe_rows(
             sb,
             "pc_mobile_assets",
-            "mobile_asset_id,name,asset_type,subtype,imo,mmsi,registration,call_sign,flag,year_built,dwt,capacity_value,capacity_unit,owner_entity_id,operator_entity_id,manager_entity_id,status,record_status,data_quality,source_id,metadata,created_at,updated_at",
-            5000,
+            "mobile_asset_id,name,asset_type,subtype,imo,status,record_status,metadata",
+            10000,
             order="name",
         )
         erows = pc_safe_rows(
@@ -959,19 +1014,20 @@ def _canonical_db_vessel_frames():
                     oo.append(x)
             owner_operator = " / ".join(oo)
 
+            research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
             vessels.append({
                 "Vessel ID": str(r.get("mobile_asset_id") or "").strip(),
                 "Vessel Name": str(r.get("name") or "").strip(),
                 "IMO": _db_norm_imo(r.get("imo")),
-                "MMSI": str(r.get("mmsi") or "").strip(),
-                "Call Sign": str(r.get("call_sign") or "").strip(),
-                "Flag": str(r.get("flag") or "").strip(),
+                "MMSI": str(research.get("mmsi") or meta.get("mmsi") or "").strip(),
+                "Call Sign": str(research.get("call_sign") or meta.get("call_sign") or "").strip(),
+                "Flag": str(research.get("flag") or meta.get("flag") or "").strip(),
                 "Vessel Type": str(r.get("asset_type") or "").strip(),
                 "Subtype / Class": str(r.get("subtype") or "").strip(),
-                "Year Built": r.get("year_built"),
-                "DWT": r.get("dwt"),
-                "Capacity": r.get("capacity_value"),
-                "Capacity Unit": str(r.get("capacity_unit") or "").strip(),
+                "Year Built": research.get("year_built") or meta.get("year_built"),
+                "DWT": research.get("dwt") or meta.get("dwt"),
+                "Capacity": research.get("capacity") or research.get("capacity_value") or meta.get("capacity"),
+                "Capacity Unit": str(research.get("capacity_unit") or meta.get("capacity_unit") or "").strip(),
                 "Owner Company ID": owner_id,
                 "Operator Company ID": operator_id,
                 "Manager Company ID": manager_id,
@@ -981,8 +1037,8 @@ def _canonical_db_vessel_frames():
                 "Owner / Operator Text": owner_operator,
                 "Status": str(r.get("status") or r.get("record_status") or "").strip(),
                 "Record Status": str(r.get("record_status") or "").strip(),
-                "Data Quality": str(r.get("data_quality") or "").strip(),
-                "Source ID": str(r.get("source_id") or "").strip(),
+                "Data Quality": str(research.get("data_quality") or meta.get("data_quality") or "").strip(),
+                "Source ID": str(research.get("source_id") or meta.get("source_id") or "").strip(),
                 "Notes": str(meta.get("note") or meta.get("notes") or "").strip(),
                 "Completeness Note": (
                     "Canonical Supabase mobile-asset record."
@@ -5062,6 +5118,22 @@ def render_trade_regional_maps():
 # ---------- workspace navigation ----------
 st.sidebar.markdown("<div class='pc-kicker'>Power & Corridors Intelligence</div>",unsafe_allow_html=True)
 st.sidebar.markdown("### Trade System")
+st.sidebar.markdown("### Controls")
+st.sidebar.radio(
+    "Appearance",
+    ["Dark","Light"],
+    horizontal=True,
+    key="pc_trade_appearance",
+)
+if st.sidebar.button("↻ Refresh database", use_container_width=True, key="pc_trade_refresh_database"):
+    st.cache_data.clear()
+    try:
+        st.cache_resource.clear()
+    except Exception:
+        pass
+    st.rerun()
+st.sidebar.caption("Refresh after applying records or relationships in Power Admin.")
+
 _bst=backend_status()
 st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend")
 
@@ -7427,8 +7499,4 @@ elif page=="Data":
     display_df(df,600,show_ids=show_debug_ids)
 
 st.sidebar.markdown("---")
-if st.sidebar.button("Refresh live database", use_container_width=True, key="refresh_live_canonical_db"):
-    st.cache_data.clear()
-    st.rerun()
-st.sidebar.caption("Canonical Supabase layers refresh automatically every ~60 seconds; use the button after a Power Admin apply.")
 st.sidebar.caption(f"{len(TABLES):,} tables loaded · {RELEASE_NAME}")

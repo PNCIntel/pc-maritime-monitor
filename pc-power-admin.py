@@ -39,6 +39,38 @@ input, [data-baseweb="input"] input{
 .pc-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px}.pc-k{color:var(--gold);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}
 </style>""",unsafe_allow_html=True)
 
+if st.session_state.get("pc_admin_appearance","Dark") == "Light":
+    st.markdown("""
+    <style>
+    :root{--bg:#f5f7fa;--panel:#ffffff;--line:#cbd5e1;--text:#16202a;--muted:#5d6b7a;--gold:#9a7626}
+    .stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"]{
+      background:var(--bg)!important;color:var(--text)!important
+    }
+    [data-testid="stSidebar"]{background:#eef2f6!important;border-right:1px solid #cbd5e1!important}
+    h1,h2,h3,h4,p,label,span,li{color:var(--text)!important}
+    .pc-card{background:#ffffff!important;border-color:#cbd5e1!important}
+    textarea,[data-baseweb="textarea"] textarea,[data-testid="stTextArea"] textarea{
+      background:#ffffff!important;color:#111827!important;-webkit-text-fill-color:#111827!important
+    }
+    [data-testid="stTextArea"] > div,[data-testid="stTextArea"] [data-baseweb="textarea"]{background:#ffffff!important}
+    input,[data-baseweb="input"] input{
+      background:#ffffff!important;color:#111827!important;-webkit-text-fill-color:#111827!important
+    }
+    [data-baseweb="select"]>div,[data-baseweb="input"]>div{
+      background:#ffffff!important;color:#111827!important;border-color:#cbd5e1!important
+    }
+    [data-baseweb="tab"]{color:#16202a!important}
+    .stButton > button,.stDownloadButton > button{
+      background:#ffffff!important;color:#29465f!important;border:1px solid #b8c3cf!important
+    }
+    .stButton > button p,.stDownloadButton > button p{color:#29465f!important}
+    [data-testid="stHeader"],header[data-testid="stHeader"],[data-testid="stToolbar"]{
+      background:#f5f7fa!important;color:#16202a!important
+    }
+    [data-testid="stHeader"] *,[data-testid="stToolbar"] *{color:#16202a!important}
+    </style>
+    """,unsafe_allow_html=True)
+
 if os.getenv("PC_REQUIRE_AUTH","false").lower()=="true":
     ctx=require_super_admin()
 else:
@@ -47,6 +79,23 @@ else:
 sb=service_client()
 st.sidebar.markdown("<div class='pc-k'>Power & Corridors</div>",unsafe_allow_html=True)
 st.sidebar.markdown("## Power Admin")
+st.sidebar.markdown("### Controls")
+st.sidebar.radio(
+    "Appearance",
+    ["Dark","Light"],
+    horizontal=True,
+    key="pc_admin_appearance",
+)
+if st.sidebar.button("↻ Refresh database", use_container_width=True, key="pc_admin_refresh_database"):
+    st.cache_data.clear()
+    try:
+        st.cache_resource.clear()
+    except Exception:
+        pass
+    st.rerun()
+st.sidebar.caption("Refresh after applying staging or relationship changes.")
+st.sidebar.markdown("---")
+
 PAGES=["Dashboard","Migration","Database Coverage","Data Completion","Model Registry","Batch Staging","Staging Resolution","Review Queue","ReCAAP Vessel Resolver","Organizations","Users & Access","Research Jobs","Trade System Builder","Market Data","Governance & Quality"]
 
 # ---------------------------------------------------------------------------

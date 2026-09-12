@@ -94,6 +94,22 @@ with st.sidebar:
         index=default_idx,
         key="pc_combined_product",
     )
+    appearance = st.radio(
+        "Appearance",
+        ["Dark","Light"],
+        horizontal=True,
+        key="pc_combined_appearance",
+    )
+    st.session_state["pc_trade_appearance"] = appearance
+    st.session_state["pc_intel_appearance"] = appearance
+    if st.button("↻ Refresh database", use_container_width=True, key="pc_combined_refresh_database"):
+        st.cache_data.clear()
+        try:
+            st.cache_resource.clear()
+        except Exception:
+            pass
+        st.rerun()
+    st.caption("Refresh after Power Admin applies canonical changes.")
     st.divider()
 
 slug = "intelligence" if product == "P&C Intelligence" else "trade"

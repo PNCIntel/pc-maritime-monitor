@@ -139,6 +139,26 @@ div[data-testid="stLinkButton"] a:visited,
     unsafe_allow_html=True,
 )
 
+if st.session_state.get("pc_intel_appearance","Dark") == "Light":
+    st.markdown("""
+    <style>
+    :root{
+      --pc-bg:#f5f7fa;--pc-panel:#ffffff;--pc-panel-2:#eef2f6;--pc-line:#cbd5e1;
+      --pc-ivory:#16202a;--pc-muted:#5d6b7a;--pc-gold:#9a7626;--pc-gold-soft:#b08a34
+    }
+    .stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"]{background:#f5f7fa!important;color:#16202a!important}
+    [data-testid="stSidebar"]{background:#eef2f6!important;border-right:1px solid #cbd5e1!important}
+    [data-testid="stSidebar"] *{color:#16202a!important}
+    h1,h2,h3,h4,p,li,label,span{color:#16202a!important}
+    .pc-card,[data-testid="stMetric"],[data-testid="stExpander"]{background:#ffffff!important;border-color:#cbd5e1!important}
+    [data-testid="stMetricLabel"],.pc-card-body,.pc-section-copy,.small-note{color:#5d6b7a!important}
+    [data-testid="stMetricValue"]{color:#16202a!important}
+    [data-baseweb="select"]>div,[data-baseweb="input"]>div,input,textarea{background:#ffffff!important;color:#16202a!important}
+    .stButton>button{background:#ffffff!important;color:#29465f!important;border-color:#b8c3cf!important}
+    [data-testid="stHeader"],[data-testid="stToolbar"]{background:#f5f7fa!important;color:#16202a!important}
+    </style>
+    """,unsafe_allow_html=True)
+
 # -----------------------------------------------------------------------------
 # Data helpers — all reads are from the same Excel-backed P&C model
 # -----------------------------------------------------------------------------
@@ -461,10 +481,65 @@ def _canonical_db_event_frames():
     except Exception:
         return pd.DataFrame(), pd.DataFrame()
 
+# Canonical vessel registry from Supabase.
+@st.cache_data(show_spinner=False, ttl=60)
+def _canonical_db_vessels():
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame()
+
+        rows = pc_safe_rows(
+            sb,
+            "pc_mobile_assets",
+            "mobile_asset_id,name,asset_type,subtype,imo,status,record_status,metadata",
+            10000,
+            order="name",
+        )
+        if not rows:
+            return pd.DataFrame()
+
+        out=[]
+        for r in rows:
+            meta=r.get("metadata") if isinstance(r.get("metadata"),dict) else {}
+            research=meta.get("research_attributes") if isinstance(meta.get("research_attributes"),dict) else {}
+            out.append({
+                "Vessel ID":str(r.get("mobile_asset_id") or "").strip(),
+                "Vessel Name":str(r.get("name") or "").strip(),
+                "IMO":str(r.get("imo") or "").strip(),
+                "Vessel Type":str(r.get("asset_type") or "").strip(),
+                "Subtype / Class":str(r.get("subtype") or "").strip(),
+                "Flag":str(research.get("flag") or meta.get("flag") or "").strip(),
+                "Status":str(r.get("status") or r.get("record_status") or "").strip(),
+                "Record Status":str(r.get("record_status") or "").strip(),
+                "Metadata":meta,
+            })
+        return pd.DataFrame(out)
+    except Exception:
+        return pd.DataFrame()
+
+
 # Core canonical datasets
 companies = xl("01_core_entities.xlsx", "Companies")
 ports = xl("02_maritime.xlsx", "Ports")
-vessels = xl("02_maritime.xlsx", "Vessels")
+_legacy_vessels = xl("02_maritime.xlsx", "Vessels")
+_db_vessels = _canonical_db_vessels()
+if not _db_vessels.empty:
+    if _legacy_vessels is None or _legacy_vessels.empty:
+        vessels = _db_vessels
+    else:
+        _old=_legacy_vessels.copy()
+        _new=_db_vessels.copy()
+        _ids=set(_new["Vessel ID"].fillna("").astype(str)) if "Vessel ID" in _new.columns else set()
+        _imos=set(_new["IMO"].fillna("").astype(str)) if "IMO" in _new.columns else set()
+        _keep=pd.Series(True,index=_old.index)
+        if "Vessel ID" in _old.columns and _ids:
+            _keep &= ~_old["Vessel ID"].fillna("").astype(str).isin(_ids)
+        if "IMO" in _old.columns and _imos:
+            _keep &= ~_old["IMO"].fillna("").astype(str).isin(_imos)
+        vessels=pd.concat([_old[_keep],_new],ignore_index=True,sort=False)
+else:
+    vessels=_legacy_vessels
 vessel_restrictions = xl("02_maritime.xlsx", "Vessel Restrictions")
 aircraft = xl("05_aviation.xlsx", "Aircraft Registry")
 infra_assets = xl("06_infrastructure.xlsx", "Assets")
@@ -523,6 +598,23 @@ st.sidebar.markdown(
     </div>''', unsafe_allow_html=True
 )
 
+st.sidebar.markdown("### Controls")
+st.sidebar.radio(
+    "Appearance",
+    ["Dark","Light"],
+    horizontal=True,
+    key="pc_intel_appearance",
+)
+if st.sidebar.button("↻ Refresh database",use_container_width=True,key="pc_intel_refresh_database"):
+    st.cache_data.clear()
+    try:
+        st.cache_resource.clear()
+    except Exception:
+        pass
+    st.rerun()
+st.sidebar.caption("Refresh after Power Admin applies new events, vessels, assets or relationships.")
+st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
+
 NAV = {
     "INTELLIGENCE DESK": ["Operating Picture", "Alerts & Incidents"],
     "FORWARD MONITORING": ["Watch Areas", "Monitoring & Indicators"],
@@ -570,7 +662,7 @@ with st.sidebar.expander("Data status", expanded=False):
     else:
         st.error("09_intelligence.xlsx is missing from /data.")
 
-    if st.button("Refresh data", key="refresh_excel_data"):
+    if st.button("Refresh database", key="refresh_excel_data"):
         st.cache_data.clear()
         st.rerun()
 
@@ -1158,7 +1250,7 @@ elif page == "Regional Security":
     else:
         st.warning(
             "Latest Gulf dataset not detected. Replace /data/13_events_hazards.xlsx "
-            "with the latest workbook and use Data status → Refresh Excel data."
+            "with the latest workbook and use Data status → Refresh database."
         )
 
     region_names=list(REGIONAL_SECURITY_AREAS.keys())
