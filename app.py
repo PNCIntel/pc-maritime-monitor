@@ -2,6 +2,7 @@ from pathlib import Path
 import sys
 import os
 import re
+import hashlib
 from difflib import SequenceMatcher
 import json
 import html as html_lib
@@ -30,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.14-live-relationship-visual-fix"
+APP_VERSION = "v3.3.15-relationship-graph-runtime-fix"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -1292,6 +1293,7 @@ def _canonical_db_core_trade_frames():
             atype = str(r.get("asset_type") or "").strip()
             subtype = str(r.get("subtype") or "").strip()
             kind = f"{atype} {subtype}".casefold()
+            name_kind = f"{name} {atype} {subtype}".casefold()
             meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
             research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
 
@@ -1323,8 +1325,10 @@ def _canonical_db_core_trade_frames():
             }
             infra_assets.append(base)
 
-            # Port-level assets.
-            if ("port" in kind or "harbour" in kind or "harbor" in kind) and "terminal" not in kind:
+            # Port-level assets. Include explicit port names even when subtype metadata is generic.
+            # A port can also contain/represent a terminal, so do not suppress an explicit "... Port" name.
+            _explicit_port_name = any(tok in name.casefold() for tok in (" port","port ","harbour","harbor"))
+            if ("port" in kind or "harbour" in kind or "harbor" in kind or _explicit_port_name):
                 port_rows.append({
                     "Port ID": aid,
                     "Port / Facility": name,
@@ -1342,7 +1346,7 @@ def _canonical_db_core_trade_frames():
                 })
 
             # Terminal / depot / warehouse / logistics-facility assets.
-            if any(term in kind for term in ("terminal", "depot", "warehouse", "logistics", "crossdock", "yard")):
+            if any(term in name_kind for term in ("terminal", "depot", "warehouse", "logistics", "crossdock", "yard")):
                 terminal_rows.append({
                     "Terminal ID": aid,
                     "Terminal / Facility": name,
