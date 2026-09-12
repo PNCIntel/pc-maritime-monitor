@@ -813,6 +813,12 @@ def _prepare_canonical_candidates(sb, job_id):
     return data or {}
 
 
+def _repair_unresolved_identity_candidates(sb, job_id):
+    """SQL 017: force a deterministic identity decision for still-unresolved staged identity rows."""
+    data=_rpc_data(sb,"pc_repair_unresolved_identity_candidates",{"p_ingestion_job_id":str(job_id)})
+    return data or {}
+
+
 # ---------------------------------------------------------------------------
 # Semantic completion helpers
 # ---------------------------------------------------------------------------
@@ -3200,10 +3206,18 @@ elif page=="Review Queue":
                         format_func=lambda jid: f"{(_job_by_id.get(jid) or {}).get('title') or 'Ingestion job'} | {jid}",
                         key="review_prepare_candidate_job"
                     )
-                    if st.button("Prepare canonical IDs + resolve candidates",key="review_prepare_candidates"):
+                    _prep_c1,_prep_c2=st.columns(2)
+                    if _prep_c1.button("Prepare canonical IDs + resolve candidates",key="review_prepare_candidates"):
                         try:
                             _prep_result=_prepare_canonical_candidates(sb,_prep_choice)
                             st.success(f"Candidate preparation complete: {_prep_result}")
+                            st.rerun()
+                        except Exception as exc:
+                            st.exception(exc)
+                    if _prep_c2.button("Repair remaining UNRESOLVED as MATCHED / NEW",key="review_repair_unresolved"):
+                        try:
+                            _repair_result=_repair_unresolved_identity_candidates(sb,_prep_choice)
+                            st.success(f"Unresolved identity repair complete: {_repair_result}")
                             st.rerun()
                         except Exception as exc:
                             st.exception(exc)
@@ -3250,6 +3264,7 @@ elif page=="Review Queue":
                             "Table": r.get("target_table"),
                             "Resolution": r.get("resolution_status") or "UNRESOLVED",
                             "Resolved ID": r.get("resolved_entity_id"),
+                            "Candidate ID": (r.get("payload") or {}).get({"pc_entities":"entity_id","pc_assets":"asset_id","pc_mobile_assets":"mobile_asset_id","pc_events":"event_id"}.get(r.get("target_table"),"")) if isinstance(r.get("payload"),dict) else None,
                             "Match": r.get("resolution_method"),
                             "Confidence": round(v["confidence"],2),
                             "Sources": v["sources"],
