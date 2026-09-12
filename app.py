@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.33-trade-home-information-architecture"
+APP_VERSION = "v3.3.34-operational-brief-cards"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -7110,20 +7110,65 @@ def _render_quick_access():
         if st.button(label,use_container_width=True,key='homequick_'+label.replace(' ','_')):
             request_nav(target); st.rerun()
 
+
 def _render_operational_brief():
     st.markdown("### Operational brief")
-    st.caption("Short business-impact summary; full incident detail stays off the homepage.")
+    st.caption("Four concise trade-impact items. Full incident detail stays in Intelligence.")
+
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     if events.empty:
-        st.caption("No current operational records."); return
-    dc=_first_existing_col(events,["Date","Start Date","Event Date"])
-    if dc:
-        events['_d']=pd.to_datetime(events[dc],errors='coerce'); events=events.sort_values('_d',ascending=False,na_position='last')
-    tc=_first_existing_col(events,["Title","Event","Event Title"]); ic=_first_existing_col(events,["Trade / Commercial Impact","Commercial Impact","Operational Impact"]); lc=_first_existing_col(events,["Location","Region","Country"]); sc=_first_existing_col(events,["Status","Event Status"])
-    rows=[]
-    for _,r in events.head(8).iterrows():
-        rows.append({"Date":r.get(dc,'') if dc else '',"Issue":r.get(tc,'') if tc else '',"Business impact":r.get(ic,'') if ic else '',"Location":r.get(lc,'') if lc else '',"Status":r.get(sc,'') if sc else ''})
-    display_df(pd.DataFrame(rows),280)
+        st.caption("No current operational records.")
+        return
+
+    date_col=_first_existing_col(events,["Date","Start Date","Event Date"])
+    if date_col:
+        events["_d"]=pd.to_datetime(events[date_col],errors="coerce")
+        events=events.sort_values("_d",ascending=False,na_position="last")
+
+    title_col=_first_existing_col(events,["Title","Event","Event Title"])
+    impact_col=_first_existing_col(events,["Trade / Commercial Impact","Commercial Impact","Operational Impact"])
+    location_col=_first_existing_col(events,["Location","Region","Country"])
+    status_col=_first_existing_col(events,["Status","Event Status"])
+    severity_col=_first_existing_col(events,["Severity","Risk","Risk Level"])
+
+    # Prefer rows that actually contain a business/commercial consequence.
+    if impact_col:
+        impacted=events[events[impact_col].astype(str).str.strip().ne("")]
+        if not impacted.empty:
+            events=impacted
+
+    for _,r in events.head(4).iterrows():
+        title=str(r.get(title_col,"") if title_col else "").strip() or "Operational issue"
+        impact=str(r.get(impact_col,"") if impact_col else "").strip()
+        location=str(r.get(location_col,"") if location_col else "").strip()
+        status=str(r.get(status_col,"") if status_col else "").strip()
+        severity=str(r.get(severity_col,"") if severity_col else "").strip()
+        date=str(r.get(date_col,"") if date_col else "").strip()
+
+        if len(title) > 92:
+            title=title[:89].rstrip()+"…"
+        if len(impact) > 145:
+            impact=impact[:142].rstrip()+"…"
+
+        meta=" · ".join(x for x in [date,severity,status,location] if x)
+
+        st.markdown(
+            f"""<div class="pc-card" style="padding:12px 14px;margin-bottom:10px;">
+            <div class="pc-label">{html_lib.escape(meta)}</div>
+            <div style="font-weight:700;font-size:0.98rem;line-height:1.35;margin:5px 0 6px;">
+                {html_lib.escape(title)}
+            </div>
+            <div class="pc-card-body" style="font-size:0.9rem;line-height:1.4;">
+                {html_lib.escape(impact)}
+            </div>
+            </div>""",
+            unsafe_allow_html=True
+        )
+
+    if st.button("Open operational events",use_container_width=True,key="home_operational_events"):
+        request_nav("Alerts & Disruptions")
+        st.rerun()
+
 
 if page=="Overview":
     header("Trade System","Companies, infrastructure, fleets, contracts, investment, corridors and operating activity across the global trade network.")
@@ -7136,7 +7181,7 @@ if page=="Overview":
             for _,h in hits.head(10).iterrows(): readable_search_card(h)
 
     st.markdown("---")
-    main,right=st.columns([3.35,1.0],gap="large")
+    main,right=st.columns([3.0,1.15],gap="large")
     with main:
         _render_trade_pulse()
         st.markdown("---")
