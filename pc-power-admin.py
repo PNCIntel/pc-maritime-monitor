@@ -1204,7 +1204,18 @@ Return JSON with this shape:
 }
 
 Allowed target tables:
-""" + ", ".join(sorted(AI_ALLOWED_TABLES))
+""" + ", ".join(sorted(AI_ALLOWED_TABLES)) + """
+
+For pc_relationships records specifically, ALWAYS include human-readable endpoint labels as well as types:
+- source_type: logical endpoint type (entity, asset, mobile_asset, geography, event)
+- source_name: researched/canonical human-readable source name
+- source_id: canonical P&C ID only when supplied in canonical context and deterministically matched; otherwise omit/null
+- relationship_type: e.g. operates, owns, invested_in, manages, controls
+- target_type: logical endpoint type
+- target_name: researched/canonical human-readable target name
+- target_id: canonical P&C ID only when supplied in canonical context and deterministically matched; otherwise omit/null
+Do not return a pc_relationships proposal without source_name and target_name.
+"""
 
 
 def _jsonable(v):
@@ -2825,6 +2836,9 @@ elif page=="Staging Resolution":
                 g4.metric("Partial",int((gstatuses=="PARTIAL").sum()))
                 g5.metric("Ambiguous",int((gstatuses=="AMBIGUOUS").sum()))
                 g6.metric("Broken",int((gstatuses=="BROKEN_REFERENCE").sum()))
+                missing_endpoint_labels=int(((gdf.get("from_name").isna() if "from_name" in gdf.columns else pd.Series([True]*len(gdf))) | (gdf.get("to_name").isna() if "to_name" in gdf.columns else pd.Series([True]*len(gdf)))).sum())
+                if missing_endpoint_labels:
+                    st.warning(f"{missing_endpoint_labels} relationship row(s) are missing endpoint names. Run SQL 014 endpoint recovery, then re-resolve this job. The visual graph will keep unresolved endpoints separate until repaired.")
 
                 goptions=["ALL"]+sorted(str(x) for x in gdf["resolution_status"].dropna().unique())
                 gstatus=st.selectbox("Generic relationship status",goptions,key="generic_relationship_resolution_status")
@@ -2854,12 +2868,20 @@ elif page=="Staging Resolution":
                         'edge [color="#9ca3af", fontcolor="#d1d5db", fontname="Arial", fontsize=9];'
                     ]
                     seen=set()
-                    for _,gr in preview.iterrows():
-                        fid=str(gr.get("resolved_from_entity_id") or gr.get("from_source_key") or gr.get("from_name") or "source")
-                        tid=str(gr.get("resolved_to_entity_id") or gr.get("to_source_key") or gr.get("to_name") or "target")
-                        flabel=str(gr.get("from_name") or gr.get("resolved_from_entity_id") or gr.get("from_source_key") or "Source")
-                        tlabel=str(gr.get("to_name") or gr.get("resolved_to_entity_id") or gr.get("to_source_key") or "Target")
+                    for rownum,(_,gr) in enumerate(preview.iterrows(),start=1):
+                        # Never collapse missing endpoints onto one generic Source/Target node.
+                        # SQL 014 recovers labels for older staged research; until then, keep
+                        # unresolved rows distinct and visibly marked rather than drawing giant self-loops.
+                        natural=str(gr.get("natural_key") or "")
                         rel=str(gr.get("relationship_type") or "related to")
+                        flabel=gr.get("from_name") or gr.get("resolved_from_entity_id") or gr.get("from_source_key")
+                        tlabel=gr.get("to_name") or gr.get("resolved_to_entity_id") or gr.get("to_source_key")
+                        if not flabel:
+                            flabel=f"Unresolved source {rownum}"
+                        if not tlabel:
+                            tlabel=f"Unresolved target {rownum}"
+                        fid=str(gr.get("resolved_from_entity_id") or gr.get("from_source_key") or f"unresolved-from-{rownum}-{natural}")
+                        tid=str(gr.get("resolved_to_entity_id") or gr.get("to_source_key") or f"unresolved-to-{rownum}-{natural}")
                         fn="n"+hashlib.sha1(fid.encode("utf-8")).hexdigest()[:12]
                         tn="n"+hashlib.sha1(tid.encode("utf-8")).hexdigest()[:12]
                         if fn not in seen:
