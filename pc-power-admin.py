@@ -308,6 +308,11 @@ def validate_staged_for_bulk(sb,row):
         except Exception:
             pass
 
+    relationship_ok=True
+    relationship_status=str(row.get("resolution_status") or "").upper()
+    if table=="pc_event_links":
+        relationship_ok=relationship_status=="READY"
+
     safe=(
         confidence >= 0.90
         and schema_ok
@@ -315,6 +320,7 @@ def validate_staged_for_bulk(sb,row):
         and not duplicate
         and sources >= 1
         and table in APPLY_CONFLICT_KEYS
+        and relationship_ok
     )
 
     risk=[]
@@ -324,6 +330,7 @@ def validate_staged_for_bulk(sb,row):
     if duplicate: risk.append("duplicate:"+dup_reason)
     if sources < 1: risk.append("no source URL")
     if table not in APPLY_CONFLICT_KEYS: risk.append("no configured apply key")
+    if table=="pc_event_links" and not relationship_ok: risk.append("relationship:"+(relationship_status or "UNRESOLVED"))
     if parent_needed: risk.append("will create/link parent asset")
 
     return {
@@ -787,6 +794,22 @@ def _process_job_resolution(sb, job_id):
     data=_rpc_data(sb,"pc_process_ingestion_job",{"p_ingestion_job_id":str(job_id)})
     return data or {}
 
+
+def _relationship_resolution_rows(sb, limit=2000, filters=None):
+    """SQL 011 staged relationship decisions."""
+    try:
+        q=sb.table("pc_v_relationship_resolution").select("*")
+        for k,v in (filters or {}).items():
+            q=q.eq(k,v)
+        return q.order("created_at",desc=True).limit(limit).execute().data or []
+    except Exception:
+        return []
+
+def _process_relationship_backlog(sb, job_id=None):
+    params={"p_ingestion_job_id":str(job_id)} if job_id else {}
+    data=_rpc_data(sb,"pc_process_relationship_backlog",params)
+    return data or {}
+
 # ---------------------------------------------------------------------------
 # Existing-data completion / deterministic repair helpers
 # ---------------------------------------------------------------------------
@@ -819,6 +842,7 @@ def _completion_inventory(sb):
     links=_all_rows(sb,"pc_event_links","*",20000)
     locations=_all_rows(sb,"pc_event_locations","*",20000)
     staged=_all_rows(sb,"pc_v_staging_resolution","*",10000)
+    relationships=_all_rows(sb,"pc_v_relationship_resolution","*",20000)
     issues=_all_rows(sb,"pc_data_quality_issues","*",10000)
 
     vessel_rows=[r for r in vessels if _is_vessel_row(r)]
@@ -837,14 +861,18 @@ def _completion_inventory(sb):
     event_geo=[r for r in events if str(r.get("event_id")) not in located_event_ids]
     event_provenance=[r for r in events if _blank(r.get("source_id")) or str(r.get("record_status") or "").casefold()=="provisional"]
 
-    backlog=[r for r in staged if str(r.get("resolution_status") or "UNRESOLVED").upper() in {"UNRESOLVED","NEW","AMBIGUOUS","CONFLICT","INVALID"}]
+    backlog=[r for r in staged if str(r.get("resolution_status") or "UNRESOLVED").upper() in {"UNRESOLVED","NEW","AMBIGUOUS","CONFLICT","INVALID","PARTIAL","BROKEN_REFERENCE"}]
+    relationship_backlog=[r for r in relationships if str(r.get("resolution_status") or "UNRESOLVED").upper() in {"UNRESOLVED","AMBIGUOUS","PARTIAL","BROKEN_REFERENCE","INVALID"}]
+    relationship_ready=[r for r in relationships if str(r.get("resolution_status") or "").upper()=="READY"]
+    relationship_existing=[r for r in relationships if str(r.get("resolution_status") or "").upper()=="ALREADY_EXISTS"]
     open_issues=[r for r in issues if str(r.get("status") or "open").casefold()=="open"]
     return {
         "vessels":vessel_rows,"assets":assets,"events":events,"links":links,"locations":locations,
         "vessel_identity":vessel_identity,"vessel_relationship":vessel_relationship,"vessel_provenance":vessel_provenance,
         "asset_geo":asset_geo,"asset_relationship":asset_relationship,"asset_provenance":asset_provenance,
         "event_links":event_links,"event_geo":event_geo,"event_provenance":event_provenance,
-        "staging_backlog":backlog,"open_issues":open_issues,
+        "staging_backlog":backlog,"relationship_resolution":relationships,"relationship_backlog":relationship_backlog,
+        "relationship_ready":relationship_ready,"relationship_existing":relationship_existing,"open_issues":open_issues,
     }
 
 
@@ -914,7 +942,7 @@ def _stage_event_vessel_repairs(sb, candidates):
         }
         rows.append({"ingestion_job_id":job["ingestion_job_id"],"target_entity_type":"event_link","target_table":"pc_event_links","source_record_key":link_id,"natural_key":link_id,"action":"REVIEW","payload":payload,"current_record":None,"confidence":c.get("confidence"),"validation_status":"pending","review_status":"pending","resolution_status":"NEW","source_id":c.get("source_id")})
     for i in range(0,len(rows),250): sb.table("pc_staged_records").insert(rows[i:i+250]).execute()
-    try: _process_job_resolution(sb,job["ingestion_job_id"])
+    try: _process_relationship_backlog(sb,job["ingestion_job_id"])
     except Exception: pass
     sb.table("pc_ingestion_jobs").update({"status":"completed","completed_at":pd.Timestamp.utcnow().isoformat(),"stats":{"staged":len(rows)}}).eq("ingestion_job_id",job["ingestion_job_id"]).execute()
     return {"staged":len(rows),"job_id":job["ingestion_job_id"]}
@@ -1986,25 +2014,27 @@ elif page=="Data Completion":
         with st.spinner("Scanning canonical and staging tables for incomplete records..."):
             inv=_completion_inventory(sb)
 
-        m1,m2,m3,m4,m5,m6=st.columns(6)
+        m1,m2,m3,m4,m5,m6,m7=st.columns(7)
         m1.metric("Vessels missing IMO",len(inv["vessel_identity"]))
         m2.metric("Vessel owner/operator gaps",len(inv["vessel_relationship"]))
         m3.metric("Ports missing coordinates",len(inv["asset_geo"]))
         m4.metric("Events missing links",len(inv["event_links"]))
         m5.metric("Events missing mapped location",len(inv["event_geo"]))
-        m6.metric("Resolution backlog",len(inv["staging_backlog"]))
+        m6.metric("Relationship backlog",len(inv["relationship_backlog"]))
+        m7.metric("Relationships ready",len(inv["relationship_ready"]))
 
         st.caption("Counts are live from the canonical Supabase database. A record can appear in more than one gap category.")
-        tabs=st.tabs(["Priority queue","Vessels","Assets & ports","Events","Resolution backlog","Deterministic repairs","Open DQ issues"])
+        tabs=st.tabs(["Priority queue","Vessels","Assets & ports","Events","Resolution backlog","Relationship backlog","Deterministic repairs","Open DQ issues"])
 
         with tabs[0]:
             summary=[
                 {"Priority":1,"Workstream":"Vessel identity","Records":len(inv["vessel_identity"]),"Why":"IMO is the strongest vessel identity key."},
-                {"Priority":2,"Workstream":"Events without entity links","Records":len(inv["event_links"]),"Why":"Unlinked incidents cannot roll up to vessel/company/asset pages."},
-                {"Priority":3,"Workstream":"Ports without coordinates","Records":len(inv["asset_geo"]),"Why":"Prevents reliable mapping and geographic event correlation."},
-                {"Priority":4,"Workstream":"Vessel owner/operator","Records":len(inv["vessel_relationship"]),"Why":"Breaks company-fleet and exposure relationships."},
-                {"Priority":5,"Workstream":"Events without mapped location","Records":len(inv["event_geo"]),"Why":"Limits Intelligence map coverage."},
-                {"Priority":6,"Workstream":"Staging resolution backlog","Records":len(inv["staging_backlog"]),"Why":"Already-collected work is waiting for identity decisions."},
+                {"Priority":2,"Workstream":"Staged relationship resolution","Records":len(inv["relationship_backlog"]),"Why":"Existing event/vessel/company link proposals should be resolved before new research."},
+                {"Priority":3,"Workstream":"Events without entity links","Records":len(inv["event_links"]),"Why":"Unlinked incidents cannot roll up to vessel/company/asset pages."},
+                {"Priority":4,"Workstream":"Ports without coordinates","Records":len(inv["asset_geo"]),"Why":"Prevents reliable mapping and geographic event correlation."},
+                {"Priority":5,"Workstream":"Vessel owner/operator","Records":len(inv["vessel_relationship"]),"Why":"Breaks company-fleet and exposure relationships."},
+                {"Priority":6,"Workstream":"Events without mapped location","Records":len(inv["event_geo"]),"Why":"Limits Intelligence map coverage."},
+                {"Priority":7,"Workstream":"Record identity backlog","Records":len(inv["staging_backlog"]),"Why":"Already-collected records are waiting for identity decisions."},
             ]
             st.dataframe(pd.DataFrame(summary),use_container_width=True,hide_index=True)
             st.info("Start with deterministic internal repairs first. Only genuine gaps should be sent to external/AI research afterward.")
@@ -2081,6 +2111,31 @@ elif page=="Data Completion":
                 st.caption("Use Staging Resolution for record-level identity review and Review Queue for canonical approval/apply.")
 
         with tabs[5]:
+            st.markdown("### Staged relationship resolution")
+            st.caption("SQL 011 resolves both endpoints of staged pc_event_links. READY can proceed to review; PARTIAL needs a missing target resolved or created; AMBIGUOUS requires analyst choice; BROKEN_REFERENCE means the parent/source endpoint is missing.")
+            rels=inv.get("relationship_resolution") or []
+            if rels:
+                rdf=pd.DataFrame(rels)
+                statuses=rdf["resolution_status"].fillna("UNRESOLVED") if "resolution_status" in rdf.columns else pd.Series([],dtype=str)
+                rc1,rc2,rc3,rc4,rc5=st.columns(5)
+                rc1.metric("Ready",int((statuses=="READY").sum()))
+                rc2.metric("Already exists",int((statuses=="ALREADY_EXISTS").sum()))
+                rc3.metric("Partial",int((statuses=="PARTIAL").sum()))
+                rc4.metric("Ambiguous",int((statuses=="AMBIGUOUS").sum()))
+                rc5.metric("Broken",int((statuses=="BROKEN_REFERENCE").sum()))
+                rcols=[c for c in ["created_at","natural_key","relationship_type","from_source_key","resolved_from_entity_id","to_name","to_identifier_type","to_identifier_value","to_source_key","resolved_to_entity_id","resolution_status","to_resolution_method","to_candidate_count","existing_relationship_id","staged_record_id"] if c in rdf.columns]
+                st.dataframe(rdf[rcols],use_container_width=True,hide_index=True)
+            else:
+                st.info("No SQL 011 relationship-resolution rows are available yet.")
+            if st.button("Resolve all pending event-link relationships",type="primary",key="completion_resolve_relationships"):
+                try:
+                    result=_process_relationship_backlog(sb)
+                    st.success(f"Relationship resolution complete: {result}")
+                    st.rerun()
+                except Exception as exc:
+                    st.exception(exc)
+
+        with tabs[6]:
             st.markdown("### Existing-database event → vessel repair")
             st.caption("This uses no AI and no web research. It looks only for an IMO explicitly present in event text or a unique canonical vessel name explicitly present in a maritime event. Candidates are staged as pc_event_links for normal review.")
             candidates=_event_vessel_candidates(inv)
@@ -2102,7 +2157,7 @@ elif page=="Data Completion":
             else:
                 st.info("No new high-confidence event-vessel links can be derived from the existing database at this time.")
 
-        with tabs[6]:
+        with tabs[7]:
             rows=inv["open_issues"]
             if rows: dataframe(rows)
             else: st.success("No open data-quality issues.")
@@ -2336,8 +2391,12 @@ elif page=="Batch Staging":
 
                     resolution=None
                     if auto_resolve and target_entity_type:
-                        progress.progress(0.95,text="Resolving canonical identities...")
-                        resolution=_process_job_resolution(sb,job["ingestion_job_id"])
+                        if target=="pc_event_links":
+                            progress.progress(0.95,text="Resolving relationship endpoints...")
+                            resolution=_process_relationship_backlog(sb,job["ingestion_job_id"])
+                        else:
+                            progress.progress(0.95,text="Resolving canonical identities...")
+                            resolution=_process_job_resolution(sb,job["ingestion_job_id"])
 
                     sb.table("pc_ingestion_jobs").update({
                         "status":"completed",
@@ -2346,11 +2405,18 @@ elif page=="Batch Staging":
                     progress.progress(1.0,text="Batch staged and processed.")
 
                     if resolution:
-                        st.success(
-                            f"Staged {len(rows):,} row(s): {resolution.get('matched',0)} matched, "
-                            f"{resolution.get('new',0)} new, {resolution.get('ambiguous',0)} ambiguous, "
-                            f"{resolution.get('invalid',0)} invalid."
-                        )
+                        if target=="pc_event_links":
+                            st.success(
+                                f"Staged {len(rows):,} relationship row(s): {resolution.get('ready',0)} ready, "
+                                f"{resolution.get('already_exists',0)} already exist, {resolution.get('partial',0)} partial, "
+                                f"{resolution.get('ambiguous',0)} ambiguous, {resolution.get('broken_reference',0)} broken."
+                            )
+                        else:
+                            st.success(
+                                f"Staged {len(rows):,} row(s): {resolution.get('matched',0)} matched, "
+                                f"{resolution.get('new',0)} new, {resolution.get('ambiguous',0)} ambiguous, "
+                                f"{resolution.get('invalid',0)} invalid."
+                            )
                     else:
                         st.success(f"Staged {len(rows):,} row(s).")
                     st.info("Next: open Staging Resolution to inspect identity decisions, then Review Queue for canonical approval/apply.")
@@ -2362,45 +2428,92 @@ elif page=="Batch Staging":
 elif page=="Staging Resolution":
     title(
         "Staging resolution",
-        "Inspect metadata-driven identity matching before canonical apply. MATCHED reuses an existing canonical ID; NEW proposes a new record; AMBIGUOUS requires analyst resolution."
+        "Resolve canonical identities and relationship endpoints before canonical apply. Entity records use MATCHED/NEW/AMBIGUOUS; relationships use READY/PARTIAL/AMBIGUOUS/BROKEN_REFERENCE/ALREADY_EXISTS."
     )
     if not sb:
         st.error("Supabase service connection required.")
     else:
-        rows=_resolution_rows(sb,2000)
-        if not rows:
-            st.info("No metadata-driven staging resolution records are available yet.")
-        else:
-            df=pd.DataFrame(rows)
-            statuses=df["resolution_status"].fillna("UNRESOLVED") if "resolution_status" in df.columns else pd.Series([],dtype=str)
-            c1,c2,c3,c4,c5=st.columns(5)
-            c1.metric("Total",len(df))
-            c2.metric("Matched",int((statuses=="MATCHED").sum()))
-            c3.metric("New",int((statuses=="NEW").sum()))
-            c4.metric("Ambiguous",int((statuses=="AMBIGUOUS").sum()))
-            c5.metric("Invalid",int((statuses=="INVALID").sum()))
+        entity_tab,relationship_tab=st.tabs(["Entity / record resolution","Relationship resolution"])
 
-            options=["ALL"]+sorted(str(x) for x in df["resolution_status"].dropna().unique()) if "resolution_status" in df.columns else ["ALL"]
-            status_filter=st.selectbox("Resolution status",options)
-            view=df if status_filter=="ALL" else df[df["resolution_status"]==status_filter]
-            preferred=[c for c in ["created_at","target_entity_type","target_table","natural_key","resolution_status","resolved_entity_id","resolution_method","resolution_confidence","candidate_count","staged_value_count","validation_status","review_status","staged_record_id"] if c in view.columns]
-            st.dataframe(view[preferred],use_container_width=True,hide_index=True)
+        with entity_tab:
+            rows=[r for r in _resolution_rows(sb,3000) if r.get("target_table")!="pc_event_links"]
+            if not rows:
+                st.info("No metadata-driven entity/record resolution rows are available yet.")
+            else:
+                df=pd.DataFrame(rows)
+                statuses=df["resolution_status"].fillna("UNRESOLVED") if "resolution_status" in df.columns else pd.Series([],dtype=str)
+                c1,c2,c3,c4,c5=st.columns(5)
+                c1.metric("Total",len(df))
+                c2.metric("Matched",int((statuses=="MATCHED").sum()))
+                c3.metric("New",int((statuses=="NEW").sum()))
+                c4.metric("Ambiguous",int((statuses=="AMBIGUOUS").sum()))
+                c5.metric("Invalid / unresolved",int(statuses.isin(["INVALID","UNRESOLVED"]).sum()))
 
-            st.markdown("### Re-run resolution")
-            jobs=safe_rows(sb,"pc_ingestion_jobs","ingestion_job_id,title,status,created_at,stats",200,"", "created_at") if False else []
-            # Build job choices directly to avoid assumptions about safe_rows filter syntax.
+                options=["ALL"]+sorted(str(x) for x in df["resolution_status"].dropna().unique()) if "resolution_status" in df.columns else ["ALL"]
+                status_filter=st.selectbox("Entity resolution status",options,key="entity_resolution_status")
+                view=df if status_filter=="ALL" else df[df["resolution_status"]==status_filter]
+                preferred=[c for c in ["created_at","target_entity_type","target_table","natural_key","resolution_status","resolved_entity_id","resolution_method","resolution_confidence","candidate_count","staged_value_count","validation_status","review_status","staged_record_id"] if c in view.columns]
+                st.dataframe(view[preferred],use_container_width=True,hide_index=True)
+
+            st.markdown("### Re-run entity resolution")
             try:
                 jobs=(sb.table("pc_ingestion_jobs").select("ingestion_job_id,title,status,created_at,stats").order("created_at",desc=True).limit(100).execute().data or [])
             except Exception:
                 jobs=[]
             if jobs:
                 labels=[f"{j.get('title') or 'Untitled'} | {j.get('ingestion_job_id')}" for j in jobs]
-                chosen=st.selectbox("Ingestion job",labels)
+                chosen=st.selectbox("Ingestion job",labels,key="entity_resolution_job")
                 job=jobs[labels.index(chosen)]
-                if st.button("Resolve this job again"):
+                if st.button("Resolve entity records in this job again",key="rerun_entity_resolution"):
                     try:
                         result=_process_job_resolution(sb,job["ingestion_job_id"])
-                        st.success(f"Resolution complete: {result}")
+                        st.success(f"Entity resolution complete: {result}")
+                        st.rerun()
+                    except Exception as exc:
+                        st.exception(exc)
+
+        with relationship_tab:
+            rels=_relationship_resolution_rows(sb,5000)
+            if not rels:
+                st.warning("No relationship-resolution rows are visible. Run SQL 011 first; it backfills the existing pc_event_links staging backlog without writing canonical data.")
+            else:
+                rdf=pd.DataFrame(rels)
+                statuses=rdf["resolution_status"].fillna("UNRESOLVED") if "resolution_status" in rdf.columns else pd.Series([],dtype=str)
+                r1,r2,r3,r4,r5,r6=st.columns(6)
+                r1.metric("Total",len(rdf))
+                r2.metric("Ready",int((statuses=="READY").sum()))
+                r3.metric("Already exists",int((statuses=="ALREADY_EXISTS").sum()))
+                r4.metric("Partial",int((statuses=="PARTIAL").sum()))
+                r5.metric("Ambiguous",int((statuses=="AMBIGUOUS").sum()))
+                r6.metric("Broken",int((statuses=="BROKEN_REFERENCE").sum()))
+
+                roptions=["ALL"]+sorted(str(x) for x in rdf["resolution_status"].dropna().unique())
+                rstatus=st.selectbox("Relationship status",roptions,key="relationship_resolution_status")
+                rview=rdf if rstatus=="ALL" else rdf[rdf["resolution_status"]==rstatus]
+                rcols=[c for c in ["created_at","natural_key","relationship_type","from_entity_type","from_source_key","resolved_from_entity_id","from_resolution_method","to_entity_type","to_name","to_identifier_type","to_identifier_value","to_source_key","resolved_to_entity_id","to_resolution_method","to_candidate_count","resolution_status","existing_relationship_id","review_status","staged_record_id"] if c in rview.columns]
+                st.dataframe(rview[rcols],use_container_width=True,hide_index=True)
+
+            c1,c2=st.columns(2)
+            if c1.button("Resolve all pending event-link relationships",type="primary",key="resolve_relationship_backlog"):
+                try:
+                    result=_process_relationship_backlog(sb)
+                    st.success(f"Relationship resolution complete: {result}")
+                    st.rerun()
+                except Exception as exc:
+                    st.exception(exc)
+
+            try:
+                rel_jobs=(sb.table("pc_ingestion_jobs").select("ingestion_job_id,title,status,created_at").order("created_at",desc=True).limit(100).execute().data or [])
+            except Exception:
+                rel_jobs=[]
+            if rel_jobs:
+                labels=[f"{j.get('title') or 'Untitled'} | {j.get('ingestion_job_id')}" for j in rel_jobs]
+                chosen=st.selectbox("Relationship ingestion job",labels,key="relationship_resolution_job")
+                job=rel_jobs[labels.index(chosen)]
+                if c2.button("Resolve selected job relationships",key="resolve_selected_relationship_job"):
+                    try:
+                        result=_process_relationship_backlog(sb,job["ingestion_job_id"])
+                        st.success(f"Relationship resolution complete: {result}")
                         st.rerun()
                     except Exception as exc:
                         st.exception(exc)
