@@ -30,7 +30,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.13-company-asset-rollup-fix"
+APP_VERSION = "v3.3.14-live-relationship-visual-fix"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -900,19 +900,53 @@ def _canonical_db_vessel_frames():
             "event_link_id,event_id,linked_type,linked_id,linked_name,relationship,confidence,source_id,metadata",
             10000,
         )
+        fleet_rel_rows = pc_safe_rows(
+            sb,
+            "pc_relationships",
+            "relationship_id,source_type,source_id,relationship_type,target_type,target_id,confidence,record_status,evidence_source_id,metadata",
+            20000,
+        )
 
         if not vrows:
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
         entities = {str(r.get("entity_id") or ""): str(r.get("name") or "") for r in (erows or [])}
+
+        # Canonical graph roles can exist even when owner/operator columns on pc_mobile_assets
+        # have not been denormalized yet. Build a target-vessel role map from pc_relationships.
+        fleet_roles = defaultdict(list)
+        for rr in fleet_rel_rows or []:
+            if str(rr.get("source_type") or "").casefold() != "entity":
+                continue
+            if str(rr.get("target_type") or "").casefold() not in {"mobile_asset","vessel"}:
+                continue
+            vid = str(rr.get("target_id") or "").strip()
+            eid = str(rr.get("source_id") or "").strip()
+            rel = str(rr.get("relationship_type") or "").strip().casefold().replace("-","_").replace(" ","_")
+            if vid and eid:
+                fleet_roles[vid].append((rel,eid,rr))
+
         vessels = []
         relationships = []
 
         for r in vrows:
             meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+            vessel_id = str(r.get("mobile_asset_id") or "").strip()
             owner_id = str(r.get("owner_entity_id") or "").strip()
             operator_id = str(r.get("operator_entity_id") or "").strip()
             manager_id = str(r.get("manager_entity_id") or "").strip()
+
+            # Fill missing denormalized roles from canonical graph edges.
+            for _rel,_eid,_rr in fleet_roles.get(vessel_id,[]):
+                if _rel in {"owns","owner_of"} and not owner_id:
+                    owner_id=_eid
+                elif _rel in {"operates","operator_of"} and not operator_id:
+                    operator_id=_eid
+                elif _rel in {"manages","manager_of"} and not manager_id:
+                    manager_id=_eid
+                elif _rel=="charters" and not operator_id:
+                    operator_id=_eid
+
             owner_name = entities.get(owner_id, owner_id)
             operator_name = entities.get(operator_id, operator_id)
             manager_name = entities.get(manager_id, manager_id)
@@ -957,6 +991,7 @@ def _canonical_db_vessel_frames():
                 "Metadata": meta,
             })
 
+            _seen_vroles=set()
             for role, eid, ename in [
                 ("Owner", owner_id, owner_name),
                 ("Operator", operator_id, operator_name),
@@ -964,14 +999,30 @@ def _canonical_db_vessel_frames():
             ]:
                 if not eid:
                     continue
+                _seen_vroles.add((role.casefold(),eid))
                 relationships.append({
-                    "Vessel ID": str(r.get("mobile_asset_id") or "").strip(),
+                    "Vessel ID": vessel_id,
                     "Vessel Name": str(r.get("name") or "").strip(),
                     "Company ID": eid,
                     "Company": ename,
                     "Relationship": role,
                     "Role": role,
                     "Source ID": str(r.get("source_id") or "").strip(),
+                })
+
+            for _rel,_eid,_rr in fleet_roles.get(vessel_id,[]):
+                _pretty = pretty_relationship(_rel)
+                _key=(_pretty.casefold(),_eid)
+                if _key in _seen_vroles:
+                    continue
+                relationships.append({
+                    "Vessel ID": vessel_id,
+                    "Vessel Name": str(r.get("name") or "").strip(),
+                    "Company ID": _eid,
+                    "Company": entities.get(_eid,_eid),
+                    "Relationship": _pretty,
+                    "Role": _pretty,
+                    "Source ID": str(_rr.get("evidence_source_id") or r.get("source_id") or "").strip(),
                 })
 
         event_links = []
@@ -1140,6 +1191,11 @@ def _canonical_db_core_trade_frames():
             "route_id,route_name,mode,operator_entity_id",
             10000, order="route_name"
         )
+        mrows = pc_safe_rows(
+            sb, "pc_mobile_assets",
+            "mobile_asset_id,name,asset_type,subtype,imo,status,record_status,metadata",
+            10000, order="name"
+        )
 
         entities_df = pd.DataFrame(erows or [])
         assets_df = pd.DataFrame(arows or [])
@@ -1185,7 +1241,20 @@ def _canonical_db_core_trade_frames():
         companies = pd.DataFrame(companies)
         entity_registry = pd.DataFrame(entity_registry)
 
-        # ---- Canonical entity/entity and entity/asset graph ----
+        # ---- Canonical entity/entity, entity/asset and entity/mobile-asset graph ----
+        asset_names={str(r.get("asset_id") or "").strip():str(r.get("name") or "").strip() for r in (arows or [])}
+        mobile_names={str(r.get("mobile_asset_id") or "").strip():str(r.get("name") or "").strip() for r in (mrows or [])}
+
+        def _graph_name(kind, object_id):
+            k=str(kind or "").casefold()
+            if k=="entity":
+                return entity_names.get(object_id,object_id)
+            if k=="asset":
+                return asset_names.get(object_id,object_id)
+            if k in {"mobile_asset","vessel"}:
+                return mobile_names.get(object_id,object_id)
+            return object_id
+
         relationships = []
         for r in rrows or []:
             sid = str(r.get("source_id") or "").strip()
@@ -1195,11 +1264,11 @@ def _canonical_db_core_trade_frames():
             relationships.append({
                 "Relationship ID": str(r.get("relationship_id") or "").strip(),
                 "Source Entity": sid,
-                "Source": entity_names.get(sid, sid),
+                "Source": _graph_name(stype,sid),
                 "Source Type": stype,
                 "Relationship": str(r.get("relationship_type") or "").strip(),
                 "Target Entity": tid,
-                "Target": entity_names.get(tid, tid),
+                "Target": _graph_name(ttype,tid),
                 "Target Type": ttype,
                 "Ownership %": r.get("ownership_percent"),
                 "Operating Control": r.get("operating_control"),
@@ -2502,8 +2571,8 @@ def readable_relationships(df, entity_id):
         src=str(r.get("Source Entity","")).strip()
         tgt=str(r.get("Target Entity","")).strip()
         rel=pretty_relationship(r.get("Relationship",""))
-        src_name=label(src)
-        tgt_name=label(tgt)
+        src_name=str(r.get("Source") or label(src) or src).strip()
+        tgt_name=str(r.get("Target") or label(tgt) or tgt).strip()
 
         st.markdown(
             f"<div class='pc-rel'><b>{src_name}</b> → {rel} → <b>{tgt_name}</b></div>",
@@ -3241,8 +3310,40 @@ def render_company_profile(entity_id, entity_name):
             st.info("No linked news, announcements or canonical event coverage.")
 
     with tabs[8]:
-        st.markdown("### Corporate relationships")
+        st.markdown("### Corporate & operational relationships")
         readable_relationships(prof["relationships"],entity_id)
+
+        if not prof["relationships"].empty:
+            _rdf=prof["relationships"].copy().head(120)
+            _dot=[
+                'digraph CompanyRelations {',
+                'rankdir=LR;',
+                'graph [bgcolor="transparent", pad="0.2", nodesep="0.35", ranksep="0.7"];',
+                'node [shape=box, style="rounded,filled", fillcolor="#111827", fontcolor="white", color="#4b5563", fontname="Arial", fontsize=10];',
+                'edge [color="#9ca3af", fontcolor="#d1d5db", fontname="Arial", fontsize=9];'
+            ]
+            _seen=set()
+            for _i,(_, _rr) in enumerate(_rdf.iterrows(),1):
+                _sid=str(_rr.get("Source Entity") or f"s{_i}")
+                _tid=str(_rr.get("Target Entity") or f"t{_i}")
+                _sname=str(_rr.get("Source") or label(_sid) or _sid)
+                _tname=str(_rr.get("Target") or label(_tid) or _tid)
+                _rel=pretty_relationship(_rr.get("Relationship","related_to"))
+                _sn="n"+hashlib.sha1(("s|"+_sid).encode("utf-8")).hexdigest()[:12]
+                _tn="n"+hashlib.sha1(("t|"+_tid).encode("utf-8")).hexdigest()[:12]
+                def _esc(v):
+                    return str(v).replace("\\","\\\\").replace('"','\\"').replace("\n"," ")
+                if _sn not in _seen:
+                    _dot.append(f'{_sn} [label="{_esc(_sname)}"];')
+                    _seen.add(_sn)
+                if _tn not in _seen:
+                    _dot.append(f'{_tn} [label="{_esc(_tname)}"];')
+                    _seen.add(_tn)
+                _dot.append(f'{_sn} -> {_tn} [label="{_esc(_rel)}"];')
+            _dot.append('}')
+            st.markdown("### Relationship network")
+            st.graphviz_chart("\n".join(_dot),use_container_width=True)
+
         if not prof["systems"].empty:
             st.markdown("### Trade systems / corridors")
             display_df(prof["systems"],50)
