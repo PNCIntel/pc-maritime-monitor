@@ -2637,6 +2637,106 @@ elif page=="Research Jobs":
                 except Exception as exc:
                     st.exception(exc)
 
+            # Inline population graph preview for the selected job.
+            st.markdown("#### Population graph preview")
+            st.caption(
+                "Shows staged/resolved relationships for the selected population job, including PARTIAL edges. "
+                "A relationship does not need to be READY to appear here; READY controls canonical apply, not visualization."
+            )
+
+            try:
+                _pgraph_rows=_generic_relationship_resolution_rows(
+                    sb,5000,{"ingestion_job_id":str(_pop_job_id)}
+                )
+            except Exception:
+                _pgraph_rows=[]
+
+            # Fallback directly to staged relationship proposals if the SQL 013 view has no rows.
+            if not _pgraph_rows:
+                try:
+                    _rawrels=(sb.table("pc_staged_records")
+                              .select("staged_record_id,natural_key,payload,resolution_status,review_status,created_at")
+                              .eq("ingestion_job_id",str(_pop_job_id))
+                              .eq("target_table","pc_relationships")
+                              .order("created_at")
+                              .limit(5000).execute().data or [])
+                except Exception:
+                    _rawrels=[]
+
+                for _r in _rawrels:
+                    _p=_r.get("payload") if isinstance(_r.get("payload"),dict) else {}
+                    _pgraph_rows.append({
+                        "staged_record_id":_r.get("staged_record_id"),
+                        "natural_key":_r.get("natural_key"),
+                        "relationship_type":_p.get("relationship_type") or _p.get("type") or "related_to",
+                        "from_name":_p.get("source_name") or _p.get("from_name"),
+                        "to_name":_p.get("target_name") or _p.get("to_name"),
+                        "resolved_from_entity_id":_p.get("source_id") or _p.get("from_id"),
+                        "resolved_to_entity_id":_p.get("target_id") or _p.get("to_id"),
+                        "resolution_status":_r.get("resolution_status") or "UNRESOLVED",
+                        "created_at":_r.get("created_at"),
+                    })
+
+            if _pgraph_rows:
+                _pgdf=pd.DataFrame(_pgraph_rows)
+                _pgstatus=_pgdf.get("resolution_status",pd.Series(["UNRESOLVED"]*len(_pgdf))).fillna("UNRESOLVED")
+                _pg1,_pg2,_pg3,_pg4=st.columns(4)
+                _pg1.metric("Graph edges",len(_pgdf))
+                _pg2.metric("READY",int((_pgstatus=="READY").sum()))
+                _pg3.metric("PARTIAL",int((_pgstatus=="PARTIAL").sum()))
+                _pg4.metric("Exceptions",int(_pgstatus.isin(["AMBIGUOUS","BROKEN_REFERENCE"]).sum()))
+
+                _pgcols=[c for c in [
+                    "from_name","relationship_type","to_name",
+                    "resolved_from_entity_id","resolved_to_entity_id",
+                    "resolution_status","natural_key"
+                ] if c in _pgdf.columns]
+                with st.expander("Relationship rows",expanded=False):
+                    st.dataframe(_pgdf[_pgcols],use_container_width=True,hide_index=True)
+
+                _preview=_pgdf.head(80)
+
+                def _pop_dot_escape(v):
+                    return str(v or "").replace("\\","\\\\").replace('"','\\"').replace("\n"," ")
+
+                _dot=[
+                    'digraph PopulationGraph {',
+                    'rankdir=LR;',
+                    'graph [bgcolor="transparent", pad="0.25", nodesep="0.35", ranksep="0.65"];',
+                    'node [shape=box, style="rounded,filled", fillcolor="#111827", fontcolor="white", color="#4b5563", fontname="Arial", fontsize=10];',
+                    'edge [color="#9ca3af", fontcolor="#d1d5db", fontname="Arial", fontsize=9];'
+                ]
+                _seen=set()
+                for _i,(_, _gr) in enumerate(_preview.iterrows(),start=1):
+                    _natural=str(_gr.get("natural_key") or "")
+                    _rel=str(_gr.get("relationship_type") or "related_to")
+                    _flabel=_gr.get("from_name") or _gr.get("resolved_from_entity_id") or f"Unresolved source {_i}"
+                    _tlabel=_gr.get("to_name") or _gr.get("resolved_to_entity_id") or f"Unresolved target {_i}"
+                    _fid=str(_gr.get("resolved_from_entity_id") or f"{_flabel}|from|{_natural}|{_i}")
+                    _tid=str(_gr.get("resolved_to_entity_id") or f"{_tlabel}|to|{_natural}|{_i}")
+                    _fn="n"+hashlib.sha1(_fid.encode("utf-8")).hexdigest()[:12]
+                    _tn="n"+hashlib.sha1(_tid.encode("utf-8")).hexdigest()[:12]
+
+                    if _fn not in _seen:
+                        _dot.append(f'{_fn} [label="{_pop_dot_escape(_flabel)}"];')
+                        _seen.add(_fn)
+                    if _tn not in _seen:
+                        _dot.append(f'{_tn} [label="{_pop_dot_escape(_tlabel)}"];')
+                        _seen.add(_tn)
+
+                    _status=str(_gr.get("resolution_status") or "UNRESOLVED")
+                    _edge_label=f"{_rel} [{_status}]"
+                    _dot.append(f'{_fn} -> {_tn} [label="{_pop_dot_escape(_edge_label)}"];')
+
+                _dot.append('}')
+                try:
+                    st.graphviz_chart("\n".join(_dot),use_container_width=True)
+                except Exception as exc:
+                    st.error(f"Population graph rendering failed: {exc}")
+                    st.code("\n".join(_dot),language="dot")
+            else:
+                st.info("This population job has no staged relationship edges to visualize yet.")
+
 elif page=="Trade System Builder":
     title("Trade system builder","Build the global trade-system graph in controlled research campaigns: energy, industrial assets, flows, markets, ports, corridors and macro layers.")
     if not sb:
