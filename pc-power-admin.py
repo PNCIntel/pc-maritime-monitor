@@ -313,6 +313,16 @@ def validate_staged_for_bulk(sb,row):
     if table=="pc_event_links":
         relationship_ok=relationship_status=="READY"
 
+    # Canonical identity rows must have been through metadata resolution. NEW means
+    # no canonical match was found; MATCHED means the database supplied the existing
+    # canonical ID for an enrichment/update. An exact duplicate is expected for MATCHED.
+    resolution_status=str(row.get("resolution_status") or "UNRESOLVED").upper()
+    identity_table=table in {"pc_entities","pc_assets","pc_mobile_assets","pc_events"}
+    identity_resolution_ok=(not identity_table) or resolution_status in {"NEW","MATCHED"}
+    if identity_table and resolution_status=="MATCHED" and row.get("resolved_entity_id"):
+        duplicate=False
+        dup_reason="matched canonical identity"
+
     safe=(
         confidence >= 0.90
         and schema_ok
@@ -321,6 +331,7 @@ def validate_staged_for_bulk(sb,row):
         and sources >= 1
         and table in APPLY_CONFLICT_KEYS
         and relationship_ok
+        and identity_resolution_ok
     )
 
     risk=[]
@@ -331,6 +342,7 @@ def validate_staged_for_bulk(sb,row):
     if sources < 1: risk.append("no source URL")
     if table not in APPLY_CONFLICT_KEYS: risk.append("no configured apply key")
     if table=="pc_event_links" and not relationship_ok: risk.append("relationship:"+(relationship_status or "UNRESOLVED"))
+    if identity_table and not identity_resolution_ok: risk.append("identity-resolution:"+resolution_status)
     if parent_needed: risk.append("will create/link parent asset")
 
     return {
@@ -792,6 +804,12 @@ def _resolution_rows(sb, limit=1000, filters=None):
 
 def _process_job_resolution(sb, job_id):
     data=_rpc_data(sb,"pc_process_ingestion_job",{"p_ingestion_job_id":str(job_id)})
+    return data or {}
+
+
+def _prepare_canonical_candidates(sb, job_id):
+    """SQL 016: resolve entity rows and assign/reuse canonical IDs in staging only."""
+    data=_rpc_data(sb,"pc_prepare_canonical_candidates",{"p_ingestion_job_id":str(job_id)})
     return data or {}
 
 
@@ -3046,9 +3064,38 @@ elif page=="Review Queue":
             else:
                 st.markdown("### Automated validation")
                 st.caption(
-                    "Safe = confidence ≥ 0.90, source-backed, valid FKs, no exact duplicate, and a configured apply key. "
-                    "For logistics/energy/industrial extensions, a missing asset_id is resolved automatically by creating or linking the parent canonical asset."
+                    "Safe = confidence ≥ 0.90, source-backed, valid FKs, metadata-resolved identity, no unexpected duplicate, and a configured apply key. "
+                    "NEW entity/asset records receive canonical IDs in staging before apply; MATCHED records reuse the resolved canonical ID."
                 )
+
+                # SQL 016 preparation is job-scoped and mutates staging only. It resolves
+                # identities, reuses MATCHED IDs, and assigns deterministic IDs to NEW rows.
+                pending_jobs={}
+                for _r in pending:
+                    _jid=_r.get("ingestion_job_id")
+                    if _jid:
+                        pending_jobs.setdefault(str(_jid), str(_jid))
+                if pending_jobs:
+                    try:
+                        _jobs=(sb.table("pc_ingestion_jobs").select("ingestion_job_id,title,created_at")
+                               .in_("ingestion_job_id",list(pending_jobs.keys())).execute().data or [])
+                        _job_by_id={str(j.get("ingestion_job_id")):j for j in _jobs}
+                    except Exception:
+                        _job_by_id={}
+                    _job_ids=list(pending_jobs.keys())
+                    _prep_choice=st.selectbox(
+                        "Prepare staged entity candidates for ingestion job",
+                        _job_ids,
+                        format_func=lambda jid: f"{(_job_by_id.get(jid) or {}).get('title') or 'Ingestion job'} | {jid}",
+                        key="review_prepare_candidate_job"
+                    )
+                    if st.button("Prepare canonical IDs + resolve candidates",key="review_prepare_candidates"):
+                        try:
+                            _prep_result=_prepare_canonical_candidates(sb,_prep_choice)
+                            st.success(f"Candidate preparation complete: {_prep_result}")
+                            st.rerun()
+                        except Exception as exc:
+                            st.exception(exc)
 
                 validated=[]
                 with st.spinner("Validating staged records..."):
