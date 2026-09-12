@@ -960,6 +960,109 @@ def _stage_event_vessel_repairs(sb, candidates):
     sb.table("pc_ingestion_jobs").update({"status":"completed","completed_at":pd.Timestamp.utcnow().isoformat(),"stats":{"staged":len(rows)}}).eq("ingestion_job_id",job["ingestion_job_id"]).execute()
     return {"staged":len(rows),"job_id":job["ingestion_job_id"]}
 
+
+
+# ---------------------------------------------------------------------------
+# Canonical context for AI research
+# ---------------------------------------------------------------------------
+
+_CANONICAL_CONTEXT_STOPWORDS = {
+    "about","above","across","after","against","also","another","assets","before","build","business",
+    "canonical","capture","company","companies","controlled","create","current","database","dates","every",
+    "existing","fields","global","grouped","identify","include","infrastructure","investment","investments",
+    "link","linked","logistics","major","managed","management","model","name","owned","owner","operator",
+    "portfolio","prefer","primary","proposed","record","records","registry","relationship","relationships",
+    "research","return","source","sources","stage","staging","structured","supported","table","tables",
+    "terminal","terminals","trade","through","valid","value","where","which","with","without","within",
+    "pc_entities","pc_assets","pc_relationships","pc_sources","json","review","exact","normalized","public"
+}
+
+def _canonical_context_terms(prompt, max_terms=32):
+    """Extract useful search terms from a research brief without assuming entity identities."""
+    words=re.findall(r"[A-Za-z0-9][A-Za-z0-9&.'/-]{2,}", str(prompt or ""))
+    out=[]
+    for w in words:
+        t=w.strip(".,:;()[]{}\"'").casefold()
+        if len(t)<4 or t in _CANONICAL_CONTEXT_STOPWORDS or t.startswith("http"):
+            continue
+        if t not in out:
+            out.append(t)
+        if len(out)>=max_terms:
+            break
+    return out
+
+def _row_context_score(row, terms):
+    name=str(row.get("name") or row.get("title") or row.get("route_name") or "")
+    fields=[name,row.get("country"),row.get("region_city"),row.get("entity_type"),row.get("asset_type"),row.get("subtype"),row.get("imo"),row.get("mmsi")]
+    hay=" ".join(str(x or "") for x in fields).casefold()
+    score=0
+    matched=[]
+    for t in terms:
+        if t in hay:
+            score += 5 if t in name.casefold() else 1
+            matched.append(t)
+    return score, matched
+
+def build_canonical_research_context(sb, prompt, per_type_limit=40):
+    """Return a compact snapshot of likely canonical candidates for an AI research job.
+
+    This is candidate context, not external evidence. The model must still use source URLs
+    for researched facts and must not force a match when the supplied candidates are not exact.
+    """
+    terms=_canonical_context_terms(prompt)
+    specs=[
+        ("entities","pc_entities","entity_id,name,entity_type,country,hq_location,status,record_status,data_quality,source_id,metadata",5000),
+        ("assets","pc_assets","asset_id,name,asset_type,subtype,country,region_city,latitude,longitude,owner_entity_id,operator_entity_id,status,record_status,data_quality,source_id,metadata",5000),
+        ("mobile_assets","pc_mobile_assets","mobile_asset_id,name,asset_type,subtype,imo,mmsi,call_sign,flag,owner_entity_id,operator_entity_id,status,record_status,data_quality,source_id,metadata",5000),
+    ]
+    context={"search_terms":terms,"entities":[],"assets":[],"mobile_assets":[],"identifiers":[],"relationships":[]}
+    candidate_ids=set()
+    for label,table,columns,limit in specs:
+        rows=safe_rows(sb,table,columns,limit)
+        ranked=[]
+        for r in rows:
+            score,matched=_row_context_score(r,terms)
+            if score>0:
+                x=dict(r)
+                x["_context_score"]=score
+                x["_matched_terms"]=matched
+                ranked.append(x)
+        ranked.sort(key=lambda x:(-int(x.get("_context_score") or 0),str(x.get("name") or "")))
+        selected=ranked[:per_type_limit]
+        context[label]=selected
+        idkey={"entities":"entity_id","assets":"asset_id","mobile_assets":"mobile_asset_id"}[label]
+        candidate_ids.update(str(x.get(idkey)) for x in selected if x.get(idkey))
+
+    # Include identifier mappings only for candidates supplied to the model.
+    try:
+        ids=safe_rows(sb,"pc_entity_identifiers","entity_type,entity_id,identifier_type,identifier_value,normalized_value,is_primary,confidence,source_id",5000)
+        context["identifiers"]=[x for x in ids if str(x.get("entity_id") or "") in candidate_ids][:250]
+    except Exception:
+        pass
+
+    # Supply graph edges touching supplied candidates, allowing research to reuse existing links.
+    try:
+        rels=safe_rows(sb,"pc_relationships","relationship_id,source_type,source_id,relationship_type,target_type,target_id,valid_from,valid_to,confidence,source_record_id,metadata",5000)
+        context["relationships"]=[x for x in rels if str(x.get("source_id") or "") in candidate_ids or str(x.get("target_id") or "") in candidate_ids][:300]
+    except Exception:
+        pass
+
+    context["candidate_counts"]={k:len(context[k]) for k in ("entities","assets","mobile_assets","identifiers","relationships")}
+    return context
+
+def canonical_context_prompt_block(context):
+    if not context:
+        return ""
+    return """
+
+CANONICAL P&C DATABASE CONTEXT
+The following is a current internal candidate snapshot from the canonical P&C Supabase database.
+It is NOT external source evidence. Use a supplied canonical ID only when the researched object is a deterministic match.
+Do not force a match. If no supplied candidate is the same object, propose a NEW staged record without inventing a canonical ID.
+If a supplied record is the same object, preserve its canonical ID and propose only supported enrichment/relationships rather than a duplicate.
+
+""" + json.dumps(context,indent=2,default=str)
+
 # ---------------------------------------------------------------------------
 # Controlled AI staging + canonical apply helpers
 # ---------------------------------------------------------------------------
@@ -1894,8 +1997,28 @@ elif page=="Research Jobs":
             context=st.selectbox("Product context",["TRADE","INTELLIGENCE"],index=0)
         with c2:
             use_web=st.checkbox("Use current web research",True)
+            use_canonical_context=st.checkbox(
+                "Use canonical database context",True,
+                help="Pass likely matching companies/assets/vessels and existing graph links from Supabase to the researcher before web research."
+            )
         with c3:
             st.metric("Pending staged",count_rows(sb,"pc_staged_records",{"review_status":"pending"}))
+
+        canonical_context={}
+        if use_canonical_context and prompt.strip():
+            try:
+                canonical_context=build_canonical_research_context(sb,prompt)
+                cc=canonical_context.get("candidate_counts",{})
+                st.caption(
+                    f"Canonical pre-check: {cc.get('entities',0)} companies/entities · "
+                    f"{cc.get('assets',0)} assets · {cc.get('mobile_assets',0)} vessels · "
+                    f"{cc.get('relationships',0)} existing relationships."
+                )
+                with st.expander("Preview canonical candidates sent to the researcher"):
+                    st.json(canonical_context)
+            except Exception as exc:
+                st.warning(f"Canonical context pre-check failed; research can still run through normal staging: {exc}")
+                canonical_context={}
 
         st.caption(
             "The AI researcher must provide source URLs and confidence. "
@@ -1906,11 +2029,21 @@ elif page=="Research Jobs":
             if not ai_configured():
                 st.error("Configure OPENAI_API_KEY and OPENAI_MODEL.")
             else:
+                effective_prompt=prompt
+                if use_canonical_context and canonical_context:
+                    effective_prompt += canonical_context_prompt_block(canonical_context)
+
                 job=sb.table("pc_ingestion_jobs").insert({
                     "job_type":"AI_RESEARCH",
                     "title":campaign if campaign!="Custom research" else prompt[:100],
                     "query_text":prompt,
-                    "source_scope":{"product":context,"web_search":use_web,"campaign":campaign},
+                    "source_scope":{
+                        "product":context,
+                        "web_search":use_web,
+                        "campaign":campaign,
+                        "canonical_context":bool(use_canonical_context),
+                        "canonical_candidate_counts":(canonical_context or {}).get("candidate_counts",{}),
+                    },
                     "status":"running",
                 }).execute().data[0]
 
@@ -1918,9 +2051,16 @@ elif page=="Research Jobs":
 
                 try:
                     with st.status("Running AI research...",expanded=True) as status:
+                        if use_canonical_context and canonical_context:
+                            cc=canonical_context.get("candidate_counts",{})
+                            st.write(
+                                "Canonical pre-check attached: "
+                                f"{cc.get('entities',0)} entities, {cc.get('assets',0)} assets, "
+                                f"{cc.get('mobile_assets',0)} vessels, {cc.get('relationships',0)} relationships."
+                            )
                         st.write("Sending research brief to OpenAI...")
                         result=ai_research(
-                            prompt,
+                            effective_prompt,
                             context,
                             use_web,
                             output_contract=AI_OUTPUT_CONTRACT
