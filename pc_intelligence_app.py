@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import re
+import sys
 from pathlib import Path
 from datetime import datetime
 
@@ -13,6 +14,11 @@ st.set_page_config(
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
+SHARED_DIR = ROOT / "shared"
+if str(SHARED_DIR) not in sys.path:
+    sys.path.insert(0,str(SHARED_DIR))
+from pc_data_bridge import load_sheet as bridge_load_sheet
+from pc_db import client as pc_db_client, safe_rows as pc_safe_rows
 
 # -----------------------------------------------------------------------------
 # P&C Intelligence visual system
@@ -139,15 +145,19 @@ if st.session_state.get("pc_intel_appearance","Dark") == "Light":
     """,unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# Data helpers — all reads are from the same Excel-backed P&C model
+# Data helpers — live/canonical bridge first, workbook fallback during migration
 # -----------------------------------------------------------------------------
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300)
 def xl(file_name: str, sheet: str) -> pd.DataFrame:
     try:
-        df = pd.read_excel(DATA / file_name, sheet_name=sheet)
-        return df.dropna(how="all")
+        df = bridge_load_sheet(DATA, file_name, sheet, dtype_str=True)
+        return df.dropna(how="all") if df is not None else pd.DataFrame()
     except Exception:
-        return pd.DataFrame()
+        try:
+            df = pd.read_excel(DATA / file_name, sheet_name=sheet)
+            return df.dropna(how="all")
+        except Exception:
+            return pd.DataFrame()
 
 
 def text_col(df, col):
@@ -219,7 +229,7 @@ def humanize_relationship(v):
 
 def show_df(df, cols=None, height=420):
     if df is None or df.empty:
-        st.markdown('<div class="pc-empty">No matching records in the current Excel model.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="pc-empty">No matching records in the current canonical/migration data layer.</div>', unsafe_allow_html=True)
         return
     view = df.copy()
     if cols:
@@ -335,6 +345,75 @@ def render_connected_context(event_id):
         show_df(view, ["System", "Relationship", "Confidence"], 180)
 
 
+
+@st.cache_data(show_spinner=False, ttl=60)
+def _live_policy_rows(table_candidates):
+    """Return rows from the first available canonical policy/compliance table."""
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame(), ""
+        for table in table_candidates:
+            try:
+                rows=pc_safe_rows(sb,table,"*",20000)
+            except Exception:
+                rows=[]
+            if rows:
+                return pd.DataFrame(rows), table
+    except Exception:
+        pass
+    return pd.DataFrame(), ""
+
+def _policy_title_columns(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+    out=df.copy()
+    rename={}
+    special={
+        "designation_id":"Designation ID","designation_date":"Designation Date",
+        "target_type":"Target Type","target_name":"Target Name",
+        "imo_identifier":"IMO / Identifier","imo_or_identifier":"IMO / Identifier",
+        "identifier":"IMO / Identifier","regime_linkage":"Regime / Linkage",
+        "designation_basis_link":"Designation Basis / Link",
+        "model_coverage_status":"Model Coverage Status",
+        "authority_id":"Authority ID","authority_name":"Authority",
+        "programme_id":"Programme ID","program_id":"Programme ID",
+        "programme_name":"Programme","program_name":"Programme",
+        "authority_sponsor":"Authority / Sponsor",
+        "jurisdiction_geography":"Jurisdiction / Geography",
+        "regime_type":"Regime Type","effective_observed_from":"Effective / Observed From",
+        "enforcement_mechanisms":"Enforcement Mechanisms",
+        "legal_analytical_note":"Legal / Analytical Note",
+        "direct_indirect":"Direct / Indirect","reason_basis":"Reason / Basis",
+        "source_vessel":"Source Vessel","counterparty_related_entity":"Counterparty / Related Entity",
+        "related_entity_type":"Related Entity Type","event_geography":"Event / Geography",
+        "exposure_type":"Exposure Type","analytical_note":"Analytical Note",
+        "classification_rule":"Classification Rule",
+        "legal_analytical_effect":"Legal / Analytical Effect",
+        "last_verified":"Last Verified","effective_date":"Effective Date",
+        "restriction_type":"Restriction Type",
+    }
+    for c in out.columns:
+        key=str(c).strip().casefold().replace(" ","_").replace("/","_").replace("-","_")
+        key=re.sub(r"_+","_",key).strip("_")
+        rename[c]=special.get(key," ".join(w.capitalize() for w in key.split("_")))
+    return out.rename(columns=rename)
+
+def _policy_live_first(legacy_df, table_candidates, dedupe_cols=None):
+    """Canonical Supabase first; workbook rows are migration fallback only."""
+    live,table=_live_policy_rows(table_candidates)
+    live=_policy_title_columns(live)
+    legacy=legacy_df.copy() if legacy_df is not None else pd.DataFrame()
+    if live.empty:
+        return legacy, "Legacy migration fallback"
+    if legacy.empty:
+        return live, f"Live canonical · {table}"
+    combined=pd.concat([live,legacy],ignore_index=True,sort=False)
+    keys=[c for c in (dedupe_cols or []) if c in combined.columns]
+    if keys:
+        combined=combined.drop_duplicates(subset=keys,keep="first")
+    return combined, f"Live canonical · {table} + fallback"
+
 # Canonical vessel registry from Supabase.
 @st.cache_data(show_spinner=False, ttl=60)
 def _canonical_db_vessels():
@@ -422,14 +501,24 @@ event_system_links = xl("13_events_hazards.xlsx", "Event System Links")
 impact_chains = xl("13_events_hazards.xlsx", "Impact Chains")
 
 # Sanctions / compliance
-sanctions_authorities = xl("14_trade_policy_compliance.xlsx", "Sanctions Authorities")
-sanctions_programmes = xl("14_trade_policy_compliance.xlsx", "Sanctions Programmes")
-sanctions_designations = xl("14_trade_policy_compliance.xlsx", "Sanctions Designations")
-sanctions_links = xl("14_trade_policy_compliance.xlsx", "Sanctions Entity Links")
-compliance_regimes = xl("14_trade_policy_compliance.xlsx", "Compliance Regimes")
-compliance_designations = xl("14_trade_policy_compliance.xlsx", "Compliance Designations")
-compliance_exposure = xl("14_trade_policy_compliance.xlsx", "Compliance Exposure")
-watchlist_taxonomy = xl("14_trade_policy_compliance.xlsx", "Watchlist Taxonomy")
+_legacy_sanctions_authorities = xl("14_trade_policy_compliance.xlsx", "Sanctions Authorities")
+_legacy_sanctions_programmes = xl("14_trade_policy_compliance.xlsx", "Sanctions Programmes")
+_legacy_sanctions_designations = xl("14_trade_policy_compliance.xlsx", "Sanctions Designations")
+_legacy_sanctions_links = xl("14_trade_policy_compliance.xlsx", "Sanctions Entity Links")
+_legacy_compliance_regimes = xl("14_trade_policy_compliance.xlsx", "Compliance Regimes")
+_legacy_compliance_designations = xl("14_trade_policy_compliance.xlsx", "Compliance Designations")
+_legacy_compliance_exposure = xl("14_trade_policy_compliance.xlsx", "Compliance Exposure")
+_legacy_watchlist_taxonomy = xl("14_trade_policy_compliance.xlsx", "Watchlist Taxonomy")
+
+sanctions_authorities,_src_auth=_policy_live_first(_legacy_sanctions_authorities,["pc_sanctions_authorities","sanctions_authorities"],["Authority ID"])
+sanctions_programmes,_src_prog=_policy_live_first(_legacy_sanctions_programmes,["pc_sanctions_programmes","pc_sanctions_programs","sanctions_programmes"],["Programme ID"])
+sanctions_designations,_src_des=_policy_live_first(_legacy_sanctions_designations,["pc_sanctions_designations","sanctions_designations"],["Designation ID"])
+sanctions_links,_src_link=_policy_live_first(_legacy_sanctions_links,["pc_sanctions_entity_links","sanctions_entity_links"],["Designation ID","Entity ID"])
+compliance_regimes,_src_reg=_policy_live_first(_legacy_compliance_regimes,["pc_compliance_regimes","compliance_regimes"],["Regime"])
+compliance_designations,_src_cd=_policy_live_first(_legacy_compliance_designations,["pc_compliance_designations","compliance_designations"])
+compliance_exposure,_src_ce=_policy_live_first(_legacy_compliance_exposure,["pc_compliance_exposure","compliance_exposure"])
+watchlist_taxonomy,_src_watch=_policy_live_first(_legacy_watchlist_taxonomy,["pc_watchlist_taxonomy","watchlist_taxonomy"],["Class"])
+POLICY_DATA_SOURCES={v for v in [_src_auth,_src_prog,_src_des,_src_link,_src_reg,_src_cd,_src_ce,_src_watch] if v}
 
 # -----------------------------------------------------------------------------
 # Sidebar architecture
@@ -1263,6 +1352,8 @@ elif page == "Aviation & Movement":
 # -----------------------------------------------------------------------------
 elif page == "Sanctions & Compliance":
     section("Economic security", "Sanctions & Compliance", "Government sanctions remain distinct from operational compliance regimes such as PGSA, while both can be analysed against the same canonical vessels and companies.")
+    if POLICY_DATA_SOURCES:
+        st.caption("Data bridge: " + " · ".join(sorted(POLICY_DATA_SOURCES)))
     t1,t2,t3,t4 = st.tabs(["Government Sanctions", "PGSA / Compliance", "Secondary Exposure", "Taxonomy"])
     with t1:
         c1,c2,c3 = st.columns(3)
@@ -1282,7 +1373,7 @@ elif page == "Sanctions & Compliance":
 # 9. INTELLIGENCE SEARCH
 # -----------------------------------------------------------------------------
 elif page == "Intelligence Search":
-    section("Discovery", "Intelligence Search", "Search incidents, monitoring, vessels, ports, companies, sanctions/compliance and source feeds from the shared Excel model.")
+    section("Discovery", "Intelligence Search", "Search incidents, monitoring, vessels, ports, companies, sanctions/compliance and source feeds from the shared live canonical data layer.")
     q = st.text_input("Search the P&C intelligence base", placeholder="e.g. Hormuz, Mraweh, Rotterdam, PGSA, Japan Coast Guard, drone...")
     if q:
         datasets = [
@@ -1328,4 +1419,4 @@ elif page == "Source Monitor":
 
 # Footer
 st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
-st.markdown('<div class="small-note">P&C Intelligence · v3.5 · Latest-intelligence homepage + prioritised forward monitoring.</div>', unsafe_allow_html=True)
+st.markdown('<div class="small-note">P&C Intelligence · v3.6 · Live-canonical-first data bridge + latest intelligence + prioritised monitoring.</div>', unsafe_allow_html=True)

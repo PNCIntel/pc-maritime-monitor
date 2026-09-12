@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.24-government-security-vessel-fallback"
+APP_VERSION = "v3.3.26-security-business-risk"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -5824,6 +5824,263 @@ def render_government_security():
             display_df(rview[[c for c in ["Source","Relationship","Target","Target Type","Confidence","Record Status"] if c in rview.columns]],600)
 
 
+
+@st.cache_data(show_spinner=False, ttl=60)
+def _live_policy_rows(table_candidates):
+    """Return rows from the first available canonical policy/compliance table."""
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame(), ""
+        for table in table_candidates:
+            try:
+                rows=pc_safe_rows(sb,table,"*",20000)
+            except Exception:
+                rows=[]
+            if rows:
+                return pd.DataFrame(rows), table
+    except Exception:
+        pass
+    return pd.DataFrame(), ""
+
+def _policy_title_columns(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+    out=df.copy()
+    rename={}
+    special={
+        "designation_id":"Designation ID","designation_date":"Designation Date",
+        "target_type":"Target Type","target_name":"Target Name",
+        "imo_identifier":"IMO / Identifier","imo_or_identifier":"IMO / Identifier",
+        "identifier":"IMO / Identifier","regime_linkage":"Regime / Linkage",
+        "designation_basis_link":"Designation Basis / Link",
+        "model_coverage_status":"Model Coverage Status",
+        "authority_id":"Authority ID","authority_name":"Authority",
+        "programme_id":"Programme ID","program_id":"Programme ID",
+        "programme_name":"Programme","program_name":"Programme",
+        "authority_sponsor":"Authority / Sponsor",
+        "jurisdiction_geography":"Jurisdiction / Geography",
+        "regime_type":"Regime Type","effective_observed_from":"Effective / Observed From",
+        "enforcement_mechanisms":"Enforcement Mechanisms",
+        "legal_analytical_note":"Legal / Analytical Note",
+        "direct_indirect":"Direct / Indirect","reason_basis":"Reason / Basis",
+        "source_vessel":"Source Vessel","counterparty_related_entity":"Counterparty / Related Entity",
+        "related_entity_type":"Related Entity Type","event_geography":"Event / Geography",
+        "exposure_type":"Exposure Type","analytical_note":"Analytical Note",
+        "classification_rule":"Classification Rule",
+        "legal_analytical_effect":"Legal / Analytical Effect",
+        "last_verified":"Last Verified","effective_date":"Effective Date",
+        "restriction_type":"Restriction Type",
+    }
+    for c in out.columns:
+        key=str(c).strip().casefold().replace(" ","_").replace("/","_").replace("-","_")
+        key=re.sub(r"_+","_",key).strip("_")
+        rename[c]=special.get(key," ".join(w.capitalize() for w in key.split("_")))
+    return out.rename(columns=rename)
+
+def _policy_live_first(legacy_df, table_candidates, dedupe_cols=None):
+    """Canonical Supabase first; workbook rows are migration fallback only."""
+    live,table=_live_policy_rows(table_candidates)
+    live=_policy_title_columns(live)
+    legacy=legacy_df.copy() if legacy_df is not None else pd.DataFrame()
+    if live.empty:
+        return legacy, "Legacy migration fallback"
+    if legacy.empty:
+        return live, f"Live canonical · {table}"
+    combined=pd.concat([live,legacy],ignore_index=True,sort=False)
+    keys=[c for c in (dedupe_cols or []) if c in combined.columns]
+    if keys:
+        combined=combined.drop_duplicates(subset=keys,keep="first")
+    return combined, f"Live canonical · {table} + fallback"
+
+
+def _security_business_event_frame():
+    """Build the commercial-security layer from the shared live event tables."""
+    candidates=[]
+    for key in [
+        ("Intelligence","Events"),
+        ("Intelligence","Event Register"),
+        ("Events","Events"),
+        ("Maritime","Security Events"),
+        ("Trade","Events"),
+    ]:
+        df=TABLES.get(key,pd.DataFrame())
+        if df is not None and not df.empty:
+            candidates.append(df.copy())
+
+    # Fall back to any obvious event dataframe exposed by the app.
+    for name in ("EVENTS","events","event_df","hazard_events"):
+        obj=globals().get(name)
+        if isinstance(obj,pd.DataFrame) and not obj.empty:
+            candidates.append(obj.copy())
+
+    if not candidates:
+        return pd.DataFrame()
+
+    df=pd.concat(candidates,ignore_index=True,sort=False)
+
+    # Normalize a compact set of analytical columns without discarding source columns.
+    def first_col(names):
+        for n in names:
+            if n in df.columns:
+                return df[n]
+        return pd.Series("",index=df.index)
+
+    out=df.copy()
+    out["Event Date"]=first_col(["Start Date","Date","Event Date","event_date","start_date"])
+    out["Title"]=first_col(["Title","Event","Event Title","title","event_title"])
+    out["Event Type"]=first_col(["Event Type","Type","Category","event_type","category"])
+    out["Severity"]=first_col(["Severity","Risk","Risk Level","severity"])
+    out["Status"]=first_col(["Status","Event Status","status"])
+    out["Country"]=first_col(["Country / Countries","Country","country"])
+    out["Location"]=first_col(["Location","Area","Region","location","region"])
+    out["Operational Impact"]=first_col(["Operational Impact","Operational impact","operational_impact"])
+    out["Trade / Commercial Impact"]=first_col([
+        "Trade / Commercial Impact","Commercial Impact","Business Impact",
+        "trade_commercial_impact","commercial_impact","business_impact"
+    ])
+    out["Confidence"]=first_col(["Confidence","confidence"])
+
+    blob=(
+        out["Event Type"].astype(str)+" "+
+        out["Title"].astype(str)+" "+
+        out["Operational Impact"].astype(str)+" "+
+        out["Trade / Commercial Impact"].astype(str)
+    ).str.casefold()
+
+    security_terms = (
+        "attack|strike|drone|missile|piracy|hijack|seizure|boarding|mine|explosion|"
+        "conflict|war|security|military|naval|coast guard|interdiction|detention|"
+        "sabotage|terror|armed|hostile|sanction|blockade|restricted zone|gps|jamming|spoof"
+    )
+    business_terms = (
+        "port|terminal|shipping|vessel|tanker|container|cargo|trade|logistics|supply chain|"
+        "freight|insurance|rate|delay|closure|disruption|export|import|energy|oil|gas|"
+        "aviation|airspace|rail|road|warehouse|industrial|company|operator|crew"
+    )
+
+    sec=blob.str.contains(security_terms,regex=True,na=False)
+    biz=blob.str.contains(business_terms,regex=True,na=False)
+
+    # Keep clear security incidents, plus events explicitly carrying commercial impacts.
+    commercial_text=out["Trade / Commercial Impact"].astype(str).str.strip()
+    keep=sec & (biz | commercial_text.ne(""))
+    return out[keep].drop_duplicates().copy()
+
+def _sbr_priority_score(df):
+    """Simple transparent display prioritisation; no hidden probability estimate."""
+    if df.empty:
+        return pd.Series(dtype=float)
+    sev=df.get("Severity",pd.Series("",index=df.index)).astype(str).str.casefold()
+    score=pd.Series(0,index=df.index,dtype=float)
+    score += sev.map({
+        "critical":5,"severe":5,"high":4,"elevated":3,"medium":2,"moderate":2,"low":1
+    }).fillna(0)
+    status=df.get("Status",pd.Series("",index=df.index)).astype(str).str.casefold()
+    score += status.str.contains("active|ongoing|developing",regex=True,na=False).astype(int)*2
+    impact=df.get("Trade / Commercial Impact",pd.Series("",index=df.index)).astype(str)
+    score += impact.str.strip().ne("").astype(int)*2
+    return score
+
+def render_security_business_risk():
+    df=_security_business_event_frame()
+
+    st.caption(
+        "This page sits behind the main Trade view: security incidents are included only where they create "
+        "a meaningful operational, commercial, corridor, infrastructure or company consequence."
+    )
+
+    if df.empty:
+        st.info("No security-linked commercial events are available in the current canonical/migration layer.")
+        return
+
+    df=df.copy()
+    df["_priority"]=_sbr_priority_score(df)
+    df["_date_sort"]=pd.to_datetime(df["Event Date"],errors="coerce")
+    df=df.sort_values(["_priority","_date_sort"],ascending=[False,False],na_position="last")
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Security-linked events",len(df))
+    c2.metric("High / severe",int(df["Severity"].astype(str).str.contains("High|Severe|Critical",case=False,regex=True,na=False).sum()))
+    c3.metric("Active / developing",int(df["Status"].astype(str).str.contains("Active|Ongoing|Developing",case=False,regex=True,na=False).sum()))
+    c4.metric("Commercial impact recorded",int(df["Trade / Commercial Impact"].astype(str).str.strip().ne("").sum()))
+
+    st.markdown("### Priority security-to-business picture")
+    st.caption(
+        "Prioritised by reported severity, active status and whether a commercial impact has been recorded. "
+        "This is a display order, not a forecast probability."
+    )
+    showcols=[
+        "Event Date","Title","Event Type","Severity","Status","Country","Location",
+        "Operational Impact","Trade / Commercial Impact","Confidence"
+    ]
+    display_df(df[[c for c in showcols if c in df.columns]].head(20),520)
+
+    st.markdown("### Filter by consequence")
+    f1,f2,f3=st.columns(3)
+    q=f1.text_input("Search",placeholder="Hormuz, port strike, tanker, airspace...",key="sbr_search")
+    countries=sorted([x for x in df["Country"].fillna("").astype(str).unique() if x.strip()])
+    country=f2.selectbox("Country / geography",["All"]+countries,key="sbr_country")
+    severity_opts=sorted([x for x in df["Severity"].fillna("").astype(str).unique() if x.strip()])
+    sev=f3.selectbox("Severity",["All"]+severity_opts,key="sbr_severity")
+
+    x=df.copy()
+    if q.strip():
+        mask=pd.Series(False,index=x.index)
+        for c in ["Title","Event Type","Country","Location","Operational Impact","Trade / Commercial Impact"]:
+            mask |= x[c].astype(str).str.contains(q,case=False,na=False,regex=False)
+        x=x[mask]
+    if country!="All":
+        x=x[x["Country"].astype(str).eq(country)]
+    if sev!="All":
+        x=x[x["Severity"].astype(str).eq(sev)]
+
+    tabs=st.tabs([
+        "All security-business events",
+        "Maritime & Ports",
+        "Energy & Industry",
+        "Aviation",
+        "Supply Chain / Logistics",
+    ])
+
+    def subset_terms(frame,terms):
+        if frame.empty:
+            return frame
+        blob=(
+            frame["Title"].astype(str)+" "+
+            frame["Event Type"].astype(str)+" "+
+            frame["Operational Impact"].astype(str)+" "+
+            frame["Trade / Commercial Impact"].astype(str)
+        )
+        return frame[blob.str.contains("|".join(terms),case=False,regex=True,na=False)]
+
+    with tabs[0]:
+        display_df(x[[c for c in showcols if c in x.columns]],600)
+
+    with tabs[1]:
+        y=subset_terms(x,["ship","vessel","port","terminal","tanker","container","maritime","strait","sea","piracy"])
+        display_df(y[[c for c in showcols if c in y.columns]],500) if not y.empty else st.info("No matching maritime/port security-business events.")
+
+    with tabs[2]:
+        y=subset_terms(x,["oil","gas","lng","refinery","pipeline","energy","power","industrial","plant"])
+        display_df(y[[c for c in showcols if c in y.columns]],500) if not y.empty else st.info("No matching energy/industry security-business events.")
+
+    with tabs[3]:
+        y=subset_terms(x,["airspace","airport","aviation","airline","flight","drone"])
+        display_df(y[[c for c in showcols if c in y.columns]],500) if not y.empty else st.info("No matching aviation security-business events.")
+
+    with tabs[4]:
+        y=subset_terms(x,["logistics","supply chain","freight","warehouse","rail","road","truck","cargo","delay","closure","disruption"])
+        display_df(y[[c for c in showcols if c in y.columns]],500) if not y.empty else st.info("No matching logistics/supply-chain security-business events.")
+
+    st.markdown("### Why it matters")
+    st.caption(
+        "The Trade app should not duplicate the Intelligence app. This layer translates security reporting into "
+        "business consequences: operational disruption, corridor exposure, port/terminal effects, vessel risk, "
+        "insurance/freight implications, infrastructure exposure and company impacts."
+    )
+
+
 def _market_db_rows(table, columns="*", limit=2000, order=None):
     """Read the normalized market layer when Supabase is configured."""
     try:
@@ -6090,7 +6347,7 @@ st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend
 
 NAV_SECTIONS={
     "OPERATING PICTURE":["Overview","Regional Maps","Alerts & Disruptions","Watch Areas"],
-    "DOMAINS":["Maritime","Rail","Aviation","Trucking","Government & Security","Defence & Shipbuilding","Energy & Industry"],
+    "DOMAINS":["Maritime","Rail","Aviation","Trucking","Government & Security","Security & Business Risk","Defence & Shipbuilding","Energy & Industry"],
     "TRADE NETWORK":["Ports & Terminals","Corridors & Systems","Companies","Vessels","Investments"],
     "MARKETS & POLICY":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Sanctions & Compliance","Trade Policy","Contracts"],
     "MONITORING & TOOLS":["Hormuz Monitor","Live Feeds","News & Signals","Search","Reference & Benchmarks","Data"],
@@ -7611,6 +7868,15 @@ elif page=="Government & Security":
     render_government_security()
 
 
+
+elif page=="Security & Business Risk":
+    header(
+        "Security & Business Risk",
+        "Security incidents translated into operational and commercial consequences for trade, infrastructure, transport corridors and companies."
+    )
+    render_security_business_risk()
+
+
 elif page=="Defence & Shipbuilding":
     header("Defence & Shipbuilding","Shipyards, government procurement, naval and research-vessel programmes, contracts, delivery routes and industrial capacity.")
     dcos=TABLES.get(("Defence & Shipbuilding","Defence Companies"),pd.DataFrame()).copy()
@@ -7907,15 +8173,17 @@ elif page=="Sanctions & Compliance":
         "Sanctions & Compliance",
         "Government sanctions, programmes and designations. Government sanctions remain separate from analytical and operational watchlists."
     )
-    des=TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame()).copy()
-    auth=TABLES.get(("Trade Policy & Compliance","Sanctions Authorities"),pd.DataFrame()).copy()
-    progs=TABLES.get(("Trade Policy & Compliance","Sanctions Programmes"),pd.DataFrame()).copy()
-    links=TABLES.get(("Trade Policy & Compliance","Sanctions Entity Links"),pd.DataFrame()).copy()
-    watch=TABLES.get(("Trade Policy & Compliance","Watchlist Taxonomy"),pd.DataFrame()).copy()
-    rules=TABLES.get(("Trade Policy & Compliance","Policy Interaction Rules"),pd.DataFrame()).copy()
-    compliance_regimes=TABLES.get(("Trade Policy & Compliance","Compliance Regimes"),pd.DataFrame()).copy()
-    compliance_designations=TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()).copy()
-    compliance_exposure=TABLES.get(("Trade Policy & Compliance","Compliance Exposure"),pd.DataFrame()).copy()
+    des,des_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame()),["pc_sanctions_designations","sanctions_designations"],["Designation ID"])
+    auth,auth_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Sanctions Authorities"),pd.DataFrame()),["pc_sanctions_authorities","sanctions_authorities"],["Authority ID"])
+    progs,progs_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Sanctions Programmes"),pd.DataFrame()),["pc_sanctions_programmes","pc_sanctions_programs","sanctions_programmes"],["Programme ID"])
+    links,links_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Sanctions Entity Links"),pd.DataFrame()),["pc_sanctions_entity_links","sanctions_entity_links"],["Designation ID","Entity ID"])
+    watch,watch_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Watchlist Taxonomy"),pd.DataFrame()),["pc_watchlist_taxonomy","watchlist_taxonomy"],["Class"])
+    rules,rules_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Policy Interaction Rules"),pd.DataFrame()),["pc_policy_interaction_rules","policy_interaction_rules"])
+    compliance_regimes,regime_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Compliance Regimes"),pd.DataFrame()),["pc_compliance_regimes","compliance_regimes"],["Regime"])
+    compliance_designations,compdes_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()),["pc_compliance_designations","compliance_designations"])
+    compliance_exposure,exposure_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Compliance Exposure"),pd.DataFrame()),["pc_compliance_exposure","compliance_exposure"])
+    _policy_sources={x for x in [des_source,auth_source,progs_source,links_source,watch_source,rules_source,regime_source,compdes_source,exposure_source] if x}
+    st.caption("Data bridge: " + " · ".join(sorted(_policy_sources)))
 
     if des.empty and compliance_designations.empty:
         st.info("Sanctions data unavailable.")
@@ -8026,7 +8294,7 @@ elif page=="Sanctions & Compliance":
 elif page=="__DEFERRED_USCG_SAFETY_COMPLIANCE__":
     header(
         "USCG Safety & Compliance",
-        "Live CGMIX/PSIX and Incident Investigation Report lookups. This is an external evidence layer and is not written into the canonical Excel model."
+        "Live CGMIX/PSIX and Incident Investigation Report lookups. This is an external evidence layer and is not written into the canonical data model."
     )
     st.caption("Source: U.S. Coast Guard CGMIX · PSIX is a weekly FOIA/MISLE snapshot · live requests cached for 30 minutes")
     t1,t2=st.tabs(["PSIX Vessel / Inspection Search","Incident Investigations"])

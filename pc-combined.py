@@ -18,7 +18,7 @@ import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
 TRADE_APP = ROOT / "app.py"
-INTELLIGENCE_APP = ROOT / "pc-intelligence.py"
+INTELLIGENCE_APP = ROOT / "pc_intelligence_app.py"
 
 st.set_page_config(
     page_title="Power & Corridors · Trade + Intelligence",
