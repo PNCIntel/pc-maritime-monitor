@@ -30,7 +30,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.12-live-canonical-dedupe-fix"
+APP_VERSION = "v3.3.13-company-asset-rollup-fix"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2187,11 +2187,43 @@ def build_company_profile(entity_id, entity_name):
     caps=TABLES.get(("Defence & Shipbuilding","Yard Capabilities"),pd.DataFrame())
     prof["yard_capabilities"]=_match_any(caps,["Yard ID"],yard_ids)
 
-    # Infrastructure assets / facilities directly owned by company
+    # Infrastructure assets / facilities linked to this company.
+    # The database/legacy layers do not all use the same ownership/operator column,
+    # so match every supported company-link field rather than only "Company ID".
     assets=TABLES.get(("Infrastructure","Assets"),pd.DataFrame())
-    prof["assets"]=_match_any(assets,["Company ID"],scope_ids)
+    _asset_company_cols=[
+        "Company ID",
+        "Owner / Operator Company ID",
+        "Operator Company ID",
+        "Owner Company ID",
+        "Primary Operator Company ID",
+        "Entity ID",
+    ]
+    prof["assets"]=_match_any(assets,_asset_company_cols,asset_scope_ids)
+
+    # Name fallback for legacy/backfill rows where only a readable owner/operator survived.
+    if not assets.empty:
+        _asset_name_mask=pd.Series(False,index=assets.index)
+        _scope_names=set([entity_name] + company_scope_names(asset_scope_ids))
+        for _c in ["Company","Owner / Operator","Operator","Owner","Operator / Network","Relationship / Role"]:
+            if _c not in assets.columns:
+                continue
+            _s=assets[_c].fillna("").astype(str)
+            for _nm in _scope_names:
+                if _nm:
+                    _asset_name_mask |= _s.str.contains(re.escape(str(_nm)),case=False,na=False)
+        _asset_named=assets[_asset_name_mask].copy()
+        if not _asset_named.empty:
+            _am=pd.concat([prof["assets"],_asset_named],ignore_index=True,sort=False)
+            _ad=[c for c in ["Asset ID","Asset"] if c in _am.columns]
+            prof["assets"]=_am.drop_duplicates(subset=_ad,keep="last") if _ad else _am
+
     infra_fac=TABLES.get(("Infrastructure","Facilities"),pd.DataFrame())
-    prof["infrastructure_facilities"]=_match_any(infra_fac,["Owner / Operator Company ID"],scope_ids)
+    prof["infrastructure_facilities"]=_match_any(
+        infra_fac,
+        ["Owner / Operator Company ID","Company ID","Operator Company ID","Owner Company ID"],
+        asset_scope_ids
+    )
 
     # Announcements related directly or through programmes
     anns=TABLES.get(("Defence & Shipbuilding","Announcements"),pd.DataFrame())
@@ -2309,26 +2341,41 @@ def build_company_profile(entity_id, entity_name):
     pnews=TABLES.get(("Maritime","Port News"),pd.DataFrame())
     ports=TABLES.get(("Maritime","Ports"),pd.DataFrame())
 
-    # direct terminal operator rows
+    # direct terminal ownership/operator rows.
+    # Support both canonical projections and older AD Ports / legacy workbook link columns.
     tm=pd.Series(False,index=pt.index) if not pt.empty else pd.Series(dtype=bool)
+    _scope_names=set([entity_name] + company_scope_names(asset_scope_ids))
     if not pt.empty:
-        if "Primary Operator Company ID" in pt.columns:
-            tm |= pt["Primary Operator Company ID"].astype(str).isin(asset_scope_ids)
-        if "Operator / Network" in pt.columns:
-            for nm in company_scope_names(asset_scope_ids):
-                tm |= pt["Operator / Network"].astype(str).str.contains(re.escape(nm),case=False,na=False)
+        for _c in [
+            "Primary Operator Company ID","Operator Company ID","Owner Company ID",
+            "Company ID","Owner / Operator Company ID"
+        ]:
+            if _c in pt.columns:
+                tm |= pt[_c].astype(str).isin(asset_scope_ids)
+        for _c in ["Operator / Network","Operator","Owner","Ownership / Structure","Company"]:
+            if _c in pt.columns:
+                _s=pt[_c].fillna("").astype(str)
+                for _nm in _scope_names:
+                    if _nm:
+                        tm |= _s.str.contains(re.escape(str(_nm)),case=False,na=False)
     direct_terms=pt[tm].copy() if not pt.empty else pd.DataFrame()
 
-    # direct port operator/authority rows.
-    # Some networks (e.g. Associated British Ports) are modelled at port level rather than terminal level.
+    # direct port owner/operator/authority rows.
     direct_ports=pd.DataFrame()
     if not ports.empty:
         pm=pd.Series(False,index=ports.index)
-        if "Operator Company ID" in ports.columns:
-            pm |= ports["Operator Company ID"].astype(str).isin(asset_scope_ids)
-        if "Operator" in ports.columns:
-            for nm in company_scope_names(asset_scope_ids):
-                pm |= ports["Operator"].astype(str).str.contains(re.escape(nm),case=False,na=False)
+        for _c in [
+            "Operator Company ID","Owner Company ID","Company ID",
+            "Owner / Operator Company ID","Primary Operator Company ID"
+        ]:
+            if _c in ports.columns:
+                pm |= ports[_c].astype(str).isin(asset_scope_ids)
+        for _c in ["Operator","Owner","Operator / Network","Company","Ownership / Structure"]:
+            if _c in ports.columns:
+                _s=ports[_c].fillna("").astype(str)
+                for _nm in _scope_names:
+                    if _nm:
+                        pm |= _s.str.contains(re.escape(str(_nm)),case=False,na=False)
         direct_ports=ports[pm].copy()
 
     # ownership / JV rows can surface terminals even where primary operator differs
