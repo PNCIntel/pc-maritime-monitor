@@ -144,14 +144,13 @@ select
     title,
     status,
     created_at,
-    updated_at,
-    now()-coalesce(updated_at,created_at) as time_since_update,
+    now()-created_at as time_since_update,
     stats,
     error_text
 from pc_ingestion_jobs
 where status='running'
-  and coalesce(updated_at,created_at) < now()-interval '45 minutes'
-order by coalesce(updated_at,created_at);
+  and created_at < now()-interval '45 minutes'
+order by created_at;
 
 create or replace function pc_run_standard_reconciliation(p_job_id uuid)
 returns jsonb

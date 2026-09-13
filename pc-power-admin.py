@@ -971,9 +971,9 @@ def _workflow_upsert(job_id, workflow_type, title, stage, order, status="running
 def _workflow_job_rows(job_type=None,limit=100):
     if not sb:
         return []
-    q=sb.table("pc_ingestion_jobs").select(
-        "ingestion_job_id,job_type,title,status,stats,error_text,created_at,updated_at,completed_at,source_scope"
-    ).order("created_at",desc=True).limit(limit)
+    # Use "*" here because pc_ingestion_jobs deployments do not all expose
+    # updated_at/completed_at/source_scope. created_at is the stable timestamp.
+    q=sb.table("pc_ingestion_jobs").select("*").order("created_at",desc=True).limit(limit)
     if job_type:
         q=q.eq("job_type",job_type)
     try:
@@ -2618,7 +2618,7 @@ elif page=="Workflow Center":
                 st.info("Run SQL 028_document_ingestion.sql to enable document records.")
         with tabs[3]:
             try:
-                stale=safe_rows(sb,"pc_v_stale_ingestion_jobs","*",250,order="updated_at")
+                stale=safe_rows(sb,"pc_v_stale_ingestion_jobs","*",250,order="created_at")
             except Exception:
                 stale=[]
             if stale:
@@ -2629,7 +2629,7 @@ elif page=="Workflow Center":
                 now=pd.Timestamp.utcnow()
                 for j in all_jobs:
                     if j.get("status")!="running": continue
-                    d=pd.to_datetime(j.get("updated_at") or j.get("created_at"),utc=True,errors="coerce")
+                    d=pd.to_datetime(j.get("created_at"),utc=True,errors="coerce")
                     if pd.notna(d) and now-d>pd.Timedelta(minutes=45):
                         calc.append({**j,"time_since_update":str(now-d)})
                 dataframe(calc)
