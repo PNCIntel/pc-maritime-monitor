@@ -2647,6 +2647,25 @@ elif page=="AI Research Workflow":
                 height=190,
                 key="aiwf_prompt"
             )
+
+            research_docs=st.file_uploader(
+                "Attach source documents (optional)",
+                type=["pdf","docx","txt","md"],
+                accept_multiple_files=True,
+                key="aiwf_documents",
+                help="Documents are read before web research. Their extracted text is passed to the researcher and, when the Documents tables are installed, preserved in pc_documents."
+            )
+            if research_docs:
+                st.caption(f"{len(research_docs)} document(s) attached. The researcher will read these before outward web research.")
+                with st.expander("Attached document preview"):
+                    for _doc in research_docs:
+                        try:
+                            _txt=_extract_document_text(_doc)
+                            st.markdown(f"**{_doc.name}** · {len(_txt):,} extracted characters")
+                            st.text(_txt[:2500] + ("\n…" if len(_txt)>2500 else ""))
+                        except Exception as _exc:
+                            st.warning(f"{_doc.name}: {_exc}")
+
             c1,c2,c3=st.columns(3)
             with c1:
                 context=st.selectbox("Product context",["TRADE","INTELLIGENCE"],index=0,key="aiwf_context")
@@ -2685,6 +2704,70 @@ elif page=="AI Research Workflow":
                     st.error("Configure OPENAI_API_KEY and OPENAI_MODEL in Streamlit secrets.")
                 else:
                     effective_prompt=prompt
+                    document_manifest=[]
+                    document_blocks=[]
+                    total_document_chars=0
+                    max_total_document_chars=120000
+                    max_document_chars=60000
+
+                    for _doc in (research_docs or []):
+                        _raw=_doc.getvalue()
+                        _hash=hashlib.sha256(_raw).hexdigest()
+                        _text=_extract_document_text(_doc)
+                        _usable=_text[:max_document_chars]
+                        remaining=max_total_document_chars-total_document_chars
+                        if remaining <= 0:
+                            _usable=""
+                        elif len(_usable)>remaining:
+                            _usable=_usable[:remaining]
+                        total_document_chars += len(_usable)
+
+                        _doc_id=None
+                        if _table_exists("pc_documents"):
+                            try:
+                                _existing=(sb.table("pc_documents").select("document_id").eq("file_sha256",_hash).limit(1).execute().data or [])
+                                _payload={
+                                    "title":Path(_doc.name).stem,
+                                    "document_type":"research_source",
+                                    "file_name":_doc.name,
+                                    "file_sha256":_hash,
+                                    "mime_type":mimetypes.guess_type(_doc.name)[0],
+                                    "extracted_text":_text,
+                                    "metadata":{
+                                        "original_size_bytes":len(_raw),
+                                        "ingested_via":"AI_RESEARCH_WORKFLOW"
+                                    }
+                                }
+                                if _existing:
+                                    _doc_id=_existing[0]["document_id"]
+                                    sb.table("pc_documents").update(_payload).eq("document_id",_doc_id).execute()
+                                else:
+                                    _doc_id=sb.table("pc_documents").insert(_payload).execute().data[0]["document_id"]
+                            except Exception as _doc_exc:
+                                st.warning(f"Could not preserve {_doc.name} in pc_documents; research will still use its extracted text: {_doc_exc}")
+
+                        document_manifest.append({
+                            "file_name":_doc.name,
+                            "sha256":_hash,
+                            "document_id":_doc_id,
+                            "extracted_chars":len(_text),
+                            "chars_sent_to_researcher":len(_usable),
+                            "truncated":len(_usable)<len(_text),
+                        })
+                        if _usable:
+                            document_blocks.append(
+                                "\n\n===== SOURCE DOCUMENT: " + _doc.name + " =====\n" +
+                                _usable +
+                                "\n===== END SOURCE DOCUMENT: " + _doc.name + " ====="
+                            )
+
+                    if document_blocks:
+                        effective_prompt += (
+                            "\n\nDOCUMENT-FIRST INSTRUCTION: Read the attached source documents below before web research. "
+                            "Treat them as seed evidence, verify material facts outward where requested, preserve provenance, "
+                            "deduplicate overlapping stories, and do not invent facts.\n" + "".join(document_blocks)
+                        )
+
                     if use_canonical_context and canonical_context:
                         effective_prompt += canonical_context_prompt_block(canonical_context)
 
@@ -2698,6 +2781,8 @@ elif page=="AI Research Workflow":
                             "campaign":campaign,
                             "canonical_context":bool(use_canonical_context),
                             "canonical_candidate_counts":(canonical_context or {}).get("candidate_counts",{}),
+                            "documents":document_manifest,
+                            "document_count":len(document_manifest),
                         },
                         "status":"running",
                     }).execute().data[0]
@@ -2741,6 +2826,7 @@ elif page=="AI Research Workflow":
                                 "product":context,
                                 "resolution":resolution,
                                 "auto_reconcile":auto_result,
+                                "documents":document_manifest,
                             }
                             sb.table("pc_ingestion_jobs").update({"status":"completed","stats":stats}).eq("ingestion_job_id",job_id).execute()
                             _workflow_upsert(job_id,"AI_RESEARCH",job.get("title") or "AI research","RECONCILE",4,stats=stats)

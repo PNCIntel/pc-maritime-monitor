@@ -1,12 +1,12 @@
-P&C Intelligence v3.3.40 - Clean Alert Cards
+P&C Workflow Console v5.4 — AI Research Document Attachments
 
-Replace:
-  pc_intelligence_app.py
+Replace only pc-power-admin.py.
+No SQL changes are required if SQL 028 and SQL 037 are already installed.
 
 Changes:
-- Removes literal NaN / None from alert cards.
-- Omits empty description/impact blocks instead of displaying placeholders.
-- Falls back to Trade / Commercial Impact when Operational Impact is absent.
-- Formats event dates as readable dates.
-- Humanizes event types such as PIPELINE_ATTACK -> Pipeline attack.
-- Retains the v3.3.39 live-canonical Supabase alert/event bridge.
+- AI Research > Launch research now accepts multiple PDF, DOCX, TXT and MD files.
+- Extracted document text is read before web research and appended to the research brief.
+- Documents are preserved in pc_documents when the document-ingestion tables are available.
+- Ingestion job source_scope records document IDs, hashes, extracted character counts and truncation state.
+- Maximum text sent per document: 60,000 chars; total document text per research job: 120,000 chars.
+- Existing canonical-context, web research, staging and one-pass reconciliation behavior remains unchanged.
