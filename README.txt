@@ -1,18 +1,12 @@
-P&C Trade / Workflow Fix v3.3.39 / v5.3
+P&C Intelligence v3.3.40 - Clean Alert Cards
 
 Replace:
-  app.py
-  pc-power-admin.py
+  pc_intelligence_app.py
 
-Trade changes:
-- Commercial Pulse suppresses nan placeholders and resolves Buyer/Target fields correctly.
-- Latest canonical activity becomes Latest trade updates.
-- Adds alerts/events, transactions, trade flows and canonical relationships as readable updates.
-- Newly created companies/entities move to a secondary expander instead of dominating the feed.
-- Infrastructure additions remain prominent.
-
-Workflow changes:
-- Fixes AI Research failure: _dependency_reconcile was undefined.
-- AI Research now calls the existing _run_reconciliation wrapper, which prefers pc_reconcile_ingestion_job_v2 and falls back safely.
-
-No new SQL required.
+Changes:
+- Removes literal NaN / None from alert cards.
+- Omits empty description/impact blocks instead of displaying placeholders.
+- Falls back to Trade / Commercial Impact when Operational Impact is absent.
+- Formats event dates as readable dates.
+- Humanizes event types such as PIPELINE_ATTACK -> Pipeline attack.
+- Retains the v3.3.39 live-canonical Supabase alert/event bridge.

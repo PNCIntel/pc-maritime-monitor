@@ -250,20 +250,50 @@ def section(kicker, title, copy=None):
         st.markdown(f'<div class="pc-section-copy">{copy}</div>', unsafe_allow_html=True)
 
 
+def _event_type_label(v):
+    s = clean_display_text(v)
+    if not s:
+        return "Event"
+    s = s.replace("_", " ").replace("-", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    keep={"SAR","AIS","GNSS","GPS","LNG","UAE","UK","US","EU","IMO"}
+    words=[]
+    for w in s.split():
+        wu=w.upper()
+        words.append(wu if wu in keep else w.lower())
+    if words and words[0] not in keep:
+        words[0]=words[0].capitalize()
+    return " ".join(words)
+
+def _event_date_label(v):
+    s = clean_display_text(v)
+    if not s:
+        return "Date not recorded"
+    dt = pd.to_datetime(s, errors="coerce")
+    if pd.isna(dt):
+        return s
+    return dt.strftime("%d %b %Y")
+
 def event_card(row):
-    title = clean_display_text(row.get("Title", "Untitled event"))
-    date = row.get("Start Date", row.get("Date", ""))
-    etype = row.get("Event Type", row.get("Event Family", "Event"))
+    title = clean_display_text(row.get("Title", "Untitled event")) or "Untitled event"
+    date = _event_date_label(row.get("Start Date", row.get("Date", "")))
+    etype = _event_type_label(row.get("Event Type", row.get("Event Family", "Event")))
     sev = clean_display_text(row.get("Severity", ""))
-    loc = row.get("Location", row.get("Country / Countries", ""))
-    body = row.get("Description", "")
-    impact = row.get("Operational Impact", "")
+    loc = clean_display_text(row.get("Location", row.get("Country / Countries", "")))
+    body = clean_display_text(row.get("Description", ""))
+    impact = clean_display_text(row.get("Operational Impact", ""))
+    if not impact:
+        impact = clean_display_text(row.get("Trade / Commercial Impact", ""))
+
+    meta_bits=[x for x in [date, etype, sev, loc] if x]
+    body_html = f'<div class="pc-card-body">{body}</div>' if body else ""
+    impact_html = f'<div class="pc-card-impact"><b>Operational impact:</b> {impact}</div>' if impact else ""
     st.markdown(
         f'''<div class="pc-card pc-card-priority">
-        <div class="pc-card-meta">{date} · {etype} · {sev} · {loc}</div>
+        <div class="pc-card-meta">{' · '.join(meta_bits)}</div>
         <div class="pc-card-title">{title}</div>
-        <div class="pc-card-body">{body}</div>
-        <div class="pc-card-impact"><b>Operational impact:</b> {impact}</div>
+        {body_html}
+        {impact_html}
         </div>''',
         unsafe_allow_html=True,
     )
