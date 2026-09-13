@@ -137,7 +137,9 @@ from pc_staged_records s
 where coalesce(s.review_status,'pending') in ('pending','needs_changes')
 order by s.created_at desc;
 
-create or replace view pc_v_stale_ingestion_jobs as
+drop view if exists pc_v_stale_ingestion_jobs;
+
+create view pc_v_stale_ingestion_jobs as
 select
     ingestion_job_id,
     job_type,
