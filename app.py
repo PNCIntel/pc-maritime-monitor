@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.37-live-canonical-commercial-dashboard"
+APP_VERSION = "v3.3.38-live-canonical-activity"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -438,7 +438,12 @@ def load_newsdata_articles(query, api_key, language="en", size=10):
             return pd.DataFrame(), str(payload.get("message") or "NewsData request failed")
         return pd.DataFrame(payload.get("results") or []), ""
     except HTTPError as exc:
-        return pd.DataFrame(), f"HTTP {exc.code}"
+        try:
+            body=exc.read().decode("utf-8",errors="replace")
+        except Exception:
+            body=""
+        detail=(body[:320].strip() if body else "")
+        return pd.DataFrame(), f"HTTP {exc.code}" + (f": {detail}" if detail else "")
     except (URLError,TimeoutError,ValueError,OSError) as exc:
         return pd.DataFrame(), str(exc)
 
@@ -621,27 +626,41 @@ def _news_trade_relevant(row):
 
 
 def render_overview_news():
-    """Latest business/trade/geopolitical signals from NewsData.io."""
+    """Latest business/trade/geopolitical signals from NewsData.io with conservative fallbacks."""
     api_key=_newsdata_key()
     st.markdown("### Latest news & signals")
     if not api_key:
         st.caption("NewsData.io is configured in code but no API key was found in Streamlit Secrets.")
         return
 
-    # Query is deliberately narrow; a second local gate below rejects irrelevant syndication.
-    query=(
-        'shipping OR maritime OR port OR logistics OR freight OR "supply chain" OR trade OR tariff OR sanctions '
-        'OR energy OR oil OR gas OR LNG OR rail OR aviation OR infrastructure OR investment OR defence '
-        'OR conflict OR geopolitics OR military OR security'
-    )
-    df,err=load_newsdata_articles(query,api_key,"en",10)
-    if err:
-        st.caption(f"NewsData.io unavailable: {err}")
-        return
-    if df.empty:
-        st.caption("No current news signals returned.")
+    # NewsData can reject very large Boolean expressions with HTTP 422.  Use a few
+    # compact thematic queries and fall back to a single keyword when a Boolean query
+    # is rejected.  Results are merged and de-duplicated locally.
+    query_groups=[
+        ("Trade & logistics","shipping OR port OR logistics OR freight"),
+        ("Trade policy","trade OR tariff OR sanctions"),
+        ("Energy","oil OR gas OR LNG OR energy"),
+        ("Investment & infrastructure","infrastructure OR investment OR contract"),
+        ("Security & geopolitics","conflict OR military OR security OR geopolitics"),
+    ]
+    frames=[]
+    errors=[]
+    for label,q in query_groups:
+        df,err=load_newsdata_articles(q,api_key,"en",10)
+        if err and "HTTP 422" in err:
+            fallback=q.split(" OR ",1)[0].strip().strip('"')
+            df,err=load_newsdata_articles(fallback,api_key,"en",10)
+        if err:
+            errors.append(f"{label}: {err}")
+        elif df is not None and not df.empty:
+            x=df.copy(); x["_pc_news_group"]=label; frames.append(x)
+
+    if not frames:
+        msg=errors[0] if errors else "No results returned"
+        st.caption(f"NewsData.io unavailable: {msg}")
         return
 
+    df=pd.concat(frames,ignore_index=True,sort=False)
     df=df[df.apply(_news_trade_relevant,axis=1)].copy()
     if df.empty:
         st.caption("No current business, trade, conflict or geopolitical signals passed the relevance filter.")
@@ -650,22 +669,28 @@ def render_overview_news():
     # De-duplicate syndicated copies by normalized title.
     df["_title_key"]=df.get("title",pd.Series(index=df.index,dtype=str)).fillna("").astype(str).str.casefold().str.replace(r"[^a-z0-9]+"," ",regex=True).str.strip()
     df=df.drop_duplicates("_title_key").drop(columns=["_title_key"],errors="ignore")
+    if "pubDate" in df.columns:
+        df["_pub_dt"]=pd.to_datetime(df["pubDate"],errors="coerce",utc=True)
+        df=df.sort_values("_pub_dt",ascending=False,na_position="last")
 
-    for _,row in df.head(8).iterrows():
+    for _,row in df.head(10).iterrows():
         title=str(row.get("title") or "Untitled").strip()
         url=str(row.get("link") or "").strip()
         source=str(row.get("source_name") or row.get("source_id") or "").strip()
         pub=str(row.get("pubDate") or "").strip()
         desc=str(row.get("description") or "").strip()
+        group=str(row.get("_pc_news_group") or "Open source").strip()
         if url:
             st.markdown(f"**[{title}]({url})**")
         else:
             st.markdown(f"**{title}**")
-        meta=" · ".join(x for x in [source,pub] if x)
+        meta=" · ".join(x for x in [group,source,pub] if x)
         if meta: st.caption(meta)
         if desc: st.write(desc[:260] + ("…" if len(desc)>260 else ""))
-        st.markdown("<span class='pc-chip'>OPEN SOURCE</span><span class='pc-chip'>TRADE / GEOPOLITICAL SIGNAL</span>",unsafe_allow_html=True)
-    st.caption("NewsData.io discovery feed · business/trade/geopolitics relevance-gated · cached 10 minutes · corroborate before canonical promotion")
+    if errors:
+        with st.expander("Feed diagnostics"):
+            for e in errors[:5]: st.caption(e)
+    st.caption("NewsData.io discovery feed · relevance-gated · cached 10 minutes · corroborate before canonical promotion")
 
 AISHUB_URL = "https://data.aishub.net/ws.php"
 NAVITIA_BASE = "https://api.navitia.io/v1"
@@ -5789,23 +5814,34 @@ def render_compliance_exposure_workspace():
 
 
 def _trade_alert_candidates():
-    """Return commercial/operational alerts, excluding routine corporate development."""
+    """Return canonical alert/disruption events, honoring explicit DB alert flags first."""
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     if events.empty:
         return events
-    cols=[c for c in ["Event Family","Event Type","Title","Description","Operational Impact","Trade / Commercial Impact"] if c in events.columns]
+
+    cols=[c for c in ["Event Nature","Event Domain","Event Family","Event Type","Title","Description","Operational Impact","Trade / Commercial Impact"] if c in events.columns]
     blob=pd.Series("",index=events.index,dtype="string")
     for c in cols:
         blob=blob.str.cat(events[c].fillna("").astype(str),sep=" ")
-    include=r"strike|labour|weather|typhoon|cyclone|hurricane|flood|earthquake|wildfire|storm|closure|outage|disruption|grounding|collision|allision|capsize|sinking|fire|explosion|attack|missile|drone|piracy|seizure|interdiction|sanction|customs|tariff|border|canal|channel|low water|cyber|fraud|smuggl|crime"
+
+    include=r"alert|warning|strike|labour|weather|typhoon|cyclone|hurricane|flood|earthquake|wildfire|storm|closure|outage|disruption|grounding|collision|allision|capsize|sinking|fire|explosion|attack|missile|drone|piracy|seizure|interdiction|sanction|customs|tariff|border|canal|channel|low water|cyber|fraud|smuggl|crime|restricted zone|blockade"
     corporate=r"new terminal|terminal opening|commissioning|new crane|crane order|equipment order|vessel order|fleet order|acquisition|investment|capex announcement|earnings|dividend|share buyback|service launch|office opening"
     inc=blob.str.contains(include,case=False,regex=True,na=False)
     corp=blob.str.contains(corporate,case=False,regex=True,na=False)
-    # A corporate story can still become an alert only when it independently contains disruption language.
-    view=events[inc & (~corp | blob.str.contains(r"closure|outage|strike|attack|weather|fire|explosion|disruption|sanction",case=False,regex=True,na=False))].copy()
+
+    explicit=pd.Series(False,index=events.index)
+    if "Alert Worthy" in events.columns:
+        explicit |= events["Alert Worthy"].fillna(False).astype(str).str.casefold().isin({"true","1","yes","y"})
+    if "Intelligence Visible" in events.columns:
+        vis=events["Intelligence Visible"].fillna(False).astype(str).str.casefold().isin({"true","1","yes","y"})
+        sev=events.get("Severity",pd.Series(index=events.index,dtype=str)).fillna("").astype(str).str.casefold().isin({"critical","severe","high","moderate"})
+        explicit |= (vis & sev)
+
+    disruptive=inc & (~corp | blob.str.contains(r"closure|outage|strike|attack|weather|fire|explosion|disruption|sanction|seizure|piracy|drone|missile",case=False,regex=True,na=False))
+    view=events[explicit | disruptive].copy()
     if "Start Date" in view.columns:
-        view["_dt"]=pd.to_datetime(view["Start Date"],errors="coerce")
-        view=view.sort_values("_dt",ascending=False)
+        view["_dt"]=pd.to_datetime(view["Start Date"],errors="coerce",utc=True)
+        view=view.sort_values("_dt",ascending=False,na_position="last")
     return view
 
 
@@ -7555,9 +7591,71 @@ def _render_trade_pulse():
         })
     display_df(pd.DataFrame(rows),360)
 
+@st.cache_data(show_spinner=False, ttl=30)
+def _live_canonical_activity():
+    """Fresh DB-native activity so newly ingested records are visible immediately."""
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None: return pd.DataFrame()
+        rows=[]
+
+        def add(kind,name,when,detail="",status=""):
+            if not str(name or "").strip(): return
+            rows.append({"When":when,"Type":kind,"Record":str(name or "").strip(),"Detail":str(detail or "").strip(),"Status":str(status or "").strip()})
+
+        for r in pc_safe_rows(sb,"pc_events","event_id,title,start_date,severity,status,event_family,event_type,alert_worthy,trade_visible,intelligence_visible,created_at",300,order="created_at") or []:
+            flags=[]
+            if r.get("alert_worthy") is True: flags.append("ALERT")
+            if r.get("trade_visible") is True: flags.append("TRADE")
+            add("Event",r.get("title"),r.get("created_at") or r.get("start_date")," · ".join(x for x in [r.get("event_family"),r.get("event_type"),"/".join(flags)] if x),r.get("status") or r.get("severity"))
+
+        for r in pc_safe_rows(sb,"pc_entities","entity_id,name,entity_type,subtype,hq_country,status,created_at,updated_at",300,order="created_at") or []:
+            add("Company / entity",r.get("name"),r.get("created_at") or r.get("updated_at")," · ".join(x for x in [r.get("entity_type"),r.get("subtype"),r.get("hq_country")] if x),r.get("status"))
+
+        for r in pc_safe_rows(sb,"pc_assets","asset_id,name,asset_type,subtype,country,region_city,status,created_at,updated_at",400,order="created_at") or []:
+            add("Asset / infrastructure",r.get("name"),r.get("created_at") or r.get("updated_at")," · ".join(x for x in [r.get("asset_type"),r.get("subtype"),r.get("region_city"),r.get("country")] if x),r.get("status"))
+
+        for r in pc_safe_rows(sb,"pc_transactions","transaction_id,announced_date,effective_date,buyer_entity_id,seller_name,target_name,asset_class,country_region,transaction_type,reported_value,currency,status",300,order="announced_date") or []:
+            val=r.get("reported_value")
+            money=(f"{r.get('currency') or ''} {val:,.0f}" if isinstance(val,(int,float)) else "")
+            add("Transaction / investment",r.get("target_name") or r.get("transaction_type"),r.get("announced_date") or r.get("effective_date")," · ".join(x for x in [r.get("transaction_type"),r.get("country_region"),money] if x),r.get("status"))
+
+        for r in pc_safe_rows(sb,"pc_trade_flows","trade_flow_id,observation_date,period_start,period_end,origin_country,destination_country,commodity,transport_mode,confidence,metadata",300,order="observation_date") or []:
+            meta=r.get("metadata") if isinstance(r.get("metadata"),dict) else {}
+            origin=meta.get("origin_node") or r.get("origin_country") or ""
+            dest=meta.get("destination_node") or r.get("destination_country") or ""
+            name=" → ".join(x for x in [str(origin).strip(),str(dest).strip()] if x) or str(r.get("commodity") or "Trade flow")
+            add("Trade flow",name,r.get("observation_date") or r.get("period_end") or r.get("period_start")," · ".join(x for x in [r.get("commodity"),r.get("transport_mode")] if x),r.get("confidence"))
+
+        out=pd.DataFrame(rows)
+        if out.empty: return out
+        out["_dt"]=pd.to_datetime(out["When"],errors="coerce",utc=True)
+        return out.sort_values("_dt",ascending=False,na_position="last").drop(columns=["_dt"])
+    except Exception:
+        return pd.DataFrame()
+
+def _render_live_canonical_activity(limit=30):
+    st.markdown("### Latest canonical activity")
+    st.caption("Newly loaded database records — events, alerts, companies, infrastructure, transactions and trade flows — without waiting for an Excel rebuild.")
+    df=_live_canonical_activity()
+    if df.empty:
+        st.caption("No timestamped canonical activity is available from the live database.")
+        return
+    q=st.text_input("Filter latest data",placeholder="EGA, Canada, ship, KEZAD, port, bauxite, alert...",key="latest_canonical_filter")
+    view=df.copy()
+    if q.strip():
+        blob=view.astype(str).agg(" ".join,axis=1)
+        view=view[blob.str.contains(q.strip(),case=False,regex=False,na=False)]
+    display_df(view.head(limit),420)
+
 def _render_recent_additions():
     st.markdown("### Latest additions")
-    st.caption("Newest or recently refreshed records across companies, infrastructure, vessels, defence and corridors.")
+    st.caption("Newest canonical records from Supabase. Legacy/reference additions appear only when live timestamps are unavailable.")
+    live=_live_canonical_activity()
+    if live is not None and not live.empty:
+        display_df(live.head(18),330)
+        return
+
     blocks=[]
     candidates=[
         ("Companies",TABLES.get(("Core Entities","Companies"),pd.DataFrame()),["Company","Company Name","Name"],["updated_at","created_at","As Of","as_of"]),
@@ -7678,6 +7776,9 @@ if page=="Overview":
 
     st.markdown("---")
     render_overview_portwatch()
+
+    st.markdown("---")
+    _render_live_canonical_activity(30)
 
     st.markdown("---")
     q=st.text_input("Search the trade system",placeholder="Company, port, vessel, corridor, contract, programme, refinery, terminal...",key="trade_home_search_top")
