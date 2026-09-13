@@ -17,28 +17,48 @@ except Exception:
     ai_configured=lambda: False
 
 st.set_page_config(page_title="P&C Workflow Console",page_icon="◈",layout="wide",initial_sidebar_state="expanded")
+
+# Match the Trade/Intelligence apps: dark by default, with a persistent light/dark toggle.
+appearance = st.session_state.get("pc_admin_appearance", "Dark")
+
 st.markdown("""
 <style>
-:root{--bg:#07111f;--panel:#0d1a2b;--line:#28415f;--text:#f3f6fa;--muted:#b8c5d4;--gold:#d7b66a}
-.stApp{background:var(--bg);color:var(--text)} [data-testid="stSidebar"]{background:#091725!important}
-h1,h2,h3,p,label{color:var(--text)!important}
-textarea, [data-baseweb="textarea"] textarea, [data-testid="stTextArea"] textarea{
-  background:#f4f7fb!important;
-  color:#111827!important;
-  -webkit-text-fill-color:#111827!important;
-  caret-color:#111827!important;
-  font-family:Consolas, "SFMono-Regular", Menlo, Monaco, monospace!important;
+:root{--bg:#07111f;--panel:#0d1a2b;--panel2:#102238;--line:#28415f;--text:#f3f6fa;--muted:#b8c5d4;--gold:#d7b66a}
+.stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"]{background:var(--bg);color:var(--text)}
+[data-testid="stSidebar"]{background:#091725!important;border-right:1px solid var(--line)!important}
+h1,h2,h3,h4,h5,h6,p,label,li,span{color:var(--text)!important}
+.pc-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px}
+.pc-k{color:var(--gold);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}
+[data-baseweb="select"]>div,[data-baseweb="input"]>div,.stTextInput input{background:var(--panel)!important;color:var(--text)!important;border-color:var(--line)!important}
+textarea,[data-baseweb="textarea"] textarea,[data-testid="stTextArea"] textarea{
+  background:#f4f7fb!important;color:#111827!important;-webkit-text-fill-color:#111827!important;caret-color:#111827!important;
+  font-family:Consolas,"SFMono-Regular",Menlo,Monaco,monospace!important;
 }
-[data-testid="stTextArea"] > div,
-[data-testid="stTextArea"] [data-baseweb="textarea"]{
-  background:#f4f7fb!important;
-}
-input, [data-baseweb="input"] input{
-  color:#111827!important;
-  -webkit-text-fill-color:#111827!important;
-}
-.pc-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px}.pc-k{color:var(--gold);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}
+[data-testid="stTextArea"]>div,[data-testid="stTextArea"] [data-baseweb="textarea"]{background:#f4f7fb!important}
+.stButton>button,.stDownloadButton>button{background:var(--panel2)!important;color:var(--text)!important;border:1px solid var(--line)!important}
+.stButton>button:hover,.stDownloadButton>button:hover{border-color:var(--gold)!important;color:#fff!important}
+.stDataFrame{border:1px solid var(--line);border-radius:8px}
 </style>""",unsafe_allow_html=True)
+
+if appearance == "Light":
+    st.markdown("""
+    <style>
+    :root{--bg:#f5f7fa;--panel:#ffffff;--panel2:#f0f3f7;--line:#cbd5e1;--text:#16202a;--muted:#5d6b7a;--gold:#9a7626}
+    .stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"]{background:var(--bg)!important;color:var(--text)!important}
+    [data-testid="stSidebar"]{background:#eef2f6!important;border-right:1px solid var(--line)!important}
+    h1,h2,h3,h4,h5,h6,p,label,li,span{color:var(--text)!important}
+    .pc-card{background:#ffffff!important;border-color:var(--line)!important}
+    .pc-k{color:var(--gold)!important}
+    [data-baseweb="select"]>div,[data-baseweb="input"]>div,.stTextInput input{background:#ffffff!important;color:#16202a!important;border-color:var(--line)!important}
+    textarea,[data-baseweb="textarea"] textarea,[data-testid="stTextArea"] textarea{background:#ffffff!important;color:#111827!important;-webkit-text-fill-color:#111827!important}
+    [data-testid="stTextArea"]>div,[data-testid="stTextArea"] [data-baseweb="textarea"]{background:#ffffff!important}
+    .stButton>button,.stDownloadButton>button{background:#ffffff!important;color:#29465f!important;border-color:#b8c3cf!important}
+    .stButton>button p,.stDownloadButton>button p{color:#29465f!important}
+    .stDataFrame{border-color:#cbd5e1!important}
+    [data-testid="stHeader"],[data-testid="stToolbar"]{background:#f5f7fa!important;color:#16202a!important}
+    [data-testid="stHeader"] *,[data-testid="stToolbar"] *{color:#16202a!important}
+    </style>
+    """,unsafe_allow_html=True)
 
 if os.getenv("PC_REQUIRE_AUTH","false").lower()=="true":
     ctx=require_super_admin()
@@ -48,7 +68,13 @@ else:
 sb=service_client()
 st.sidebar.markdown("<div class='pc-k'>Power & Corridors</div>",unsafe_allow_html=True)
 st.sidebar.markdown("## Workflow Console")
-st.sidebar.caption("Five day-to-day tools. Everything else stays out of the way.")
+st.sidebar.caption("Seven focused workflows. Create, ingest, reconcile and review without the old maintenance clutter.")
+st.sidebar.radio(
+    "Appearance",
+    ["Dark","Light"],
+    horizontal=True,
+    key="pc_admin_appearance",
+)
 NAV = {
     "Home": "Workflow Center",
     "AI Research": "AI Research Workflow",
@@ -2600,52 +2626,193 @@ elif page=="Workflow Center":
                 dataframe(calc)
 
 elif page=="AI Research Workflow":
-    title("AI research workflow","Ordered AI path: research → stage → IDs → reconcile → relationships → review → apply → QA.")
-    jobs=_workflow_job_rows("AI_RESEARCH",100)
-    if not jobs:
-        st.info("No AI research jobs yet. Create one in Research Jobs.")
+    title(
+        "AI research workflow",
+        "Create research here, then stage → auto-resolve → review exceptions → apply → QA. No separate Research Jobs page is required."
+    )
+
+    if not sb:
+        st.error("Supabase service connection required.")
     else:
-        labels=[f"{j.get('title') or 'AI research'} | {j.get('status')} | {j.get('ingestion_job_id')}" for j in jobs]
-        choice=st.selectbox("AI research job",labels)
-        job=jobs[labels.index(choice)]
-        jid=job["ingestion_job_id"]
-        summ=_staging_summary(jid)
-        stages=WORKFLOW_STAGES["AI_RESEARCH"]
-        st.progress(min(1.0,max(0.0,(1 + (1 if job.get("status")=="completed" else 0) + (1 if summ.get("total") else 0) + (1 if summ.get("ready") else 0) + (1 if summ.get("applied") else 0))/len(stages))))
-        st.caption(" → ".join(stages))
-        c1,c2,c3,c4,c5=st.columns(5)
-        c1.metric("Staged",summ.get("total",0)); c2.metric("Ready",summ.get("ready",0))
-        c3.metric("Unresolved",summ.get("unresolved",0)); c4.metric("Partial",summ.get("partial",0)); c5.metric("Applied",summ.get("applied",0))
+        launch_tab, manage_tab, history_tab = st.tabs(["Launch research","Run & reconcile","Recent jobs"])
 
-        a,b,c,d=st.columns(4)
-        if a.button("1 · Prepare IDs",type="primary"):
-            with st.spinner("Preparing canonical candidates..."):
-                res=_prepare_canonical_candidates(sb,jid)
-            _workflow_upsert(jid,"AI_RESEARCH",job.get("title") or "AI research","PREPARE_IDS",3,stats={"prepare":res})
-            st.success(res); st.rerun()
-        if b.button("2 · Reconcile / repair"):
-            with st.spinner("Running standard reconciliation..."):
-                res=_run_reconciliation(jid)
-            _workflow_upsert(jid,"AI_RESEARCH",job.get("title") or "AI research","RECONCILE",4,stats={"reconcile":res})
-            st.success("Reconciliation complete."); st.json(res); st.rerun()
-        if c.button("3 · Resolve relationships"):
-            out={}
-            try: out["event_links"]=_process_relationship_backlog(sb,jid)
-            except Exception as exc: out["event_links_error"]=str(exc)
-            try: out["relationships"]=_process_generic_relationship_backlog(sb,jid)
-            except Exception as exc: out["relationships_error"]=str(exc)
-            _workflow_upsert(jid,"AI_RESEARCH",job.get("title") or "AI research","RELATIONSHIPS",5,stats=out)
-            st.json(out); st.rerun()
-        if d.button("4 · Re-check"):
-            st.json(_staging_summary(jid))
+        with launch_tab:
+            st.markdown("### New AI research job")
+            campaign=st.selectbox("Campaign",list(AI_CAMPAIGNS),key="aiwf_campaign")
+            seed_prompt=AI_CAMPAIGNS[campaign]
+            prompt=st.text_area(
+                "Research query",
+                value=seed_prompt,
+                placeholder="Describe exactly what you want the AI researcher to find, verify and stage.",
+                height=190,
+                key="aiwf_prompt"
+            )
+            c1,c2,c3=st.columns(3)
+            with c1:
+                context=st.selectbox("Product context",["TRADE","INTELLIGENCE"],index=0,key="aiwf_context")
+            with c2:
+                use_web=st.checkbox("Use current web research",True,key="aiwf_web")
+                use_canonical_context=st.checkbox(
+                    "Use canonical database context",True,
+                    help="Pass likely matching companies/assets/vessels and existing graph links from Supabase to the researcher before web research.",
+                    key="aiwf_canonical"
+                )
+            with c3:
+                st.metric("Pending staged",count_rows(sb,"pc_staged_records",{"review_status":"pending"}))
 
-        st.markdown("#### Next")
-        if summ.get("unresolved",0) or summ.get("ambiguous",0) or summ.get("partial",0):
-            st.warning("This job still needs cleanup. Use Reconciliation Center before Review Queue.")
-        elif summ.get("total",0):
-            st.success("Identity/relationship resolution looks ready for Review Queue approval and apply.")
-        else:
-            st.info("No staged rows were found for this job.")
+            canonical_context={}
+            if use_canonical_context and prompt.strip():
+                try:
+                    canonical_context=build_canonical_research_context(sb,prompt)
+                    cc=canonical_context.get("candidate_counts",{})
+                    st.caption(
+                        f"Canonical pre-check: {cc.get('entities',0)} companies/entities · "
+                        f"{cc.get('assets',0)} assets · {cc.get('mobile_assets',0)} vessels · "
+                        f"{cc.get('relationships',0)} existing relationships."
+                    )
+                    with st.expander("Preview canonical candidates sent to the researcher"):
+                        st.json(canonical_context)
+                except Exception as exc:
+                    st.warning(f"Canonical context pre-check failed; research can still run through normal staging: {exc}")
+                    canonical_context={}
+
+            st.caption(
+                "Research output is staged first. The dependency engine can create missing source-backed companies, facilities, vessels and other endpoints before relationships are applied."
+            )
+
+            if st.button("Run AI research job",type="primary",disabled=not bool(prompt.strip()),key="aiwf_run"):
+                if not ai_configured():
+                    st.error("Configure OPENAI_API_KEY and OPENAI_MODEL in Streamlit secrets.")
+                else:
+                    effective_prompt=prompt
+                    if use_canonical_context and canonical_context:
+                        effective_prompt += canonical_context_prompt_block(canonical_context)
+
+                    job=sb.table("pc_ingestion_jobs").insert({
+                        "job_type":"AI_RESEARCH",
+                        "title":campaign if campaign!="Custom research" else prompt[:100],
+                        "query_text":prompt,
+                        "source_scope":{
+                            "product":context,
+                            "web_search":use_web,
+                            "campaign":campaign,
+                            "canonical_context":bool(use_canonical_context),
+                            "canonical_candidate_counts":(canonical_context or {}).get("candidate_counts",{}),
+                        },
+                        "status":"running",
+                    }).execute().data[0]
+                    job_id=job["ingestion_job_id"]
+                    _workflow_upsert(job_id,"AI_RESEARCH",job.get("title") or "AI research","RESEARCH",1)
+
+                    try:
+                        with st.status("Running AI research...",expanded=True) as status:
+                            st.write("Sending research brief to OpenAI...")
+                            result=ai_research(
+                                effective_prompt,
+                                context,
+                                use_web,
+                                output_contract=AI_OUTPUT_CONTRACT
+                            )
+                            st.write("Research returned. Validating and staging structured proposals...")
+                            staged,rejected,resolution=stage_ai_result(sb,job_id,result)
+
+                            if staged==0 and result:
+                                sb.table("pc_staged_records").insert({
+                                    "ingestion_job_id":job_id,
+                                    "target_table":"research_bundle",
+                                    "natural_key":str(job_id),
+                                    "action":"REVIEW",
+                                    "payload":result,
+                                    "confidence":0.5,
+                                    "validation_status":"needs_structuring",
+                                    "review_status":"pending",
+                                }).execute()
+                                staged=1
+
+                            auto_result={}
+                            if staged:
+                                st.write("Running dependency-aware auto reconciliation...")
+                                auto_result=_dependency_reconcile(job_id)
+
+                            stats={
+                                "staged_records":staged,
+                                "discarded_invalid_records":rejected,
+                                "campaign":campaign,
+                                "product":context,
+                                "resolution":resolution,
+                                "auto_reconcile":auto_result,
+                            }
+                            sb.table("pc_ingestion_jobs").update({"status":"completed","stats":stats}).eq("ingestion_job_id",job_id).execute()
+                            _workflow_upsert(job_id,"AI_RESEARCH",job.get("title") or "AI research","RECONCILE",4,stats=stats)
+                            status.update(label=f"Research complete — {staged} staged record(s)",state="complete",expanded=False)
+
+                        st.success(f"Research complete. {staged} proposal(s) staged and auto-reconciled.")
+                        st.session_state["aiwf_last_job_id"]=job_id
+                        st.rerun()
+                    except Exception as exc:
+                        sb.table("pc_ingestion_jobs").update({"status":"failed","error_text":str(exc)}).eq("ingestion_job_id",job_id).execute()
+                        st.error(str(exc))
+
+        with manage_tab:
+            jobs=_workflow_job_rows("AI_RESEARCH",100)
+            if not jobs:
+                st.info("No AI research jobs yet. Use the Launch research tab above to create one.")
+            else:
+                labels=[f"{j.get('title') or 'AI research'} | {j.get('status')} | {j.get('ingestion_job_id')}" for j in jobs]
+                default_idx=0
+                last=str(st.session_state.get("aiwf_last_job_id") or "")
+                if last:
+                    for i,j in enumerate(jobs):
+                        if str(j.get("ingestion_job_id"))==last:
+                            default_idx=i; break
+                choice=st.selectbox("AI research job",labels,index=default_idx,key="aiwf_job_select")
+                job=jobs[labels.index(choice)]
+                jid=job["ingestion_job_id"]
+                summ=_staging_summary(jid)
+                stages=WORKFLOW_STAGES["AI_RESEARCH"]
+                st.caption(" → ".join(stages))
+                c1,c2,c3,c4,c5=st.columns(5)
+                c1.metric("Staged",summ.get("total",0)); c2.metric("Ready",summ.get("ready",0))
+                c3.metric("Unresolved",summ.get("unresolved",0)); c4.metric("Partial",summ.get("partial",0)); c5.metric("Applied",summ.get("applied",0))
+
+                a,b,c,d=st.columns(4)
+                if a.button("Prepare IDs",key="aiwf_prepare"):
+                    with st.spinner("Preparing canonical candidates..."):
+                        res=_prepare_canonical_candidates(sb,jid)
+                    _workflow_upsert(jid,"AI_RESEARCH",job.get("title") or "AI research","PREPARE_IDS",3,stats={"prepare":res})
+                    st.success(res); st.rerun()
+                if b.button("Auto reconcile",type="primary",key="aiwf_reconcile"):
+                    with st.spinner("Resolving dependencies, identities and relationships..."):
+                        res=_dependency_reconcile(jid)
+                    _workflow_upsert(jid,"AI_RESEARCH",job.get("title") or "AI research","RECONCILE",4,stats={"reconcile":res})
+                    st.success("Dependency-aware reconciliation complete."); st.json(res); st.rerun()
+                if c.button("Resolve relationships",key="aiwf_relationships"):
+                    out={}
+                    try: out["event_links"]=_process_relationship_backlog(sb,jid)
+                    except Exception as exc: out["event_links_error"]=str(exc)
+                    try: out["relationships"]=_process_generic_relationship_backlog(sb,jid)
+                    except Exception as exc: out["relationships_error"]=str(exc)
+                    _workflow_upsert(jid,"AI_RESEARCH",job.get("title") or "AI research","RELATIONSHIPS",5,stats=out)
+                    st.json(out); st.rerun()
+                if d.button("Refresh status",key="aiwf_refresh"):
+                    st.json(_staging_summary(jid))
+
+                st.markdown("#### Next")
+                if summ.get("unresolved",0) or summ.get("ambiguous",0) or summ.get("partial",0):
+                    st.warning("Only remaining exceptions should require analyst review. Open Reconcile & Review to inspect them.")
+                elif summ.get("total",0):
+                    st.success("Resolution looks clean. Continue to Reconcile & Review for approval/apply and QA.")
+                else:
+                    st.info("No staged rows were found for this job.")
+
+        with history_tab:
+            jobs=safe_rows(
+                sb,"pc_ingestion_jobs",
+                "ingestion_job_id,job_type,title,query_text,status,stats,error_text,created_at,started_at,completed_at",
+                100,order="created_at"
+            )
+            ai_jobs=[j for j in jobs if str(j.get("job_type") or "").upper()=="AI_RESEARCH"]
+            dataframe(ai_jobs)
 
 elif page=="Bulk Import Workflow":
     title("Bulk import workflow","Ordered bulk path: upload → map tables → map fields → fill IDs → stage → reconcile → review → apply → QA.")

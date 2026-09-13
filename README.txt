@@ -1,15 +1,11 @@
-P&C Trade System v3.3.35 - Live Canonical Commercial Bridge
-
-Replace:
-  app.py
-  shared/pc_trade_system.py
+P&C Workflow Console v5.2
 
 Changes:
-- pc_transactions now feeds Transactions V125, Infra Deals, Investments, commercial search/homepage.
-- pc_trade_flows remains direct from Supabase and now resolves readable origin/destination names.
-- pc_observations query corrected to current schema (removed nonexistent record_status).
-- energy/industrial pages now use canonical pc_energy_assets and pc_industrial_assets.
-- specialization rows join back to pc_assets for names/country/location.
-- existing live canonical entities/assets/relationships/events/vessels bridge retained.
+- Restores AI Research launch workflow from v5.1.
+- Adds Dark / Light appearance toggle in the sidebar.
+- Dark remains the default.
+- Light mode matches the Trade and Intelligence apps: off-white canvas, white panels, dark navy text, gold accents.
+- No SQL changes required.
 
-No Excel rebuild is required for newly canonicalized records.
+Deploy:
+Replace pc-power-admin.py with the file in this package.
