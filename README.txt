@@ -1,10 +1,10 @@
-P&C Trade v3.3.41 Regional Maps Fix
+P&C Trade v3.3.42 - Live Regional Maps
 
-Replace only app.py.
+Replace app.py only.
 
-Fixes the NameError on Operating Picture > Regional Maps by restoring:
-- _regional_business_security_events()
-- render_regional_business_security_maps()
-
-Based directly on app_world_bank_v3_3_40.py, so the World Bank macro changes are retained.
-No SQL changes required.
+Fixes:
+- Regional Maps now reads the live canonical Events & Hazards event layer.
+- Merges pc_event_locations coordinates into canonical pc_events for mapping.
+- Uses the same canonical event/location source pattern as P&C Intelligence.
+- Keeps business + security, business-only and security-only layers.
+- No SQL changes required.

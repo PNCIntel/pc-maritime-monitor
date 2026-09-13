@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.41-world-bank-macro-regional-maps-fix"
+APP_VERSION = "v3.3.42-world-bank-macro-live-regional-maps"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -8258,9 +8258,10 @@ def _render_operational_brief():
 
 
 def _regional_business_security_events():
-    """Regional map layer for Trade: commercial activity first, security as one exposure dimension."""
+    """Regional map layer for Trade using the live canonical event/location layer first."""
     candidates=[]
     for key in [
+        ("Events & Hazards","Events"),
         ("Intelligence","Events"),
         ("Intelligence","Event Register"),
         ("Events","Events"),
@@ -8288,6 +8289,7 @@ def _regional_business_security_events():
         return pd.Series("",index=df.index)
 
     out=df.copy()
+    out["Event ID"]=first_col(["Event ID","event_id","ID"])
     out["Event Date"]=first_col(["Start Date","Date","Event Date","event_date","start_date"])
     out["Title"]=first_col(["Title","Event","Event Title","title","event_title"])
     out["Event Type"]=first_col(["Event Type","Type","Category","event_type","category"])
@@ -8303,6 +8305,31 @@ def _regional_business_security_events():
     ])
     out["Latitude"]=pd.to_numeric(first_col(["Latitude","latitude","lat"]),errors="coerce")
     out["Longitude"]=pd.to_numeric(first_col(["Longitude","longitude","lon","lng"]),errors="coerce")
+
+    # Canonical pc_events keeps coordinates in pc_event_locations. Merge those here so
+    # Trade Regional Maps uses the same live location layer as P&C Intelligence.
+    locs=TABLES.get(("Events & Hazards","Event Locations"),pd.DataFrame())
+    if isinstance(locs,pd.DataFrame) and not locs.empty and "Event ID" in out.columns and "Event ID" in locs.columns:
+        ll=locs.copy()
+        keep=[c for c in ["Event ID","Location","Country","Latitude","Longitude"] if c in ll.columns]
+        if keep:
+            ll=ll[keep].copy()
+            # One representative location per event for the overview map. The full
+            # event-location table remains available elsewhere for drill-down.
+            ll=ll.drop_duplicates(subset=["Event ID"],keep="first")
+            rename={c:f"_loc_{c}" for c in keep if c!="Event ID"}
+            ll=ll.rename(columns=rename)
+            out=out.merge(ll,on="Event ID",how="left")
+            if "_loc_Latitude" in out.columns:
+                out["Latitude"]=out["Latitude"].fillna(pd.to_numeric(out["_loc_Latitude"],errors="coerce"))
+            if "_loc_Longitude" in out.columns:
+                out["Longitude"]=out["Longitude"].fillna(pd.to_numeric(out["_loc_Longitude"],errors="coerce"))
+            if "_loc_Location" in out.columns:
+                blank=out["Location"].fillna("").astype(str).str.strip().eq("")
+                out.loc[blank,"Location"]=out.loc[blank,"_loc_Location"]
+            if "_loc_Country" in out.columns:
+                blank=out["Country"].fillna("").astype(str).str.strip().eq("")
+                out.loc[blank,"Country"]=out.loc[blank,"_loc_Country"]
 
     blob=(
         out["Event Family"].astype(str)+" "+
@@ -8320,7 +8347,8 @@ def _regional_business_security_events():
     )
     security_terms=(
         "security|attack|strike|drone|missile|piracy|hijack|seizure|boarding|mine|"
-        "conflict|war|military|naval|sanction|blockade|restricted zone|jamming|spoof"
+        "conflict|war|military|naval|sanction|blockade|restricted zone|jamming|spoof|"
+        "collision|grounding|fire|explosion|casualty|sinking"
     )
 
     out["Business Relevance"]=blob.str.contains(business_terms,regex=True,na=False) | out["Trade / Commercial Impact"].astype(str).str.strip().ne("")
@@ -8328,11 +8356,10 @@ def _regional_business_security_events():
     keep=out["Business Relevance"] | out["Security Relevance"]
 
     filtered=out[keep].copy()
-    dedupe_cols=[c for c in ["Event Date","Title","Event Type","Country","Location","Severity","Status"] if c in filtered.columns]
+    dedupe_cols=[c for c in ["Event ID","Event Date","Title","Event Type","Country","Location"] if c in filtered.columns]
     if dedupe_cols:
         filtered=filtered.drop_duplicates(subset=dedupe_cols,keep="first")
     return filtered
-
 
 def render_regional_business_security_maps():
     """Trade-first regional map view with business, infrastructure and security layers."""
