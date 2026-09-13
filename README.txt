@@ -1,13 +1,15 @@
-P&C Workflow Console v5.5 — resilient AI Research document parser
+P&C Workflow 038 — One-Pass AI Research: Transactions + Routes
 
-Changes:
-- PDF extraction no longer hard-depends on only `pypdf`.
-- Parser fallback order: pypdf -> PyPDF2 -> pdfplumber -> PyMuPDF.
-- A single unreadable document no longer crashes the entire AI Research page/job.
-- Add `pypdf>=5.0` to the EXISTING repository requirements.txt for guaranteed PDF support.
+Install after Workflow 037.
 
-Deploy:
-1. Replace pc-power-admin.py with the included file.
-2. Add `pypdf>=5.0` to your existing requirements.txt (do not replace your full requirements file).
-3. Commit/push and allow Streamlit Cloud to rebuild.
-4. Re-open AI Research and attach the PDFs again.
+This patch permanently incorporates the final fixes proven on the fresh
+multisource document + web AI Research acceptance job:
+- transaction promotion into pc_transactions
+- boolean-safe operating_control
+- explicit million/billion/trillion transaction value scaling
+- route promotion into pc_transport_routes
+- required route mode inference
+- corrected UUID typing in canonical-name alias registration
+- pc_reconcile_ingestion_job_v2 now calls transactions and routes before QA
+
+No Admin app replacement is required for this SQL patch.
