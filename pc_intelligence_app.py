@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import re
+import html
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -275,6 +276,8 @@ def _event_date_label(v):
     return dt.strftime("%d %b %Y")
 
 def event_card(row):
+    # Keep the card HTML on one logical line. Indented conditional fragments
+    # can be interpreted by Markdown as code blocks when Description is empty.
     title = clean_display_text(row.get("Title", "Untitled event")) or "Untitled event"
     date = _event_date_label(row.get("Start Date", row.get("Date", "")))
     etype = _event_type_label(row.get("Event Type", row.get("Event Family", "Event")))
@@ -282,22 +285,27 @@ def event_card(row):
     loc = clean_display_text(row.get("Location", row.get("Country / Countries", "")))
     body = clean_display_text(row.get("Description", ""))
     impact = clean_display_text(row.get("Operational Impact", ""))
+    impact_label = "Operational impact"
     if not impact:
         impact = clean_display_text(row.get("Trade / Commercial Impact", ""))
+        if impact:
+            impact_label = "Trade / commercial impact"
 
-    meta_bits=[x for x in [date, etype, sev, loc] if x]
-    body_html = f'<div class="pc-card-body">{body}</div>' if body else ""
-    impact_html = f'<div class="pc-card-impact"><b>Operational impact:</b> {impact}</div>' if impact else ""
-    st.markdown(
-        f'''<div class="pc-card pc-card-priority">
-        <div class="pc-card-meta">{' · '.join(meta_bits)}</div>
-        <div class="pc-card-title">{title}</div>
-        {body_html}
-        {impact_html}
-        </div>''',
-        unsafe_allow_html=True,
+    meta_bits = [html.escape(str(x)) for x in [date, etype, sev, loc] if x]
+    title_html = html.escape(str(title))
+    body_html = f'<div class="pc-card-body">{html.escape(str(body))}</div>' if body else ""
+    impact_html = (
+        f'<div class="pc-card-impact"><b>{impact_label}:</b> {html.escape(str(impact))}</div>'
+        if impact else ""
     )
-
+    card_html = (
+        '<div class="pc-card pc-card-priority">'
+        f'<div class="pc-card-meta">{" · ".join(meta_bits)}</div>'
+        f'<div class="pc-card-title">{title_html}</div>'
+        f'{body_html}{impact_html}'
+        '</div>'
+    )
+    st.markdown(card_html, unsafe_allow_html=True)
 
 def canonical_port_id(link_id, link_name):
     lid=str(link_id or "").strip(); name=str(link_name or "").strip()

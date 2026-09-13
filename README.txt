@@ -1,15 +1,11 @@
-P&C Workflow 038 — One-Pass AI Research: Transactions + Routes
+P&C Intelligence v3.3.41 — Alert Card HTML Rendering Fix
 
-Install after Workflow 037.
+Replace pc_intelligence_app.py only.
 
-This patch permanently incorporates the final fixes proven on the fresh
-multisource document + web AI Research acceptance job:
-- transaction promotion into pc_transactions
-- boolean-safe operating_control
-- explicit million/billion/trillion transaction value scaling
-- route promotion into pc_transport_routes
-- required route mode inference
-- corrected UUID typing in canonical-name alias registration
-- pc_reconcile_ingestion_job_v2 now calls transactions and routes before QA
+Fixes:
+- Raw <div class="pc-card-impact"> markup rendering as code on alert cards.
+- Uses single-line card HTML to avoid Markdown code-block parsing.
+- Escapes dynamic event text safely.
+- Uses Trade / commercial impact label when that fallback field is displayed.
 
-No Admin app replacement is required for this SQL patch.
+No SQL changes required.
