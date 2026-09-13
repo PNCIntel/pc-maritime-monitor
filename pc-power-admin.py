@@ -48,7 +48,7 @@ else:
 sb=service_client()
 st.sidebar.markdown("<div class='pc-k'>Power & Corridors</div>",unsafe_allow_html=True)
 st.sidebar.markdown("## Power Admin")
-PAGES=["Dashboard","Workflow Center","AI Research Workflow","Bulk Import Workflow","Multi-Table Bulk Loader","Reconciliation Center","Document Loader","Distribution Lists","Migration","Database Coverage","Data Completion","Model Registry","Batch Staging","Staging Resolution","Review Queue","ReCAAP Vessel Resolver","Organizations","Users & Access","Research Jobs","Trade System Builder","Market Data","Governance & Quality"]
+PAGES=["Dashboard","Workflow Center","AI Research Workflow","Bundle Review","Dependency Graph","Bulk Import Workflow","Multi-Table Bulk Loader","Reconciliation Center","Document Loader","Distribution Lists","Migration","Database Coverage","Data Completion","Model Registry","Batch Staging","Staging Resolution","Review Queue","ReCAAP Vessel Resolver","Organizations","Users & Access","Research Jobs","Trade System Builder","Market Data","Governance & Quality"]
 
 # ---------------------------------------------------------------------------
 # Bulk review / validation helpers
@@ -1018,6 +1018,56 @@ def _run_reconciliation(job_id):
         try: result["generic_relationships"]=_process_generic_relationship_backlog(sb,job_id)
         except Exception as exc: result["generic_relationships_error"]=str(exc)
         return result
+
+
+def _dependency_reconcile(job_id):
+    """Use SQL 032 when installed; fall back to the legacy reconciliation path."""
+    try:
+        return sb.rpc("pc_reconcile_ingestion_job",{"p_ingestion_job_id":job_id}).execute().data
+    except Exception:
+        return _run_reconciliation(job_id)
+
+def _dependency_exceptions(job_id=None, limit=1500):
+    if not sb:
+        return []
+    try:
+        q=sb.table("pc_v_ingestion_dependency_exceptions").select("*").limit(limit)
+        if job_id:
+            q=q.eq("ingestion_job_id",job_id)
+        return q.execute().data or []
+    except Exception:
+        q=sb.table("pc_staged_records").select(
+            "staged_record_id,ingestion_job_id,target_table,natural_key,resolution_status,review_status,validation_status,payload,created_at"
+        ).limit(limit)
+        if job_id:
+            q=q.eq("ingestion_job_id",job_id)
+        rows=q.execute().data or []
+        for r in rows:
+            rs=str(r.get("resolution_status") or "")
+            p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+            if r.get("target_table")=="pc_event_links" and isinstance(p.get("linked_entities"),list):
+                typ="ARRAY_EVENT_LINK"
+            elif rs=="BROKEN_REFERENCE": typ="BROKEN_REFERENCE"
+            elif rs=="PARTIAL": typ="PARTIAL_RELATIONSHIP"
+            elif rs=="AMBIGUOUS": typ="TRUE_AMBIGUITY"
+            elif rs=="INVALID": typ="UNSUPPORTED_OR_INVALID_TARGET"
+            elif rs=="NEW" and r.get("review_status")=="pending": typ="READY_FOR_CANONICAL_PREP"
+            else: typ="REVIEW"
+            r["exception_type"]=typ
+        return [
+            r for r in rows
+            if r.get("review_status")!="applied"
+            or r.get("resolution_status") in {"BROKEN_REFERENCE","PARTIAL","AMBIGUOUS","INVALID"}
+        ]
+
+def _bundle_counts(job_id):
+    rows=_dependency_exceptions(job_id,3000)
+    counts={}
+    for r in rows:
+        k=r.get("exception_type") or "REVIEW"
+        counts[k]=counts.get(k,0)+1
+    return counts
+
 
 def _docx_text(raw):
     with zipfile.ZipFile(io.BytesIO(raw)) as z:
@@ -2610,7 +2660,7 @@ elif page=="AI Research Workflow":
             st.success(res); st.rerun()
         if b.button("2 · Reconcile / repair"):
             with st.spinner("Running standard reconciliation..."):
-                res=_run_reconciliation(jid)
+                res=_dependency_reconcile(jid)
             _workflow_upsert(jid,"AI_RESEARCH",job.get("title") or "AI research","RECONCILE",4,stats={"reconcile":res})
             st.success("Reconciliation complete."); st.json(res); st.rerun()
         if c.button("3 · Resolve relationships"):
@@ -2631,6 +2681,148 @@ elif page=="AI Research Workflow":
             st.success("Identity/relationship resolution looks ready for Review Queue approval and apply.")
         else:
             st.info("No staged rows were found for this job.")
+
+
+elif page=="Bundle Review":
+    title("Bundle review","Review one research job as a connected bundle: primary events, dependencies, links, relationships and only the exceptions that still need a person.")
+    jobs=_workflow_job_rows(None,150)
+    if not jobs:
+        st.info("No ingestion jobs found.")
+    else:
+        labels=[f"{j.get('title') or j.get('job_type')} | {j.get('status')} | {j.get('ingestion_job_id')}" for j in jobs]
+        selected=st.selectbox("Research / ingestion job",labels,key="bundle_review_job")
+        job=jobs[labels.index(selected)]
+        jid=job["ingestion_job_id"]
+        summ=_staging_summary(jid)
+        counts=_bundle_counts(jid)
+
+        c1,c2,c3,c4,c5=st.columns(5)
+        c1.metric("Staged",summ.get("total",0))
+        c2.metric("Ready",summ.get("ready",0))
+        c3.metric("Partial",summ.get("partial",0))
+        c4.metric("Ambiguous",summ.get("ambiguous",0))
+        c5.metric("Broken",counts.get("BROKEN_REFERENCE",0)+counts.get("EVENT_LINK_DEPENDENCY",0))
+
+        st.markdown("#### Dependency-aware workflow")
+        st.code("Research bundle → canonical entities/assets/events → natural-key aliases → event links → relationships → review exceptions → apply")
+
+        b1,b2=st.columns([1,2])
+        if b1.button("Resolve safe dependencies",type="primary"):
+            with st.spinner("Resolving dependencies and applying deterministic records..."):
+                result=_dependency_reconcile(jid)
+            st.success("Dependency pass complete.")
+            st.json(result)
+            st.rerun()
+
+        with b2:
+            if counts:
+                st.caption("Remaining exception categories")
+                st.json(counts)
+            else:
+                st.success("No unresolved dependency exceptions found.")
+
+        tabs=st.tabs(["Events","Entities","Event links","Relationships","Exceptions"])
+        with tabs[0]:
+            rows=(sb.table("pc_staged_records").select(
+                "staged_record_id,natural_key,resolution_status,review_status,validation_status,payload"
+            ).eq("ingestion_job_id",jid).eq("target_table","pc_events").limit(500).execute().data or [])
+            view=[]
+            for r in rows:
+                p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+                view.append({
+                    "Natural key":r.get("natural_key"),
+                    "Canonical event ID":r.get("resolved_entity_id") or p.get("event_id"),
+                    "Title":p.get("title") or p.get("name"),
+                    "Resolution":r.get("resolution_status"),
+                    "Review":r.get("review_status"),
+                    "Validation":r.get("validation_status")
+                })
+            dataframe(view)
+        with tabs[1]:
+            rows=(sb.table("pc_staged_records").select(
+                "staged_record_id,natural_key,resolution_status,resolved_entity_id,review_status,validation_status,payload"
+            ).eq("ingestion_job_id",jid).eq("target_table","pc_entities").limit(1000).execute().data or [])
+            view=[]
+            for r in rows:
+                p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+                view.append({
+                    "Name":p.get("name") or p.get("canonical_name"),
+                    "Type":p.get("entity_type"),
+                    "Canonical ID":r.get("resolved_entity_id") or p.get("entity_id"),
+                    "Resolution":r.get("resolution_status"),
+                    "Review":r.get("review_status")
+                })
+            dataframe(view)
+        with tabs[2]:
+            rows=(sb.table("pc_staged_records").select(
+                "staged_record_id,natural_key,resolution_status,review_status,validation_status,payload"
+            ).eq("ingestion_job_id",jid).eq("target_table","pc_event_links").limit(1000).execute().data or [])
+            view=[]
+            for r in rows:
+                p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+                linked=p.get("linked_entities")
+                if isinstance(linked,list):
+                    linked_display=", ".join(map(str,linked))
+                else:
+                    linked_display=p.get("linked_name") or p.get("linked_id") or ""
+                view.append({
+                    "Event key":p.get("event_natural_key") or p.get("event_id"),
+                    "Linked object(s)":linked_display,
+                    "Relationship":p.get("relationship") or p.get("link_type"),
+                    "Resolution":r.get("resolution_status"),
+                    "Review":r.get("review_status")
+                })
+            dataframe(view)
+        with tabs[3]:
+            rows=(sb.table("pc_staged_records").select(
+                "staged_record_id,natural_key,resolution_status,review_status,validation_status,payload"
+            ).eq("ingestion_job_id",jid).eq("target_table","pc_relationships").limit(1000).execute().data or [])
+            dataframe(rows)
+        with tabs[4]:
+            dataframe(_dependency_exceptions(jid,1500))
+
+elif page=="Dependency Graph":
+    title("Dependency graph","See what is preventing a research job from becoming canonical, in dependency order rather than raw staging status.")
+    jobs=_workflow_job_rows(None,150)
+    if not jobs:
+        st.info("No jobs found.")
+    else:
+        labels=[f"{j.get('title') or j.get('job_type')} | {j.get('ingestion_job_id')}" for j in jobs]
+        selected=st.selectbox("Job",labels,key="dep_graph_job")
+        job=jobs[labels.index(selected)]
+        jid=job["ingestion_job_id"]
+        rows=_dependency_exceptions(jid,2000)
+
+        categories={
+            "READY_FOR_CANONICAL_PREP":"Canonical dependencies to prepare",
+            "ARRAY_EXPANSION_REQUIRED":"Array event links to expand",
+            "EVENT_LINK_DEPENDENCY":"Event links waiting on canonical dependencies",
+            "PARTIAL_RELATIONSHIP":"Relationships missing one endpoint",
+            "TRUE_AMBIGUITY":"True ambiguities requiring analyst choice",
+            "BROKEN_REFERENCE":"Broken references",
+            "UNSUPPORTED_OR_INVALID_TARGET":"Unsupported / invalid target-table mappings",
+            "REVIEW":"Other review"
+        }
+        counts={}
+        for r in rows:
+            k=r.get("exception_type") or "REVIEW"
+            counts[k]=counts.get(k,0)+1
+
+        for key,label in categories.items():
+            n=counts.get(key,0)
+            if not n:
+                continue
+            with st.expander(f"{label} · {n}",expanded=key in {"TRUE_AMBIGUITY","BROKEN_REFERENCE","EVENT_LINK_DEPENDENCY"}):
+                subset=[r for r in rows if (r.get("exception_type") or "REVIEW")==key]
+                dataframe(subset)
+
+        st.divider()
+        if st.button("Fix all deterministic dependencies",type="primary"):
+            with st.spinner("Running event-first dependency reconciliation..."):
+                result=_dependency_reconcile(jid)
+            st.json(result)
+            st.rerun()
+
 
 elif page=="Bulk Import Workflow":
     title("Bulk import workflow","Ordered bulk path: upload → map tables → map fields → fill IDs → stage → reconcile → review → apply → QA.")
@@ -2806,7 +2998,7 @@ elif page=="Reconciliation Center":
             dataframe(stale)
         with tabs[4]:
             st.markdown("Install these SQL migrations in order:")
-            st.code("027_workflow_orchestration.sql\n028_document_ingestion.sql\n029_intelligence_authoring.sql\n030_distribution_lists.sql\n031_reconciliation_cleanup.sql")
+            st.code("027_workflow_orchestration.sql\n028_document_ingestion.sql\n029_intelligence_authoring.sql\n030_distribution_lists.sql\n031_reconciliation_cleanup.sql\n032_event_first_dependency_engine.sql")
             st.caption("The cleanup functions are job-scoped and operate on staging before canonical apply.")
 
 elif page=="Document Loader":
