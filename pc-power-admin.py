@@ -2732,7 +2732,7 @@ elif page=="AI Research Workflow":
                             auto_result={}
                             if staged:
                                 st.write("Running dependency-aware auto reconciliation...")
-                                auto_result=_dependency_reconcile(job_id)
+                                auto_result=_run_reconciliation(job_id)
 
                             stats={
                                 "staged_records":staged,
@@ -2783,7 +2783,7 @@ elif page=="AI Research Workflow":
                     st.success(res); st.rerun()
                 if b.button("Auto reconcile",type="primary",key="aiwf_reconcile"):
                     with st.spinner("Resolving dependencies, identities and relationships..."):
-                        res=_dependency_reconcile(jid)
+                        res=_run_reconciliation(jid)
                     _workflow_upsert(jid,"AI_RESEARCH",job.get("title") or "AI research","RECONCILE",4,stats={"reconcile":res})
                     st.success("Dependency-aware reconciliation complete."); st.json(res); st.rerun()
                 if c.button("Resolve relationships",key="aiwf_relationships"):

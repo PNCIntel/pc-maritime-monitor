@@ -1,11 +1,18 @@
-P&C Workflow Console v5.2
+P&C Trade / Workflow Fix v3.3.39 / v5.3
 
-Changes:
-- Restores AI Research launch workflow from v5.1.
-- Adds Dark / Light appearance toggle in the sidebar.
-- Dark remains the default.
-- Light mode matches the Trade and Intelligence apps: off-white canvas, white panels, dark navy text, gold accents.
-- No SQL changes required.
+Replace:
+  app.py
+  pc-power-admin.py
 
-Deploy:
-Replace pc-power-admin.py with the file in this package.
+Trade changes:
+- Commercial Pulse suppresses nan placeholders and resolves Buyer/Target fields correctly.
+- Latest canonical activity becomes Latest trade updates.
+- Adds alerts/events, transactions, trade flows and canonical relationships as readable updates.
+- Newly created companies/entities move to a secondary expander instead of dominating the feed.
+- Infrastructure additions remain prominent.
+
+Workflow changes:
+- Fixes AI Research failure: _dependency_reconcile was undefined.
+- AI Research now calls the existing _run_reconciliation wrapper, which prefers pc_reconcile_ingestion_job_v2 and falls back safely.
+
+No new SQL required.

@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.38-live-canonical-activity"
+APP_VERSION = "v3.3.39-live-trade-updates"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -7560,83 +7560,140 @@ def _trade_network_snapshot():
         "Corridors / systems":max(len(systems),len(routes)),
     }
 
+def _clean_trade_value(v):
+    if v is None or (isinstance(v,float) and pd.isna(v)):
+        return ""
+    x=str(v).strip()
+    return "" if x.casefold() in {"nan","none","<na>"} else x
+
 def _render_trade_pulse():
     records=_recent_commercial_records()
     st.markdown("### Commercial pulse")
-    st.caption("Recent deals, contracts and investment — showing who, when, what and value where the source model provides it.")
+    st.caption("Recent deals, contracts and investment — who did what, with whom, where and for how much.")
     if records.empty:
         st.info("No recent commercial activity records available.")
         return
+
     def c(names):
         return _first_existing_col(records,names)
-    dc=c(["Date","Announcement Date","Transaction Date","Contract Date","Start Date","Effective Date","As Of"])
-    tc=c(["Title","Deal","Transaction","Contract","Name","Event"])
-    ac=c(["Buyer","Customer","Client","Awarding Authority","Contracting Authority","Investor","Acquirer","Company","Company Name"])
-    bc=c(["Seller","Supplier","Contractor","Counterparty","Target","Partner","Awardee"])
-    gc=c(["Country","Geography","Region","Location","Market"])
-    vc=c(["Value","Deal Value","Transaction Value","Contract Value","CAPEX","Capex","Investment"])
+
+    dc=c(["Date","Announcement Date","Announced Date","Transaction Date","Contract Date","Start Date","Effective Date","As Of"])
+    tc=c(["Title","Deal","Transaction","Contract","Name","Event","Target / Asset","Target Company"])
+    ac=c(["Buyer","Buyer Company","Customer","Client","Awarding Authority","Contracting Authority","Investor","Acquirer","Company","Company Name"])
+    bc=c(["Seller","Supplier","Contractor","Counterparty","Target","Target Company","Target / Asset","Partner","Awardee"])
+    gc=c(["Country","Country / Region","Geography","Region","Location","Market"])
+    vc=c(["Value","Reported Value","Deal Value","Transaction Value","Contract Value","CAPEX","Capex","Investment"])
+    cc=c(["Currency"])
     sc=c(["Status","Deal Status","Contract Status","Transaction Status"])
     yc=c(["Type","Deal Type","Transaction Type","Contract Type","Category"])
+
     rows=[]
-    for _,r in records.head(20).iterrows():
-        a=str(r.get(ac,'') if ac else '').strip(); b=str(r.get(bc,'') if bc else '').strip()
+    for _,r in records.head(30).iterrows():
+        a=_clean_trade_value(r.get(ac,'')) if ac else ''
+        b=_clean_trade_value(r.get(bc,'')) if bc else ''
+        typ=_clean_trade_value(r.get(yc,'')) if yc else _clean_trade_value(r.get('_source_type',''))
+        activity=_clean_trade_value(r.get(tc,'')) if tc else ''
+        if not activity:
+            target=_clean_trade_value(r.get('Target / Asset','')) or _clean_trade_value(r.get('Target Company',''))
+            activity=' · '.join(x for x in [typ,target] if x)
+        if not a:
+            a=_clean_trade_value(r.get('Investor / Buyer','')) or _clean_trade_value(r.get('Buyer',''))
+        if not b:
+            b=_clean_trade_value(r.get('Target / Asset','')) or _clean_trade_value(r.get('Target Company',''))
+        who=' → '.join(x for x in [a,b] if x and x!=a) if a else b
+        raw_val=r.get(vc,'') if vc else ''
+        cur=_clean_trade_value(r.get(cc,'')) if cc else ''
+        if isinstance(raw_val,(int,float)) and not pd.isna(raw_val):
+            value=(f"{cur} {raw_val:,.0f}".strip())
+        else:
+            value=_clean_trade_value(raw_val)
+            if value and cur and not value.startswith(cur): value=f"{cur} {value}"
         rows.append({
             "Date":r.get(dc,'') if dc else '',
-            "Activity":r.get(tc,'') if tc else '',
-            "Who":" ↔ ".join(x for x in [a,b] if x),
-            "Type":r.get(yc,'') if yc else r.get('_source_type',''),
-            "Value / CAPEX":r.get(vc,'') if vc else '',
-            "Market":r.get(gc,'') if gc else '',
-            "Status":r.get(sc,'') if sc else '',
+            "Activity":activity,
+            "Who":who,
+            "Type":typ,
+            "Value / CAPEX":value,
+            "Market":_clean_trade_value(r.get(gc,'')) if gc else '',
+            "Status":_clean_trade_value(r.get(sc,'')) if sc else '',
         })
-    display_df(pd.DataFrame(rows),360)
+    view=pd.DataFrame(rows)
+    # Blank, unidentified rows are not decision-useful.
+    view=view[(view["Activity"].astype(str).str.strip()!="") | (view["Who"].astype(str).str.strip()!="")].copy()
+    display_df(view.head(20),390)
 
 @st.cache_data(show_spinner=False, ttl=30)
 def _live_canonical_activity():
-    """Fresh DB-native activity so newly ingested records are visible immediately."""
+    """Fresh DB-native trade updates with readable context, plus low-level additions as fallback."""
     try:
         sb=pc_db_client(service=True)
         if sb is None: return pd.DataFrame()
         rows=[]
+        entities_rows=pc_safe_rows(sb,"pc_entities","entity_id,name,entity_type,subtype,hq_country,status,created_at,updated_at",12000,order="name") or []
+        assets_rows=pc_safe_rows(sb,"pc_assets","asset_id,name,asset_type,subtype,country,region_city,status,created_at,updated_at",16000,order="name") or []
+        entity_names={str(r.get("entity_id") or ""):str(r.get("name") or "") for r in entities_rows}
+        asset_names={str(r.get("asset_id") or ""):str(r.get("name") or "") for r in assets_rows}
 
-        def add(kind,name,when,detail="",status=""):
-            if not str(name or "").strip(): return
-            rows.append({"When":when,"Type":kind,"Record":str(name or "").strip(),"Detail":str(detail or "").strip(),"Status":str(status or "").strip()})
+        def add(kind,name,when,detail="",status="",priority=5,object_id=""):
+            name=_clean_trade_value(name)
+            if not name: return
+            rows.append({"When":when,"Update":kind,"Record":name,"Detail":_clean_trade_value(detail),"Status":_clean_trade_value(status),"_priority":priority,"_object_id":object_id})
 
-        for r in pc_safe_rows(sb,"pc_events","event_id,title,start_date,severity,status,event_family,event_type,alert_worthy,trade_visible,intelligence_visible,created_at",300,order="created_at") or []:
+        # Events/news-like canonical updates first.
+        for r in pc_safe_rows(sb,"pc_events","event_id,title,start_date,severity,status,event_family,event_type,description,commercial_impact,alert_worthy,trade_visible,intelligence_visible,created_at",500,order="created_at") or []:
             flags=[]
-            if r.get("alert_worthy") is True: flags.append("ALERT")
-            if r.get("trade_visible") is True: flags.append("TRADE")
-            add("Event",r.get("title"),r.get("created_at") or r.get("start_date")," · ".join(x for x in [r.get("event_family"),r.get("event_type"),"/".join(flags)] if x),r.get("status") or r.get("severity"))
+            if r.get("alert_worthy") is True: flags.append("Alert")
+            if r.get("trade_visible") is True: flags.append("Trade")
+            detail=r.get("commercial_impact") or r.get("description") or " · ".join(x for x in [r.get("event_family"),r.get("event_type")] if x)
+            add("Alert / event" if r.get("alert_worthy") else "Trade event",r.get("title"),r.get("created_at") or r.get("start_date"),detail,r.get("status") or r.get("severity"),1,str(r.get("event_id") or ""))
 
-        for r in pc_safe_rows(sb,"pc_entities","entity_id,name,entity_type,subtype,hq_country,status,created_at,updated_at",300,order="created_at") or []:
-            add("Company / entity",r.get("name"),r.get("created_at") or r.get("updated_at")," · ".join(x for x in [r.get("entity_type"),r.get("subtype"),r.get("hq_country")] if x),r.get("status"))
-
-        for r in pc_safe_rows(sb,"pc_assets","asset_id,name,asset_type,subtype,country,region_city,status,created_at,updated_at",400,order="created_at") or []:
-            add("Asset / infrastructure",r.get("name"),r.get("created_at") or r.get("updated_at")," · ".join(x for x in [r.get("asset_type"),r.get("subtype"),r.get("region_city"),r.get("country")] if x),r.get("status"))
-
-        for r in pc_safe_rows(sb,"pc_transactions","transaction_id,announced_date,effective_date,buyer_entity_id,seller_name,target_name,asset_class,country_region,transaction_type,reported_value,currency,status",300,order="announced_date") or []:
+        # Transactions/investments with resolved company names.
+        for r in pc_safe_rows(sb,"pc_transactions","transaction_id,announced_date,effective_date,buyer_entity_id,seller_name,target_entity_id,target_asset_id,target_name,asset_class,country_region,transaction_type,reported_value,currency,status,created_at",500,order="announced_date") or []:
+            buyer=entity_names.get(str(r.get("buyer_entity_id") or ""),"")
+            target=entity_names.get(str(r.get("target_entity_id") or ""),"") or asset_names.get(str(r.get("target_asset_id") or ""),"") or r.get("target_name") or ""
+            seller=r.get("seller_name") or ""
+            who=" → ".join(x for x in [buyer or seller,target] if _clean_trade_value(x))
             val=r.get("reported_value")
-            money=(f"{r.get('currency') or ''} {val:,.0f}" if isinstance(val,(int,float)) else "")
-            add("Transaction / investment",r.get("target_name") or r.get("transaction_type"),r.get("announced_date") or r.get("effective_date")," · ".join(x for x in [r.get("transaction_type"),r.get("country_region"),money] if x),r.get("status"))
+            money=f"{r.get('currency') or ''} {val:,.0f}".strip() if isinstance(val,(int,float)) and not pd.isna(val) else ""
+            title=" · ".join(x for x in [r.get("transaction_type"),who] if _clean_trade_value(x)) or target
+            detail=" · ".join(x for x in [r.get("country_region"),money] if _clean_trade_value(x))
+            add("Deal / investment",title,r.get("created_at") or r.get("announced_date") or r.get("effective_date"),detail,r.get("status"),2,str(r.get("transaction_id") or ""))
 
-        for r in pc_safe_rows(sb,"pc_trade_flows","trade_flow_id,observation_date,period_start,period_end,origin_country,destination_country,commodity,transport_mode,confidence,metadata",300,order="observation_date") or []:
+        # Trade flows are substantive trade updates, not raw database rows.
+        for r in pc_safe_rows(sb,"pc_trade_flows","trade_flow_id,observation_date,period_start,period_end,origin_country,destination_country,origin_asset_id,destination_asset_id,commodity,transport_mode,confidence,metadata",500,order="observation_date") or []:
             meta=r.get("metadata") if isinstance(r.get("metadata"),dict) else {}
-            origin=meta.get("origin_node") or r.get("origin_country") or ""
-            dest=meta.get("destination_node") or r.get("destination_country") or ""
-            name=" → ".join(x for x in [str(origin).strip(),str(dest).strip()] if x) or str(r.get("commodity") or "Trade flow")
-            add("Trade flow",name,r.get("observation_date") or r.get("period_end") or r.get("period_start")," · ".join(x for x in [r.get("commodity"),r.get("transport_mode")] if x),r.get("confidence"))
+            origin=asset_names.get(str(r.get("origin_asset_id") or ""),"") or meta.get("origin_node") or r.get("origin_country") or ""
+            dest=asset_names.get(str(r.get("destination_asset_id") or ""),"") or meta.get("destination_node") or r.get("destination_country") or ""
+            route=" → ".join(x for x in [str(origin).strip(),str(dest).strip()] if x)
+            title=" · ".join(x for x in [r.get("commodity"),route] if _clean_trade_value(x)) or route or "Trade flow"
+            add("Trade flow",title,r.get("observation_date") or r.get("period_end") or r.get("period_start"),r.get("transport_mode") or "",r.get("confidence"),2,str(r.get("trade_flow_id") or ""))
+
+        # Relationship changes are often the most useful context for newly added entities.
+        rels=pc_safe_rows(sb,"pc_relationships","relationship_id,source_type,source_id,relationship_type,target_type,target_id,record_status,created_at,updated_at,metadata",800,order="created_at") or []
+        for r in rels:
+            sid=str(r.get("source_id") or ""); tid=str(r.get("target_id") or "")
+            sname=entity_names.get(sid) if str(r.get("source_type") or "").casefold()=="entity" else asset_names.get(sid)
+            tname=entity_names.get(tid) if str(r.get("target_type") or "").casefold()=="entity" else asset_names.get(tid)
+            if not sname or not tname: continue
+            rel=pretty_relationship(r.get("relationship_type"))
+            add("Network relationship",f"{sname} → {tname}",r.get("created_at") or r.get("updated_at"),rel,r.get("record_status"),3,str(r.get("relationship_id") or ""))
+
+        # New infrastructure/company additions remain visible, but below substantive updates.
+        for r in entities_rows:
+            add("New company / entity",r.get("name"),r.get("created_at") or r.get("updated_at")," · ".join(x for x in [r.get("entity_type"),r.get("subtype"),r.get("hq_country")] if x),r.get("status"),5,str(r.get("entity_id") or ""))
+        for r in assets_rows:
+            add("New infrastructure",r.get("name"),r.get("created_at") or r.get("updated_at")," · ".join(x for x in [r.get("asset_type"),r.get("subtype"),r.get("region_city"),r.get("country")] if x),r.get("status"),4,str(r.get("asset_id") or ""))
 
         out=pd.DataFrame(rows)
         if out.empty: return out
         out["_dt"]=pd.to_datetime(out["When"],errors="coerce",utc=True)
-        return out.sort_values("_dt",ascending=False,na_position="last").drop(columns=["_dt"])
+        return out.sort_values(["_dt","_priority"],ascending=[False,True],na_position="last")
     except Exception:
         return pd.DataFrame()
 
 def _render_live_canonical_activity(limit=30):
-    st.markdown("### Latest canonical activity")
-    st.caption("Newly loaded database records — events, alerts, companies, infrastructure, transactions and trade flows — without waiting for an Excel rebuild.")
+    st.markdown("### Latest trade updates")
+    st.caption("New alerts, commercial events, deals, infrastructure, trade flows and network relationships from the live canonical database.")
     df=_live_canonical_activity()
     if df.empty:
         st.caption("No timestamped canonical activity is available from the live database.")
@@ -7646,7 +7703,17 @@ def _render_live_canonical_activity(limit=30):
     if q.strip():
         blob=view.astype(str).agg(" ".join,axis=1)
         view=view[blob.str.contains(q.strip(),case=False,regex=False,na=False)]
-    display_df(view.head(limit),420)
+
+    # Lead with decision-useful updates. Keep raw entity additions secondary.
+    substantive=view[view["Update"].isin(["Alert / event","Trade event","Deal / investment","Trade flow","Network relationship","New infrastructure"])].head(limit)
+    if substantive.empty:
+        substantive=view.head(limit)
+    display_df(substantive[[c for c in ["When","Update","Record","Detail","Status"] if c in substantive.columns]],430)
+
+    additions=view[view["Update"].eq("New company / entity")].head(25)
+    if not additions.empty:
+        with st.expander(f"Recently added companies/entities ({len(additions)})",expanded=False):
+            display_df(additions[[c for c in ["When","Record","Detail","Status"] if c in additions.columns]],300)
 
 def _render_recent_additions():
     st.markdown("### Latest additions")
