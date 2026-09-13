@@ -452,9 +452,159 @@ def _canonical_db_vessels():
         return pd.DataFrame()
 
 
+
+
+# -----------------------------------------------------------------------------
+# Live canonical intelligence bridge
+# -----------------------------------------------------------------------------
+def _truthy_series(s):
+    return s.fillna(False).astype(str).str.strip().str.casefold().isin({"true","1","yes","y","t"})
+
+def _merge_live_legacy(live, legacy, keys):
+    if live is None or live.empty:
+        return legacy.copy() if isinstance(legacy,pd.DataFrame) else pd.DataFrame()
+    if legacy is None or legacy.empty:
+        return live.copy()
+    out=pd.concat([live,legacy],ignore_index=True,sort=False)
+    usable=[k for k in keys if k in out.columns]
+    return out.drop_duplicates(subset=usable,keep="first") if usable else out
+
+@st.cache_data(show_spinner=False, ttl=60)
+def _canonical_db_intelligence_frames():
+    """Read the current canonical event graph directly from Supabase.
+
+    Returns legacy-shaped dataframes for events, locations and event links so the
+    existing Intelligence UI can display newly applied alerts immediately.
+    Workbook sheets remain fallback-only during migration.
+    """
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return tuple(pd.DataFrame() for _ in range(5))
+
+        erows=pc_safe_rows(
+            sb,"pc_events",
+            "event_id,start_date,end_date,event_nature,event_domain,event_family,event_type,severity,status,mode,countries,location,title,description,operational_impact,commercial_impact,confidence,trade_relevance,intelligence_relevance,trade_visible,intelligence_visible,alert_worthy,record_status,source_id,metadata,created_at,updated_at",
+            15000,order="start_date"
+        ) or []
+        lrows=pc_safe_rows(
+            sb,"pc_event_locations",
+            "event_location_id,event_id,location_name,country,latitude,longitude,accuracy,notes",
+            15000
+        ) or []
+        linkrows=pc_safe_rows(
+            sb,"pc_event_links",
+            "event_link_id,event_id,linked_type,linked_id,linked_name,relationship,confidence,source_id,metadata",
+            30000
+        ) or []
+        entity_rows=pc_safe_rows(sb,"pc_entities","entity_id,name,entity_type,subtype,hq_country,status,metadata",15000,order="name") or []
+        asset_rows=pc_safe_rows(sb,"pc_assets","asset_id,name,asset_type,subtype,country,region_city,status,metadata",20000,order="name") or []
+        mobile_rows=pc_safe_rows(sb,"pc_mobile_assets","mobile_asset_id,name,asset_type,subtype,imo,flag,status,metadata",20000,order="name") or []
+
+        events=pd.DataFrame(erows).rename(columns={
+            "event_id":"Event ID","start_date":"Start Date","end_date":"End Date",
+            "event_nature":"Event Nature","event_domain":"Event Domain","event_family":"Event Family",
+            "event_type":"Event Type","severity":"Severity","status":"Status","mode":"Mode",
+            "countries":"Country / Countries","location":"Location","title":"Title","description":"Description",
+            "operational_impact":"Operational Impact","commercial_impact":"Trade / Commercial Impact",
+            "confidence":"Confidence","trade_relevance":"Trade Relevance","intelligence_relevance":"Intelligence Relevance",
+            "trade_visible":"Trade Visible","intelligence_visible":"Intelligence Visible","alert_worthy":"Alert Worthy",
+            "record_status":"Record Status","source_id":"Source ID","metadata":"Metadata",
+            "created_at":"Created At","updated_at":"Updated At"
+        }) if erows else pd.DataFrame()
+
+        locations=pd.DataFrame(lrows).rename(columns={
+            "event_location_id":"Location Record","event_id":"Event ID","location_name":"Location",
+            "country":"Country","latitude":"Latitude","longitude":"Longitude","accuracy":"Accuracy","notes":"Notes"
+        }) if lrows else pd.DataFrame()
+
+        entity_names={str(r.get("entity_id") or ""):str(r.get("name") or "") for r in entity_rows}
+        asset_by_id={str(r.get("asset_id") or ""):r for r in asset_rows}
+        mobile_by_id={str(r.get("mobile_asset_id") or ""):r for r in mobile_rows}
+
+        asset_links=[]; company_links=[]; system_links=[]
+        for r in linkrows:
+            typ=str(r.get("linked_type") or "").strip().casefold()
+            lid=str(r.get("linked_id") or "").strip()
+            lname=str(r.get("linked_name") or "").strip()
+            rel=str(r.get("relationship") or "").strip()
+            base={"Event ID":str(r.get("event_id") or "").strip(),"Relationship":rel,"Confidence":r.get("confidence"),"Source ID":str(r.get("source_id") or "").strip()}
+            if typ in {"entity","company","organisation","organization"}:
+                company_links.append({**base,"Company ID":lid,"Company":lname or entity_names.get(lid,lid)})
+            elif typ in {"asset","port","terminal","facility"}:
+                a=asset_by_id.get(lid,{})
+                asset_links.append({**base,"Asset ID":lid,"Asset":lname or str(a.get("name") or lid),"Asset Type":str(a.get("asset_type") or a.get("subtype") or "Asset")})
+            elif typ in {"mobile_asset","vessel","ship","aircraft"}:
+                m=mobile_by_id.get(lid,{})
+                nm=lname or str(m.get("name") or lid)
+                subtype=str(m.get("subtype") or m.get("asset_type") or "Mobile asset")
+                imo=str(m.get("imo") or "").strip()
+                asset_links.append({**base,"Asset ID":lid,"Asset":nm,"Asset Type":subtype,"IMO":imo})
+            elif typ in {"system","corridor","route","waterway","chokepoint"}:
+                system_links.append({**base,"System ID":lid,"System":lname or lid})
+
+        return events,locations,pd.DataFrame(asset_links),pd.DataFrame(company_links),pd.DataFrame(system_links)
+    except Exception:
+        return tuple(pd.DataFrame() for _ in range(5))
+
+
+def _intelligence_gate(df):
+    """Prefer canonical visibility flags, then retain clearly operational/security events."""
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+    x=df.copy()
+    explicit=pd.Series(False,index=x.index)
+    if "Intelligence Visible" in x.columns:
+        explicit |= _truthy_series(x["Intelligence Visible"])
+    if "Alert Worthy" in x.columns:
+        explicit |= _truthy_series(x["Alert Worthy"])
+    if "Intelligence Relevance" in x.columns:
+        rel=pd.to_numeric(x["Intelligence Relevance"],errors="coerce")
+        explicit |= rel.ge(3).fillna(False)
+
+    blob=pd.Series("",index=x.index,dtype="string")
+    for c in ["Event Nature","Event Domain","Event Family","Event Type","Mode","Title","Description","Operational Impact","Trade / Commercial Impact"]:
+        if c in x.columns:
+            blob=blob.str.cat(x[c].fillna("").astype(str),sep=" ")
+    operational=blob.str.contains(
+        r"war|conflict|attack|missile|drone|piracy|hijack|boarding|seizure|interdiction|smuggl|traffick|fraud|crime|theft|terror|sabotage|mine|sanction|enforcement|weather|typhoon|hurricane|cyclone|flood|earthquake|wildfire|storm|low water|grounding|collision|allision|capsiz|sinking|fire|explosion|pollution|search and rescue|\bsar\b|labour|industrial action|strike|protest|riot|civil unrest|closure|outage|disruption|border closure|airspace closure|cyber|ransomware",
+        case=False,regex=True,na=False
+    )
+    return x[explicit | operational].copy()
+
+@st.cache_data(show_spinner=False, ttl=60)
+def _canonical_db_entity_asset_frames():
+    """Small live entity/asset bridge for connected-context lookups in Intelligence."""
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame(),pd.DataFrame(),pd.DataFrame()
+        erows=pc_safe_rows(sb,"pc_entities","entity_id,name,entity_type,subtype,hq_country,status,metadata",15000,order="name") or []
+        arows=pc_safe_rows(sb,"pc_assets","asset_id,name,asset_type,subtype,country,region_city,status,operator_entity_id,owner_entity_id,metadata",20000,order="name") or []
+        companies=pd.DataFrame([{
+            "Company ID":r.get("entity_id",""),"Company":r.get("name",""),"HQ Country":r.get("hq_country",""),
+            "Entity Type":r.get("entity_type",""),"Subtype":r.get("subtype",""),"Status":r.get("status",""),"Metadata":r.get("metadata") or {}
+        } for r in erows])
+        assets=pd.DataFrame([{
+            "Asset ID":r.get("asset_id",""),"Asset":r.get("name",""),"Asset Type":r.get("asset_type",""),
+            "Subtype":r.get("subtype",""),"Country":r.get("country",""),"City / Area":r.get("region_city",""),
+            "Status":r.get("status",""),"Operator Company ID":r.get("operator_entity_id",""),
+            "Owner Company ID":r.get("owner_entity_id",""),"Metadata":r.get("metadata") or {}
+        } for r in arows])
+        ports=assets[assets.apply(lambda r: "port" in f"{r.get('Asset','')} {r.get('Asset Type','')} {r.get('Subtype','')}".casefold() or "harbour" in f"{r.get('Asset','')} {r.get('Asset Type','')} {r.get('Subtype','')}".casefold() or "harbor" in f"{r.get('Asset','')} {r.get('Asset Type','')} {r.get('Subtype','')}".casefold(),axis=1)].copy() if not assets.empty else pd.DataFrame()
+        if not ports.empty:
+            ports=ports.rename(columns={"Asset ID":"Port ID","Asset":"Port / Facility","Asset Type":"Facility Type"})
+        return companies,assets,ports
+    except Exception:
+        return pd.DataFrame(),pd.DataFrame(),pd.DataFrame()
+
+
 # Core canonical datasets
-companies = xl("01_core_entities.xlsx", "Companies")
-ports = xl("02_maritime.xlsx", "Ports")
+_legacy_companies = xl("01_core_entities.xlsx", "Companies")
+_legacy_ports = xl("02_maritime.xlsx", "Ports")
+_db_companies, _db_assets, _db_ports = _canonical_db_entity_asset_frames()
+companies = _merge_live_legacy(_db_companies,_legacy_companies,["Company ID"])
+ports = _merge_live_legacy(_db_ports,_legacy_ports,["Port ID"])
 _legacy_vessels = xl("02_maritime.xlsx", "Vessels")
 _db_vessels = _canonical_db_vessels()
 if not _db_vessels.empty:
@@ -475,7 +625,8 @@ else:
     vessels=_legacy_vessels
 vessel_restrictions = xl("02_maritime.xlsx", "Vessel Restrictions")
 aircraft = xl("05_aviation.xlsx", "Aircraft Registry")
-infra_assets = xl("06_infrastructure.xlsx", "Assets")
+_legacy_infra_assets = xl("06_infrastructure.xlsx", "Assets")
+infra_assets = _merge_live_legacy(_db_assets,_legacy_infra_assets,["Asset ID"])
 dry_ports = xl("06_infrastructure.xlsx", "Dry Ports")
 economic_zones = xl("06_infrastructure.xlsx", "Economic Zones")
 
@@ -492,12 +643,20 @@ security_view = xl("09_intelligence.xlsx", "Security Product View")
 sources = xl("10_sources_evidence.xlsx", "Sources")
 source_feeds = xl("10_sources_evidence.xlsx", "Source Feeds")
 
-# Canonical events/hazards
-hazard_events = xl("13_events_hazards.xlsx", "Events")
-event_locations = xl("13_events_hazards.xlsx", "Event Locations")
-event_asset_links = xl("13_events_hazards.xlsx", "Event Asset Links")
-event_company_links = xl("13_events_hazards.xlsx", "Event Company Links")
-event_system_links = xl("13_events_hazards.xlsx", "Event System Links")
+# Canonical events/hazards — live Supabase first, workbook fallback during migration
+_db_events, _db_event_locations, _db_event_asset_links, _db_event_company_links, _db_event_system_links = _canonical_db_intelligence_frames()
+_legacy_events = xl("13_events_hazards.xlsx", "Events")
+_legacy_locations = xl("13_events_hazards.xlsx", "Event Locations")
+_legacy_asset_links = xl("13_events_hazards.xlsx", "Event Asset Links")
+_legacy_company_links = xl("13_events_hazards.xlsx", "Event Company Links")
+_legacy_system_links = xl("13_events_hazards.xlsx", "Event System Links")
+
+hazard_events_raw = _db_events if not _db_events.empty else _legacy_events
+hazard_events = _intelligence_gate(hazard_events_raw)
+event_locations = _db_event_locations if not _db_event_locations.empty else _legacy_locations
+event_asset_links = _merge_live_legacy(_db_event_asset_links,_legacy_asset_links,["Event ID","Asset ID","Relationship"])
+event_company_links = _merge_live_legacy(_db_event_company_links,_legacy_company_links,["Event ID","Company ID","Relationship"])
+event_system_links = _merge_live_legacy(_db_event_system_links,_legacy_system_links,["Event ID","System ID","Relationship"])
 impact_chains = xl("13_events_hazards.xlsx", "Impact Chains")
 
 # Sanctions / compliance
@@ -772,8 +931,12 @@ def render_latest_intelligence_strip():
     section(
         "LATEST INTELLIGENCE",
         "Latest intelligence",
-        "Newest reporting and assessed incidents in the P&C intelligence base — surfaced first, not buried in the event register."
+        "Newest reporting and assessed incidents in the live P&C intelligence base — surfaced first, not buried in the event register."
     )
+    if not hazard_events.empty and "Start Date" in hazard_events.columns:
+        _latest_live=pd.to_datetime(hazard_events["Start Date"],errors="coerce").max()
+        if pd.notna(_latest_live):
+            st.caption(f"Live canonical event layer · latest event date {_latest_live.strftime('%Y-%m-%d')} · refresh database after new ingestion jobs.")
     if latest is None or latest.empty:
         st.markdown('<div class="pc-empty">No intelligence records available.</div>', unsafe_allow_html=True)
         return
