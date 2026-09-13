@@ -1,7 +1,8 @@
 from __future__ import annotations
 from pathlib import Path
-import os, sys, json, uuid, hashlib, re, hashlib, re
+import os, sys, json, uuid, hashlib, re, io, zipfile, mimetypes
 import pandas as pd
+import xml.etree.ElementTree as ET
 import streamlit as st
 
 ROOT=Path(__file__).resolve().parent
@@ -39,38 +40,6 @@ input, [data-baseweb="input"] input{
 .pc-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px}.pc-k{color:var(--gold);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}
 </style>""",unsafe_allow_html=True)
 
-if st.session_state.get("pc_admin_appearance","Dark") == "Light":
-    st.markdown("""
-    <style>
-    :root{--bg:#f5f7fa;--panel:#ffffff;--line:#cbd5e1;--text:#16202a;--muted:#5d6b7a;--gold:#9a7626}
-    .stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"]{
-      background:var(--bg)!important;color:var(--text)!important
-    }
-    [data-testid="stSidebar"]{background:#eef2f6!important;border-right:1px solid #cbd5e1!important}
-    h1,h2,h3,h4,p,label,span,li{color:var(--text)!important}
-    .pc-card{background:#ffffff!important;border-color:#cbd5e1!important}
-    textarea,[data-baseweb="textarea"] textarea,[data-testid="stTextArea"] textarea{
-      background:#ffffff!important;color:#111827!important;-webkit-text-fill-color:#111827!important
-    }
-    [data-testid="stTextArea"] > div,[data-testid="stTextArea"] [data-baseweb="textarea"]{background:#ffffff!important}
-    input,[data-baseweb="input"] input{
-      background:#ffffff!important;color:#111827!important;-webkit-text-fill-color:#111827!important
-    }
-    [data-baseweb="select"]>div,[data-baseweb="input"]>div{
-      background:#ffffff!important;color:#111827!important;border-color:#cbd5e1!important
-    }
-    [data-baseweb="tab"]{color:#16202a!important}
-    .stButton > button,.stDownloadButton > button{
-      background:#ffffff!important;color:#29465f!important;border:1px solid #b8c3cf!important
-    }
-    .stButton > button p,.stDownloadButton > button p{color:#29465f!important}
-    [data-testid="stHeader"],header[data-testid="stHeader"],[data-testid="stToolbar"]{
-      background:#f5f7fa!important;color:#16202a!important
-    }
-    [data-testid="stHeader"] *,[data-testid="stToolbar"] *{color:#16202a!important}
-    </style>
-    """,unsafe_allow_html=True)
-
 if os.getenv("PC_REQUIRE_AUTH","false").lower()=="true":
     ctx=require_super_admin()
 else:
@@ -79,24 +48,7 @@ else:
 sb=service_client()
 st.sidebar.markdown("<div class='pc-k'>Power & Corridors</div>",unsafe_allow_html=True)
 st.sidebar.markdown("## Power Admin")
-st.sidebar.markdown("### Controls")
-st.sidebar.radio(
-    "Appearance",
-    ["Dark","Light"],
-    horizontal=True,
-    key="pc_admin_appearance",
-)
-if st.sidebar.button("↻ Refresh database", use_container_width=True, key="pc_admin_refresh_database"):
-    st.cache_data.clear()
-    try:
-        st.cache_resource.clear()
-    except Exception:
-        pass
-    st.rerun()
-st.sidebar.caption("Refresh after applying staging or relationship changes.")
-st.sidebar.markdown("---")
-
-PAGES=["Dashboard","Migration","Database Coverage","Data Completion","Model Registry","Batch Staging","Staging Resolution","Review Queue","ReCAAP Vessel Resolver","Organizations","Users & Access","Research Jobs","Trade System Builder","Market Data","Governance & Quality"]
+PAGES=["Dashboard","Workflow Center","AI Research Workflow","Bulk Import Workflow","Multi-Table Bulk Loader","Reconciliation Center","Document Loader","Distribution Lists","Migration","Database Coverage","Data Completion","Model Registry","Batch Staging","Staging Resolution","Review Queue","ReCAAP Vessel Resolver","Organizations","Users & Access","Research Jobs","Trade System Builder","Market Data","Governance & Quality"]
 
 # ---------------------------------------------------------------------------
 # Bulk review / validation helpers
@@ -366,7 +318,7 @@ def validate_staged_for_bulk(sb,row):
     # no canonical match was found; MATCHED means the database supplied the existing
     # canonical ID for an enrichment/update. An exact duplicate is expected for MATCHED.
     resolution_status=str(row.get("resolution_status") or "UNRESOLVED").upper()
-    identity_table=table in {"pc_entities","pc_assets","pc_mobile_assets","pc_events","pc_transport_routes"}
+    identity_table=table in {"pc_entities","pc_assets","pc_mobile_assets","pc_events"}
     identity_resolution_ok=(not identity_table) or resolution_status in {"NEW","MATCHED"}
     if identity_table and resolution_status=="MATCHED" and row.get("resolved_entity_id"):
         duplicate=False
@@ -793,6 +745,333 @@ Rules:
 """
 
 
+
+# ---------------------------------------------------------------------------
+# Workflow / multi-table / document / distribution helpers
+# ---------------------------------------------------------------------------
+
+WORKFLOW_STAGES = {
+    "AI_RESEARCH": [
+        "RESEARCH","STAGE","PREPARE_IDS","RECONCILE","RELATIONSHIPS","REVIEW","APPLY","QA","COMPLETE"
+    ],
+    "BULK_IMPORT": [
+        "UPLOAD","MAP_TABLES","MAP_FIELDS","FILL_KEYS","STAGE","RECONCILE","REVIEW","APPLY","QA","COMPLETE"
+    ],
+    "DOCUMENT_INGEST": [
+        "UPLOAD","EXTRACT","LINK","STRUCTURE","STAGE","RECONCILE","REVIEW","APPLY","COMPLETE"
+    ],
+}
+
+ID_FIELDS = {
+    "pc_entities": ("entity_id","ENTITY_",16),
+    "pc_assets": ("asset_id","ASSET_",16),
+    "pc_mobile_assets": ("mobile_asset_id","MOBILE_",16),
+    "pc_relationships": ("relationship_id","REL_",24),
+    "pc_events": ("event_id","EVENT_",20),
+    "pc_event_links": ("event_link_id","EVLINK_",20),
+    "pc_transactions": ("transaction_id","TXN_",20),
+    "pc_transport_routes": ("route_id","ROUTE_",20),
+    "pc_chokepoints": ("chokepoint_id","CHOKE_",20),
+    "pc_market_instruments": ("market_instrument_id","MKT_",20),
+    "pc_trade_flows": ("trade_flow_id","FLOW_",20),
+    "pc_supply_series": ("supply_series_id","SUPPLY_",20),
+    "pc_observations": ("observation_id","OBS_",20),
+}
+
+FIELD_ALIASES = {
+    "canonical_name":"name","entity_name":"name","company_name":"name","vessel_name":"name",
+    "asset_name":"name","display_name":"name","organisation_name":"name","organization_name":"name",
+    "imo_number":"imo","imo_no":"imo","imo_no.":"imo",
+    "country_name":"country","city":"region_city","region":"region_city",
+    "operator_id":"operator_entity_id","owner_id":"owner_entity_id","manager_id":"manager_entity_id",
+    "source_url":"source_url","research_sources":"metadata",
+}
+
+def _norm_field(v):
+    return re.sub(r"[^a-z0-9]+","_",str(v or "").strip().casefold()).strip("_")
+
+def _table_write_columns_live(sb, table):
+    try:
+        r=sb.rpc("pc_get_table_write_columns",{"p_table_name":table}).execute().data
+        if isinstance(r,list):
+            return [str(x) for x in r]
+    except Exception:
+        pass
+    return sorted(set(REQUIRED_BY_TABLE.get(table,[])) | set(ID_FIELDS.get(table,("", "", 0))[:1]) | {
+        "name","title","entity_type","asset_type","event_type","subtype","status","country","region_city",
+        "imo","mmsi","flag","owner_entity_id","operator_entity_id","manager_entity_id","source_id","metadata"
+    })
+
+def _auto_column_mapping(source_columns, target_columns):
+    targets={_norm_field(x):x for x in target_columns}
+    rows=[]
+    for src in source_columns:
+        n=_norm_field(src)
+        alias=FIELD_ALIASES.get(n)
+        target=targets.get(_norm_field(alias)) if alias else targets.get(n)
+        rows.append({"Include":bool(target),"Source Column":src,"Canonical Field":target or ""})
+    return pd.DataFrame(rows)
+
+def _clean_upload_scalar(v):
+    if v is None:
+        return None
+    if isinstance(v,float) and pd.isna(v):
+        return None
+    s=str(v).strip()
+    if not s or s.casefold()=="nan":
+        return None
+    return v
+
+def _jsonish(v):
+    if isinstance(v,(dict,list)) or v is None:
+        return v
+    s=str(v).strip()
+    if not s:
+        return None
+    if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
+        try: return json.loads(s)
+        except Exception: return v
+    return v
+
+def _payload_from_mapping(row, mapping_df, target_table):
+    payload={}
+    for _,m in mapping_df.iterrows():
+        if not bool(m.get("Include")):
+            continue
+        src=str(m.get("Source Column") or "")
+        dst=str(m.get("Canonical Field") or "").strip()
+        if not src or not dst or src not in row:
+            continue
+        val=_clean_upload_scalar(row.get(src))
+        if val is None:
+            continue
+        if dst in {"metadata","raw_value","derived_value","source_scope","stats"}:
+            val=_jsonish(val)
+        payload[dst]=val
+
+    # Keep unmapped source fields in metadata.source_payload rather than discarding them.
+    source_payload={}
+    mapped_sources=set(mapping_df.loc[mapping_df["Include"]==True,"Source Column"].astype(str)) if not mapping_df.empty else set()
+    for k,v in row.items():
+        if k in mapped_sources:
+            continue
+        val=_clean_upload_scalar(v)
+        if val is not None:
+            source_payload[str(k)]=_jsonable(val)
+    if source_payload:
+        meta=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {}
+        meta=dict(meta)
+        meta.setdefault("source_payload",{}).update(source_payload)
+        payload["metadata"]=meta
+
+    return payload
+
+def _natural_key_global(payload,target_table,index):
+    for key in (
+        "entity_id","asset_id","mobile_asset_id","relationship_id","event_id","event_link_id",
+        "transaction_id","route_id","chokepoint_id","market_instrument_id","trade_flow_id",
+        "supply_series_id","observation_id","imo","mmsi","name","title","route_name"
+    ):
+        if payload.get(key):
+            return str(payload[key])
+    return f"{target_table}:{index}"
+
+def _fill_staging_key(payload,target_table,natural_key):
+    payload=dict(payload or {})
+    spec=ID_FIELDS.get(target_table)
+    if not spec:
+        return payload
+    field,prefix,n=spec
+    if payload.get(field):
+        return payload
+    digest=hashlib.sha256(f"{target_table}|{natural_key}".encode("utf-8")).hexdigest().upper()[:n]
+    payload[field]=prefix+digest
+    return payload
+
+def _parse_multitable_upload(upload):
+    raw=upload.getvalue()
+    name=upload.name.lower()
+    sections={}
+    if name.endswith((".xlsx",".xls")):
+        xf=pd.ExcelFile(io.BytesIO(raw))
+        for sheet in xf.sheet_names:
+            sections[sheet]=pd.read_excel(io.BytesIO(raw),sheet_name=sheet,dtype=object)
+    elif name.endswith(".csv"):
+        df=pd.read_csv(io.BytesIO(raw),dtype=object)
+        if "target_table" in df.columns:
+            for table,g in df.groupby("target_table",dropna=False):
+                sections[str(table or "records")]=g.drop(columns=["target_table"]).reset_index(drop=True)
+        else:
+            sections[Path(upload.name).stem]=df
+    else:
+        obj=json.loads(raw.decode("utf-8-sig"))
+        records=obj if isinstance(obj,list) else obj.get("records",[obj])
+        df=pd.DataFrame(records)
+        if "target_table" in df.columns:
+            for table,g in df.groupby("target_table",dropna=False):
+                sections[str(table or "records")]=g.drop(columns=["target_table"]).reset_index(drop=True)
+        else:
+            sections[Path(upload.name).stem]=df
+    return sections, hashlib.sha256(raw).hexdigest()
+
+def _suggest_target_table(section,df):
+    n=_norm_field(section)
+    aliases={
+        "companies":"pc_entities","entities":"pc_entities","organisations":"pc_entities","organizations":"pc_entities",
+        "assets":"pc_assets","ports":"pc_assets","terminals":"pc_assets","infrastructure":"pc_assets",
+        "vessels":"pc_mobile_assets","ships":"pc_mobile_assets","mobile_assets":"pc_mobile_assets",
+        "relationships":"pc_relationships","relations":"pc_relationships",
+        "events":"pc_events","incidents":"pc_events","event_links":"pc_event_links",
+        "transactions":"pc_transactions","deals":"pc_transactions",
+        "routes":"pc_transport_routes","corridors":"pc_transport_routes",
+        "chokepoints":"pc_chokepoints","observations":"pc_observations",
+    }
+    if n in aliases:
+        return aliases[n]
+    cols={_norm_field(c) for c in df.columns}
+    if "imo" in cols or "vessel_name" in cols:
+        return "pc_mobile_assets"
+    if "relationship_type" in cols and ("source_id" in cols or "source_name" in cols):
+        return "pc_relationships"
+    if "event_type" in cols:
+        return "pc_events"
+    if "entity_type" in cols or "company_name" in cols:
+        return "pc_entities"
+    if "asset_type" in cols:
+        return "pc_assets"
+    return "pc_entities"
+
+def _workflow_upsert(job_id, workflow_type, title, stage, order, status="running", stats=None, metadata=None):
+    if not sb:
+        return None
+    try:
+        hit=(sb.table("pc_workflow_runs").select("*").eq("ingestion_job_id",job_id).limit(1).execute().data or [])
+        patch={
+            "workflow_type":workflow_type,"title":title,"current_stage":stage,"stage_order":order,
+            "status":status,"updated_at":pd.Timestamp.utcnow().isoformat(),
+            "stats":stats or {},"metadata":metadata or {}
+        }
+        if hit:
+            wid=hit[0]["workflow_run_id"]
+            sb.table("pc_workflow_runs").update(patch).eq("workflow_run_id",wid).execute()
+        else:
+            patch["ingestion_job_id"]=job_id
+            wid=sb.table("pc_workflow_runs").insert(patch).execute().data[0]["workflow_run_id"]
+        try:
+            sb.table("pc_workflow_stage_events").insert({
+                "workflow_run_id":wid,"stage_name":stage,"stage_order":order,
+                "stage_status":status,"stats":stats or {}
+            }).execute()
+        except Exception:
+            pass
+        return wid
+    except Exception:
+        return None
+
+def _workflow_job_rows(job_type=None,limit=100):
+    if not sb:
+        return []
+    q=sb.table("pc_ingestion_jobs").select(
+        "ingestion_job_id,job_type,title,status,stats,error_text,created_at,updated_at,completed_at,source_scope"
+    ).order("created_at",desc=True).limit(limit)
+    if job_type:
+        q=q.eq("job_type",job_type)
+    try:
+        return q.execute().data or []
+    except Exception:
+        return []
+
+def _staging_summary(job_id):
+    if not sb: return {}
+    try:
+        rows=(sb.table("pc_staged_records").select(
+            "staged_record_id,target_table,resolution_status,review_status,validation_status,payload"
+        ).eq("ingestion_job_id",job_id).limit(10000).execute().data or [])
+    except Exception:
+        rows=[]
+    out={"total":len(rows),"pending":0,"approved":0,"applied":0,"unresolved":0,"ambiguous":0,"partial":0,"ready":0,"missing_name":0}
+    for r in rows:
+        rv=str(r.get("review_status") or "pending")
+        out[rv]=out.get(rv,0)+1
+        rs=str(r.get("resolution_status") or "UNRESOLVED")
+        if rs=="UNRESOLVED": out["unresolved"]+=1
+        if rs=="AMBIGUOUS": out["ambiguous"]+=1
+        if rs=="PARTIAL": out["partial"]+=1
+        if rs in {"READY","MATCHED","NEW"}: out["ready"]+=1
+        p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+        if r.get("target_table") in {"pc_entities","pc_assets","pc_mobile_assets"} and not p.get("name"):
+            out["missing_name"]+=1
+    return out
+
+def _run_reconciliation(job_id):
+    try:
+        return sb.rpc("pc_run_standard_reconciliation",{"p_job_id":job_id}).execute().data
+    except Exception:
+        # compatibility path before SQL 031 is installed
+        result={}
+        try: result["prepare"]=_prepare_canonical_candidates(sb,job_id)
+        except Exception as exc: result["prepare_error"]=str(exc)
+        try: result["repair"]=sb.rpc("pc_repair_unresolved_identity_candidates",{"p_job_id":job_id}).execute().data
+        except Exception as exc: result["repair_error"]=str(exc)
+        try: result["event_relationships"]=_process_relationship_backlog(sb,job_id)
+        except Exception as exc: result["event_relationships_error"]=str(exc)
+        try: result["generic_relationships"]=_process_generic_relationship_backlog(sb,job_id)
+        except Exception as exc: result["generic_relationships_error"]=str(exc)
+        return result
+
+def _docx_text(raw):
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        xml=z.read("word/document.xml")
+    root=ET.fromstring(xml)
+    ns="{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    lines=[]
+    for p in root.iter(ns+"p"):
+        text="".join((n.text or "") for n in p.iter(ns+"t"))
+        if text.strip():
+            lines.append(text.strip())
+    return "\n".join(lines)
+
+def _extract_document_text(upload):
+    raw=upload.getvalue()
+    lname=upload.name.lower()
+    if lname.endswith(".docx"):
+        return _docx_text(raw)
+    if lname.endswith((".txt",".md",".csv")):
+        return raw.decode("utf-8-sig",errors="replace")
+    if lname.endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+            reader=PdfReader(io.BytesIO(raw))
+            return "\n".join((p.extract_text() or "") for p in reader.pages)
+        except Exception as exc:
+            raise RuntimeError(f"PDF parser unavailable or failed: {exc}")
+    raise RuntimeError("Supported document types: DOCX, PDF, TXT, MD.")
+
+def _canonical_link_candidates(kind, query="",limit=100):
+    config={
+        "entity":("pc_entities","entity_id,name,entity_type,hq_country","name"),
+        "asset":("pc_assets","asset_id,name,asset_type,country","name"),
+        "mobile_asset":("pc_mobile_assets","mobile_asset_id,name,asset_type,imo,flag","name"),
+        "event":("pc_events","event_id,title,event_type,start_date","title"),
+    }
+    table,cols,display=config[kind]
+    try:
+        q=sb.table(table).select(cols).limit(limit)
+        if query.strip():
+            q=q.ilike(display,f"%{query.strip()}%")
+        return q.execute().data or []
+    except Exception:
+        return []
+
+def _table_exists(name):
+    if not sb: return False
+    try:
+        sb.table(name).select("*").limit(1).execute()
+        return True
+    except Exception:
+        return False
+
+
 page=st.sidebar.radio("Workspace",PAGES)
 
 if sb is None:
@@ -860,58 +1139,6 @@ def _prepare_canonical_candidates(sb, job_id):
     """SQL 016: resolve entity rows and assign/reuse canonical IDs in staging only."""
     data=_rpc_data(sb,"pc_prepare_canonical_candidates",{"p_ingestion_job_id":str(job_id)})
     return data or {}
-
-
-def _repair_unresolved_identity_candidates(sb, job_id):
-    """SQL 017: force a deterministic identity decision for still-unresolved staged identity rows."""
-    data=_rpc_data(sb,"pc_repair_unresolved_identity_candidates",{"p_ingestion_job_id":str(job_id)})
-    return data or {}
-
-
-def _prepare_research_population(sb, job_id):
-    """SQL 022: unified staging-first company population preparation."""
-    data=_rpc_data(sb,"pc_prepare_research_population",{"p_ingestion_job_id":str(job_id)})
-    return data or {}
-
-
-def _population_pipeline_status(sb, limit=200):
-    try:
-        return (sb.table("pc_v_population_pipeline_status")
-                .select("*")
-                .order("created_at",desc=True)
-                .limit(limit).execute().data or [])
-    except Exception:
-        return []
-
-
-def _population_mobile_asset_coverage(sb, job_id, limit=5000):
-    try:
-        return (sb.table("pc_v_population_mobile_asset_coverage")
-                .select("*")
-                .eq("ingestion_job_id",str(job_id))
-                .order("mobile_asset_name")
-                .limit(limit).execute().data or [])
-    except Exception:
-        return []
-
-
-def _population_mobile_asset_stats(sb, job_id):
-    try:
-        return _rpc_data(sb,"pc_population_mobile_asset_stats",{"p_ingestion_job_id":str(job_id)}) or {}
-    except Exception:
-        return {}
-
-
-def _stage_missing_mobile_asset_links(sb, job_id, company_name, relationship_type="operates"):
-    return _rpc_data(
-        sb,
-        "pc_stage_missing_mobile_asset_links",
-        {
-            "p_ingestion_job_id":str(job_id),
-            "p_company_name":company_name,
-            "p_relationship_type":relationship_type,
-        },
-    ) or {}
 
 
 # ---------------------------------------------------------------------------
@@ -1059,141 +1286,6 @@ def _apply_ready_generic_relationships(sb, job_id=None):
     params={"p_ingestion_job_id":str(job_id)} if job_id else {}
     data=_rpc_data(sb,"pc_apply_ready_generic_relationships",params)
     return data or {}
-
-
-def _stage_corporate_relationship(sb, job_id, source_name, target_name, relationship_type="parent_of",
-                                  source_id=None, target_id=None, evidence_source_id=None,
-                                  confidence=1.0, ownership_percent=None, operating_control=None,
-                                  notes=None, metadata=None):
-    """SQL 020: stage and resolve one entity->entity corporate relationship."""
-    params={
-        "p_ingestion_job_id":str(job_id),
-        "p_source_name":source_name,
-        "p_target_name":target_name,
-        "p_relationship_type":relationship_type,
-        "p_source_id":source_id,
-        "p_target_id":target_id,
-        "p_evidence_source_id":evidence_source_id,
-        "p_confidence":confidence,
-        "p_ownership_percent":ownership_percent,
-        "p_operating_control":operating_control,
-        "p_notes":notes,
-        "p_metadata":metadata or {},
-    }
-    return _rpc_data(sb,"pc_stage_corporate_relationship",params) or {}
-
-
-def _canonical_corporate_relationships(sb, limit=5000):
-    try:
-        return (sb.table("pc_v_corporate_relationships")
-                .select("*")
-                .limit(limit).execute().data or [])
-    except Exception:
-        return []
-
-
-def _staged_corporate_relationships(sb, limit=5000, job_id=None):
-    try:
-        q=sb.table("pc_v_staged_corporate_relationships").select("*")
-        if job_id:
-            q=q.eq("ingestion_job_id",str(job_id))
-        return q.order("created_at",desc=True).limit(limit).execute().data or []
-    except Exception:
-        return []
-
-
-def _corporate_entity_candidates(sb, job_id=None, scope="all"):
-    """SQL 021: discover corporate candidates across canonical + staged + relationship endpoints.
-
-    scope='job' prefers the selected ingestion job plus canonical entities.
-    scope='all' exposes every candidate because older research rows can be attached
-    to incorrect ingestion-job metadata.
-    """
-    rows=[]
-    seen=set()
-
-    try:
-        q=sb.table("pc_v_corporate_entity_candidates").select("*").limit(20000)
-        raw=q.execute().data or []
-    except Exception:
-        raw=[]
-
-    # If SQL 021 has not been deployed yet, retain a canonical fallback.
-    if not raw:
-        try:
-            canonical=(sb.table("pc_entities")
-                       .select("entity_id,name,entity_type,subtype")
-                       .order("name").limit(10000).execute().data or [])
-        except Exception:
-            canonical=[]
-        for r in canonical:
-            raw.append({
-                "candidate_origin":"canonical",
-                "entity_id":r.get("entity_id"),
-                "name":r.get("name"),
-                "entity_type":r.get("entity_type"),
-                "subtype":r.get("subtype"),
-                "ingestion_job_id":None,
-                "ingestion_job_title":None,
-                "resolution_status":"MATCHED",
-                "source_id":None,
-                "metadata":{},
-            })
-
-    # Prefer canonical candidates over staged duplicates with the same normalized name.
-    origin_rank={"canonical":0,"staged_entity":1,"relationship_endpoint":2}
-    raw=sorted(
-        raw,
-        key=lambda r:(
-            origin_rank.get(str(r.get("candidate_origin") or ""),9),
-            str(r.get("name") or "").casefold()
-        )
-    )
-
-    canonical_names=set()
-    for r in raw:
-        name=str(r.get("name") or "").strip()
-        if not name:
-            continue
-        origin=str(r.get("candidate_origin") or "unknown")
-        jid=str(r.get("ingestion_job_id") or "")
-        if scope=="job" and origin!="canonical" and job_id and jid!=str(job_id):
-            continue
-
-        norm=" ".join(name.casefold().split())
-        if origin!="canonical" and norm in canonical_names:
-            continue
-
-        eid=r.get("entity_id")
-        if origin=="canonical":
-            canonical_names.add(norm)
-
-        dedupe_key=(norm,str(eid or ""),origin,jid)
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-
-        job_title=str(r.get("ingestion_job_title") or "").strip()
-        status=str(r.get("resolution_status") or "UNRESOLVED")
-        if origin=="canonical":
-            suffix="canonical"
-        elif job_title:
-            suffix=f"{origin} · {status} · {job_title}"
-        else:
-            suffix=f"{origin} · {status}"
-
-        rows.append({
-            "label":f"{name} — {suffix}",
-            "name":name,
-            "entity_id":eid,
-            "origin":origin,
-            "ingestion_job_id":r.get("ingestion_job_id"),
-            "ingestion_job_title":r.get("ingestion_job_title"),
-            "resolution_status":status,
-            "source_id":r.get("source_id"),
-            "metadata":r.get("metadata") if isinstance(r.get("metadata"),dict) else {},
-        })
-    return rows
 
 def _canonical_event_vessel_links(sb, limit=5000):
     try:
@@ -1497,15 +1589,6 @@ APPLY_CONFLICT_KEYS = {
 }
 
 AI_CAMPAIGNS = {
-    "Full company population": (
-        "Build a complete, source-backed Power & Corridors company population. "
-        "Research the named company, its parent/subsidiaries/business units, owned/operated/chartered fleets, "
-        "ports/terminals/logistics facilities and other material infrastructure, operating routes/services where supported, "
-        "corporate investments/acquisitions, and the relationships connecting all of those objects. "
-        "Return canonical identity proposals plus company-to-company, company-to-asset and company-to-mobile-asset relationships. "
-        "Prefer primary company, regulator, port/terminal, exchange/filing and vessel/flag/class sources; use reputable specialist reporting to fill gaps. "
-        "Every record must carry at least one valid research source URL. Do not invent P&C IDs, ownership percentages, vessel IMO numbers, capacities or dates."
-    ),
     "Resolve ReCAAP vessel links": (
         "Resolve the supplied unresolved ReCAAP event vessel identities. Link events to existing "
         "pc_mobile_assets when confidently matched; create missing vessel records only with reliable "
@@ -1545,60 +1628,6 @@ AI_CAMPAIGNS = {
     ),
     "Custom research": "",
 }
-
-def full_company_population_prompt(company_name):
-    company_name=str(company_name or "").strip()
-    return f"""Research and build a complete Power & Corridors population for {company_name}.
-
-OBJECTIVE
-Create a source-backed operational and corporate graph, not a flat company profile.
-
-IDENTITY / CORPORATE
-- Resolve the main company against supplied canonical P&C context.
-- Identify material parent companies, subsidiaries, controlled operating companies, business units that are legally distinct,
-  joint ventures, acquisitions and strategic equity investments.
-- Stage each distinct company/entity in pc_entities.
-- Stage source-backed entity→entity corporate edges in pc_relationships using parent_of, owns, controls,
-  affiliate_of, joint_venture_with, invested_in or acquired as appropriate.
-- Do not treat branding similarity as ownership evidence.
-
-FLEET / MOBILE ASSETS
-- Identify current material owned, operated or chartered vessels/mobile assets where public evidence is reliable.
-- For vessels, capture IMO first where verifiable; include vessel name, type, flag and owner/operator where supported.
-- Stage each vessel/mobile asset in pc_mobile_assets.
-- EVERY pc_mobile_assets record must have a corresponding source-backed pc_relationships record linking it to the relevant company/entity.
-- Stage company→mobile_asset relationships using owns, operates, manages or charters only where sourced.
-- A fleet/mobile-asset record without a company relationship is incomplete and must not be silently returned as an orphan.
-- Include IMO where verifiable; do not guess IMO numbers or fleet status.
-
-PORTS / TERMINALS / LOGISTICS INFRASTRUCTURE
-- Identify ports, container terminals, inland depots, logistics facilities, rail/intermodal facilities, warehouses and other
-  infrastructure the company owns, operates, manages, leases, controls or materially invests in.
-- Stage physical infrastructure in pc_assets (and extension tables only when appropriate).
-- Include country, city/region, coordinates, capacity and dates only when explicitly supported.
-- Stage company→asset relationships with the correct role.
-
-ROUTES / SERVICES
-- Include named transport routes/services/corridors only where they are materially part of the company's network and supported
-  by public evidence. Use pc_transport_routes when appropriate and preserve source links.
-
-SOURCE / QUALITY RULES
-- Every populated record must contain metadata.research_sources with at least one valid URL.
-- Prefer primary company pages, SEC/exchange filings, port/terminal authorities, regulators, flag/class/owner records and
-  other authoritative sources. Supplement with reputable maritime/logistics reporting.
-- Check supplied canonical P&C candidates before proposing NEW records.
-- Reuse a canonical ID only for a deterministic match. Otherwise omit internal IDs and let staging create them.
-- Do not invent ownership percentages, capacities, coordinates, IMO numbers, dates or corporate relationships.
-- If evidence conflicts, return the conflict rather than choosing silently.
-
-RELATIONSHIP CONTRACT
-- Every pc_relationships proposal must include source_type, source_name, relationship_type, target_type and target_name.
-- Return company→company relationships as well as company→asset and company→mobile_asset relationships.
-- Store one authoritative relationship direction; do not duplicate inverse edges.
-
-This is a population job: breadth matters, but only include records that can be source-backed with reasonable confidence.
-"""
-
 
 AI_OUTPUT_CONTRACT = """
 Return JSON with this shape:
@@ -1643,19 +1672,6 @@ For pc_relationships records specifically, ALWAYS include human-readable endpoin
 - target_name: researched/canonical human-readable target name
 - target_id: canonical P&C ID only when supplied in canonical context and deterministically matched; otherwise omit/null
 Do not return a pc_relationships proposal without source_name and target_name.
-Every identity, asset, mobile asset and relationship record must include at least one valid URL in payload.metadata.research_sources.
-
-Corporate graph requirement:
-- When research identifies parent/subsidiary, ownership, control, affiliate, joint-venture,
-  acquisition or corporate-investment relationships between companies/entities, return
-  separate pc_relationships records for those company-to-company edges.
-- Use source_type='entity' and target_type='entity'.
-- Preferred relationship_type values are parent_of, owns, controls, affiliate_of,
-  joint_venture_with, invested_in, or acquired.
-- Do not infer ownership merely from similar branding or names. Every corporate edge must
-  be supported by at least one research source URL.
-- Do not return both directions of the same relationship; store the authoritative direction
-  and let the application derive the inverse presentation.
 """
 
 
@@ -1793,67 +1809,6 @@ def stage_ai_result(sb, job_id, result):
 # Canonical columns that this admin is allowed to send to selected tables.
 # Unknown AI/research fields are preserved in metadata instead of being sent
 # as non-existent PostgREST columns.
-_TABLE_COLUMN_CACHE = {}
-
-def _live_table_columns(sb, table):
-    """Return live PostgreSQL columns for one canonical public table."""
-    table=str(table or "").strip()
-    if not table:
-        return set()
-    if table in _TABLE_COLUMN_CACHE:
-        return _TABLE_COLUMN_CACHE[table]
-    try:
-        data=_rpc_data(sb,"pc_get_table_write_columns",{"p_table_name":table})
-        cols=set(data or [])
-    except Exception:
-        # Fallback to the executable model registry if SQL 026 has not been installed.
-        try:
-            rows=(sb.table("pc_meta_columns")
-                  .select("column_name")
-                  .eq("table_name",table)
-                  .limit(1000).execute().data or [])
-            cols={str(r.get("column_name")) for r in rows if r.get("column_name")}
-        except Exception:
-            cols=set()
-    _TABLE_COLUMN_CACHE[table]=cols
-    return cols
-
-
-def _schema_safe_canonical_payload(sb, table, payload):
-    """Keep only real canonical columns and preserve all research overflow in metadata.
-
-    This is used for every canonical table, not only extension tables. It prevents
-    PostgREST errors such as pc_entities.country or pc_mobile_assets.capacity while
-    retaining those attributes under metadata.research_attributes.
-    """
-    if not isinstance(payload,dict):
-        return payload, {}
-
-    allowed=_live_table_columns(sb,table)
-    if not allowed:
-        # Fail closed: if we cannot determine the schema, do not silently drop fields.
-        return payload, {}
-
-    clean={}
-    overflow={}
-
-    for key,value in payload.items():
-        if key in allowed:
-            clean[key]=value
-        else:
-            overflow[key]=value
-
-    if "metadata" in allowed:
-        existing=clean.get("metadata")
-        if not isinstance(existing,dict):
-            existing={}
-        if overflow:
-            existing.setdefault("research_attributes",{}).update(overflow)
-        clean["metadata"]=existing
-
-    return clean, overflow
-
-
 TABLE_WRITE_COLUMNS = {
     "pc_logistics_facilities": {
         "asset_id","facility_type","owner_entity_id","operator_entity_id",
@@ -1997,7 +1952,6 @@ def _ensure_parent_asset_schema_safe(sb, row, payload):
     except Exception:
         pass
 
-    plan,_parent_overflow=_schema_safe_canonical_payload(sb,"pc_assets",plan)
     sb.table("pc_assets").upsert(plan, on_conflict="asset_id").execute()
 
     clean["asset_id"] = plan["asset_id"]
@@ -2035,16 +1989,6 @@ def apply_staged_record(sb, row, edited_payload=None):
         payload,parent_created=_ensure_parent_asset_schema_safe(sb,row,payload)
     else:
         parent_created=False
-
-    # SQL 026: enforce the LIVE PostgreSQL schema for every canonical write.
-    # Unsupported research attributes are retained in metadata.research_attributes.
-    payload,overflow=_schema_safe_canonical_payload(sb,table,payload)
-
-    if not payload:
-        raise ValueError(
-            f"No writable canonical fields remain for {table}. "
-            "Refresh Model Registry / run SQL 026 and inspect the staged payload."
-        )
 
     conflict=APPLY_CONFLICT_KEYS.get(table)
     keys=[x.strip() for x in conflict.split(",")] if conflict else []
@@ -2575,6 +2519,468 @@ elif page=="Users & Access":
                 else:
                     sb.table("pc_organization_members").upsert({"organization_id":oid,"user_id":uid,"role":role,"active":True},on_conflict="organization_id,user_id").execute(); st.rerun()
 
+
+elif page=="Workflow Center":
+    title("Workflow center","One place to see what is running, what needs reconciliation, what is ready for review, and what is complete.")
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        ai=_workflow_job_rows("AI_RESEARCH",60)
+        bulk=_workflow_job_rows("BATCH_IMPORT",60)
+        docs=_workflow_job_rows("DOCUMENT_INGEST",60)
+        all_jobs=ai+bulk+docs
+        running=sum(1 for j in all_jobs if j.get("status")=="running")
+        completed=sum(1 for j in all_jobs if j.get("status")=="completed")
+        failed=sum(1 for j in all_jobs if j.get("status")=="failed")
+        pending=count_rows(sb,"pc_staged_records",{"review_status":"pending"})
+        c1,c2,c3,c4=st.columns(4)
+        c1.metric("Running",running)
+        c2.metric("Completed",completed)
+        c3.metric("Failed",failed)
+        c4.metric("Pending staged",pending)
+
+        tabs=st.tabs(["AI research","Bulk imports","Documents","Stale / attention"])
+        with tabs[0]:
+            rows=[]
+            for j in ai:
+                s=_staging_summary(j["ingestion_job_id"])
+                rows.append({
+                    "Job":j.get("title"),"Status":j.get("status"),"Created":j.get("created_at"),
+                    "Staged":s.get("total",0),"Ready":s.get("ready",0),"Unresolved":s.get("unresolved",0),
+                    "Partial":s.get("partial",0),"Applied":s.get("applied",0),"Job ID":j.get("ingestion_job_id")
+                })
+            dataframe(rows)
+        with tabs[1]:
+            rows=[]
+            for j in bulk:
+                s=_staging_summary(j["ingestion_job_id"])
+                rows.append({
+                    "Job":j.get("title"),"Status":j.get("status"),"Created":j.get("created_at"),
+                    "Staged":s.get("total",0),"Ready":s.get("ready",0),"Unresolved":s.get("unresolved",0),
+                    "Partial":s.get("partial",0),"Applied":s.get("applied",0),"Job ID":j.get("ingestion_job_id")
+                })
+            dataframe(rows)
+        with tabs[2]:
+            if _table_exists("pc_documents"):
+                docs_rows=safe_rows(sb,"pc_documents","document_id,title,document_type,file_name,publisher,publication_date,extraction_status,created_at",250,order="created_at")
+                dataframe(docs_rows)
+            else:
+                st.info("Run SQL 028_document_ingestion.sql to enable document records.")
+        with tabs[3]:
+            try:
+                stale=safe_rows(sb,"pc_v_stale_ingestion_jobs","*",250,order="updated_at")
+            except Exception:
+                stale=[]
+            if stale:
+                dataframe(stale)
+            else:
+                # Compatibility calculation.
+                calc=[]
+                now=pd.Timestamp.utcnow()
+                for j in all_jobs:
+                    if j.get("status")!="running": continue
+                    d=pd.to_datetime(j.get("updated_at") or j.get("created_at"),utc=True,errors="coerce")
+                    if pd.notna(d) and now-d>pd.Timedelta(minutes=45):
+                        calc.append({**j,"time_since_update":str(now-d)})
+                dataframe(calc)
+
+elif page=="AI Research Workflow":
+    title("AI research workflow","Ordered AI path: research → stage → IDs → reconcile → relationships → review → apply → QA.")
+    jobs=_workflow_job_rows("AI_RESEARCH",100)
+    if not jobs:
+        st.info("No AI research jobs yet. Create one in Research Jobs.")
+    else:
+        labels=[f"{j.get('title') or 'AI research'} | {j.get('status')} | {j.get('ingestion_job_id')}" for j in jobs]
+        choice=st.selectbox("AI research job",labels)
+        job=jobs[labels.index(choice)]
+        jid=job["ingestion_job_id"]
+        summ=_staging_summary(jid)
+        stages=WORKFLOW_STAGES["AI_RESEARCH"]
+        st.progress(min(1.0,max(0.0,(1 + (1 if job.get("status")=="completed" else 0) + (1 if summ.get("total") else 0) + (1 if summ.get("ready") else 0) + (1 if summ.get("applied") else 0))/len(stages))))
+        st.caption(" → ".join(stages))
+        c1,c2,c3,c4,c5=st.columns(5)
+        c1.metric("Staged",summ.get("total",0)); c2.metric("Ready",summ.get("ready",0))
+        c3.metric("Unresolved",summ.get("unresolved",0)); c4.metric("Partial",summ.get("partial",0)); c5.metric("Applied",summ.get("applied",0))
+
+        a,b,c,d=st.columns(4)
+        if a.button("1 · Prepare IDs",type="primary"):
+            with st.spinner("Preparing canonical candidates..."):
+                res=_prepare_canonical_candidates(sb,jid)
+            _workflow_upsert(jid,"AI_RESEARCH",job.get("title") or "AI research","PREPARE_IDS",3,stats={"prepare":res})
+            st.success(res); st.rerun()
+        if b.button("2 · Reconcile / repair"):
+            with st.spinner("Running standard reconciliation..."):
+                res=_run_reconciliation(jid)
+            _workflow_upsert(jid,"AI_RESEARCH",job.get("title") or "AI research","RECONCILE",4,stats={"reconcile":res})
+            st.success("Reconciliation complete."); st.json(res); st.rerun()
+        if c.button("3 · Resolve relationships"):
+            out={}
+            try: out["event_links"]=_process_relationship_backlog(sb,jid)
+            except Exception as exc: out["event_links_error"]=str(exc)
+            try: out["relationships"]=_process_generic_relationship_backlog(sb,jid)
+            except Exception as exc: out["relationships_error"]=str(exc)
+            _workflow_upsert(jid,"AI_RESEARCH",job.get("title") or "AI research","RELATIONSHIPS",5,stats=out)
+            st.json(out); st.rerun()
+        if d.button("4 · Re-check"):
+            st.json(_staging_summary(jid))
+
+        st.markdown("#### Next")
+        if summ.get("unresolved",0) or summ.get("ambiguous",0) or summ.get("partial",0):
+            st.warning("This job still needs cleanup. Use Reconciliation Center before Review Queue.")
+        elif summ.get("total",0):
+            st.success("Identity/relationship resolution looks ready for Review Queue approval and apply.")
+        else:
+            st.info("No staged rows were found for this job.")
+
+elif page=="Bulk Import Workflow":
+    title("Bulk import workflow","Ordered bulk path: upload → map tables → map fields → fill IDs → stage → reconcile → review → apply → QA.")
+    jobs=_workflow_job_rows("BATCH_IMPORT",100)
+    c1,c2=st.columns([1,2])
+    c1.metric("Bulk jobs",len(jobs))
+    c2.caption("Create new multi-table imports in Multi-Table Bulk Loader; use this page to advance existing imports.")
+    if jobs:
+        labels=[f"{j.get('title') or 'Batch'} | {j.get('status')} | {j.get('ingestion_job_id')}" for j in jobs]
+        choice=st.selectbox("Bulk job",labels)
+        job=jobs[labels.index(choice)]; jid=job["ingestion_job_id"]
+        summ=_staging_summary(jid)
+        st.caption(" → ".join(WORKFLOW_STAGES["BULK_IMPORT"]))
+        k1,k2,k3,k4=st.columns(4)
+        k1.metric("Staged",summ.get("total",0)); k2.metric("Ready",summ.get("ready",0))
+        k3.metric("Needs cleanup",summ.get("unresolved",0)+summ.get("ambiguous",0)+summ.get("partial",0))
+        k4.metric("Applied",summ.get("applied",0))
+        b1,b2,b3=st.columns(3)
+        if b1.button("Run reconciliation",type="primary"):
+            res=_run_reconciliation(jid)
+            _workflow_upsert(jid,"BULK_IMPORT",job.get("title") or "Bulk import","RECONCILE",6,stats={"reconcile":res})
+            st.json(res); st.rerun()
+        if b2.button("Resolve relationships"):
+            out={}
+            try: out["event_links"]=_process_relationship_backlog(sb,jid)
+            except Exception as exc: out["event_links_error"]=str(exc)
+            try: out["relationships"]=_process_generic_relationship_backlog(sb,jid)
+            except Exception as exc: out["relationships_error"]=str(exc)
+            st.json(out); st.rerun()
+        if b3.button("Refresh status"):
+            st.json(_staging_summary(jid))
+
+elif page=="Multi-Table Bulk Loader":
+    title("Multi-table bulk loader","Load one workbook/file into several canonical tables. Map sections and fields, fill staging keys, then resolve everything as one controlled job.")
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        up=st.file_uploader("Workbook / CSV / JSON",type=["xlsx","xls","csv","json"],key="multitable_bulk")
+        if up:
+            try:
+                sections,file_hash=_parse_multitable_upload(up)
+                st.caption(f"{len(sections)} source section(s) · SHA-256 {file_hash[:16]}…")
+                meta_map=_meta_table_map(sb)
+                allowed=sorted(AI_ALLOWED_TABLES)
+                configs={}
+                for idx,(section,df) in enumerate(sections.items()):
+                    with st.expander(f"{section} · {len(df):,} rows",expanded=True):
+                        suggested=_suggest_target_table(section,df)
+                        default_i=allowed.index(suggested) if suggested in allowed else 0
+                        target=st.selectbox("Target canonical table",allowed,index=default_i,key=f"mt_target_{idx}")
+                        cols=_table_write_columns_live(sb,target)
+                        mapping=_auto_column_mapping(list(df.columns),cols)
+                        edited=st.data_editor(
+                            mapping,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Include":st.column_config.CheckboxColumn(),
+                                "Canonical Field":st.column_config.SelectboxColumn(options=[""]+cols)
+                            },
+                            key=f"mt_map_{idx}"
+                        )
+                        st.dataframe(df.head(8),use_container_width=True,hide_index=True)
+                        configs[section]={"df":df,"target":target,"mapping":edited}
+
+                auto_resolve=st.checkbox("Run reconciliation after staging",value=True)
+                if st.button("Stage all selected tables",type="primary"):
+                    job=sb.table("pc_ingestion_jobs").insert({
+                        "job_type":"BATCH_IMPORT",
+                        "title":up.name,
+                        "source_scope":{
+                            "multi_table":True,"file_sha256":file_hash,
+                            "sections":{k:{"target_table":v["target"],"rows":len(v["df"])} for k,v in configs.items()}
+                        },
+                        "status":"running"
+                    }).execute().data[0]
+                    jid=job["ingestion_job_id"]
+                    wid=_workflow_upsert(jid,"BULK_IMPORT",up.name,"STAGE",5,metadata={"file_sha256":file_hash})
+
+                    all_payloads=[]
+                    table_counts={}
+                    meta_map=_meta_table_map(sb)
+                    for section,cfg in configs.items():
+                        target=cfg["target"]; df=cfg["df"]; mapping=cfg["mapping"]
+                        logical=(meta_map.get(target) or {}).get("entity_type")
+                        if not logical and target=="pc_relationships": logical="relationship"
+                        if not logical and target=="pc_event_links": logical="event_link"
+                        for i,row in enumerate(df.to_dict("records"),1):
+                            payload=_payload_from_mapping(row,mapping,target)
+                            nk=_natural_key_global(payload,target,i)
+                            payload=_fill_staging_key(payload,target,nk)
+                            all_payloads.append({
+                                "ingestion_job_id":jid,
+                                "target_entity_type":logical,
+                                "target_table":target,
+                                "source_record_key":f"{section}:{nk}",
+                                "natural_key":nk,
+                                "action":"REVIEW",
+                                "payload":_jsonable(payload),
+                                "confidence":1.0,
+                                "validation_status":"pending",
+                                "review_status":"pending",
+                                "resolution_status":"UNRESOLVED"
+                            })
+                            table_counts[target]=table_counts.get(target,0)+1
+
+                    for i in range(0,len(all_payloads),250):
+                        sb.table("pc_staged_records").insert(all_payloads[i:i+250]).execute()
+
+                    result={}
+                    if auto_resolve:
+                        result=_run_reconciliation(jid)
+                    sb.table("pc_ingestion_jobs").update({
+                        "status":"completed","completed_at":pd.Timestamp.utcnow().isoformat(),
+                        "stats":{"rows":len(all_payloads),"tables":table_counts,"reconciliation":result}
+                    }).eq("ingestion_job_id",jid).execute()
+                    _workflow_upsert(jid,"BULK_IMPORT",up.name,"RECONCILE" if auto_resolve else "STAGE",6 if auto_resolve else 5,stats={"rows":len(all_payloads),"tables":table_counts})
+                    st.success(f"Staged {len(all_payloads):,} rows across {len(table_counts)} canonical tables.")
+                    st.json({"job_id":jid,"tables":table_counts,"reconciliation":result})
+            except Exception as exc:
+                st.exception(exc)
+
+elif page=="Reconciliation Center":
+    title("Reconciliation center","Clean and match remaining staged data before apply: names, IDs, duplicate candidates, unresolved identities and incomplete relationships.")
+    if not sb:
+        st.error("Supabase required.")
+    else:
+        jobs=_workflow_job_rows(None,200)
+        labels=[f"{j.get('title') or j.get('job_type')} | {j.get('status')} | {j.get('ingestion_job_id')}" for j in jobs]
+        selected=st.selectbox("Ingestion job",["All jobs"]+labels)
+        jid=None if selected=="All jobs" else jobs[labels.index(selected)]["ingestion_job_id"]
+        if jid:
+            st.json(_staging_summary(jid))
+        tabs=st.tabs(["Queue","One-click cleanup","Relationships","Stale jobs","SQL pack"])
+        with tabs[0]:
+            try:
+                q=sb.table("pc_v_reconciliation_queue").select("*").limit(1000)
+                if jid: q=q.eq("ingestion_job_id",jid)
+                rows=q.execute().data or []
+            except Exception:
+                q=sb.table("pc_staged_records").select(
+                    "staged_record_id,ingestion_job_id,target_table,natural_key,resolution_status,resolved_entity_id,resolution_method,confidence,review_status,payload,created_at"
+                ).limit(1000)
+                if jid: q=q.eq("ingestion_job_id",jid)
+                rows=q.execute().data or []
+            dataframe(rows)
+        with tabs[1]:
+            if not jid:
+                st.info("Select one ingestion job to run cleanup safely.")
+            else:
+                st.markdown("#### Standard cleanup order")
+                st.code("Normalize names → fill deterministic staging keys → prepare candidates → repair unresolved identities → resolve relationship endpoints → re-check")
+                if st.button("Run standard reconciliation",type="primary"):
+                    with st.spinner("Reconciling staged data..."):
+                        res=_run_reconciliation(jid)
+                    st.success("Reconciliation completed.")
+                    st.json(res)
+                    st.rerun()
+        with tabs[2]:
+            if jid:
+                c1,c2=st.columns(2)
+                if c1.button("Resolve event links"):
+                    st.json(_process_relationship_backlog(sb,jid)); st.rerun()
+                if c2.button("Resolve generic graph relationships"):
+                    st.json(_process_generic_relationship_backlog(sb,jid)); st.rerun()
+            else:
+                st.info("Select a job.")
+        with tabs[3]:
+            try:
+                stale=sb.table("pc_v_stale_ingestion_jobs").select("*").limit(250).execute().data or []
+            except Exception:
+                stale=[]
+            dataframe(stale)
+        with tabs[4]:
+            st.markdown("Install these SQL migrations in order:")
+            st.code("027_workflow_orchestration.sql\n028_document_ingestion.sql\n029_intelligence_authoring.sql\n030_distribution_lists.sql\n031_reconciliation_cleanup.sql")
+            st.caption("The cleanup functions are job-scoped and operate on staging before canonical apply.")
+
+elif page=="Document Loader":
+    title("Document / report loader","Upload a source document, link it to a company/event/vessel/asset, preserve extracted text, and optionally stage AI-extracted facts.")
+    if not sb:
+        st.error("Supabase required.")
+    elif not _table_exists("pc_documents"):
+        st.error("Run 028_document_ingestion.sql first.")
+    else:
+        up=st.file_uploader("DOCX, PDF, TXT or MD",type=["docx","pdf","txt","md"],key="document_loader")
+        if up:
+            try:
+                text=_extract_document_text(up)
+                file_hash=hashlib.sha256(up.getvalue()).hexdigest()
+                st.caption(f"Extracted {len(text):,} characters · SHA-256 {file_hash[:16]}…")
+                with st.expander("Preview extracted text"):
+                    st.text(text[:12000])
+                c1,c2=st.columns(2)
+                doc_title=c1.text_input("Document title",value=Path(up.name).stem)
+                doc_type=c2.selectbox("Document type",["company_report","annual_report","contract","government_notice","intelligence_source","research_report","presentation","other"])
+                c3,c4,c5=st.columns(3)
+                publisher=c3.text_input("Publisher / issuer")
+                pub_date=c4.date_input("Publication date",value=None)
+                source_url=c5.text_input("Source URL (optional)")
+
+                st.markdown("#### Link document")
+                l1,l2=st.columns([1,2])
+                kind=l1.selectbox("Linked object type",["entity","asset","mobile_asset","event"])
+                search=l2.text_input("Find canonical object",placeholder="DP World, Jebel Ali, USCGC Healy, event title...")
+                candidates=_canonical_link_candidates(kind,search,100) if search.strip() else []
+                selected_id=None
+                if candidates:
+                    def _cand_label(r):
+                        rid=r.get({"entity":"entity_id","asset":"asset_id","mobile_asset":"mobile_asset_id","event":"event_id"}[kind])
+                        nm=r.get("name") or r.get("title") or rid
+                        return f"{nm} | {rid}"
+                    labels=[_cand_label(r) for r in candidates]
+                    chosen=st.selectbox("Canonical match",labels)
+                    selected_id=candidates[labels.index(chosen)].get({"entity":"entity_id","asset":"asset_id","mobile_asset":"mobile_asset_id","event":"event_id"}[kind])
+
+                if st.button("Save document",type="primary"):
+                    existing=(sb.table("pc_documents").select("document_id").eq("file_sha256",file_hash).limit(1).execute().data or [])
+                    payload={
+                        "title":doc_title,"document_type":doc_type,"file_name":up.name,
+                        "file_sha256":file_hash,"mime_type":mimetypes.guess_type(up.name)[0],
+                        "publisher":publisher or None,"publication_date":str(pub_date) if pub_date else None,
+                        "source_url":source_url or None,"extracted_text":text,
+                        "metadata":{"original_size_bytes":len(up.getvalue())}
+                    }
+                    if existing:
+                        doc_id=existing[0]["document_id"]
+                        sb.table("pc_documents").update(payload).eq("document_id",doc_id).execute()
+                    else:
+                        doc_id=sb.table("pc_documents").insert(payload).execute().data[0]["document_id"]
+                    if selected_id:
+                        sb.table("pc_document_links").insert({
+                            "document_id":doc_id,"linked_type":kind,"linked_id":selected_id,"relationship":"source_for"
+                        }).execute()
+                    st.success(f"Document saved: {doc_id}")
+                    st.session_state["_last_document_id"]=doc_id
+
+                doc_id=st.session_state.get("_last_document_id")
+                if doc_id:
+                    st.markdown("#### AI fact extraction to staging")
+                    extraction_prompt=st.text_area(
+                        "Extraction instruction",
+                        value="Extract only facts supported by this document into the P&C canonical staging schema. Preserve source-document provenance. Do not invent facts.",
+                        height=110
+                    )
+                    if st.button("Extract document facts → staging"):
+                        if not ai_configured():
+                            st.error("Configure OPENAI_API_KEY and OPENAI_MODEL.")
+                        else:
+                            job=sb.table("pc_ingestion_jobs").insert({
+                                "job_type":"DOCUMENT_INGEST","title":doc_title,
+                                "query_text":extraction_prompt,
+                                "source_scope":{"document_id":doc_id,"file_name":up.name},
+                                "status":"running"
+                            }).execute().data[0]
+                            prompt=extraction_prompt + "\n\nSOURCE DOCUMENT:\n" + text[:60000]
+                            result=ai_research(prompt,"DOCUMENT",False,output_contract=AI_OUTPUT_CONTRACT)
+                            staged,rejected,resolution=stage_ai_result(sb,job["ingestion_job_id"],result)
+                            sb.table("pc_ingestion_jobs").update({
+                                "status":"completed","completed_at":pd.Timestamp.utcnow().isoformat(),
+                                "stats":{"document_id":doc_id,"staged_records":staged,"rejected":rejected,"resolution":resolution}
+                            }).eq("ingestion_job_id",job["ingestion_job_id"]).execute()
+                            st.success(f"{staged} proposal(s) staged from the document.")
+            except Exception as exc:
+                st.exception(exc)
+
+elif page=="Distribution Lists":
+    title("Email lists & distribution","Load contacts and maintain product distribution lists without mixing recipient data into the trade entity model.")
+    if not sb:
+        st.error("Supabase required.")
+    elif not _table_exists("pc_contacts"):
+        st.error("Run 030_distribution_lists.sql first.")
+    else:
+        tabs=st.tabs(["Lists","Contacts","Bulk loader"])
+        with tabs[0]:
+            lists=safe_rows(sb,"pc_distribution_lists","*",250,order="name")
+            dataframe(lists)
+            with st.form("new_dist_list"):
+                n=st.text_input("List name")
+                d=st.text_input("Description")
+                scope=st.text_input("Product scope",placeholder="GCC Weekly / Black Sea / Alerts / Clients")
+                if st.form_submit_button("Create list") and n.strip():
+                    sb.table("pc_distribution_lists").insert({"name":n.strip(),"description":d or None,"product_scope":scope or None}).execute()
+                    st.rerun()
+        with tabs[1]:
+            contacts=safe_rows(sb,"pc_contacts","contact_id,name,email,organisation,role_title,country,subscription_status,source,updated_at",500,order="updated_at")
+            dataframe(contacts)
+        with tabs[2]:
+            up=st.file_uploader("CSV / XLSX email list",type=["csv","xlsx"],key="email_bulk")
+            lists=safe_rows(sb,"pc_distribution_lists","distribution_list_id,name,active",250,order="name")
+            list_map={r["name"]:r["distribution_list_id"] for r in lists if r.get("active",True)}
+            target_list=st.selectbox("Default distribution list",["None"]+sorted(list_map))
+            if up:
+                df=pd.read_csv(up,dtype=object) if up.name.lower().endswith(".csv") else pd.read_excel(up,dtype=object)
+                cols=list(df.columns)
+                def pick(label,candidates):
+                    default=0
+                    for i,c in enumerate([""]+cols):
+                        if _norm_field(c) in candidates:
+                            default=i; break
+                    return st.selectbox(label,[""]+cols,index=default,key=f"emailmap_{label}")
+                c1,c2,c3=st.columns(3)
+                email_col=c1.selectbox("Email column",cols,index=next((i for i,c in enumerate(cols) if _norm_field(c) in {"email","email_address","e_mail"}),0))
+                name_col=c2.selectbox("Name column",[""]+cols,index=next((i+1 for i,c in enumerate(cols) if _norm_field(c) in {"name","full_name","contact_name"}),0))
+                org_col=c3.selectbox("Organisation column",[""]+cols,index=next((i+1 for i,c in enumerate(cols) if _norm_field(c) in {"organisation","organization","company"}),0))
+                r1,r2=st.columns(2)
+                role_col=r1.selectbox("Role column",[""]+cols,index=next((i+1 for i,c in enumerate(cols) if _norm_field(c) in {"role","title","job_title"}),0))
+                country_col=r2.selectbox("Country column",[""]+cols,index=next((i+1 for i,c in enumerate(cols) if _norm_field(c)=="country"),0))
+                st.dataframe(df.head(20),use_container_width=True,hide_index=True)
+
+                if st.button("Import contacts",type="primary"):
+                    upserted=members=0; errors=[]
+                    for _,r in df.iterrows():
+                        email=str(r.get(email_col) or "").strip().lower()
+                        if not email or "@" not in email:
+                            continue
+                        payload={
+                            "email":email,
+                            "name":str(r.get(name_col) or "").strip() if name_col else None,
+                            "organisation":str(r.get(org_col) or "").strip() if org_col else None,
+                            "role_title":str(r.get(role_col) or "").strip() if role_col else None,
+                            "country":str(r.get(country_col) or "").strip() if country_col else None,
+                            "source":up.name
+                        }
+                        try:
+                            hit=(sb.table("pc_contacts").select("contact_id").ilike("email",email).limit(1).execute().data or [])
+                            if hit:
+                                cid=hit[0]["contact_id"]
+                                sb.table("pc_contacts").update(payload).eq("contact_id",cid).execute()
+                            else:
+                                cid=sb.table("pc_contacts").insert(payload).execute().data[0]["contact_id"]
+                            upserted+=1
+                            if target_list!="None":
+                                try:
+                                    sb.table("pc_distribution_memberships").upsert({
+                                        "distribution_list_id":list_map[target_list],"contact_id":cid,"status":"active"
+                                    },on_conflict="distribution_list_id,contact_id").execute()
+                                    members+=1
+                                except Exception as exc:
+                                    errors.append(str(exc))
+                        except Exception as exc:
+                            errors.append(f"{email}: {exc}")
+                    sb.table("pc_email_import_jobs").insert({
+                        "file_name":up.name,"rows_seen":len(df),"contacts_upserted":upserted,
+                        "memberships_upserted":members,"errors":errors
+                    }).execute()
+                    st.success(f"Imported/updated {upserted} contact(s); {members} membership(s).")
+                    if errors: st.warning(f"{len(errors)} row/membership error(s).")
+
+
 elif page=="Research Jobs":
     title(
         "AI research & enrichment",
@@ -2598,22 +3004,11 @@ elif page=="Research Jobs":
         campaign=st.selectbox("Campaign",list(AI_CAMPAIGNS))
         seed_prompt=AI_CAMPAIGNS[campaign]
 
-        company_name=""
-        if campaign=="Full company population":
-            company_name=st.text_input(
-                "Company to populate",
-                value="Matson",
-                placeholder="e.g. Matson, CMA CGM, AD Ports Group",
-                key="full_population_company"
-            )
-            seed_prompt=full_company_population_prompt(company_name)
-
         prompt=st.text_area(
             "Research query",
             value=seed_prompt,
             placeholder="Describe exactly what you want the AI researcher to find, verify and stage.",
-            height=320 if campaign=="Full company population" else 180,
-            key=f"research_prompt_{campaign}"
+            height=180
         )
         c1,c2,c3=st.columns(3)
         with c1:
@@ -2692,25 +3087,6 @@ elif page=="Research Jobs":
                         st.write("Research returned. Validating structured proposals...")
                         staged,rejected,resolution=stage_ai_result(sb,job_id,result)
 
-                        # SQL 022 turns the raw staged population into deterministic identity
-                        # decisions + resolved graph proposals. It remains staging-only.
-                        population_pipeline={}
-                        if staged:
-                            try:
-                                st.write("Preparing identities and relationship graph...")
-                                population_pipeline=_prepare_research_population(sb,job_id)
-                                resolution["population_pipeline"]=population_pipeline
-                                st.write(
-                                    "Population preparation: "
-                                    f"{(population_pipeline.get('identity') or {}).get('matched',0)} matched · "
-                                    f"{(population_pipeline.get('identity') or {}).get('new',0)} new · "
-                                    f"{(population_pipeline.get('relationships') or {}).get('ready',0)} relationships ready · "
-                                    f"{(population_pipeline.get('relationships') or {}).get('partial',0)} partial."
-                                )
-                            except Exception as exc:
-                                resolution["population_pipeline_error"]=str(exc)
-                                st.warning(f"Population preparation did not complete automatically: {exc}")
-
                         # If the model returned raw/unstructured output, preserve it
                         # as a research bundle rather than losing the result.
                         if staged==0 and result:
@@ -2743,12 +3119,7 @@ elif page=="Research Jobs":
                             expanded=False
                         )
 
-                    st.success(f"Research complete. {staged} proposal(s) sent to staging/review.")
-                    if campaign=="Full company population":
-                        st.info(
-                            "Next: review only exceptions and safe NEW/MATCHED identity candidates. "
-                            "Apply approved identities first, then rerun the population pipeline so PARTIAL relationships can become READY."
-                        )
+                    st.success(f"Research complete. {staged} proposal(s) sent to Review Queue.")
                     st.rerun()
 
                 except Exception as exc:
@@ -2757,228 +3128,6 @@ elif page=="Research Jobs":
                         "error_text":str(exc)
                     }).eq("ingestion_job_id",job_id).execute()
                     st.error(str(exc))
-
-        st.divider()
-        st.markdown("### Population pipeline")
-        _pop_status=_population_pipeline_status(sb,100)
-        if _pop_status:
-            _psdf=pd.DataFrame(_pop_status)
-            _show=[c for c in [
-                "created_at","title","job_status","staged_records","matched_records","new_records",
-                "ambiguous_records","unresolved_identity_records","staged_relationships",
-                "ready_relationships","partial_relationships","existing_relationships","relationship_exceptions",
-                "ingestion_job_id"
-            ] if c in _psdf.columns]
-            st.dataframe(_psdf[_show],use_container_width=True,hide_index=True)
-
-            _pop_labels=[
-                f"{r.get('title') or 'Ingestion job'} | {r.get('ingestion_job_id')}"
-                for r in _pop_status
-            ]
-            _pop_choice=st.selectbox(
-                "Re-run population preparation for job",
-                _pop_labels,
-                key="population_pipeline_job"
-            )
-            _pop_job=_pop_status[_pop_labels.index(_pop_choice)]
-            _pop_job_id=_pop_job.get("ingestion_job_id")
-            if st.button("Prepare identities + graph",type="primary",key="rerun_population_pipeline"):
-                try:
-                    _res=_prepare_research_population(sb,_pop_job_id)
-                    st.success(f"Population pipeline complete: {_res}")
-                    st.rerun()
-                except Exception as exc:
-                    st.exception(exc)
-
-            st.markdown("#### Fleet / mobile-asset coverage")
-            _fleet_stats=_population_mobile_asset_stats(sb,_pop_job_id)
-            _fleet_rows=_population_mobile_asset_coverage(sb,_pop_job_id,5000)
-
-            if _fleet_rows:
-                _fs1,_fs2,_fs3,_fs4=st.columns(4)
-                _fs1.metric("Mobile assets",int(_fleet_stats.get("mobile_assets",len(_fleet_rows)) or 0))
-                _fs2.metric("Linked to company",int(_fleet_stats.get("linked",0) or 0))
-                _fs3.metric("Unlinked",int(_fleet_stats.get("unlinked",0) or 0))
-                _fs4.metric("READY fleet links",int(_fleet_stats.get("ready_links",0) or 0))
-
-                _fdf=pd.DataFrame(_fleet_rows)
-                _fcols=[c for c in [
-                    "mobile_asset_name","imo","asset_type","identity_status",
-                    "company_name","relationship_type","relationship_status","has_company_link"
-                ] if c in _fdf.columns]
-                with st.expander("Fleet coverage rows",expanded=False):
-                    st.dataframe(_fdf[_fcols],use_container_width=True,hide_index=True)
-
-                _unlinked=int(_fleet_stats.get("unlinked",0) or 0)
-                if _unlinked:
-                    st.warning(
-                        f"{_unlinked} staged mobile asset(s) have no company graph relationship. "
-                        "You can stage source-backed fleet links below before canonical apply."
-                    )
-
-                    _fleet_entities=_corporate_entity_candidates(sb,_pop_job_id,"all")
-                    _fleet_labels={}
-                    for _e in _fleet_entities:
-                        _lab=_e.get("label")
-                        if _lab and _lab not in _fleet_labels:
-                            _fleet_labels[_lab]=_e
-
-                    # Prefer Matson/subject-like canonical candidates when possible.
-                    _default_idx=0
-                    _job_title=str(_pop_job.get("title") or "")
-                    _preferred_tokens=[]
-                    if "—" in _job_title:
-                        _preferred_tokens.append(_job_title.split("—",1)[1].strip().casefold())
-                    _preferred_tokens.extend(["matson navigation","matson"])
-                    _all_labels=list(_fleet_labels.keys())
-                    for _i,_lab in enumerate(_all_labels):
-                        _nm=str((_fleet_labels[_lab] or {}).get("name") or "").casefold()
-                        if any(tok and tok in _nm for tok in _preferred_tokens):
-                            _default_idx=_i
-                            break
-
-                    _fleet_company_label=st.selectbox(
-                        "Company to link orphaned mobile assets to",
-                        _all_labels,
-                        index=_default_idx if _all_labels else None,
-                        key="fleet_link_company"
-                    ) if _all_labels else None
-
-                    _fr1,_fr2=st.columns([1,2])
-                    with _fr1:
-                        _fleet_rel=st.selectbox(
-                            "Fleet relationship",
-                            ["operates","owns","manages","charters"],
-                            key="fleet_link_relationship"
-                        )
-                    with _fr2:
-                        _fleet_confirm=st.checkbox(
-                            "I confirm the selected relationship role is supported by the staged research sources for these mobile assets.",
-                            key="fleet_link_confirm"
-                        )
-
-                    if st.button(
-                        f"Stage missing fleet links ({_unlinked})",
-                        type="primary",
-                        disabled=(not _fleet_company_label or not _fleet_confirm),
-                        key="stage_missing_fleet_links"
-                    ):
-                        try:
-                            _company=_fleet_labels[_fleet_company_label]
-                            _fleet_res=_stage_missing_mobile_asset_links(
-                                sb,_pop_job_id,_company.get("name"),_fleet_rel
-                            )
-                            st.success(f"Fleet-link staging complete: {_fleet_res}")
-                            # Immediately rerun the unified pipeline so new fleet edges resolve.
-                            try:
-                                _prepare_research_population(sb,_pop_job_id)
-                            except Exception:
-                                pass
-                            st.rerun()
-                        except Exception as exc:
-                            st.exception(exc)
-            else:
-                st.info("No staged mobile assets are attached to this population job.")
-
-            # Inline population graph preview for the selected job.
-            st.markdown("#### Population graph preview")
-            st.caption(
-                "Shows staged/resolved relationships for the selected population job, including PARTIAL edges. "
-                "A relationship does not need to be READY to appear here; READY controls canonical apply, not visualization."
-            )
-
-            try:
-                _pgraph_rows=_generic_relationship_resolution_rows(
-                    sb,5000,{"ingestion_job_id":str(_pop_job_id)}
-                )
-            except Exception:
-                _pgraph_rows=[]
-
-            # Fallback directly to staged relationship proposals if the SQL 013 view has no rows.
-            if not _pgraph_rows:
-                try:
-                    _rawrels=(sb.table("pc_staged_records")
-                              .select("staged_record_id,natural_key,payload,resolution_status,review_status,created_at")
-                              .eq("ingestion_job_id",str(_pop_job_id))
-                              .eq("target_table","pc_relationships")
-                              .order("created_at")
-                              .limit(5000).execute().data or [])
-                except Exception:
-                    _rawrels=[]
-
-                for _r in _rawrels:
-                    _p=_r.get("payload") if isinstance(_r.get("payload"),dict) else {}
-                    _pgraph_rows.append({
-                        "staged_record_id":_r.get("staged_record_id"),
-                        "natural_key":_r.get("natural_key"),
-                        "relationship_type":_p.get("relationship_type") or _p.get("type") or "related_to",
-                        "from_name":_p.get("source_name") or _p.get("from_name"),
-                        "to_name":_p.get("target_name") or _p.get("to_name"),
-                        "resolved_from_entity_id":_p.get("source_id") or _p.get("from_id"),
-                        "resolved_to_entity_id":_p.get("target_id") or _p.get("to_id"),
-                        "resolution_status":_r.get("resolution_status") or "UNRESOLVED",
-                        "created_at":_r.get("created_at"),
-                    })
-
-            if _pgraph_rows:
-                _pgdf=pd.DataFrame(_pgraph_rows)
-                _pgstatus=_pgdf.get("resolution_status",pd.Series(["UNRESOLVED"]*len(_pgdf))).fillna("UNRESOLVED")
-                _pg1,_pg2,_pg3,_pg4=st.columns(4)
-                _pg1.metric("Graph edges",len(_pgdf))
-                _pg2.metric("READY",int((_pgstatus=="READY").sum()))
-                _pg3.metric("PARTIAL",int((_pgstatus=="PARTIAL").sum()))
-                _pg4.metric("Exceptions",int(_pgstatus.isin(["AMBIGUOUS","BROKEN_REFERENCE"]).sum()))
-
-                _pgcols=[c for c in [
-                    "from_name","relationship_type","to_name",
-                    "resolved_from_entity_id","resolved_to_entity_id",
-                    "resolution_status","natural_key"
-                ] if c in _pgdf.columns]
-                with st.expander("Relationship rows",expanded=False):
-                    st.dataframe(_pgdf[_pgcols],use_container_width=True,hide_index=True)
-
-                _preview=_pgdf.head(80)
-
-                def _pop_dot_escape(v):
-                    return str(v or "").replace("\\","\\\\").replace('"','\\"').replace("\n"," ")
-
-                _dot=[
-                    'digraph PopulationGraph {',
-                    'rankdir=LR;',
-                    'graph [bgcolor="transparent", pad="0.25", nodesep="0.35", ranksep="0.65"];',
-                    'node [shape=box, style="rounded,filled", fillcolor="#111827", fontcolor="white", color="#4b5563", fontname="Arial", fontsize=10];',
-                    'edge [color="#9ca3af", fontcolor="#d1d5db", fontname="Arial", fontsize=9];'
-                ]
-                _seen=set()
-                for _i,(_, _gr) in enumerate(_preview.iterrows(),start=1):
-                    _natural=str(_gr.get("natural_key") or "")
-                    _rel=str(_gr.get("relationship_type") or "related_to")
-                    _flabel=_gr.get("from_name") or _gr.get("resolved_from_entity_id") or f"Unresolved source {_i}"
-                    _tlabel=_gr.get("to_name") or _gr.get("resolved_to_entity_id") or f"Unresolved target {_i}"
-                    _fid=str(_gr.get("resolved_from_entity_id") or f"{_flabel}|from|{_natural}|{_i}")
-                    _tid=str(_gr.get("resolved_to_entity_id") or f"{_tlabel}|to|{_natural}|{_i}")
-                    _fn="n"+hashlib.sha1(_fid.encode("utf-8")).hexdigest()[:12]
-                    _tn="n"+hashlib.sha1(_tid.encode("utf-8")).hexdigest()[:12]
-
-                    if _fn not in _seen:
-                        _dot.append(f'{_fn} [label="{_pop_dot_escape(_flabel)}"];')
-                        _seen.add(_fn)
-                    if _tn not in _seen:
-                        _dot.append(f'{_tn} [label="{_pop_dot_escape(_tlabel)}"];')
-                        _seen.add(_tn)
-
-                    _status=str(_gr.get("resolution_status") or "UNRESOLVED")
-                    _edge_label=f"{_rel} [{_status}]"
-                    _dot.append(f'{_fn} -> {_tn} [label="{_pop_dot_escape(_edge_label)}"];')
-
-                _dot.append('}')
-                try:
-                    st.graphviz_chart("\n".join(_dot),use_container_width=True)
-                except Exception as exc:
-                    st.error(f"Population graph rendering failed: {exc}")
-                    st.code("\n".join(_dot),language="dot")
-            else:
-                st.info("This population job has no staged relationship edges to visualize yet.")
 
 elif page=="Trade System Builder":
     title("Trade system builder","Build the global trade-system graph in controlled research campaigns: energy, industrial assets, flows, markets, ports, corridors and macro layers.")
@@ -3564,218 +3713,6 @@ elif page=="Staging Resolution":
                         st.info("No canonical event-vessel links are visible through pc_v_event_vessel_links yet. Run SQL 012, then apply READY relationships.")
 
             st.divider()
-            st.markdown("## Corporate company links")
-            st.caption(
-                "SQL 020 treats company → company relationships as first-class graph edges. "
-                "Stage only source-backed parent, ownership, control, affiliate, joint-venture, "
-                "investment or acquisition relationships; SQL 013 resolves both entity endpoints "
-                "before anything can be written to canonical pc_relationships."
-            )
-
-            _corp_canonical=_canonical_corporate_relationships(sb,5000)
-            _cc1,_cc2=st.columns(2)
-            _cc1.metric("Canonical company-company links",len(_corp_canonical))
-            if _corp_canonical:
-                _corp_types=sorted({str(x.get("relationship_type") or "") for x in _corp_canonical if x.get("relationship_type")})
-                _cc2.metric("Corporate relationship types",len(_corp_types))
-                with st.expander("Canonical corporate graph",expanded=False):
-                    _cdf=pd.DataFrame(_corp_canonical)
-                    _ccols=[c for c in [
-                        "source_name","relationship_type","target_name","ownership_percent",
-                        "operating_control","confidence","record_status","evidence_source_id","relationship_id"
-                    ] if c in _cdf.columns]
-                    st.dataframe(_cdf[_ccols],use_container_width=True,hide_index=True)
-            else:
-                _cc2.metric("Corporate relationship types",0)
-                st.info("No canonical entity-to-entity corporate links are present yet.")
-
-            try:
-                _corp_jobs=(sb.table("pc_ingestion_jobs")
-                            .select("ingestion_job_id,title,status,created_at")
-                            .order("created_at",desc=True).limit(100).execute().data or [])
-            except Exception:
-                _corp_jobs=[]
-
-            if _corp_jobs:
-                _corp_labels=[f"{j.get('title') or 'Untitled'} | {j.get('ingestion_job_id')}" for j in _corp_jobs]
-                _corp_choice=st.selectbox("Corporate-link ingestion job",_corp_labels,key="corporate_link_job")
-                _corp_job=_corp_jobs[_corp_labels.index(_corp_choice)]
-                _corp_job_id=_corp_job.get("ingestion_job_id")
-                _candidate_scope=st.radio(
-                    "Company candidate scope",
-                    ["All canonical + staged companies","Selected job + canonical only"],
-                    horizontal=True,
-                    key="corporate_candidate_scope",
-                    help="Use all candidates when older research records were staged under the wrong ingestion-job metadata."
-                )
-                _corp_scope="all" if _candidate_scope.startswith("All ") else "job"
-                _corp_candidates=_corporate_entity_candidates(sb,_corp_job_id,_corp_scope)
-
-                if _corp_candidates:
-                    _candidate_names=[str(x.get("name") or "") for x in _corp_candidates]
-                    _expected_gt=["GT Ports","GT Logistics","GT Parks","GT Maritime","GT Lines","Momentum Logistics","GT USA","GSCCO"]
-                    _missing_gt=[n for n in _expected_gt if not any(n.casefold() in x.casefold() or x.casefold() in n.casefold() for x in _candidate_names)]
-                    st.caption(f"Corporate candidate pool: {len(_corp_candidates)} companies/entities.")
-                    if _missing_gt:
-                        st.warning(
-                            "Not found in candidate pool: " + ", ".join(_missing_gt) +
-                            ". These entities are not currently present as canonical entities, staged pc_entities rows, or entity endpoints in staged relationships."
-                        )
-                    _label_to_candidate={}
-                    for _cand in _corp_candidates:
-                        _label=_cand.get("label")
-                        # Preserve every visible candidate even when names collide.
-                        if _label in _label_to_candidate:
-                            _label=f"{_label} [{len(_label_to_candidate)+1}]"
-                        _label_to_candidate[_label]=_cand
-
-                    _corp_filter=st.text_input(
-                        "Filter company choices",
-                        value="",
-                        key="corporate_company_filter",
-                        placeholder="e.g. Gulftainer, GT, Momentum"
-                    )
-                    _choice_labels=list(_label_to_candidate.keys())
-                    if _corp_filter.strip():
-                        _f=_corp_filter.casefold().strip()
-                        _choice_labels=[x for x in _choice_labels if _f in x.casefold()]
-                    if not _choice_labels:
-                        st.warning("No companies match the current filter.")
-                        _choice_labels=list(_label_to_candidate.keys())
-
-                    _source_label=st.selectbox(
-                        "Parent / source company",
-                        _choice_labels,
-                        key="corporate_source_entity"
-                    )
-                    _source=_label_to_candidate[_source_label]
-
-                    _target_options=[
-                        lab for lab,cand in _label_to_candidate.items()
-                        if not (
-                            cand.get("entity_id") and _source.get("entity_id") and cand.get("entity_id")==_source.get("entity_id")
-                        ) and cand.get("name") != _source.get("name")
-                    ]
-                    _targets=st.multiselect(
-                        "Target company/entities",
-                        _target_options,
-                        key="corporate_target_entities"
-                    )
-
-                    _cr1,_cr2,_cr3=st.columns([1.2,1,1])
-                    with _cr1:
-                        _rel_type=st.selectbox(
-                            "Corporate relationship",
-                            ["parent_of","owns","controls","affiliate_of","joint_venture_with","invested_in","acquired"],
-                            key="corporate_relationship_type"
-                        )
-                    with _cr2:
-                        _confidence=st.number_input(
-                            "Confidence",min_value=0.0,max_value=1.0,value=0.95,step=0.01,
-                            key="corporate_relationship_confidence"
-                        )
-                    with _cr3:
-                        _ownership_text=st.text_input(
-                            "Ownership % (optional)",value="",key="corporate_ownership_percent"
-                        )
-
-                    _corp_notes=st.text_input(
-                        "Relationship notes / evidence context (optional)",
-                        value="",key="corporate_relationship_notes"
-                    )
-
-                    _source_urls=[]
-                    _smd=_source.get("metadata") or {}
-                    if isinstance(_smd.get("research_sources"),list):
-                        _source_urls.extend(_smd.get("research_sources") or [])
-                    st.caption(
-                        "The selected job's staged entity evidence is preserved as metadata. "
-                        "Only stage links you have source support for; naming similarity alone is not evidence."
-                    )
-
-                    if st.button(
-                        f"Stage selected corporate links ({len(_targets)})",
-                        type="primary",
-                        disabled=(len(_targets)==0),
-                        key="stage_corporate_links"
-                    ):
-                        _results=[]
-                        _ownership=None
-                        if str(_ownership_text).strip():
-                            try:
-                                _ownership=float(_ownership_text)
-                            except Exception:
-                                st.error("Ownership % must be numeric, e.g. 100 or 49.")
-                                _ownership="INVALID"
-
-                        if _ownership!="INVALID":
-                            with st.status("Staging and resolving corporate links...",expanded=True) as _status:
-                                for _lab in _targets:
-                                    _target=_label_to_candidate[_lab]
-                                    _tmd=_target.get("metadata") or {}
-                                    _research_sources=[]
-                                    for _md in (_smd,_tmd):
-                                        if isinstance(_md.get("research_sources"),list):
-                                            _research_sources.extend(_md.get("research_sources") or [])
-                                    # Deduplicate source objects/URLs conservatively.
-                                    _seen_src=set()
-                                    _dedup_sources=[]
-                                    for _rs in _research_sources:
-                                        if isinstance(_rs,dict):
-                                            _rk=str(_rs.get("url") or _rs)
-                                        else:
-                                            _rk=str(_rs)
-                                        if _rk and _rk not in _seen_src:
-                                            _seen_src.add(_rk)
-                                            _dedup_sources.append(_rs)
-                                    try:
-                                        _res=_stage_corporate_relationship(
-                                            sb,_corp_job_id,
-                                            _source.get("name"),_target.get("name"),_rel_type,
-                                            source_id=_source.get("entity_id"),
-                                            target_id=_target.get("entity_id"),
-                                            evidence_source_id=_target.get("source_id") or _source.get("source_id"),
-                                            confidence=_confidence,
-                                            ownership_percent=_ownership,
-                                            notes=_corp_notes or None,
-                                            metadata={
-                                                "research_sources":_dedup_sources,
-                                                "source_origin":_source.get("origin"),
-                                                "target_origin":_target.get("origin"),
-                                            }
-                                        )
-                                        _results.append(_res)
-                                        st.write(f"{_source.get('name')} → {_rel_type} → {_target.get('name')}: {_res.get('resolution',{}).get('status','STAGED')}")
-                                    except Exception as _exc:
-                                        st.error(f"{_target.get('name')}: {_exc}")
-                                _status.update(label="Corporate-link staging complete",state="complete")
-                            st.success(f"Staged {len(_results)} corporate relationship proposal(s).")
-                            st.rerun()
-
-                _corp_staged=_staged_corporate_relationships(sb,5000,_corp_job_id)
-                if _corp_staged:
-                    st.markdown("### Staged corporate links")
-                    _csdf=pd.DataFrame(_corp_staged)
-                    _cscols=[c for c in [
-                        "source_name","relationship_type","target_name",
-                        "source_id","target_id","source_resolution_method","target_resolution_method",
-                        "resolution_status","apply_status","confidence","canonical_relationship_id"
-                    ] if c in _csdf.columns]
-                    st.dataframe(_csdf[_cscols],use_container_width=True,hide_index=True)
-                    _cstat=_csdf.get("resolution_status",pd.Series([],dtype=str)).fillna("UNRESOLVED")
-                    _sc1,_sc2,_sc3=st.columns(3)
-                    _sc1.metric("Corporate READY",int((_cstat=="READY").sum()))
-                    _sc2.metric("Corporate PARTIAL",int((_cstat=="PARTIAL").sum()))
-                    _sc3.metric("Corporate already exists",int((_cstat=="ALREADY_EXISTS").sum()))
-                    if st.button("Re-resolve corporate links in this job",key="resolve_corporate_links"):
-                        try:
-                            _cres=_process_generic_relationship_backlog(sb,_corp_job_id)
-                            st.success(f"Corporate relationship resolution complete: {_cres}")
-                            st.rerun()
-                        except Exception as _exc:
-                            st.exception(_exc)
-
-            st.divider()
             st.markdown("## Generic graph relationships")
             st.caption(
                 "SQL 013 resolves ordinary P&C graph edges such as company → operates → terminal, "
@@ -4053,18 +3990,10 @@ elif page=="Review Queue":
                         format_func=lambda jid: f"{(_job_by_id.get(jid) or {}).get('title') or 'Ingestion job'} | {jid}",
                         key="review_prepare_candidate_job"
                     )
-                    _prep_c1,_prep_c2=st.columns(2)
-                    if _prep_c1.button("Prepare canonical IDs + resolve candidates",key="review_prepare_candidates"):
+                    if st.button("Prepare canonical IDs + resolve candidates",key="review_prepare_candidates"):
                         try:
                             _prep_result=_prepare_canonical_candidates(sb,_prep_choice)
                             st.success(f"Candidate preparation complete: {_prep_result}")
-                            st.rerun()
-                        except Exception as exc:
-                            st.exception(exc)
-                    if _prep_c2.button("Repair remaining UNRESOLVED as MATCHED / NEW",key="review_repair_unresolved"):
-                        try:
-                            _repair_result=_repair_unresolved_identity_candidates(sb,_prep_choice)
-                            st.success(f"Unresolved identity repair complete: {_repair_result}")
                             st.rerun()
                         except Exception as exc:
                             st.exception(exc)
@@ -4111,7 +4040,6 @@ elif page=="Review Queue":
                             "Table": r.get("target_table"),
                             "Resolution": r.get("resolution_status") or "UNRESOLVED",
                             "Resolved ID": r.get("resolved_entity_id"),
-                            "Candidate ID": (r.get("payload") or {}).get({"pc_entities":"entity_id","pc_assets":"asset_id","pc_mobile_assets":"mobile_asset_id","pc_events":"event_id","pc_transport_routes":"route_id"}.get(r.get("target_table"),"")) if isinstance(r.get("payload"),dict) else None,
                             "Match": r.get("resolution_method"),
                             "Confidence": round(v["confidence"],2),
                             "Sources": v["sources"],
@@ -4127,16 +4055,6 @@ elif page=="Review Queue":
 
                 safe_count=sum(1 for x in validated if x["_safe"])
                 st.info(f"{safe_count} of {len(validated)} record(s) currently qualify as bulk-safe.")
-                if safe_count==0 and validated:
-                    _risk_counts={}
-                    for _vrow in validated:
-                        for _risk in _vrow.get("risk",[]) or []:
-                            _risk_counts[_risk]=_risk_counts.get(_risk,0)+1
-                    if _risk_counts:
-                        _risk_text=" · ".join(
-                            f"{k}: {v}" for k,v in sorted(_risk_counts.items(),key=lambda kv:(-kv[1],kv[0]))[:8]
-                        )
-                        st.caption("Current blockers: "+_risk_text)
 
                 # Streamlit data_editor persists its own widget state. The previous
                 # "Select all safe" button only displayed an info message, so it could
