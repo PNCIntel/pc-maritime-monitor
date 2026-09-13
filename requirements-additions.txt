@@ -1,0 +1,2 @@
+# Add this line to your existing repository requirements.txt
+pypdf>=5.0

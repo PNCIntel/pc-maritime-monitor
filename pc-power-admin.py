@@ -1070,6 +1070,64 @@ def _docx_text(raw):
             lines.append(text.strip())
     return "\n".join(lines)
 
+def _extract_pdf_text(raw):
+    """Extract PDF text using whichever parser is available in the deployment.
+
+    pypdf is preferred, but older deployments may already have PyPDF2,
+    pdfplumber or PyMuPDF installed.  We deliberately try all of them so a
+    missing optional package does not crash the entire AI Research page.
+    """
+    errors=[]
+
+    try:
+        from pypdf import PdfReader
+        reader=PdfReader(io.BytesIO(raw))
+        text="\n".join((p.extract_text() or "") for p in reader.pages)
+        if text.strip():
+            return text
+        errors.append("pypdf returned no extractable text")
+    except Exception as exc:
+        errors.append(f"pypdf: {exc}")
+
+    try:
+        from PyPDF2 import PdfReader
+        reader=PdfReader(io.BytesIO(raw))
+        text="\n".join((p.extract_text() or "") for p in reader.pages)
+        if text.strip():
+            return text
+        errors.append("PyPDF2 returned no extractable text")
+    except Exception as exc:
+        errors.append(f"PyPDF2: {exc}")
+
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+            text="\n".join((p.extract_text() or "") for p in pdf.pages)
+        if text.strip():
+            return text
+        errors.append("pdfplumber returned no extractable text")
+    except Exception as exc:
+        errors.append(f"pdfplumber: {exc}")
+
+    try:
+        import fitz  # PyMuPDF
+        pdf=fitz.open(stream=raw,filetype="pdf")
+        try:
+            text="\n".join(page.get_text("text") or "" for page in pdf)
+        finally:
+            pdf.close()
+        if text.strip():
+            return text
+        errors.append("PyMuPDF returned no extractable text")
+    except Exception as exc:
+        errors.append(f"PyMuPDF: {exc}")
+
+    raise RuntimeError(
+        "No usable PDF text parser is installed (or the PDF contains no "
+        "extractable text). Add `pypdf>=5.0` to requirements.txt. Details: "
+        + " | ".join(errors)
+    )
+
 def _extract_document_text(upload):
     raw=upload.getvalue()
     lname=upload.name.lower()
@@ -1078,12 +1136,7 @@ def _extract_document_text(upload):
     if lname.endswith((".txt",".md",".csv")):
         return raw.decode("utf-8-sig",errors="replace")
     if lname.endswith(".pdf"):
-        try:
-            from pypdf import PdfReader
-            reader=PdfReader(io.BytesIO(raw))
-            return "\n".join((p.extract_text() or "") for p in reader.pages)
-        except Exception as exc:
-            raise RuntimeError(f"PDF parser unavailable or failed: {exc}")
+        return _extract_pdf_text(raw)
     raise RuntimeError("Supported document types: DOCX, PDF, TXT, MD.")
 
 def _canonical_link_candidates(kind, query="",limit=100):
@@ -2710,10 +2763,22 @@ elif page=="AI Research Workflow":
                     max_total_document_chars=120000
                     max_document_chars=60000
 
+                    document_failures=[]
                     for _doc in (research_docs or []):
                         _raw=_doc.getvalue()
                         _hash=hashlib.sha256(_raw).hexdigest()
-                        _text=_extract_document_text(_doc)
+                        try:
+                            _text=_extract_document_text(_doc)
+                        except Exception as _doc_parse_exc:
+                            document_failures.append({
+                                "file_name":_doc.name,
+                                "error":str(_doc_parse_exc),
+                            })
+                            st.warning(
+                                f"Could not extract {_doc.name}; this file will be skipped rather than aborting the research job. "
+                                f"{_doc_parse_exc}"
+                            )
+                            continue
                         _usable=_text[:max_document_chars]
                         remaining=max_total_document_chars-total_document_chars
                         if remaining <= 0:
