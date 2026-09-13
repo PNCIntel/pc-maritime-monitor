@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.35-live-dashboard-portwatch-news-markets"
+APP_VERSION = "v3.3.35-live-canonical-commercial"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -424,7 +424,7 @@ def load_gdelt_articles(query, timespan="24h", maxrecords=50):
 # ---------- NewsData.io news & signal discovery ----------
 NEWSDATA_LATEST_URL = "https://newsdata.io/api/1/latest"
 
-@st.cache_data(show_spinner=False, ttl=600)
+@st.cache_data(show_spinner=False, ttl=3600)
 def load_newsdata_articles(query, api_key, language="en", size=10):
     """NewsData.io discovery feed. Results remain open-source signals until corroborated."""
     if not api_key:
@@ -448,160 +448,6 @@ def _secret(name, default=""):
         return str(st.secrets.get(name, default) or default)
     except Exception:
         return str(os.environ.get(name, default) or default)
-
-def _newsdata_key():
-    """Accept either NEWSDATA_API_KEY or grouped [newsdata] api_key secrets."""
-    direct=_secret("NEWSDATA_API_KEY")
-    if direct:
-        return direct
-    try:
-        section=st.secrets.get("newsdata", {})
-        if hasattr(section, "get"):
-            return str(section.get("api_key", "") or "")
-    except Exception:
-        pass
-    return str(os.environ.get("NEWSDATA_API_KEY", "") or "")
-
-YAHOO_CHART_BASE="https://query1.finance.yahoo.com/v8/finance/chart"
-
-@st.cache_data(show_spinner=False, ttl=300)
-def load_yahoo_quote(symbol):
-    """Small server-side market snapshot. Fails closed when the upstream quote is unavailable."""
-    safe=str(symbol or "").strip()
-    if not safe:
-        return {}, "Missing symbol"
-    from urllib.parse import quote as _urlquote
-    url=f"{YAHOO_CHART_BASE}/{_urlquote(safe, safe='')}?interval=1d&range=5d"
-    try:
-        req=Request(url,headers={"User-Agent":"Mozilla/5.0 PC-Trade-System/3.3"})
-        with urlopen(req,timeout=10) as response:
-            payload=json.loads(response.read().decode("utf-8",errors="replace"))
-        result=((payload.get("chart") or {}).get("result") or [None])[0]
-        if not isinstance(result,dict):
-            return {}, str(((payload.get("chart") or {}).get("error") or {}).get("description") or "No quote returned")
-        meta=result.get("meta") or {}
-        closes=(((result.get("indicators") or {}).get("quote") or [{}])[0].get("close") or [])
-        vals=[float(x) for x in closes if x is not None]
-        price=meta.get("regularMarketPrice")
-        try: price=float(price) if price is not None else (vals[-1] if vals else None)
-        except Exception: price=vals[-1] if vals else None
-        prev=meta.get("chartPreviousClose") or meta.get("previousClose")
-        try: prev=float(prev) if prev is not None else (vals[-2] if len(vals)>1 else None)
-        except Exception: prev=vals[-2] if len(vals)>1 else None
-        pct=((price-prev)/prev*100.0) if price is not None and prev not in (None,0) else None
-        return {
-            "symbol":safe,"price":price,"previous":prev,"change_pct":pct,
-            "currency":str(meta.get("currency") or ""),"exchange":str(meta.get("exchangeName") or meta.get("fullExchangeName") or ""),
-            "timestamp":meta.get("regularMarketTime"),
-        }, ""
-    except (HTTPError,URLError,TimeoutError,ValueError,OSError,TypeError) as exc:
-        return {}, str(exc)
-
-@st.cache_data(show_spinner=False, ttl=1800)
-def load_fred_latest(series_id):
-    """Latest non-empty FRED observation for slower official/reference series."""
-    sid=str(series_id or "").strip()
-    if not sid: return {}, "Missing series"
-    url=f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}"
-    try:
-        req=Request(url,headers={"User-Agent":"PC-Trade-System/3.3"})
-        with urlopen(req,timeout=10) as response:
-            raw=response.read().decode("utf-8",errors="replace")
-        import io
-        df=pd.read_csv(io.StringIO(raw))
-        if df.empty or sid not in df.columns: return {}, "No observations"
-        df[sid]=pd.to_numeric(df[sid],errors="coerce")
-        df=df[df[sid].notna()]
-        if df.empty: return {}, "No numeric observations"
-        r=df.iloc[-1]
-        prev=df.iloc[-2][sid] if len(df)>1 else None
-        value=float(r[sid]); prev=float(prev) if prev is not None and pd.notna(prev) else None
-        pct=((value-prev)/prev*100.0) if prev not in (None,0) else None
-        return {"price":value,"previous":prev,"change_pct":pct,"date":str(r.iloc[0])}, ""
-    except (HTTPError,URLError,TimeoutError,ValueError,OSError,TypeError) as exc:
-        return {}, str(exc)
-
-def _metric_price(value, kind="number"):
-    if value is None or pd.isna(value): return "—"
-    value=float(value)
-    if kind=="fx": return f"{value:,.4f}"
-    if abs(value)>=1000: return f"{value:,.0f}"
-    return f"{value:,.2f}"
-
-def render_live_market_dashboard(compact=False):
-    """Live/delayed market context for the Trade overview; every upstream failure is isolated."""
-    indices=[
-        ("S&P 500","^GSPC"),("NASDAQ","^IXIC"),("FTSE 100","^FTSE"),("DAX","^GDAXI"),
-        ("Nikkei 225","^N225"),("Hang Seng","^HSI"),("Tadawul","^TASI.SR"),
-    ]
-    energy=[("Brent","BZ=F"),("WTI","CL=F"),("Henry Hub","NG=F"),("Gold","GC=F"),("USD Index","DX-Y.NYB")]
-    fx=[("EUR/USD","EURUSD=X"),("GBP/USD","GBPUSD=X"),("USD/JPY","JPY=X"),("USD/CNY","CNY=X"),("USD/INR","INR=X")]
-
-    def _render_group(items,kind="number"):
-        data=[]
-        for label,symbol in items:
-            q,err=load_yahoo_quote(symbol)
-            if q and q.get("price") is not None:
-                data.append((label,q,err))
-        if not data:
-            st.caption("Live market feed is temporarily unavailable.")
-            return
-        for start in range(0,len(data),5):
-            cols=st.columns(min(5,len(data)-start))
-            for c,(label,q,_err) in zip(cols,data[start:start+5]):
-                delta=q.get("change_pct")
-                c.metric(label,_metric_price(q.get("price"),kind),None if delta is None else f"{delta:+.2f}%")
-
-    if compact:
-        tabs=st.tabs(["Bourses","Energy","FX"])
-        with tabs[0]: _render_group(indices)
-        with tabs[1]:
-            _render_group(energy)
-            dubai,derr=load_fred_latest("POILDUBUSDM")
-            if dubai:
-                st.caption(f"Dubai crude reference (IMF/FRED monthly): ${dubai.get('price',0):,.2f} · {dubai.get('date','')}")
-        with tabs[2]: _render_group(fx,"fx")
-    else:
-        st.markdown("### Bourse indices")
-        _render_group(indices)
-        st.markdown("### Energy, commodities & USD")
-        _render_group(energy)
-        dubai,derr=load_fred_latest("POILDUBUSDM")
-        if dubai:
-            st.caption(f"Dubai crude reference (IMF/FRED monthly): ${dubai.get('price',0):,.2f} · observation {dubai.get('date','')} · slower reference series, not an intraday quote")
-        st.markdown("### FX")
-        _render_group(fx,"fx")
-
-def render_overview_news():
-    """Latest trade-system headlines from NewsData.io for the Overview page."""
-    api_key=_newsdata_key()
-    st.markdown("### Latest news & signals")
-    if not api_key:
-        st.caption("NewsData.io is configured in code but no API key was found in Streamlit Secrets.")
-        return
-    query="shipping OR port OR logistics OR freight OR trade OR energy OR rail OR aviation"
-    df,err=load_newsdata_articles(query,api_key,"en",10)
-    if err:
-        st.caption(f"NewsData.io unavailable: {err}")
-        return
-    if df.empty:
-        st.caption("No current news signals returned.")
-        return
-    for _,row in df.head(8).iterrows():
-        title=str(row.get("title") or "Untitled").strip()
-        url=str(row.get("link") or "").strip()
-        source=str(row.get("source_name") or row.get("source_id") or "").strip()
-        pub=str(row.get("pubDate") or "").strip()
-        desc=str(row.get("description") or "").strip()
-        if url:
-            st.markdown(f"**[{title}]({url})**")
-        else:
-            st.markdown(f"**{title}**")
-        meta=" · ".join(x for x in [source,pub] if x)
-        if meta: st.caption(meta)
-        if desc: st.write(desc[:260] + ("…" if len(desc)>260 else ""))
-        st.markdown("<span class='pc-chip'>OPEN SOURCE</span><span class='pc-chip'>UNVERIFIED SIGNAL</span>",unsafe_allow_html=True)
-    st.caption("NewsData.io discovery feed · cached 10 minutes · corroborate before promoting to the canonical event model")
 
 AISHUB_URL = "https://data.aishub.net/ws.php"
 NAVITIA_BASE = "https://api.navitia.io/v1"
@@ -1665,6 +1511,191 @@ if not _CANON_TRANSPORT_ROUTES.empty:
     )
 
 
+
+# ---------- v3.3.35 canonical transactions / investments bridge ----------
+@st.cache_data(show_spinner=False, ttl=60)
+def _canonical_db_transaction_frames():
+    """Project pc_transactions into the existing commercial and investment UI shapes.
+
+    pc_transactions is canonical.  The workbook-shaped frames below are presentation
+    adapters only, allowing newly ingested transactions to appear immediately without
+    rebuilding Excel files.
+    """
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+        txrows = pc_safe_rows(
+            sb,
+            "pc_transactions",
+            "transaction_id,announced_date,effective_date,buyer_entity_id,seller_name,target_entity_id,"
+            "target_asset_id,target_name,asset_class,country_region,transaction_type,equity_percent,"
+            "reported_value,currency,operating_control,status,regulatory_status,source_id,notes,metadata",
+            10000,
+            order="announced_date",
+        ) or []
+        if not txrows:
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+        erows = pc_safe_rows(
+            sb, "pc_entities",
+            "entity_id,name,entity_type,subtype,hq_country,status,record_status,metadata",
+            15000, order="name"
+        ) or []
+        arows = pc_safe_rows(
+            sb, "pc_assets",
+            "asset_id,name,asset_type,subtype,country,region_city,status,record_status,metadata",
+            20000, order="name"
+        ) or []
+        entities = {str(r.get("entity_id") or ""): str(r.get("name") or "") for r in erows}
+        assets = {str(r.get("asset_id") or ""): str(r.get("name") or "") for r in arows}
+
+        tx_display=[]
+        infra_deals=[]
+        investments=[]
+
+        for r in txrows:
+            meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
+            tid = str(r.get("transaction_id") or "").strip()
+            buyer_id = str(r.get("buyer_entity_id") or "").strip()
+            target_entity_id = str(r.get("target_entity_id") or "").strip()
+            target_asset_id = str(r.get("target_asset_id") or "").strip()
+            buyer = entities.get(buyer_id, buyer_id)
+            target_entity = entities.get(target_entity_id, target_entity_id)
+            target_asset = assets.get(target_asset_id, target_asset_id)
+            target_name = str(r.get("target_name") or target_asset or target_entity or "").strip()
+            announced = r.get("announced_date") or r.get("effective_date")
+            value = r.get("reported_value")
+            currency = str(r.get("currency") or "").strip()
+            tx_type = str(r.get("transaction_type") or "").strip()
+            country_region = str(r.get("country_region") or "").strip()
+            status = str(r.get("status") or "").strip()
+
+            common={
+                "Transaction ID": tid,
+                "Announced Date": announced,
+                "Effective Date": r.get("effective_date"),
+                "Buyer Company ID": buyer_id,
+                "Buyer": buyer,
+                "Seller": str(r.get("seller_name") or "").strip(),
+                "Target Company ID": target_entity_id,
+                "Target Asset ID": target_asset_id,
+                "Target Company": target_entity or target_name,
+                "Target / Asset": target_name,
+                "Asset Class": str(r.get("asset_class") or "").strip(),
+                "Country / Region": country_region,
+                "Transaction Type": tx_type,
+                "Equity %": r.get("equity_percent"),
+                "Reported Value": value,
+                "Currency": currency,
+                "Operating Control": r.get("operating_control"),
+                "Status": status,
+                "Regulatory Status": str(r.get("regulatory_status") or "").strip(),
+                "Source ID": str(r.get("source_id") or "").strip(),
+                "Notes": str(r.get("notes") or "").strip(),
+                "Metadata": meta,
+            }
+            tx_display.append(common)
+
+            # Infrastructure/commercial deal projection for the existing Contracts page.
+            infra_deals.append({
+                "Deal ID": tid,
+                "Announced Date": announced,
+                "Investor / Buyer IDs": buyer_id,
+                "Investor / Buyer": buyer,
+                "Target / Asset": target_name,
+                "Deal Type": tx_type,
+                "Asset Class": str(r.get("asset_class") or "").strip(),
+                "Country / Region": country_region,
+                "Reported Value": value,
+                "Currency": currency,
+                "Equity %": r.get("equity_percent"),
+                "Status": status,
+                "Regulatory Status": str(r.get("regulatory_status") or "").strip(),
+                "Source ID": str(r.get("source_id") or "").strip(),
+                "Notes": str(r.get("notes") or "").strip(),
+                "Metadata": meta,
+            })
+
+            tnorm=tx_type.casefold().replace("_"," ").replace("-"," ")
+            if any(x in tnorm for x in ("acquisition","stake","equity","sale")):
+                spend_type="Acquisition / equity"
+            elif any(x in tnorm for x in ("procurement","contract","equipment")):
+                spend_type="Procurement / equipment"
+            elif any(x in tnorm for x in ("lease","concession")):
+                spend_type="Lease / concession"
+            else:
+                spend_type="Investment / transaction"
+
+            fiscal_year=""
+            try:
+                fiscal_year=str(pd.to_datetime(announced,errors="coerce").year)
+                if fiscal_year=="nan": fiscal_year=""
+            except Exception:
+                fiscal_year=""
+
+            # The buyer is the primary investment actor where known.  Keep target IDs
+            # separately so detail pages can later expose both sides without duplicating value.
+            investments.append({
+                "Transaction ID": tid,
+                "Company ID": buyer_id or target_entity_id,
+                "Counterparty / Target Company ID": target_entity_id,
+                "Announced Date": announced,
+                "Fiscal Year": fiscal_year,
+                "Project": target_name or tx_type,
+                "Country": country_region,
+                "Region": country_region,
+                "Asset / Location": target_name,
+                "Investment Class": tx_type,
+                "Spend Type": spend_type,
+                "Reported Value": value,
+                "Currency": currency,
+                "USD Value if Reported": value if currency.upper()=="USD" else None,
+                "Value Status": "Reported" if value is not None else "Undisclosed",
+                "Status": status,
+                "Investment Stage": status,
+                "Capacity / Scope": str(meta.get("scope") or meta.get("capacity") or "").strip(),
+                "Strategic Relevance": str(meta.get("strategic_relevance") or "").strip(),
+                "Seller": str(r.get("seller_name") or "").strip(),
+                "Equity %": r.get("equity_percent"),
+                "Regulatory Status": str(r.get("regulatory_status") or "").strip(),
+                "Source ID": str(r.get("source_id") or "").strip(),
+                "Notes": str(r.get("notes") or "").strip(),
+                "Metadata": meta,
+            })
+
+        return pd.DataFrame(tx_display), pd.DataFrame(infra_deals), pd.DataFrame(investments)
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+
+_CANON_TRANSACTIONS, _CANON_INFRA_DEALS, _CANON_INVESTMENTS = _canonical_db_transaction_frames()
+
+if not _CANON_TRANSACTIONS.empty:
+    TABLES[("Transactions","Transactions V125")] = _merge_canonical_rows(
+        TABLES.get(("Transactions","Transactions V125"), pd.DataFrame()),
+        _CANON_TRANSACTIONS,
+        "Transaction ID",
+        None,
+    )
+
+if not _CANON_INFRA_DEALS.empty:
+    TABLES[("Transactions","Infra Deals")] = _merge_canonical_rows(
+        TABLES.get(("Transactions","Infra Deals"), pd.DataFrame()),
+        _CANON_INFRA_DEALS,
+        "Deal ID",
+        None,
+    )
+
+if not _CANON_INVESTMENTS.empty:
+    TABLES[("Corporate & Markets","Investments")] = _merge_canonical_rows(
+        TABLES.get(("Corporate & Markets","Investments"), pd.DataFrame()),
+        _CANON_INVESTMENTS,
+        "Transaction ID",
+        None,
+    )
+
 # ---------- v3.3.3 geographic + cruise integration ----------
 def _ref_port_display_name(raw):
     raw=str(raw or "").strip()
@@ -1751,97 +1782,6 @@ def unified_ports_with_reference(ports):
     if rows:
         canonical=pd.concat([canonical,pd.DataFrame(rows)],ignore_index=True,sort=False)
     return canonical
-
-@st.cache_data(show_spinner=False, ttl=1800)
-def join_portwatch_to_pc_ports(live, ports):
-    """Join latest PortWatch activity onto canonical/reference P&C geography without replacing P&C coordinates."""
-    if live is None or live.empty or ports is None or ports.empty:
-        return pd.DataFrame()
-    p=ports.copy()
-    l=live.copy()
-    p["_name_key"]=p.get("Port / Facility",pd.Series(index=p.index,dtype=str)).map(_port_match_key)
-    p["_country_key"]=p.get("Country",pd.Series(index=p.index,dtype=str)).map(_port_match_key)
-    l["_name_key"]=l.get("portname",pd.Series(index=l.index,dtype=str)).map(_port_match_key)
-    l["_country_key"]=l.get("country",pd.Series(index=l.index,dtype=str)).map(_port_match_key)
-    metrics=[c for c in ["portid","portname","country","ISO3","Date","portcalls","portcalls_container","portcalls_dry_bulk","portcalls_general_cargo","portcalls_roro","portcalls_tanker","import","export"] if c in l.columns]
-    exact=p.merge(l[metrics+["_name_key","_country_key"]],on=["_name_key","_country_key"],how="inner",suffixes=("","_pw"))
-    if not exact.empty:
-        exact["PortWatch Match Confidence"]=1.0
-        exact["PortWatch Match Method"]="normalized port + country"
-    matched_p=set(exact.index.tolist()) if not exact.empty else set()
-    # Name-only fallback is permitted only where the PortWatch name is unique globally.
-    counts=l.groupby("_name_key").size() if "_name_key" in l.columns else pd.Series(dtype=int)
-    unique_names=set(counts[counts==1].index)
-    already_keys=set(zip(exact.get("Port ID",pd.Series(dtype=str)).astype(str),exact.get("portid",pd.Series(dtype=str)).astype(str))) if not exact.empty else set()
-    fall=[]
-    exact_port_ids=set(exact.get("Port ID",pd.Series(dtype=str)).astype(str)) if not exact.empty and "Port ID" in exact.columns else set()
-    l_lookup={r["_name_key"]:r for _,r in l[l["_name_key"].isin(unique_names)].iterrows()}
-    for _,pr in p.iterrows():
-        if str(pr.get("Port ID","")) in exact_port_ids: continue
-        k=pr.get("_name_key","")
-        lr=l_lookup.get(k)
-        if lr is None: continue
-        row=pr.to_dict()
-        for c in metrics: row[c]=lr.get(c)
-        row["PortWatch Match Confidence"]=0.94
-        row["PortWatch Match Method"]="unique normalized port name"
-        fall.append(row)
-    if fall:
-        exact=pd.concat([exact,pd.DataFrame(fall)],ignore_index=True,sort=False)
-    for c in ["Latitude","Longitude","portcalls","portcalls_container","portcalls_tanker","import","export"]:
-        if c in exact.columns: exact[c]=pd.to_numeric(exact[c],errors="coerce")
-    return exact.drop(columns=[c for c in ["_name_key","_country_key"] if c in exact.columns],errors="ignore")
-
-def render_portwatch_operational_map(joined, height=470):
-    if joined is None or joined.empty:
-        st.caption("No PortWatch observations could be joined to mapped P&C ports on the latest available day.")
-        return
-    m=joined.copy()
-    m=m[pd.to_numeric(m.get("Latitude"),errors="coerce").notna() & pd.to_numeric(m.get("Longitude"),errors="coerce").notna()].copy()
-    if m.empty:
-        st.caption("Joined PortWatch records do not yet have canonical/reference coordinates.")
-        return
-    m["Latitude"]=pd.to_numeric(m["Latitude"],errors="coerce"); m["Longitude"]=pd.to_numeric(m["Longitude"],errors="coerce")
-    m["Port calls"]=pd.to_numeric(m.get("portcalls"),errors="coerce").fillna(0)
-    m["Container calls"]=pd.to_numeric(m.get("portcalls_container"),errors="coerce").fillna(0)
-    m["Tanker calls"]=pd.to_numeric(m.get("portcalls_tanker"),errors="coerce").fillna(0)
-    m["Imports"]=pd.to_numeric(m.get("import"),errors="coerce").fillna(0)
-    m["Exports"]=pd.to_numeric(m.get("export"),errors="coerce").fillna(0)
-    m["Map Port"]=m.get("Port / Facility",m.get("portname","")).fillna("").astype(str)
-    m["Map Country"]=m.get("Country",m.get("country","")).fillna("").astype(str)
-    maxcalls=max(float(m["Port calls"].max()),1.0)
-    m["radius"]=m["Port calls"].map(lambda x: 12000 + 52000*((max(float(x),0.0)/maxcalls)**0.5))
-    if pdk is None:
-        st.map(m,latitude="Latitude",longitude="Longitude",use_container_width=True)
-        return
-    layer=pdk.Layer("ScatterplotLayer",data=m,get_position="[Longitude, Latitude]",get_radius="radius",radius_min_pixels=3,radius_max_pixels=18,pickable=True,auto_highlight=True,get_fill_color=[216,180,90,175],get_line_color=[240,224,180,230],line_width_min_pixels=1)
-    view=pdk.ViewState(latitude=float(m["Latitude"].mean()),longitude=float(m["Longitude"].mean()),zoom=1.05,pitch=0,bearing=0)
-    tooltip={"html":"<b>{Map Port}</b><br/>{Map Country}<br/>Port calls: {Port calls}<br/>Container: {Container calls}<br/>Tankers: {Tanker calls}<br/>Imports: {Imports}<br/>Exports: {Exports}","style":{"backgroundColor":"#101820","color":"#F4EFE5","fontSize":"12px"}}
-    st.pydeck_chart(pdk.Deck(layers=[layer],initial_view_state=view,tooltip=tooltip,map_style=None),use_container_width=True,height=height)
-
-def render_overview_portwatch():
-    st.markdown("### Global port activity · IMF PortWatch")
-    live,error,latest_date=load_portwatch_latest()
-    if not error and live is not None and not live.empty:
-        st.session_state["portwatch_last_good"]=(live.copy(),latest_date)
-    elif "portwatch_last_good" in st.session_state:
-        live,latest_date=st.session_state["portwatch_last_good"]
-    if live is None or live.empty:
-        st.caption(f"PortWatch currently unavailable. {error}" if error else "No PortWatch observations returned.")
-        return
-    base=unified_ports_with_reference(TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy())
-    joined=join_portwatch_to_pc_ports(live,base)
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("PortWatch ports",f"{len(live):,}")
-    c2.metric("Joined to P&C map",f"{len(joined):,}")
-    c3.metric("Port calls",f"{pd.to_numeric(joined.get('portcalls'),errors='coerce').fillna(0).sum():,.0f}" if not joined.empty else "—")
-    c4.metric("Observation",latest_date or "—")
-    render_portwatch_operational_map(joined)
-    if not joined.empty:
-        cols=[c for c in ["Port / Facility","Country","portname","portid","portcalls","portcalls_container","portcalls_tanker","import","export","PortWatch Match Confidence","PortWatch Match Method"] if c in joined.columns]
-        with st.expander("PortWatch ↔ P&C joined records",expanded=False):
-            display_df(joined[cols].sort_values("portcalls",ascending=False) if "portcalls" in cols else joined[cols],500)
-    st.caption("PortWatch supplies operational activity; P&C canonical/global reference records remain the geographic authority for port identity and coordinates.")
 
 def render_named_port_map(df, height=480, radius=22000):
     if df is None or df.empty: return
@@ -6731,7 +6671,7 @@ _bst=backend_status()
 st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend")
 
 NAV_SECTIONS={
-    "OPERATING PICTURE":["Overview","Regional Maps","Alerts & Disruptions","Watch Areas","Port Activity"],
+    "OPERATING PICTURE":["Overview","Regional Maps","Alerts & Disruptions","Watch Areas"],
     "DOMAINS":["Maritime","Rail","Aviation","Trucking","Government & Security","Defence & Shipbuilding","Energy & Industry"],
     "TRADE NETWORK":["Ports & Terminals","Corridors & Systems","Companies","Vessels","Investments"],
     "MARKETS & POLICY":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Sanctions & Compliance","Trade Policy","Contracts"],
@@ -6787,7 +6727,7 @@ st.sidebar.markdown("<div class='pc-small'>ACTIVE DATA LAYERS</div>",unsafe_allo
 st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> Shared data model</span>",unsafe_allow_html=True)
 st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> PortWatch</span>",unsafe_allow_html=True)
 st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> Hormuz</span>",unsafe_allow_html=True)
-news_key_present=bool(_newsdata_key())
+news_key_present=bool(_secret("NEWSDATA_API_KEY"))
 news_class="pc-dot-live" if news_key_present else "pc-dot-key"
 news_label="NewsData" if news_key_present else "NewsData · key needed"
 st.sidebar.markdown(f"<span class='pc-feed-health'><span class='pc-dot {news_class}'></span> {news_label}</span>",unsafe_allow_html=True)
@@ -7416,19 +7356,8 @@ def _render_operational_brief():
 
 
 if page=="Overview":
-    header("Trade System","Live news, markets, port activity, companies, infrastructure, fleets, contracts, investment and corridors across the global trade network.")
+    header("Trade System","Companies, infrastructure, fleets, contracts, investment, corridors and operating activity across the global trade network.")
 
-    top_news,top_markets=st.columns([1.55,1.0],gap="large")
-    with top_news:
-        render_overview_news()
-    with top_markets:
-        st.markdown("### Markets now")
-        render_live_market_dashboard(compact=True)
-
-    st.markdown("---")
-    render_overview_portwatch()
-
-    st.markdown("---")
     q=st.text_input("Search the trade system",placeholder="Company, port, vessel, corridor, contract, programme, refinery, terminal...",key="trade_home_search_top")
     if q.strip():
         hits=ranked_search(q.strip(),limit=25)
@@ -8444,7 +8373,7 @@ elif page=="Live Feeds":
         sources=[dict(x) for x in registry.get("sources",[])]
         # Reflect actual runtime credential state rather than only the static registry label.
         runtime_enabled={
-            "newsdata_io_latest": bool(_newsdata_key()),
+            "newsdata_io_latest": bool(_secret("NEWSDATA_API_KEY")),
             "aishub_live_ais": bool(aishub_user),
             "navitia_mobility": bool(navitia_token),
         }
@@ -9117,7 +9046,7 @@ elif page=="News & Signals":
         "News & Signals",
         "Open-source discovery across trade, ports, logistics, maritime, rail, aviation and infrastructure. Results remain leads for verification and entity matching."
     )
-    api_key=_newsdata_key()
+    api_key=_secret("NEWSDATA_API_KEY")
     if not api_key:
         st.markdown("<div class='pc-hero'><div class='pc-hero-title'>NewsData.io connector ready</div><div class='pc-hero-copy'>Add <b>NEWSDATA_API_KEY</b> to Streamlit Secrets to activate this workspace. No external requests are made until the key is present.</div></div>",unsafe_allow_html=True)
     else:
