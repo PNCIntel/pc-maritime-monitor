@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.39-live-trade-updates"
+APP_VERSION = "v3.3.40-world-bank-macro"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -6992,6 +6992,434 @@ def render_trade_regional_maps():
     with tabs[1]:
         cols=[c for c in ["Port / Facility","Country","Operator","Facility Type","Key Role","Coverage Note"] if c in ports_view.columns]
         display_df(ports_view[cols] if cols else ports_view,360)
+
+
+# ---------- World Bank macro ingestion + country dashboard ----------
+# The World Bank Indicators API v2 is public and does not require an API key.
+WORLD_BANK_API_BASE = "https://api.worldbank.org/v2"
+WORLD_BANK_SOURCE_ID = "SRC_OPEN_WB"
+WORLD_BANK_COUNTRIES = {
+    "ARE": "United Arab Emirates",
+    "SAU": "Saudi Arabia",
+    "CHN": "China",
+    "USA": "United States",
+    "GBR": "United Kingdom",
+    "DEU": "Germany",
+    "IND": "India",
+    "KEN": "Kenya",
+    "ZAF": "South Africa",
+    "BRA": "Brazil",
+}
+
+# Ten indicators are featured in the Country & Macro snapshot. The wider tracked
+# catalogue is also ingested and remains searchable in the full observations table.
+WORLD_BANK_FEATURED = [
+    "NY.GDP.MKTP.CD",       # GDP
+    "NY.GDP.MKTP.KD.ZG",    # GDP growth
+    "FP.CPI.TOTL.ZG",       # inflation
+    "FI.RES.TOTL.CD",       # reserves
+    "NE.TRD.GNFS.ZS",       # trade / GDP
+    "NE.EXP.GNFS.CD",       # exports
+    "NE.IMP.GNFS.CD",       # imports
+    "BN.CAB.XOKA.CD",       # current account
+    "BX.KLT.DINV.CD.WD",    # FDI inflows
+    "SP.POP.TOTL",          # population
+]
+
+WORLD_BANK_INDICATORS = {
+    "NY.GDP.MKTP.CD":      ("GDP (current US$)", "current US$"),
+    "NY.GDP.MKTP.KD.ZG":   ("GDP growth (annual %)", "%"),
+    "FP.CPI.TOTL.ZG":      ("Inflation, consumer prices (annual %)", "%"),
+    "FI.RES.TOTL.CD":      ("Total reserves (current US$)", "current US$"),
+    "NE.TRD.GNFS.ZS":      ("Trade (% of GDP)", "% of GDP"),
+    "NE.EXP.GNFS.CD":      ("Exports of goods and services (current US$)", "current US$"),
+    "NE.IMP.GNFS.CD":      ("Imports of goods and services (current US$)", "current US$"),
+    "BN.CAB.XOKA.CD":      ("Current account balance (BoP, current US$)", "current US$"),
+    "BX.KLT.DINV.CD.WD":   ("Foreign direct investment, net inflows (BoP, current US$)", "current US$"),
+    "SP.POP.TOTL":         ("Population, total", "people"),
+    "NY.GDP.PCAP.CD":      ("GDP per capita (current US$)", "current US$ per person"),
+    "NE.EXP.GNFS.ZS":      ("Exports of goods and services (% of GDP)", "% of GDP"),
+    "NE.IMP.GNFS.ZS":      ("Imports of goods and services (% of GDP)", "% of GDP"),
+    "NE.GDI.FTOT.ZS":      ("Gross fixed capital formation (% of GDP)", "% of GDP"),
+    "NV.IND.TOTL.ZS":      ("Industry, including construction, value added (% of GDP)", "% of GDP"),
+    "NV.IND.MANF.ZS":      ("Manufacturing, value added (% of GDP)", "% of GDP"),
+    "SL.UEM.TOTL.ZS":      ("Unemployment, total (% of total labor force)", "%"),
+    "PA.NUS.FCRF":         ("Official exchange rate (LCU per US$, period average)", "LCU per US$"),
+    "FR.INR.RINR":         ("Real interest rate (%)", "%"),
+    "GC.DOD.TOTL.GD.ZS":   ("Central government debt, total (% of GDP)", "% of GDP"),
+    "GC.TAX.TOTL.GD.ZS":   ("Tax revenue (% of GDP)", "% of GDP"),
+    "FS.AST.PRVT.GD.ZS":   ("Domestic credit to private sector (% of GDP)", "% of GDP"),
+    "CM.MKT.LCAP.GD.ZS":   ("Market capitalization of listed domestic companies (% of GDP)", "% of GDP"),
+    "BX.TRF.PWKR.CD.DT":   ("Personal remittances, received (current US$)", "current US$"),
+    "IT.NET.USER.ZS":      ("Individuals using the Internet (% of population)", "% of population"),
+    "IS.AIR.GOOD.MT.K1":   ("Air transport, freight (million ton-km)", "million ton-km"),
+    "IS.SHP.GOOD.TU":      ("Container port traffic (TEU: 20 foot equivalent units)", "TEU"),
+    "TX.VAL.MRCH.CD.WT":   ("Merchandise exports (current US$)", "current US$"),
+    "TM.VAL.MRCH.CD.WT":   ("Merchandise imports (current US$)", "current US$"),
+    "LP.LPI.OVRL.XQ":      ("Logistics performance index: Overall (1=low to 5=high)", "index 1-5"),
+}
+
+
+def _world_bank_fetch(indicator_code, start_year=2016, end_year=None, country_codes=None):
+    """Fetch one World Bank indicator for the tracked P&C country set."""
+    end_year = int(end_year or pd.Timestamp.utcnow().year)
+    country_codes = country_codes or list(WORLD_BANK_COUNTRIES)
+    joined = ";".join(country_codes)
+    url = f"{WORLD_BANK_API_BASE}/country/{joined}/indicator/{indicator_code}"
+    params = {
+        "format": "json",
+        "per_page": 20000,
+        "date": f"{int(start_year)}:{end_year}",
+    }
+    req = Request(url + "?" + urlencode(params), headers={"User-Agent": "PC-Trade-System/3.3"})
+    try:
+        with urlopen(req, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+        rows = payload[1] if isinstance(payload, list) and len(payload) > 1 and payload[1] else []
+        return rows, ""
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
+        return [], str(exc)
+
+
+def _macro_db_frame(limit=20000):
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame()
+        rows = pc_safe_rows(
+            sb,
+            "pc_macro_indicators",
+            "macro_record_id,country,indicator_code,indicator_name,observation_date,period_start,period_end,value,unit,source_id,observation_id,metadata",
+            limit,
+            order="period_end",
+        ) or []
+        return pd.DataFrame(rows)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _macro_latest_refresh_time(macro):
+    if macro is None or macro.empty or "metadata" not in macro.columns:
+        return None
+    vals=[]
+    for meta in macro["metadata"].tolist():
+        if not isinstance(meta, dict):
+            continue
+        raw = meta.get("world_bank_retrieved_at") or meta.get("retrieved_at")
+        if not raw:
+            continue
+        dt = pd.to_datetime(raw, errors="coerce", utc=True)
+        if pd.notna(dt):
+            vals.append(dt)
+    return max(vals) if vals else None
+
+
+def _world_bank_refresh_due(macro, hours=24):
+    last = _macro_latest_refresh_time(macro)
+    if last is None:
+        return True
+    now = pd.Timestamp.now(tz="UTC")
+    return (now - last).total_seconds() >= float(hours) * 3600.0
+
+
+def refresh_world_bank_macro(start_year=2016, end_year=None, auto=False):
+    """Fetch the tracked World Bank catalogue and upsert it into pc_macro_indicators.
+
+    Existing natural-key rows are resolved to their macro_record_id before upsert, so
+    repeated refreshes update observations rather than adding a duplicate copy.
+    """
+    sb = pc_db_client(service=True)
+    if sb is None:
+        return {"ok": False, "error": "Supabase service client is unavailable.", "rows": 0, "indicators": 0}
+
+    end_year = int(end_year or pd.Timestamp.utcnow().year)
+    existing = _macro_db_frame(limit=50000)
+    key_to_id = {}
+    if not existing.empty:
+        for _, r in existing.iterrows():
+            k = (
+                str(r.get("country") or "").strip(),
+                str(r.get("indicator_code") or "").strip(),
+                str(r.get("observation_date") or "")[:10],
+            )
+            rid = str(r.get("macro_record_id") or "").strip()
+            if all(k) and rid and k not in key_to_id:
+                key_to_id[k] = rid
+
+    fetched_at = pd.Timestamp.now(tz="UTC").isoformat()
+    rows=[]
+    errors=[]
+    successful=0
+    for code, (name, unit) in WORLD_BANK_INDICATORS.items():
+        recs, err = _world_bank_fetch(code, start_year=start_year, end_year=end_year)
+        if err:
+            errors.append(f"{code}: {err}")
+            continue
+        successful += 1
+        for rec in recs:
+            value = rec.get("value")
+            year = str(rec.get("date") or "").strip()
+            iso3 = str(rec.get("countryiso3code") or "").strip()
+            country = str((rec.get("country") or {}).get("value") or WORLD_BANK_COUNTRIES.get(iso3) or "").strip()
+            if value is None or not year.isdigit() or not country:
+                continue
+            obs_date = f"{year}-12-31"
+            row = {
+                "country": country,
+                "indicator_code": code,
+                "indicator_name": name,
+                "observation_date": obs_date,
+                "period_start": f"{year}-01-01",
+                "period_end": obs_date,
+                "value": value,
+                "unit": unit,
+                "source_id": WORLD_BANK_SOURCE_ID,
+                "metadata": {
+                    "country_id": iso3,
+                    "provider": "World Bank",
+                    "api": "World Bank Indicators API v2",
+                    "world_bank_retrieved_at": fetched_at,
+                    "featured": code in WORLD_BANK_FEATURED,
+                    "source_url": f"{WORLD_BANK_API_BASE}/country/{iso3}/indicator/{code}?format=json",
+                },
+            }
+            rid = key_to_id.get((country, code, obs_date))
+            if rid:
+                row["macro_record_id"] = rid
+            rows.append(row)
+
+    # De-duplicate the fetched payload itself, retaining the latest copy of each key.
+    dedup={}
+    for row in rows:
+        dedup[(row["country"], row["indicator_code"], row["observation_date"])] = row
+    rows=list(dedup.values())
+
+    written=0
+    try:
+        for i in range(0, len(rows), 400):
+            batch=rows[i:i+400]
+            if not batch:
+                continue
+            sb.table("pc_macro_indicators").upsert(batch).execute()
+            written += len(batch)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "rows": written,
+            "indicators": successful,
+            "fetch_errors": errors,
+        }
+
+    # Force a fresh read on this rerun/session after canonical writes.
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "rows": written,
+        "indicators": successful,
+        "fetch_errors": errors,
+        "auto": bool(auto),
+        "start_year": int(start_year),
+        "end_year": end_year,
+    }
+
+
+def _macro_human_value(value, unit):
+    try:
+        v=float(value)
+    except (TypeError, ValueError):
+        return "—"
+    u=str(unit or "")
+    if "current US$" in u and "per person" not in u:
+        av=abs(v)
+        if av >= 1_000_000_000_000:
+            return f"${v/1_000_000_000_000:,.2f}tn"
+        if av >= 1_000_000_000:
+            return f"${v/1_000_000_000:,.1f}bn"
+        if av >= 1_000_000:
+            return f"${v/1_000_000:,.1f}m"
+        return f"${v:,.0f}"
+    if u == "current US$ per person":
+        return f"${v:,.0f}"
+    if "%" in u:
+        return f"{v:,.2f}%"
+    if u == "people":
+        av=abs(v)
+        if av >= 1_000_000_000:
+            return f"{v/1_000_000_000:,.2f}bn"
+        if av >= 1_000_000:
+            return f"{v/1_000_000:,.1f}m"
+        return f"{v:,.0f}"
+    if u == "TEU":
+        return f"{v:,.0f} TEU"
+    if u == "index 1-5":
+        return f"{v:,.2f}"
+    return f"{v:,.2f}"
+
+
+def _latest_macro_rows(frame):
+    if frame is None or frame.empty:
+        return pd.DataFrame()
+    x=frame.copy()
+    x["_period"] = pd.to_datetime(x.get("period_end"), errors="coerce")
+    x["_obs"] = pd.to_datetime(x.get("observation_date"), errors="coerce")
+    x=x.sort_values(["_period","_obs"],ascending=[False,False],na_position="last")
+    keys=[c for c in ["country","indicator_code"] if c in x.columns]
+    if keys:
+        x=x.drop_duplicates(keys,keep="first")
+    return x.drop(columns=["_period","_obs"],errors="ignore")
+
+
+def render_country_macro():
+    """DB-first country macro dashboard with World Bank refresh and searchable history."""
+    st.caption(
+        "Country-level macro, trade and logistics context. The World Bank v2 feed is written into the canonical "
+        "pc_macro_indicators table; ten priority indicators lead the view and the wider catalogue remains searchable."
+    )
+
+    macro=_macro_db_frame(limit=50000)
+
+    # Refresh once a day when this workspace is opened. A failed refresh never blocks
+    # the existing database view, and manual refresh is always available below.
+    auto_key="pc_world_bank_auto_refresh_attempted"
+    if not st.session_state.get(auto_key) and _world_bank_refresh_due(macro,24):
+        st.session_state[auto_key]=True
+        with st.spinner("Refreshing World Bank macro observations…"):
+            res=refresh_world_bank_macro(start_year=2016,auto=True)
+        if res.get("ok"):
+            macro=_macro_db_frame(limit=50000)
+        else:
+            st.caption(f"World Bank auto-refresh skipped: {res.get('error','unknown error')}")
+
+    try:
+        sb=pc_db_client(service=True)
+        chok=pd.DataFrame(pc_safe_rows(sb,"pc_chokepoints","*",1500) or []) if sb else pd.DataFrame()
+        status=pd.DataFrame(pc_safe_rows(sb,"pc_chokepoint_status","*",3000,order="observation_timestamp") or []) if sb else pd.DataFrame()
+    except Exception:
+        chok=pd.DataFrame(); status=pd.DataFrame()
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Macro observations",len(macro))
+    c2.metric("Tracked indicators",int(macro["indicator_code"].nunique()) if not macro.empty and "indicator_code" in macro else 0)
+    c3.metric("Countries",int(macro["country"].nunique()) if not macro.empty and "country" in macro else 0)
+    c4.metric("Chokepoints / crossings",len(chok))
+
+    tabs=st.tabs(["Macro indicators","Borders & chokepoints","Current status"])
+    with tabs[0]:
+        controls=st.columns([2,1,1])
+        countries=sorted(x for x in macro.get("country",pd.Series(dtype=str)).dropna().astype(str).unique() if x) if not macro.empty else []
+        default_country="United Arab Emirates" if "United Arab Emirates" in countries else (countries[0] if countries else "All")
+        opts=["All"]+countries
+        chosen=controls[0].selectbox("Country",opts,index=(opts.index(default_country) if default_country in opts else 0),key="macro_country_v340")
+        start_year=controls[1].selectbox("Refresh history",[2016,2018,2020,2022,2024],index=0,key="macro_refresh_start")
+        if controls[2].button("Refresh World Bank",use_container_width=True,key="macro_refresh_world_bank"):
+            with st.spinner("Fetching World Bank indicators and updating Supabase…"):
+                res=refresh_world_bank_macro(start_year=int(start_year),auto=False)
+            if res.get("ok"):
+                st.success(f"Updated {res.get('rows',0):,} observations across {res.get('indicators',0)} indicators.")
+                st.session_state[auto_key]=True
+                st.rerun()
+            else:
+                st.error(f"World Bank refresh failed: {res.get('error','unknown error')}")
+
+        last_refresh=_macro_latest_refresh_time(macro)
+        if last_refresh is not None:
+            st.caption(f"World Bank canonical refresh: {last_refresh.strftime('%Y-%m-%d %H:%M UTC')} · no API key required")
+        else:
+            st.caption("World Bank Indicators API v2 · no API key required")
+
+        if macro.empty:
+            st.info("No macro series are loaded yet. Use Refresh World Bank to populate the canonical table.")
+        else:
+            country_view=macro if chosen=="All" else macro[macro["country"].astype(str).eq(chosen)].copy()
+            latest=_latest_macro_rows(country_view)
+
+            st.markdown("### Priority snapshot")
+            featured=latest[latest.get("indicator_code",pd.Series(index=latest.index,dtype=str)).astype(str).isin(WORLD_BANK_FEATURED)].copy()
+            if not featured.empty:
+                featured["_rank"]=featured["indicator_code"].astype(str).map({c:i for i,c in enumerate(WORLD_BANK_FEATURED)}).fillna(999)
+                featured=featured.sort_values("_rank").drop(columns=["_rank"],errors="ignore").head(10)
+                cards=st.columns(5)
+                for i,(_,r) in enumerate(featured.iterrows()):
+                    with cards[i%5]:
+                        label=str(r.get("indicator_name") or r.get("indicator_code") or "Indicator")
+                        short={
+                            "NY.GDP.MKTP.CD":"GDP",
+                            "NY.GDP.MKTP.KD.ZG":"GDP growth",
+                            "FP.CPI.TOTL.ZG":"Inflation",
+                            "FI.RES.TOTL.CD":"Reserves",
+                            "NE.TRD.GNFS.ZS":"Trade / GDP",
+                            "NE.EXP.GNFS.CD":"Exports",
+                            "NE.IMP.GNFS.CD":"Imports",
+                            "BN.CAB.XOKA.CD":"Current account",
+                            "BX.KLT.DINV.CD.WD":"FDI inflows",
+                            "SP.POP.TOTL":"Population",
+                        }.get(str(r.get("indicator_code") or ""),label)
+                        val=_macro_human_value(r.get("value"),r.get("unit"))
+                        year=str(r.get("period_end") or r.get("observation_date") or "")[:4]
+                        st.metric(short,val)
+                        st.caption(year)
+            else:
+                st.caption("The ten priority indicators have not been loaded for this selection yet.")
+
+            st.markdown("### Search all macro observations")
+            q=st.text_input(
+                "Search indicators, codes, countries or years",
+                placeholder="reserves, exports, logistics performance, GDP per capita, 2024…",
+                key="macro_indicator_search_v340",
+            )
+            scope=country_view.copy()
+            if q.strip():
+                blob=scope[[c for c in ["country","indicator_code","indicator_name","observation_date","period_start","period_end","unit"] if c in scope.columns]].fillna("").astype(str).agg(" ".join,axis=1)
+                scope=scope[blob.str.contains(q.strip(),case=False,regex=False,na=False)]
+            else:
+                # Without a search term, show one latest record per indicator rather than
+                # flooding the page with the entire historical database.
+                scope=_latest_macro_rows(scope)
+
+            if not scope.empty:
+                scope=scope.copy()
+                scope["Value"]=[_macro_human_value(v,u) for v,u in zip(scope.get("value",pd.Series(index=scope.index)),scope.get("unit",pd.Series(index=scope.index)))]
+                scope["Period"] = scope.get("period_end",pd.Series(index=scope.index,dtype=str)).astype(str).str[:10]
+                clean=scope.rename(columns={"country":"Country","indicator_code":"Code","indicator_name":"Indicator","unit":"Unit"})
+                cols=[c for c in ["Country","Indicator","Code","Period","Value","Unit"] if c in clean.columns]
+                st.dataframe(clean[cols].head(500),use_container_width=True,hide_index=True,height=460)
+                st.caption(f"Showing {min(len(clean),500):,} of {len(clean):,} matching rows. Search returns historical observations; blank search shows latest observations only.")
+            else:
+                st.info("No macro observations match that search.")
+
+            # A compact historical chart for one selected series.
+            series_codes=sorted(x for x in country_view.get("indicator_code",pd.Series(dtype=str)).dropna().astype(str).unique() if x)
+            if chosen!="All" and series_codes:
+                labels={c:WORLD_BANK_INDICATORS.get(c,(c,""))[0] for c in series_codes}
+                pick=st.selectbox("Historical series",series_codes,format_func=lambda c:labels.get(c,c),key="macro_series_v340")
+                hist=country_view[country_view["indicator_code"].astype(str).eq(pick)].copy()
+                hist["Period"]=pd.to_datetime(hist.get("period_end"),errors="coerce")
+                hist["value"]=pd.to_numeric(hist.get("value"),errors="coerce")
+                hist=hist.dropna(subset=["Period","value"]).sort_values("Period").drop_duplicates("Period",keep="last")
+                if len(hist)>=2:
+                    st.line_chart(hist.set_index("Period")[["value"]],use_container_width=True)
+                    st.caption(WORLD_BANK_INDICATORS.get(pick,(pick,""))[1])
+
+    with tabs[1]:
+        if chok.empty:
+            st.info("No chokepoint records are loaded.")
+        else:
+            q=st.text_input("Search borders & chokepoints",placeholder="Hormuz, Panama, border, rail crossing…",key="macro_chok_search_v340")
+            view=chok.copy()
+            if q.strip():
+                blob=view.fillna("").astype(str).agg(" ".join,axis=1)
+                view=view[blob.str.contains(q.strip(),case=False,regex=False,na=False)]
+            display_df(view,420)
+
+    with tabs[2]:
+        if status.empty:
+            st.info("No current chokepoint-status observations are loaded.")
+        else:
+            display_df(status,420)
 
 # ---------- workspace navigation ----------
 st.sidebar.markdown("<div class='pc-kicker'>Power & Corridors Intelligence</div>",unsafe_allow_html=True)
