@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.40-world-bank-macro"
+APP_VERSION = "v3.3.41-world-bank-macro-regional-maps-fix"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -8256,6 +8256,144 @@ def _render_operational_brief():
         request_nav("Alerts & Disruptions")
         st.rerun()
 
+
+def _regional_business_security_events():
+    """Regional map layer for Trade: commercial activity first, security as one exposure dimension."""
+    candidates=[]
+    for key in [
+        ("Intelligence","Events"),
+        ("Intelligence","Event Register"),
+        ("Events","Events"),
+        ("Trade","Events"),
+        ("Maritime","Security Events"),
+    ]:
+        df=TABLES.get(key,pd.DataFrame())
+        if df is not None and not df.empty:
+            candidates.append(df.copy())
+
+    for name in ("EVENTS","events","event_df","hazard_events"):
+        obj=globals().get(name)
+        if isinstance(obj,pd.DataFrame) and not obj.empty:
+            candidates.append(obj.copy())
+
+    if not candidates:
+        return pd.DataFrame()
+
+    df=pd.concat(candidates,ignore_index=True,sort=False)
+
+    def first_col(names):
+        for n in names:
+            if n in df.columns:
+                return df[n]
+        return pd.Series("",index=df.index)
+
+    out=df.copy()
+    out["Event Date"]=first_col(["Start Date","Date","Event Date","event_date","start_date"])
+    out["Title"]=first_col(["Title","Event","Event Title","title","event_title"])
+    out["Event Type"]=first_col(["Event Type","Type","Category","event_type","category"])
+    out["Event Family"]=first_col(["Event Family","Family","event_family"])
+    out["Severity"]=first_col(["Severity","Risk","Risk Level","severity"])
+    out["Status"]=first_col(["Status","Event Status","status"])
+    out["Country"]=first_col(["Country / Countries","Country","country"])
+    out["Location"]=first_col(["Location","Area","Region","location","region"])
+    out["Operational Impact"]=first_col(["Operational Impact","Operational impact","operational_impact"])
+    out["Trade / Commercial Impact"]=first_col([
+        "Trade / Commercial Impact","Commercial Impact","Business Impact",
+        "trade_commercial_impact","commercial_impact","business_impact"
+    ])
+    out["Latitude"]=pd.to_numeric(first_col(["Latitude","latitude","lat"]),errors="coerce")
+    out["Longitude"]=pd.to_numeric(first_col(["Longitude","longitude","lon","lng"]),errors="coerce")
+
+    blob=(
+        out["Event Family"].astype(str)+" "+
+        out["Event Type"].astype(str)+" "+
+        out["Title"].astype(str)+" "+
+        out["Operational Impact"].astype(str)+" "+
+        out["Trade / Commercial Impact"].astype(str)
+    ).str.casefold()
+
+    business_terms=(
+        "trade|commercial|port|terminal|shipping|vessel|tanker|container|cargo|logistics|"
+        "freight|supply chain|rail|aviation|airport|energy|oil|gas|lng|refinery|pipeline|"
+        "industrial|factory|warehouse|investment|capex|expansion|acquisition|concession|"
+        "corridor|route|throughput|export|import|market|company|operator"
+    )
+    security_terms=(
+        "security|attack|strike|drone|missile|piracy|hijack|seizure|boarding|mine|"
+        "conflict|war|military|naval|sanction|blockade|restricted zone|jamming|spoof"
+    )
+
+    out["Business Relevance"]=blob.str.contains(business_terms,regex=True,na=False) | out["Trade / Commercial Impact"].astype(str).str.strip().ne("")
+    out["Security Relevance"]=blob.str.contains(security_terms,regex=True,na=False)
+    keep=out["Business Relevance"] | out["Security Relevance"]
+
+    filtered=out[keep].copy()
+    dedupe_cols=[c for c in ["Event Date","Title","Event Type","Country","Location","Severity","Status"] if c in filtered.columns]
+    if dedupe_cols:
+        filtered=filtered.drop_duplicates(subset=dedupe_cols,keep="first")
+    return filtered
+
+
+def render_regional_business_security_maps():
+    """Trade-first regional map view with business, infrastructure and security layers."""
+    df=_regional_business_security_events()
+
+    st.caption(
+        "Regional Maps in Trade show business activity, infrastructure, movement systems and disruption. "
+        "Security is one layer of exposure, not the primary lens."
+    )
+
+    if df is None or df.empty:
+        st.info("No regional business/security events available in the current canonical/migration layer.")
+        return
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Business-relevant events",int(df["Business Relevance"].sum()))
+    c2.metric("Security-relevant events",int(df["Security Relevance"].sum()))
+    c3.metric("Mapped events",int((df["Latitude"].notna() & df["Longitude"].notna()).sum()))
+    c4.metric("Countries / markets",df["Country"].astype(str).replace("",pd.NA).dropna().nunique())
+
+    f1,f2,f3=st.columns(3)
+    layer=f1.selectbox(
+        "Map layer",
+        ["Business + Security","Business only","Security only"],
+        key="regional_map_layer_trade"
+    )
+    countries=sorted([x for x in df["Country"].fillna("").astype(str).unique() if x.strip()])
+    country=f2.selectbox("Country / market",["All"]+countries,key="regional_map_country_trade")
+    q=f3.text_input("Search",placeholder="port, LNG, strike, rail, investment...",key="regional_map_search_trade")
+
+    x=df.copy()
+    if layer=="Business only":
+        x=x[x["Business Relevance"]]
+    elif layer=="Security only":
+        x=x[x["Security Relevance"]]
+    if country!="All":
+        x=x[x["Country"].astype(str).eq(country)]
+    if q.strip():
+        mask=pd.Series(False,index=x.index)
+        for c in ["Title","Event Type","Event Family","Country","Location","Operational Impact","Trade / Commercial Impact"]:
+            mask |= x[c].astype(str).str.contains(q,case=False,na=False,regex=False)
+        x=x[mask]
+
+    mapped=x[x["Latitude"].notna() & x["Longitude"].notna()].copy()
+    if not mapped.empty:
+        mm=mapped.rename(columns={"Latitude":"lat","Longitude":"lon"})
+        st.map(mm[["lat","lon"]],use_container_width=True)
+    else:
+        st.info("No coordinates available for the selected regional layer.")
+
+    tabs=st.tabs(["Business & infrastructure","Security exposure","All regional events"])
+    cols=["Event Date","Title","Event Type","Severity","Status","Country","Location","Operational Impact","Trade / Commercial Impact"]
+
+    with tabs[0]:
+        y=x[x["Business Relevance"]].copy()
+        display_df(y[[c for c in cols if c in y.columns]],500) if not y.empty else st.info("No business-relevant events in this selection.")
+    with tabs[1]:
+        y=x[x["Security Relevance"]].copy()
+        display_df(y[[c for c in cols if c in y.columns]],500) if not y.empty else st.info("No security-relevant events in this selection.")
+    with tabs[2]:
+        display_df(x[[c for c in cols if c in x.columns]],550)
 
 if page=="Overview":
     header("Trade System","Live news, markets, port activity, companies, infrastructure, fleets, contracts, investment and corridors across the global trade network.")

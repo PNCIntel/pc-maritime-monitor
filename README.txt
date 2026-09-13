@@ -1,11 +1,10 @@
-P&C Intelligence v3.3.41 — Alert Card HTML Rendering Fix
+P&C Trade v3.3.41 Regional Maps Fix
 
-Replace pc_intelligence_app.py only.
+Replace only app.py.
 
-Fixes:
-- Raw <div class="pc-card-impact"> markup rendering as code on alert cards.
-- Uses single-line card HTML to avoid Markdown code-block parsing.
-- Escapes dynamic event text safely.
-- Uses Trade / commercial impact label when that fallback field is displayed.
+Fixes the NameError on Operating Picture > Regional Maps by restoring:
+- _regional_business_security_events()
+- render_regional_business_security_maps()
 
+Based directly on app_world_bank_v3_3_40.py, so the World Bank macro changes are retained.
 No SQL changes required.
