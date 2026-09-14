@@ -2,7 +2,6 @@ from pathlib import Path
 import sys
 import os
 import re
-import hashlib
 from difflib import SequenceMatcher
 import json
 import html as html_lib
@@ -31,8 +30,8 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.42-world-bank-macro-live-regional-maps"
-RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
+APP_VERSION = "v3.3.7-compact-multimodal-ui"
+RELEASE_NAME = "Global Trade-System Intelligence Graph · Legacy Excel + Research Reference + Supabase Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -173,57 +172,6 @@ div[data-testid="stLinkButton"] a:visited,
 
 </style>
 """, unsafe_allow_html=True)
-
-if st.session_state.get("pc_trade_appearance","Dark") == "Light":
-    st.markdown("""
-    <style>
-    :root{
-      --bg:#f5f7fa;--panel:#ffffff;--panel2:#f0f3f7;--border:#cbd5e1;
-      --text:#16202a;--muted:#5d6b7a;--gold:#9a7626;--blue:#176aa3
-    }
-    .stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"]{
-      background:var(--bg)!important;color:var(--text)!important
-    }
-    [data-testid="stSidebar"]{
-      background:#eef2f6!important;border-right:1px solid var(--border)!important
-    }
-    h1,h2,h3,h4,h5,h6,p,li,span,label{color:var(--text)!important}
-    .pc-card,.pc-feed,.pc-object-card,.pc-workspace-card,.pc-rel{
-      background:#ffffff!important;border-color:var(--border)!important
-    }
-    .pc-hero{background:linear-gradient(120deg,#ffffff,#eef3f8)!important;border-color:var(--border)!important}
-    .pc-sub,.pc-small,.pc-label,.pc-feed-meta,.pc-search-details,.pc-workspace-card p,.pc-hero-copy{
-      color:var(--muted)!important
-    }
-    div[role="radiogroup"] label{
-      background:#ffffff!important;border-color:var(--border)!important
-    }
-    div[role="radiogroup"] label:has(input:checked){
-      background:#e6edf5!important;border-color:#9a7626!important
-    }
-    [data-testid="stSidebar"] [data-testid="stRadio"] label:hover{background:#e4eaf1!important}
-    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked){
-      background:#dfe8f2!important;border-left:3px solid #9a7626!important
-    }
-    [data-baseweb="tab"]{color:#16202a!important}
-    [data-baseweb="select"]>div,[data-baseweb="input"]>div,.stTextInput input{
-      background:#ffffff!important;color:#16202a!important;border-color:#cbd5e1!important
-    }
-    .stButton > button,.stDownloadButton > button,
-    a[data-testid="stLinkButton"],div[data-testid="stLinkButton"] a,.stLinkButton a{
-      background:#ffffff!important;color:#29465f!important;border-color:#b8c3cf!important
-    }
-    .stButton > button p,.stDownloadButton > button p{color:#29465f!important}
-    .stDataFrame{border-color:#cbd5e1!important}
-    [data-testid="stHeader"],header[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecoration"]{
-      background:#f5f7fa!important;color:#16202a!important
-    }
-    [data-testid="stHeader"] *,[data-testid="stToolbar"] *{color:#16202a!important}
-    [data-testid="stHeader"] svg,[data-testid="stToolbar"] svg{fill:#16202a!important;color:#16202a!important}
-    .pc-bar-label,.pc-detail-value{color:#16202a!important}
-    .pc-bar-track{background:#e9eef4!important;border-color:#cbd5e1!important}
-    </style>
-    """, unsafe_allow_html=True)
 
 # ---------- workbook loading ----------
 WORKBOOKS = {
@@ -424,7 +372,7 @@ def load_gdelt_articles(query, timespan="24h", maxrecords=50):
 # ---------- NewsData.io news & signal discovery ----------
 NEWSDATA_LATEST_URL = "https://newsdata.io/api/1/latest"
 
-@st.cache_data(show_spinner=False, ttl=600)
+@st.cache_data(show_spinner=False, ttl=3600)
 def load_newsdata_articles(query, api_key, language="en", size=10):
     """NewsData.io discovery feed. Results remain open-source signals until corroborated."""
     if not api_key:
@@ -438,12 +386,7 @@ def load_newsdata_articles(query, api_key, language="en", size=10):
             return pd.DataFrame(), str(payload.get("message") or "NewsData request failed")
         return pd.DataFrame(payload.get("results") or []), ""
     except HTTPError as exc:
-        try:
-            body=exc.read().decode("utf-8",errors="replace")
-        except Exception:
-            body=""
-        detail=(body[:320].strip() if body else "")
-        return pd.DataFrame(), f"HTTP {exc.code}" + (f": {detail}" if detail else "")
+        return pd.DataFrame(), f"HTTP {exc.code}"
     except (URLError,TimeoutError,ValueError,OSError) as exc:
         return pd.DataFrame(), str(exc)
 
@@ -453,244 +396,6 @@ def _secret(name, default=""):
         return str(st.secrets.get(name, default) or default)
     except Exception:
         return str(os.environ.get(name, default) or default)
-
-def _newsdata_key():
-    """Accept either NEWSDATA_API_KEY or grouped [newsdata] api_key secrets."""
-    direct=_secret("NEWSDATA_API_KEY")
-    if direct:
-        return direct
-    try:
-        section=st.secrets.get("newsdata", {})
-        if hasattr(section, "get"):
-            return str(section.get("api_key", "") or "")
-    except Exception:
-        pass
-    return str(os.environ.get("NEWSDATA_API_KEY", "") or "")
-
-YAHOO_CHART_BASE="https://query1.finance.yahoo.com/v8/finance/chart"
-
-@st.cache_data(show_spinner=False, ttl=300)
-def load_yahoo_quote(symbol):
-    """Small server-side market snapshot. Fails closed when the upstream quote is unavailable."""
-    safe=str(symbol or "").strip()
-    if not safe:
-        return {}, "Missing symbol"
-    from urllib.parse import quote as _urlquote
-    url=f"{YAHOO_CHART_BASE}/{_urlquote(safe, safe='')}?interval=1d&range=5d"
-    try:
-        req=Request(url,headers={"User-Agent":"Mozilla/5.0 PC-Trade-System/3.3"})
-        with urlopen(req,timeout=10) as response:
-            payload=json.loads(response.read().decode("utf-8",errors="replace"))
-        result=((payload.get("chart") or {}).get("result") or [None])[0]
-        if not isinstance(result,dict):
-            return {}, str(((payload.get("chart") or {}).get("error") or {}).get("description") or "No quote returned")
-        meta=result.get("meta") or {}
-        closes=(((result.get("indicators") or {}).get("quote") or [{}])[0].get("close") or [])
-        vals=[float(x) for x in closes if x is not None]
-        price=meta.get("regularMarketPrice")
-        try: price=float(price) if price is not None else (vals[-1] if vals else None)
-        except Exception: price=vals[-1] if vals else None
-        prev=meta.get("chartPreviousClose") or meta.get("previousClose")
-        try: prev=float(prev) if prev is not None else (vals[-2] if len(vals)>1 else None)
-        except Exception: prev=vals[-2] if len(vals)>1 else None
-        pct=((price-prev)/prev*100.0) if price is not None and prev not in (None,0) else None
-        return {
-            "symbol":safe,"price":price,"previous":prev,"change_pct":pct,
-            "currency":str(meta.get("currency") or ""),"exchange":str(meta.get("exchangeName") or meta.get("fullExchangeName") or ""),
-            "timestamp":meta.get("regularMarketTime"),
-        }, ""
-    except (HTTPError,URLError,TimeoutError,ValueError,OSError,TypeError) as exc:
-        return {}, str(exc)
-
-@st.cache_data(show_spinner=False, ttl=1800)
-def load_fred_latest(series_id):
-    """Latest non-empty FRED observation for slower official/reference series."""
-    sid=str(series_id or "").strip()
-    if not sid: return {}, "Missing series"
-    url=f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}"
-    try:
-        req=Request(url,headers={"User-Agent":"PC-Trade-System/3.3"})
-        with urlopen(req,timeout=10) as response:
-            raw=response.read().decode("utf-8",errors="replace")
-        import io
-        df=pd.read_csv(io.StringIO(raw))
-        if df.empty or sid not in df.columns: return {}, "No observations"
-        df[sid]=pd.to_numeric(df[sid],errors="coerce")
-        df=df[df[sid].notna()]
-        if df.empty: return {}, "No numeric observations"
-        r=df.iloc[-1]
-        prev=df.iloc[-2][sid] if len(df)>1 else None
-        value=float(r[sid]); prev=float(prev) if prev is not None and pd.notna(prev) else None
-        pct=((value-prev)/prev*100.0) if prev not in (None,0) else None
-        return {"price":value,"previous":prev,"change_pct":pct,"date":str(r.iloc[0])}, ""
-    except (HTTPError,URLError,TimeoutError,ValueError,OSError,TypeError) as exc:
-        return {}, str(exc)
-
-def _metric_price(value, kind="number"):
-    if value is None or pd.isna(value): return "—"
-    value=float(value)
-    if kind=="fx": return f"{value:,.4f}"
-    if abs(value)>=1000: return f"{value:,.0f}"
-    return f"{value:,.2f}"
-
-def render_live_market_dashboard(compact=False):
-    """Readable live/delayed market context for the Trade overview."""
-    indices=[
-        ("S&P 500","^GSPC"),("NASDAQ Composite","^IXIC"),("FTSE 100","^FTSE"),("DAX","^GDAXI"),
-        ("Nikkei 225","^N225"),("Hang Seng","^HSI"),("Tadawul All Share","^TASI.SR"),
-    ]
-    energy=[("Brent","BZ=F"),("WTI","CL=F"),("Henry Hub Gas","NG=F"),("Gold","GC=F"),("USD Index","DX-Y.NYB")]
-    fx=[("EUR/USD","EURUSD=X"),("GBP/USD","GBPUSD=X"),("USD/JPY","JPY=X"),("USD/CNY","CNY=X"),("USD/INR","INR=X")]
-
-    def _rows(items,kind="number"):
-        rows=[]
-        for label,symbol in items:
-            q,err=load_yahoo_quote(symbol)
-            if not q or q.get("price") is None:
-                continue
-            delta=q.get("change_pct")
-            rows.append({
-                "Market":label,
-                "Last":_metric_price(q.get("price"),kind),
-                "Change":("—" if delta is None else f"{delta:+.2f}%"),
-            })
-        return pd.DataFrame(rows)
-
-    def _render_table(items,kind="number"):
-        df=_rows(items,kind)
-        if df.empty:
-            st.caption("Live market feed is temporarily unavailable.")
-            return
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Market":st.column_config.TextColumn("Market",width="medium"),
-                "Last":st.column_config.TextColumn("Last",width="small"),
-                "Change":st.column_config.TextColumn("1D",width="small"),
-            },
-        )
-
-    if compact:
-        tabs=st.tabs(["Bourses","Energy","FX"])
-        with tabs[0]:
-            _render_table(indices)
-        with tabs[1]:
-            _render_table(energy)
-            dubai,derr=load_fred_latest("POILDUBUSDM")
-            if dubai:
-                ch=dubai.get("change_pct")
-                change="" if ch is None else f" · {ch:+.2f}% vs prior observation"
-                st.caption(f"Dubai crude · IMF/FRED monthly reference · ${dubai.get('price',0):,.2f}{change} · {dubai.get('date','')}")
-        with tabs[2]:
-            _render_table(fx,"fx")
-    else:
-        st.markdown("### Bourse indices")
-        _render_table(indices)
-        st.markdown("### Energy, commodities & USD")
-        _render_table(energy)
-        dubai,derr=load_fred_latest("POILDUBUSDM")
-        if dubai:
-            st.caption(f"Dubai crude reference (IMF/FRED monthly): ${dubai.get('price',0):,.2f} · observation {dubai.get('date','')} · slower reference series, not an intraday quote")
-        st.markdown("### FX")
-        _render_table(fx,"fx")
-
-
-def _news_trade_relevant(row):
-    """Keep the Overview feed focused on trade, business, conflict and geopolitics."""
-    fields=["title","description","content","keywords","category","country","source_name"]
-    text=" ".join(str(row.get(c) or "") for c in fields).casefold()
-
-    # Strong exclusions. These should never lead the Trade overview unless a genuine
-    # commercial/geopolitical term also appears in a clearly relevant context.
-    excluded=[
-        r"\bnfl\b",r"\bnba\b",r"\bmlb\b",r"\bnhl\b",r"\bncaa\b",r"football",r"basketball",r"baseball",
-        r"soccer",r"tennis",r"golf",r"touchdown",r"halftime",r"quarterback",r"kentucky",r"alabama",
-        r"celebrity",r"entertainment",r"movie",r"film festival",r"television series",r"music album",r"concert",
-        r"fashion",r"recipe",r"dating",r"horoscope",r"wellness",r"fitness",r"travel tips",r"lottery"
-    ]
-    if any(re.search(p,text) for p in excluded):
-        return False
-
-    relevant=[
-        r"shipping",r"maritime",r"port\b",r"terminal",r"container",r"freight",r"logistics",r"supply chain",
-        r"trade\b",r"tariff",r"customs",r"sanction",r"export",r"import",r"corridor",r"rail",r"railway",
-        r"aviation",r"airport",r"air cargo",r"infrastructure",r"investment",r"contract",r"acquisition",r"merger",
-        r"oil\b",r"crude",r"gas\b",r"lng",r"refiner",r"pipeline",r"energy",r"commodity",r"minerals?",
-        r"conflict",r"war\b",r"attack",r"drone",r"missile",r"military",r"defen[cs]e",r"naval",r"security",
-        r"geopolit",r"government",r"election",r"diplomat",r"border",r"blockade",r"strait",r"canal",
-        r"company",r"corporate",r"earnings",r"shares?",r"stock market",r"bourse",r"bank",r"finance",r"economy",
-    ]
-    return any(re.search(p,text) for p in relevant)
-
-
-def render_overview_news():
-    """Latest business/trade/geopolitical signals from NewsData.io with conservative fallbacks."""
-    api_key=_newsdata_key()
-    st.markdown("### Latest news & signals")
-    if not api_key:
-        st.caption("NewsData.io is configured in code but no API key was found in Streamlit Secrets.")
-        return
-
-    # NewsData can reject very large Boolean expressions with HTTP 422.  Use a few
-    # compact thematic queries and fall back to a single keyword when a Boolean query
-    # is rejected.  Results are merged and de-duplicated locally.
-    query_groups=[
-        ("Trade & logistics","shipping OR port OR logistics OR freight"),
-        ("Trade policy","trade OR tariff OR sanctions"),
-        ("Energy","oil OR gas OR LNG OR energy"),
-        ("Investment & infrastructure","infrastructure OR investment OR contract"),
-        ("Security & geopolitics","conflict OR military OR security OR geopolitics"),
-    ]
-    frames=[]
-    errors=[]
-    for label,q in query_groups:
-        df,err=load_newsdata_articles(q,api_key,"en",10)
-        if err and "HTTP 422" in err:
-            fallback=q.split(" OR ",1)[0].strip().strip('"')
-            df,err=load_newsdata_articles(fallback,api_key,"en",10)
-        if err:
-            errors.append(f"{label}: {err}")
-        elif df is not None and not df.empty:
-            x=df.copy(); x["_pc_news_group"]=label; frames.append(x)
-
-    if not frames:
-        msg=errors[0] if errors else "No results returned"
-        st.caption(f"NewsData.io unavailable: {msg}")
-        return
-
-    df=pd.concat(frames,ignore_index=True,sort=False)
-    df=df[df.apply(_news_trade_relevant,axis=1)].copy()
-    if df.empty:
-        st.caption("No current business, trade, conflict or geopolitical signals passed the relevance filter.")
-        return
-
-    # De-duplicate syndicated copies by normalized title.
-    df["_title_key"]=df.get("title",pd.Series(index=df.index,dtype=str)).fillna("").astype(str).str.casefold().str.replace(r"[^a-z0-9]+"," ",regex=True).str.strip()
-    df=df.drop_duplicates("_title_key").drop(columns=["_title_key"],errors="ignore")
-    if "pubDate" in df.columns:
-        df["_pub_dt"]=pd.to_datetime(df["pubDate"],errors="coerce",utc=True)
-        df=df.sort_values("_pub_dt",ascending=False,na_position="last")
-
-    for _,row in df.head(10).iterrows():
-        title=str(row.get("title") or "Untitled").strip()
-        url=str(row.get("link") or "").strip()
-        source=str(row.get("source_name") or row.get("source_id") or "").strip()
-        pub=str(row.get("pubDate") or "").strip()
-        desc=str(row.get("description") or "").strip()
-        group=str(row.get("_pc_news_group") or "Open source").strip()
-        if url:
-            st.markdown(f"**[{title}]({url})**")
-        else:
-            st.markdown(f"**{title}**")
-        meta=" · ".join(x for x in [group,source,pub] if x)
-        if meta: st.caption(meta)
-        if desc: st.write(desc[:260] + ("…" if len(desc)>260 else ""))
-    if errors:
-        with st.expander("Feed diagnostics"):
-            for e in errors[:5]: st.caption(e)
-    st.caption("NewsData.io discovery feed · relevance-gated · cached 10 minutes · corroborate before canonical promotion")
 
 AISHUB_URL = "https://data.aishub.net/ws.php"
 NAVITIA_BASE = "https://api.navitia.io/v1"
@@ -1074,870 +779,6 @@ def all_tables():
 
 TABLES=all_tables()
 
-def _canonical_db_event_frames():
-    """Return normalized Supabase events/locations in the legacy dataframe shape.
-
-    Canonical normalized tables are authoritative when available. The existing
-    workbook/legacy bridge remains a fallback if Supabase is unavailable.
-    """
-    try:
-        sb = pc_db_client(service=True)
-        if sb is None:
-            return pd.DataFrame(), pd.DataFrame()
-
-        erows = pc_safe_rows(
-            sb,
-            "pc_events",
-            "event_id,start_date,end_date,event_nature,event_domain,event_family,event_type,severity,status,mode,countries,location,title,description,operational_impact,commercial_impact,confidence,trade_relevance,intelligence_relevance,trade_visible,intelligence_visible,alert_worthy,record_status,source_id,metadata",
-            5000,
-            order="start_date",
-        )
-        lrows = pc_safe_rows(
-            sb,
-            "pc_event_locations",
-            "event_location_id,event_id,location_name,country,latitude,longitude,accuracy,notes",
-            5000,
-        )
-
-        if not erows:
-            return pd.DataFrame(), pd.DataFrame()
-
-        events = pd.DataFrame(erows).rename(columns={
-            "event_id":"Event ID",
-            "start_date":"Start Date",
-            "end_date":"End Date",
-            "event_nature":"Event Nature",
-            "event_domain":"Event Domain",
-            "event_family":"Event Family",
-            "event_type":"Event Type",
-            "severity":"Severity",
-            "status":"Status",
-            "mode":"Mode",
-            "countries":"Country / Countries",
-            "location":"Location",
-            "title":"Title",
-            "description":"Description",
-            "operational_impact":"Operational Impact",
-            "commercial_impact":"Trade / Commercial Impact",
-            "confidence":"Confidence",
-            "trade_relevance":"Trade Relevance",
-            "intelligence_relevance":"Intelligence Relevance",
-            "trade_visible":"Trade Visible",
-            "intelligence_visible":"Intelligence Visible",
-            "alert_worthy":"Alert Worthy",
-            "record_status":"Record Status",
-            "source_id":"Source ID",
-            "metadata":"Metadata",
-        })
-
-        if lrows:
-            locations = pd.DataFrame(lrows).rename(columns={
-                "event_location_id":"Location Record",
-                "event_id":"Event ID",
-                "location_name":"Location",
-                "country":"Country",
-                "latitude":"Latitude",
-                "longitude":"Longitude",
-                "accuracy":"Accuracy",
-                "notes":"Notes",
-            })
-        else:
-            locations = pd.DataFrame()
-
-        return events, locations
-    except Exception:
-        return pd.DataFrame(), pd.DataFrame()
-
-# Normalized canonical event tables supersede the mirrored workbook event layer.
-# This is what allows newly-promoted ReCAAP records (and future DB-native events)
-# to appear immediately without rebuilding an Excel workbook.
-_CANON_EVENTS, _CANON_EVENT_LOCS = _canonical_db_event_frames()
-if not _CANON_EVENTS.empty:
-    TABLES[("Events & Hazards","Events")] = _CANON_EVENTS
-if not _CANON_EVENT_LOCS.empty:
-    TABLES[("Events & Hazards","Event Locations")] = _CANON_EVENT_LOCS
-
-
-@st.cache_data(show_spinner=False, ttl=60)
-def _canonical_db_vessel_frames():
-    """Load canonical Supabase vessels, vessel/company relationships and event links.
-
-    The normalized database is authoritative for newly-created vessels.  Results are
-    projected into the legacy dataframe column names so the existing Trade UI can use
-    them without maintaining a second vessel implementation.
-    """
-    def _db_norm_imo(value):
-        s = re.sub(r"[^0-9]", "", str(value or ""))
-        return s if len(s) == 7 else s
-
-    try:
-        sb = pc_db_client(service=True)
-        if sb is None:
-            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-        # Keep this projection deliberately limited to columns verified in the
-        # canonical pc_mobile_assets schema. Earlier builds requested optional fields
-        # such as capacity_value/dwt/data_quality; one absent field made PostgREST
-        # return no rows and the entire Trade vessel universe appeared as zero.
-        vrows = pc_safe_rows(
-            sb,
-            "pc_mobile_assets",
-            "mobile_asset_id,name,asset_type,subtype,imo,status,record_status,metadata",
-            10000,
-            order="name",
-        )
-        erows = pc_safe_rows(
-            sb,
-            "pc_entities",
-            "entity_id,name,entity_type,subtype,hq_city,hq_country,status,record_status,metadata",
-            5000,
-            order="name",
-        )
-        lrows = pc_safe_rows(
-            sb,
-            "pc_event_links",
-            "event_link_id,event_id,linked_type,linked_id,linked_name,relationship,confidence,source_id,metadata",
-            10000,
-        )
-        fleet_rel_rows = pc_safe_rows(
-            sb,
-            "pc_relationships",
-            "relationship_id,source_type,source_id,relationship_type,target_type,target_id,confidence,record_status,evidence_source_id,metadata",
-            20000,
-        )
-
-        if not vrows:
-            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-        entities = {str(r.get("entity_id") or ""): str(r.get("name") or "") for r in (erows or [])}
-
-        # Canonical graph roles can exist even when owner/operator columns on pc_mobile_assets
-        # have not been denormalized yet. Build a target-vessel role map from pc_relationships.
-        fleet_roles = defaultdict(list)
-        for rr in fleet_rel_rows or []:
-            if str(rr.get("source_type") or "").casefold() != "entity":
-                continue
-            if str(rr.get("target_type") or "").casefold() not in {"mobile_asset","vessel"}:
-                continue
-            vid = str(rr.get("target_id") or "").strip()
-            eid = str(rr.get("source_id") or "").strip()
-            rel = str(rr.get("relationship_type") or "").strip().casefold().replace("-","_").replace(" ","_")
-            if vid and eid:
-                fleet_roles[vid].append((rel,eid,rr))
-
-        vessels = []
-        relationships = []
-
-        for r in vrows:
-            meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
-            vessel_id = str(r.get("mobile_asset_id") or "").strip()
-            owner_id = str(r.get("owner_entity_id") or "").strip()
-            operator_id = str(r.get("operator_entity_id") or "").strip()
-            manager_id = str(r.get("manager_entity_id") or "").strip()
-
-            # Fill missing denormalized roles from canonical graph edges.
-            for _rel,_eid,_rr in fleet_roles.get(vessel_id,[]):
-                if _rel in {"owns","owner_of"} and not owner_id:
-                    owner_id=_eid
-                elif _rel in {"operates","operator_of"} and not operator_id:
-                    operator_id=_eid
-                elif _rel in {"manages","manager_of"} and not manager_id:
-                    manager_id=_eid
-                elif _rel=="charters" and not operator_id:
-                    operator_id=_eid
-
-            owner_name = entities.get(owner_id, owner_id)
-            operator_name = entities.get(operator_id, operator_id)
-            manager_name = entities.get(manager_id, manager_id)
-
-            # Build a readable owner/operator line without duplicating the same company.
-            oo = []
-            for x in [owner_name, operator_name]:
-                if x and x not in oo:
-                    oo.append(x)
-            owner_operator = " / ".join(oo)
-
-            research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
-            vessels.append({
-                "Vessel ID": str(r.get("mobile_asset_id") or "").strip(),
-                "Vessel Name": str(r.get("name") or "").strip(),
-                "IMO": _db_norm_imo(r.get("imo")),
-                "MMSI": str(research.get("mmsi") or meta.get("mmsi") or "").strip(),
-                "Call Sign": str(research.get("call_sign") or meta.get("call_sign") or "").strip(),
-                "Flag": str(research.get("flag") or meta.get("flag") or "").strip(),
-                "Vessel Type": str(r.get("asset_type") or "").strip(),
-                "Subtype / Class": str(r.get("subtype") or "").strip(),
-                "Year Built": research.get("year_built") or meta.get("year_built"),
-                "DWT": research.get("dwt") or meta.get("dwt"),
-                "Capacity": research.get("capacity") or research.get("capacity_value") or meta.get("capacity"),
-                "Capacity Unit": str(research.get("capacity_unit") or meta.get("capacity_unit") or "").strip(),
-                "Owner Company ID": owner_id,
-                "Operator Company ID": operator_id,
-                "Manager Company ID": manager_id,
-                "Owner": owner_name,
-                "Operator": operator_name,
-                "Manager": manager_name,
-                "Owner / Operator Text": owner_operator,
-                "Status": str(r.get("status") or r.get("record_status") or "").strip(),
-                "Record Status": str(r.get("record_status") or "").strip(),
-                "Data Quality": str(research.get("data_quality") or meta.get("data_quality") or "").strip(),
-                "Source ID": str(research.get("source_id") or meta.get("source_id") or "").strip(),
-                "Notes": str(meta.get("note") or meta.get("notes") or "").strip(),
-                "Completeness Note": (
-                    "Canonical Supabase mobile-asset record."
-                    if not str(meta.get("recaap_input_name") or "").strip()
-                    else "Canonical Supabase vessel resolved from ReCAAP incident data."
-                ),
-                "Metadata": meta,
-            })
-
-            _seen_vroles=set()
-            for role, eid, ename in [
-                ("Owner", owner_id, owner_name),
-                ("Operator", operator_id, operator_name),
-                ("Manager", manager_id, manager_name),
-            ]:
-                if not eid:
-                    continue
-                _seen_vroles.add((role.casefold(),eid))
-                relationships.append({
-                    "Vessel ID": vessel_id,
-                    "Vessel Name": str(r.get("name") or "").strip(),
-                    "Company ID": eid,
-                    "Company": ename,
-                    "Relationship": role,
-                    "Role": role,
-                    "Source ID": str(r.get("source_id") or "").strip(),
-                })
-
-            for _rel,_eid,_rr in fleet_roles.get(vessel_id,[]):
-                _pretty = pretty_relationship(_rel)
-                _key=(_pretty.casefold(),_eid)
-                if _key in _seen_vroles:
-                    continue
-                relationships.append({
-                    "Vessel ID": vessel_id,
-                    "Vessel Name": str(r.get("name") or "").strip(),
-                    "Company ID": _eid,
-                    "Company": entities.get(_eid,_eid),
-                    "Relationship": _pretty,
-                    "Role": _pretty,
-                    "Source ID": str(_rr.get("evidence_source_id") or r.get("source_id") or "").strip(),
-                })
-
-        event_links = []
-        for r in (lrows or []):
-            linked_type = str(r.get("linked_type") or "").strip().casefold()
-            if linked_type not in {"mobile_asset", "vessel"}:
-                continue
-            event_links.append({
-                "Link ID": str(r.get("event_link_id") or "").strip(),
-                "Event ID": str(r.get("event_id") or "").strip(),
-                "Asset ID": str(r.get("linked_id") or "").strip(),
-                "Asset": str(r.get("linked_name") or "").strip(),
-                "Relationship": str(r.get("relationship") or "").strip(),
-                "Confidence": str(r.get("confidence") or "").strip(),
-                "Source ID": str(r.get("source_id") or "").strip(),
-                "Metadata": r.get("metadata") or {},
-            })
-
-        return (
-            pd.DataFrame(vessels),
-            pd.DataFrame(relationships),
-            pd.DataFrame(event_links),
-        )
-    except Exception:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-
-def _merge_canonical_vessels(legacy, canonical):
-    """Merge DB vessels into the legacy display frame, preferring DB rows by ID/IMO."""
-    def _merge_merge_norm_imo(value):
-        return re.sub(r"[^0-9]", "", str(value or ""))
-    if canonical is None or canonical.empty:
-        return legacy.copy() if isinstance(legacy, pd.DataFrame) else pd.DataFrame()
-    if legacy is None or legacy.empty:
-        return canonical.copy()
-
-    old = legacy.copy()
-    new = canonical.copy()
-
-    # Remove legacy rows superseded by the canonical ID or IMO.
-    canon_ids = set(new.get("Vessel ID", pd.Series(dtype=str)).fillna("").astype(str))
-    canon_imos = set(new.get("IMO", pd.Series(dtype=str)).map(_merge_merge_norm_imo))
-    canon_imos.discard("")
-
-    keep = pd.Series(True, index=old.index)
-    if "Vessel ID" in old.columns and canon_ids:
-        keep &= ~old["Vessel ID"].fillna("").astype(str).isin(canon_ids)
-    if "IMO" in old.columns and canon_imos:
-        keep &= ~old["IMO"].map(_merge_merge_norm_imo).isin(canon_imos)
-
-    return pd.concat([old[keep], new], ignore_index=True, sort=False)
-
-
-_CANON_VESSELS, _CANON_VESSEL_RELS, _CANON_VESSEL_EVENT_LINKS = _canonical_db_vessel_frames()
-
-if not _CANON_VESSELS.empty:
-    TABLES[("Maritime","Vessels")] = _merge_canonical_vessels(
-        TABLES.get(("Maritime","Vessels"), pd.DataFrame()),
-        _CANON_VESSELS,
-    )
-
-if not _CANON_VESSEL_RELS.empty:
-    _legacy_vrels = TABLES.get(("Maritime","Vessel Relationships"), pd.DataFrame())
-    TABLES[("Maritime","Vessel Relationships")] = pd.concat(
-        [_legacy_vrels, _CANON_VESSEL_RELS],
-        ignore_index=True,
-        sort=False,
-    ).drop_duplicates(
-        subset=[c for c in ["Vessel ID","Company ID","Relationship"] if c in pd.concat([_legacy_vrels, _CANON_VESSEL_RELS], ignore_index=True, sort=False).columns],
-        keep="last",
-    )
-
-if not _CANON_VESSEL_EVENT_LINKS.empty:
-    _legacy_eal = TABLES.get(("Events & Hazards","Event Asset Links"), pd.DataFrame())
-    _combined_eal = pd.concat(
-        [_legacy_eal, _CANON_VESSEL_EVENT_LINKS],
-        ignore_index=True,
-        sort=False,
-    )
-    _dedupe_cols = [c for c in ["Event ID","Asset ID","Relationship"] if c in _combined_eal.columns]
-    TABLES[("Events & Hazards","Event Asset Links")] = (
-        _combined_eal.drop_duplicates(subset=_dedupe_cols, keep="last")
-        if _dedupe_cols else _combined_eal
-    )
-
-
-# ---------- v3.3.11 live canonical trade bridge ----------
-def _merge_canonical_rows(legacy, canonical, id_col, name_col=None):
-    """Merge canonical DB rows into a legacy display frame, preferring DB rows by ID/name."""
-    if canonical is None or canonical.empty:
-        return legacy.copy() if isinstance(legacy, pd.DataFrame) else pd.DataFrame()
-    if legacy is None or legacy.empty:
-        return canonical.copy()
-
-    old = legacy.copy()
-    new = canonical.copy()
-    keep = pd.Series(True, index=old.index)
-
-    if id_col in old.columns and id_col in new.columns:
-        ids = set(new[id_col].fillna("").astype(str).str.strip())
-        ids.discard("")
-        if ids:
-            keep &= ~old[id_col].fillna("").astype(str).str.strip().isin(ids)
-
-    if name_col and name_col in old.columns and name_col in new.columns:
-        names = set(new[name_col].fillna("").astype(str).str.strip().str.casefold())
-        names.discard("")
-        if names:
-            keep &= ~old[name_col].fillna("").astype(str).str.strip().str.casefold().isin(names)
-
-    return pd.concat([old[keep], new], ignore_index=True, sort=False)
-
-
-def _canonical_relationship_role_maps(rels):
-    """Return asset->company role maps from canonical pc_relationships."""
-    operator = {}
-    owner = {}
-    all_roles = defaultdict(list)
-    if rels is None or rels.empty:
-        return operator, owner, all_roles
-
-    for _, r in rels.iterrows():
-        stype = str(r.get("source_type") or "").strip().casefold()
-        ttype = str(r.get("target_type") or "").strip().casefold()
-        if stype != "entity" or ttype != "asset":
-            continue
-        eid = str(r.get("source_id") or "").strip()
-        aid = str(r.get("target_id") or "").strip()
-        rel = str(r.get("relationship_type") or "").strip().casefold().replace("-", "_").replace(" ", "_")
-        if not eid or not aid:
-            continue
-        all_roles[aid].append((rel, eid))
-        if rel in {"operates", "manages", "operator_of", "concession_holder"} and aid not in operator:
-            operator[aid] = eid
-        if rel in {"owns", "controls", "owner_of", "parent_of"} and aid not in owner:
-            owner[aid] = eid
-    return operator, owner, all_roles
-
-
-@st.cache_data(show_spinner=False, ttl=60)
-def _canonical_db_core_trade_frames():
-    """Project live canonical Supabase entities/assets/relationships/routes into legacy Trade UI shapes."""
-    try:
-        sb = pc_db_client(service=True)
-        if sb is None:
-            return tuple(pd.DataFrame() for _ in range(7))
-
-        erows = pc_safe_rows(
-            sb, "pc_entities",
-            "entity_id,name,entity_type,subtype,hq_city,hq_country,status,record_status,metadata",
-            10000, order="name"
-        )
-        arows = pc_safe_rows(
-            sb, "pc_assets",
-            "asset_id,name,asset_type,subtype,country,region_city,latitude,longitude,status,record_status,metadata",
-            10000, order="name"
-        )
-        rrows = pc_safe_rows(
-            sb, "pc_relationships",
-            "relationship_id,source_type,source_id,relationship_type,target_type,target_id,ownership_percent,operating_control,valid_from,valid_to,confidence,record_status,evidence_source_id,notes,metadata",
-            20000
-        )
-        # Keep route select to fields known to exist in the executable model registry.
-        trrows = pc_safe_rows(
-            sb, "pc_transport_routes",
-            "route_id,route_name,mode,operator_entity_id",
-            10000, order="route_name"
-        )
-        mrows = pc_safe_rows(
-            sb, "pc_mobile_assets",
-            "mobile_asset_id,name,asset_type,subtype,imo,status,record_status,metadata",
-            10000, order="name"
-        )
-
-        entities_df = pd.DataFrame(erows or [])
-        assets_df = pd.DataFrame(arows or [])
-        rels_df = pd.DataFrame(rrows or [])
-        routes_df = pd.DataFrame(trrows or [])
-
-        # ---- Companies / entity registry ----
-        companies = []
-        entity_registry = []
-        entity_names = {}
-        for r in erows or []:
-            eid = str(r.get("entity_id") or "").strip()
-            name = str(r.get("name") or "").strip()
-            meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
-            research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
-            entity_names[eid] = name
-            companies.append({
-                "Company ID": eid,
-                "Company": name,
-                "Entity Type": str(r.get("entity_type") or "").strip(),
-                "Subtype": str(r.get("subtype") or "").strip(),
-                "HQ City": str(r.get("hq_city") or research.get("hq_city") or "").strip(),
-                "HQ Country": str(r.get("hq_country") or research.get("country") or research.get("hq_country") or "").strip(),
-                "Country / Geography": str(r.get("hq_country") or research.get("country") or "").strip(),
-                "Status": str(r.get("status") or r.get("record_status") or "").strip(),
-                "Record Status": str(r.get("record_status") or "").strip(),
-                "Ownership": str(research.get("ownership") or "").strip(),
-                "Business Segments": str(research.get("business_segments") or "").strip(),
-                "Markets": str(research.get("markets") or "").strip(),
-                "Scale / Network Notes": str(research.get("scale") or research.get("network_notes") or "").strip(),
-                "Metadata": meta,
-            })
-            entity_registry.append({
-                "Entity ID": eid,
-                "Canonical Name": name,
-                "Entity Type": str(r.get("entity_type") or "").strip(),
-                "Subtype": str(r.get("subtype") or "").strip(),
-                "Country": str(r.get("hq_country") or research.get("country") or "").strip(),
-                "Status": str(r.get("status") or r.get("record_status") or "").strip(),
-                "Metadata": meta,
-            })
-
-        companies = pd.DataFrame(companies)
-        entity_registry = pd.DataFrame(entity_registry)
-
-        # ---- Canonical entity/entity, entity/asset and entity/mobile-asset graph ----
-        asset_names={str(r.get("asset_id") or "").strip():str(r.get("name") or "").strip() for r in (arows or [])}
-        mobile_names={str(r.get("mobile_asset_id") or "").strip():str(r.get("name") or "").strip() for r in (mrows or [])}
-
-        def _graph_name(kind, object_id):
-            k=str(kind or "").casefold()
-            if k=="entity":
-                return entity_names.get(object_id,object_id)
-            if k=="asset":
-                return asset_names.get(object_id,object_id)
-            if k in {"mobile_asset","vessel"}:
-                return mobile_names.get(object_id,object_id)
-            return object_id
-
-        relationships = []
-        for r in rrows or []:
-            sid = str(r.get("source_id") or "").strip()
-            tid = str(r.get("target_id") or "").strip()
-            stype = str(r.get("source_type") or "").strip()
-            ttype = str(r.get("target_type") or "").strip()
-            relationships.append({
-                "Relationship ID": str(r.get("relationship_id") or "").strip(),
-                "Source Entity": sid,
-                "Source": _graph_name(stype,sid),
-                "Source Type": stype,
-                "Relationship": str(r.get("relationship_type") or "").strip(),
-                "Target Entity": tid,
-                "Target": _graph_name(ttype,tid),
-                "Target Type": ttype,
-                "Ownership %": r.get("ownership_percent"),
-                "Operating Control": r.get("operating_control"),
-                "Confidence": r.get("confidence"),
-                "Record Status": str(r.get("record_status") or "").strip(),
-                "Source ID": str(r.get("evidence_source_id") or "").strip(),
-                "Notes": str(r.get("notes") or "").strip(),
-                "Metadata": r.get("metadata") or {},
-            })
-        relationships = pd.DataFrame(relationships)
-
-        op_map, owner_map, role_map = _canonical_relationship_role_maps(rels_df)
-
-        # ---- Infrastructure assets ----
-        infra_assets = []
-        port_rows = []
-        terminal_rows = []
-        for r in arows or []:
-            aid = str(r.get("asset_id") or "").strip()
-            name = str(r.get("name") or "").strip()
-            atype = str(r.get("asset_type") or "").strip()
-            subtype = str(r.get("subtype") or "").strip()
-            kind = f"{atype} {subtype}".casefold()
-            name_kind = f"{name} {atype} {subtype}".casefold()
-            meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
-            research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
-
-            operator_id = op_map.get(aid, "")
-            owner_id = owner_map.get(aid, "")
-            company_id = operator_id or owner_id
-            company_name = entity_names.get(company_id, company_id)
-            role_text = "; ".join(
-                f"{rel}:{entity_names.get(eid,eid)}" for rel, eid in role_map.get(aid, [])
-            )
-
-            base = {
-                "Asset ID": aid,
-                "Asset": name,
-                "Asset Type": atype,
-                "Subtype": subtype,
-                "Company ID": company_id,
-                "Owner / Operator Company ID": company_id,
-                "Company": company_name,
-                "Country": str(r.get("country") or research.get("country") or "").strip(),
-                "City / Area": str(r.get("region_city") or research.get("city") or research.get("region") or "").strip(),
-                "Latitude": r.get("latitude"),
-                "Longitude": r.get("longitude"),
-                "Status": str(r.get("status") or r.get("record_status") or "").strip(),
-                "Record Status": str(r.get("record_status") or "").strip(),
-                "Relationship / Role": role_text,
-                "Capacity": research.get("capacity") or research.get("capacity_teu") or research.get("capacity_teu_per_year") or "",
-                "Metadata": meta,
-            }
-            infra_assets.append(base)
-
-            # Port-level assets. Include explicit port names even when subtype metadata is generic.
-            # A port can also contain/represent a terminal, so do not suppress an explicit "... Port" name.
-            _explicit_port_name = any(tok in name.casefold() for tok in (" port","port ","harbour","harbor"))
-            if ("port" in kind or "harbour" in kind or "harbor" in kind or _explicit_port_name):
-                port_rows.append({
-                    "Port ID": aid,
-                    "Port / Facility": name,
-                    "Country": base["Country"],
-                    "City / Area": base["City / Area"],
-                    "Facility Type": atype or subtype,
-                    "Operator Company ID": operator_id,
-                    "Operator": entity_names.get(operator_id, operator_id),
-                    "Owner Company ID": owner_id,
-                    "Status": base["Status"],
-                    "Latitude": base["Latitude"],
-                    "Longitude": base["Longitude"],
-                    "Key Role": str(research.get("role") or research.get("strategic_role") or "").strip(),
-                    "Metadata": meta,
-                })
-
-            # Terminal / depot / warehouse / logistics-facility assets.
-            if any(term in name_kind for term in ("terminal", "depot", "warehouse", "logistics", "crossdock", "yard")):
-                terminal_rows.append({
-                    "Terminal ID": aid,
-                    "Terminal / Facility": name,
-                    "Port ID": str(research.get("parent_port_id") or "").strip(),
-                    "Parent Port": str(research.get("parent_port") or "").strip(),
-                    "Country": base["Country"],
-                    "City / Area": base["City / Area"],
-                    "Primary Operator Company ID": operator_id or company_id,
-                    "Operator / Network": entity_names.get(operator_id or company_id, operator_id or company_id),
-                    "Status": base["Status"],
-                    "Ownership / Structure": role_text,
-                    "Facility Type": atype or subtype,
-                    "Latitude": base["Latitude"],
-                    "Longitude": base["Longitude"],
-                    "Metadata": meta,
-                })
-
-        infra_assets = pd.DataFrame(infra_assets)
-        ports = pd.DataFrame(port_rows)
-        terminals = pd.DataFrame(terminal_rows)
-
-        # ---- Transport routes ----
-        routes = []
-        for r in trrows or []:
-            oid = str(r.get("operator_entity_id") or "").strip()
-            routes.append({
-                "Route ID": str(r.get("route_id") or "").strip(),
-                "Route": str(r.get("route_name") or "").strip(),
-                "Route Name": str(r.get("route_name") or "").strip(),
-                "Mode": str(r.get("mode") or "").strip(),
-                "Operator Company ID": oid,
-                "Operator": entity_names.get(oid, oid),
-            })
-        routes = pd.DataFrame(routes)
-
-        return companies, entity_registry, relationships, infra_assets, ports, terminals, routes
-    except Exception:
-        return tuple(pd.DataFrame() for _ in range(7))
-
-
-(
-    _CANON_COMPANIES,
-    _CANON_ENTITY_REGISTRY,
-    _CANON_RELATIONSHIPS,
-    _CANON_INFRA_ASSETS,
-    _CANON_PORTS,
-    _CANON_TERMINALS,
-    _CANON_TRANSPORT_ROUTES,
-) = _canonical_db_core_trade_frames()
-
-if not _CANON_COMPANIES.empty:
-    TABLES[("Core Entities","Companies")] = _merge_canonical_rows(
-        TABLES.get(("Core Entities","Companies"), pd.DataFrame()),
-        _CANON_COMPANIES,
-        "Company ID",
-        "Company",
-    )
-
-if not _CANON_ENTITY_REGISTRY.empty:
-    TABLES[("Core Entities","Entity Registry")] = _merge_canonical_rows(
-        TABLES.get(("Core Entities","Entity Registry"), pd.DataFrame()),
-        _CANON_ENTITY_REGISTRY,
-        "Entity ID",
-        "Canonical Name",
-    )
-
-if not _CANON_RELATIONSHIPS.empty:
-    TABLES[("Core Entities","Relationships")] = _merge_canonical_rows(
-        TABLES.get(("Core Entities","Relationships"), pd.DataFrame()),
-        _CANON_RELATIONSHIPS,
-        "Relationship ID",
-        None,
-    )
-
-if not _CANON_INFRA_ASSETS.empty:
-    TABLES[("Infrastructure","Assets")] = _merge_canonical_rows(
-        TABLES.get(("Infrastructure","Assets"), pd.DataFrame()),
-        _CANON_INFRA_ASSETS,
-        "Asset ID",
-        "Asset",
-    )
-
-if not _CANON_PORTS.empty:
-    TABLES[("Maritime","Ports")] = _merge_canonical_rows(
-        TABLES.get(("Maritime","Ports"), pd.DataFrame()),
-        _CANON_PORTS,
-        "Port ID",
-        "Port / Facility",
-    )
-
-if not _CANON_TERMINALS.empty:
-    TABLES[("Maritime","Port Terminals")] = _merge_canonical_rows(
-        TABLES.get(("Maritime","Port Terminals"), pd.DataFrame()),
-        _CANON_TERMINALS,
-        "Terminal ID",
-        "Terminal / Facility",
-    )
-
-if not _CANON_TRANSPORT_ROUTES.empty:
-    # Keep a DB-native route table while also making routes discoverable in the Data/related-table layer.
-    TABLES[("Infrastructure","Transport Routes")] = _merge_canonical_rows(
-        TABLES.get(("Infrastructure","Transport Routes"), pd.DataFrame()),
-        _CANON_TRANSPORT_ROUTES,
-        "Route ID",
-        "Route",
-    )
-
-
-
-# ---------- v3.3.35 canonical transactions / investments bridge ----------
-@st.cache_data(show_spinner=False, ttl=60)
-def _canonical_db_transaction_frames():
-    """Project pc_transactions into the existing commercial and investment UI shapes.
-
-    pc_transactions is canonical.  The workbook-shaped frames below are presentation
-    adapters only, allowing newly ingested transactions to appear immediately without
-    rebuilding Excel files.
-    """
-    try:
-        sb = pc_db_client(service=True)
-        if sb is None:
-            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-        txrows = pc_safe_rows(
-            sb,
-            "pc_transactions",
-            "transaction_id,announced_date,effective_date,buyer_entity_id,seller_name,target_entity_id,"
-            "target_asset_id,target_name,asset_class,country_region,transaction_type,equity_percent,"
-            "reported_value,currency,operating_control,status,regulatory_status,source_id,notes,metadata",
-            10000,
-            order="announced_date",
-        ) or []
-        if not txrows:
-            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-        erows = pc_safe_rows(
-            sb, "pc_entities",
-            "entity_id,name,entity_type,subtype,hq_country,status,record_status,metadata",
-            15000, order="name"
-        ) or []
-        arows = pc_safe_rows(
-            sb, "pc_assets",
-            "asset_id,name,asset_type,subtype,country,region_city,status,record_status,metadata",
-            20000, order="name"
-        ) or []
-        entities = {str(r.get("entity_id") or ""): str(r.get("name") or "") for r in erows}
-        assets = {str(r.get("asset_id") or ""): str(r.get("name") or "") for r in arows}
-
-        tx_display=[]
-        infra_deals=[]
-        investments=[]
-
-        for r in txrows:
-            meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
-            tid = str(r.get("transaction_id") or "").strip()
-            buyer_id = str(r.get("buyer_entity_id") or "").strip()
-            target_entity_id = str(r.get("target_entity_id") or "").strip()
-            target_asset_id = str(r.get("target_asset_id") or "").strip()
-            buyer = entities.get(buyer_id, buyer_id)
-            target_entity = entities.get(target_entity_id, target_entity_id)
-            target_asset = assets.get(target_asset_id, target_asset_id)
-            target_name = str(r.get("target_name") or target_asset or target_entity or "").strip()
-            announced = r.get("announced_date") or r.get("effective_date")
-            value = r.get("reported_value")
-            currency = str(r.get("currency") or "").strip()
-            tx_type = str(r.get("transaction_type") or "").strip()
-            country_region = str(r.get("country_region") or "").strip()
-            status = str(r.get("status") or "").strip()
-
-            common={
-                "Transaction ID": tid,
-                "Announced Date": announced,
-                "Effective Date": r.get("effective_date"),
-                "Buyer Company ID": buyer_id,
-                "Buyer": buyer,
-                "Seller": str(r.get("seller_name") or "").strip(),
-                "Target Company ID": target_entity_id,
-                "Target Asset ID": target_asset_id,
-                "Target Company": target_entity or target_name,
-                "Target / Asset": target_name,
-                "Asset Class": str(r.get("asset_class") or "").strip(),
-                "Country / Region": country_region,
-                "Transaction Type": tx_type,
-                "Equity %": r.get("equity_percent"),
-                "Reported Value": value,
-                "Currency": currency,
-                "Operating Control": r.get("operating_control"),
-                "Status": status,
-                "Regulatory Status": str(r.get("regulatory_status") or "").strip(),
-                "Source ID": str(r.get("source_id") or "").strip(),
-                "Notes": str(r.get("notes") or "").strip(),
-                "Metadata": meta,
-            }
-            tx_display.append(common)
-
-            # Infrastructure/commercial deal projection for the existing Contracts page.
-            infra_deals.append({
-                "Deal ID": tid,
-                "Announced Date": announced,
-                "Investor / Buyer IDs": buyer_id,
-                "Investor / Buyer": buyer,
-                "Target / Asset": target_name,
-                "Deal Type": tx_type,
-                "Asset Class": str(r.get("asset_class") or "").strip(),
-                "Country / Region": country_region,
-                "Reported Value": value,
-                "Currency": currency,
-                "Equity %": r.get("equity_percent"),
-                "Status": status,
-                "Regulatory Status": str(r.get("regulatory_status") or "").strip(),
-                "Source ID": str(r.get("source_id") or "").strip(),
-                "Notes": str(r.get("notes") or "").strip(),
-                "Metadata": meta,
-            })
-
-            tnorm=tx_type.casefold().replace("_"," ").replace("-"," ")
-            if any(x in tnorm for x in ("acquisition","stake","equity","sale")):
-                spend_type="Acquisition / equity"
-            elif any(x in tnorm for x in ("procurement","contract","equipment")):
-                spend_type="Procurement / equipment"
-            elif any(x in tnorm for x in ("lease","concession")):
-                spend_type="Lease / concession"
-            else:
-                spend_type="Investment / transaction"
-
-            fiscal_year=""
-            try:
-                fiscal_year=str(pd.to_datetime(announced,errors="coerce").year)
-                if fiscal_year=="nan": fiscal_year=""
-            except Exception:
-                fiscal_year=""
-
-            # The buyer is the primary investment actor where known.  Keep target IDs
-            # separately so detail pages can later expose both sides without duplicating value.
-            investments.append({
-                "Transaction ID": tid,
-                "Company ID": buyer_id or target_entity_id,
-                "Counterparty / Target Company ID": target_entity_id,
-                "Announced Date": announced,
-                "Fiscal Year": fiscal_year,
-                "Project": target_name or tx_type,
-                "Country": country_region,
-                "Region": country_region,
-                "Asset / Location": target_name,
-                "Investment Class": tx_type,
-                "Spend Type": spend_type,
-                "Reported Value": value,
-                "Currency": currency,
-                "USD Value if Reported": value if currency.upper()=="USD" else None,
-                "Value Status": "Reported" if value is not None else "Undisclosed",
-                "Status": status,
-                "Investment Stage": status,
-                "Capacity / Scope": str(meta.get("scope") or meta.get("capacity") or "").strip(),
-                "Strategic Relevance": str(meta.get("strategic_relevance") or "").strip(),
-                "Seller": str(r.get("seller_name") or "").strip(),
-                "Equity %": r.get("equity_percent"),
-                "Regulatory Status": str(r.get("regulatory_status") or "").strip(),
-                "Source ID": str(r.get("source_id") or "").strip(),
-                "Notes": str(r.get("notes") or "").strip(),
-                "Metadata": meta,
-            })
-
-        return pd.DataFrame(tx_display), pd.DataFrame(infra_deals), pd.DataFrame(investments)
-    except Exception:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-
-_CANON_TRANSACTIONS, _CANON_INFRA_DEALS, _CANON_INVESTMENTS = _canonical_db_transaction_frames()
-
-if not _CANON_TRANSACTIONS.empty:
-    TABLES[("Transactions","Transactions V125")] = _merge_canonical_rows(
-        TABLES.get(("Transactions","Transactions V125"), pd.DataFrame()),
-        _CANON_TRANSACTIONS,
-        "Transaction ID",
-        None,
-    )
-
-if not _CANON_INFRA_DEALS.empty:
-    TABLES[("Transactions","Infra Deals")] = _merge_canonical_rows(
-        TABLES.get(("Transactions","Infra Deals"), pd.DataFrame()),
-        _CANON_INFRA_DEALS,
-        "Deal ID",
-        None,
-    )
-
-if not _CANON_INVESTMENTS.empty:
-    TABLES[("Corporate & Markets","Investments")] = _merge_canonical_rows(
-        TABLES.get(("Corporate & Markets","Investments"), pd.DataFrame()),
-        _CANON_INVESTMENTS,
-        "Transaction ID",
-        None,
-    )
 
 # ---------- v3.3.3 geographic + cruise integration ----------
 def _ref_port_display_name(raw):
@@ -2025,97 +866,6 @@ def unified_ports_with_reference(ports):
     if rows:
         canonical=pd.concat([canonical,pd.DataFrame(rows)],ignore_index=True,sort=False)
     return canonical
-
-@st.cache_data(show_spinner=False, ttl=1800)
-def join_portwatch_to_pc_ports(live, ports):
-    """Join latest PortWatch activity onto canonical/reference P&C geography without replacing P&C coordinates."""
-    if live is None or live.empty or ports is None or ports.empty:
-        return pd.DataFrame()
-    p=ports.copy()
-    l=live.copy()
-    p["_name_key"]=p.get("Port / Facility",pd.Series(index=p.index,dtype=str)).map(_port_match_key)
-    p["_country_key"]=p.get("Country",pd.Series(index=p.index,dtype=str)).map(_port_match_key)
-    l["_name_key"]=l.get("portname",pd.Series(index=l.index,dtype=str)).map(_port_match_key)
-    l["_country_key"]=l.get("country",pd.Series(index=l.index,dtype=str)).map(_port_match_key)
-    metrics=[c for c in ["portid","portname","country","ISO3","Date","portcalls","portcalls_container","portcalls_dry_bulk","portcalls_general_cargo","portcalls_roro","portcalls_tanker","import","export"] if c in l.columns]
-    exact=p.merge(l[metrics+["_name_key","_country_key"]],on=["_name_key","_country_key"],how="inner",suffixes=("","_pw"))
-    if not exact.empty:
-        exact["PortWatch Match Confidence"]=1.0
-        exact["PortWatch Match Method"]="normalized port + country"
-    matched_p=set(exact.index.tolist()) if not exact.empty else set()
-    # Name-only fallback is permitted only where the PortWatch name is unique globally.
-    counts=l.groupby("_name_key").size() if "_name_key" in l.columns else pd.Series(dtype=int)
-    unique_names=set(counts[counts==1].index)
-    already_keys=set(zip(exact.get("Port ID",pd.Series(dtype=str)).astype(str),exact.get("portid",pd.Series(dtype=str)).astype(str))) if not exact.empty else set()
-    fall=[]
-    exact_port_ids=set(exact.get("Port ID",pd.Series(dtype=str)).astype(str)) if not exact.empty and "Port ID" in exact.columns else set()
-    l_lookup={r["_name_key"]:r for _,r in l[l["_name_key"].isin(unique_names)].iterrows()}
-    for _,pr in p.iterrows():
-        if str(pr.get("Port ID","")) in exact_port_ids: continue
-        k=pr.get("_name_key","")
-        lr=l_lookup.get(k)
-        if lr is None: continue
-        row=pr.to_dict()
-        for c in metrics: row[c]=lr.get(c)
-        row["PortWatch Match Confidence"]=0.94
-        row["PortWatch Match Method"]="unique normalized port name"
-        fall.append(row)
-    if fall:
-        exact=pd.concat([exact,pd.DataFrame(fall)],ignore_index=True,sort=False)
-    for c in ["Latitude","Longitude","portcalls","portcalls_container","portcalls_tanker","import","export"]:
-        if c in exact.columns: exact[c]=pd.to_numeric(exact[c],errors="coerce")
-    return exact.drop(columns=[c for c in ["_name_key","_country_key"] if c in exact.columns],errors="ignore")
-
-def render_portwatch_operational_map(joined, height=470):
-    if joined is None or joined.empty:
-        st.caption("No PortWatch observations could be joined to mapped P&C ports on the latest available day.")
-        return
-    m=joined.copy()
-    m=m[pd.to_numeric(m.get("Latitude"),errors="coerce").notna() & pd.to_numeric(m.get("Longitude"),errors="coerce").notna()].copy()
-    if m.empty:
-        st.caption("Joined PortWatch records do not yet have canonical/reference coordinates.")
-        return
-    m["Latitude"]=pd.to_numeric(m["Latitude"],errors="coerce"); m["Longitude"]=pd.to_numeric(m["Longitude"],errors="coerce")
-    m["Port calls"]=pd.to_numeric(m.get("portcalls"),errors="coerce").fillna(0)
-    m["Container calls"]=pd.to_numeric(m.get("portcalls_container"),errors="coerce").fillna(0)
-    m["Tanker calls"]=pd.to_numeric(m.get("portcalls_tanker"),errors="coerce").fillna(0)
-    m["Imports"]=pd.to_numeric(m.get("import"),errors="coerce").fillna(0)
-    m["Exports"]=pd.to_numeric(m.get("export"),errors="coerce").fillna(0)
-    m["Map Port"]=m.get("Port / Facility",m.get("portname","")).fillna("").astype(str)
-    m["Map Country"]=m.get("Country",m.get("country","")).fillna("").astype(str)
-    maxcalls=max(float(m["Port calls"].max()),1.0)
-    m["radius"]=m["Port calls"].map(lambda x: 12000 + 52000*((max(float(x),0.0)/maxcalls)**0.5))
-    if pdk is None:
-        st.map(m,latitude="Latitude",longitude="Longitude",use_container_width=True)
-        return
-    layer=pdk.Layer("ScatterplotLayer",data=m,get_position="[Longitude, Latitude]",get_radius="radius",radius_min_pixels=3,radius_max_pixels=18,pickable=True,auto_highlight=True,get_fill_color=[216,180,90,175],get_line_color=[240,224,180,230],line_width_min_pixels=1)
-    view=pdk.ViewState(latitude=float(m["Latitude"].mean()),longitude=float(m["Longitude"].mean()),zoom=1.05,pitch=0,bearing=0)
-    tooltip={"html":"<b>{Map Port}</b><br/>{Map Country}<br/>Port calls: {Port calls}<br/>Container: {Container calls}<br/>Tankers: {Tanker calls}<br/>Imports: {Imports}<br/>Exports: {Exports}","style":{"backgroundColor":"#101820","color":"#F4EFE5","fontSize":"12px"}}
-    st.pydeck_chart(pdk.Deck(layers=[layer],initial_view_state=view,tooltip=tooltip,map_style=None),use_container_width=True,height=height)
-
-def render_overview_portwatch():
-    st.markdown("### Global port activity · IMF PortWatch")
-    live,error,latest_date=load_portwatch_latest()
-    if not error and live is not None and not live.empty:
-        st.session_state["portwatch_last_good"]=(live.copy(),latest_date)
-    elif "portwatch_last_good" in st.session_state:
-        live,latest_date=st.session_state["portwatch_last_good"]
-    if live is None or live.empty:
-        st.caption(f"PortWatch currently unavailable. {error}" if error else "No PortWatch observations returned.")
-        return
-    base=unified_ports_with_reference(TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy())
-    joined=join_portwatch_to_pc_ports(live,base)
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("PortWatch ports",f"{len(live):,}")
-    c2.metric("Joined to P&C map",f"{len(joined):,}")
-    c3.metric("Port calls",f"{pd.to_numeric(joined.get('portcalls'),errors='coerce').fillna(0).sum():,.0f}" if not joined.empty else "—")
-    c4.metric("Observation",latest_date or "—")
-    render_portwatch_operational_map(joined)
-    if not joined.empty:
-        cols=[c for c in ["Port / Facility","Country","portname","portid","portcalls","portcalls_container","portcalls_tanker","import","export","PortWatch Match Confidence","PortWatch Match Method"] if c in joined.columns]
-        with st.expander("PortWatch ↔ P&C joined records",expanded=False):
-            display_df(joined[cols].sort_values("portcalls",ascending=False) if "portcalls" in cols else joined[cols],500)
-    st.caption("PortWatch supplies operational activity; P&C canonical/global reference records remain the geographic authority for port identity and coordinates.")
 
 def render_named_port_map(df, height=480, radius=22000):
     if df is None or df.empty: return
@@ -2652,38 +1402,25 @@ def company_scope_ids(entity_id, max_depth=3):
     scope={str(entity_id)}
     rel=TABLES.get(("Core Entities","Relationships"),pd.DataFrame())
     if rel.empty: return scope
-    downward_terms=(
-        "OWNS","PARENT","CONTROLS","CONTROLLED","SUBSIDIARY","JV_PARTNER",
-        "OWNS_51","OWNS_49","PARENT_OF","CONTROLS","CONSOLIDATES"
-    )
-    reverse_terms=("SUBSIDIARY_OF","OWNED_BY","CONTROLLED_BY","PART_OF","MEMBER_OF")
+    ownership_terms=("OWNS","PARENT","CONTROLS","CONTROLLED","SUBSIDIARY","JV_PARTNER","OWNS_51","OWNS_49")
     frontier={str(entity_id)}
     for _ in range(max_depth):
         nxt=set()
         for src in frontier:
             rows=rel[rel.get("Source Entity",pd.Series(dtype=str)).astype(str).eq(src)]
             for _,r in rows.iterrows():
-                relationship=str(r.get("Relationship","")).upper().replace(" ","_").replace("-","_")
+                relationship=str(r.get("Relationship","")).upper()
                 tgt=str(r.get("Target Entity","")).strip()
-                if tgt and any(term in relationship for term in downward_terms):
+                if tgt and any(term in relationship for term in ownership_terms):
                     if tgt not in scope:
                         scope.add(tgt); nxt.add(tgt)
-
-                # Some legacy/canonical rows are written as child -> SUBSIDIARY_OF -> parent.
-                # Do not traverse those forward when building a parent's operating scope.
-                # They are handled through the inbound pass below.
-
+            # Group operating-ecosystem links are deliberately traversable in
+            # reverse so a Noatum Maritime profile can surface SAFEEN service
+            # craft without claiming those sister businesses are subsidiaries.
             inbound=rel[rel.get("Target Entity",pd.Series(dtype=str)).astype(str).eq(src)]
             for _,r in inbound.iterrows():
-                relationship=str(r.get("Relationship","")).upper().replace(" ","_").replace("-","_")
+                relationship=str(r.get("Relationship","")).upper()
                 source_entity=str(r.get("Source Entity","")).strip()
-
-                if source_entity and any(term in relationship for term in reverse_terms):
-                    if source_entity not in scope:
-                        scope.add(source_entity); nxt.add(source_entity)
-
-                # Group operating-ecosystem links are deliberately traversable in
-                # reverse so group profiles can expose operating sister businesses.
                 if source_entity and "GROUP_ECOSYSTEM_LINK" in relationship:
                     if source_entity not in scope:
                         scope.add(source_entity); nxt.add(source_entity)
@@ -2751,387 +1488,11 @@ def company_record(entity_id):
         if not x.empty: return x.iloc[0]
     return None
 
-def _company_name_key(value):
-    """Normalize company names for migration-era rollups."""
-    s=str(value or "").casefold()
-    s=re.sub(r"[^a-z0-9]+"," ",s).strip()
-    parts=[p for p in s.split() if p]
-    suffixes={
-        "inc","incorporated","llc","ltd","limited","plc","corp","corporation",
-        "company","co","holdings","holding","group","sa","ag","nv","bv"
-    }
-    while parts and parts[-1] in suffixes:
-        parts.pop()
-    return " ".join(parts)
-
-def _company_name_matches(series, names):
-    keys={_company_name_key(n) for n in names if _company_name_key(n)}
-    vals=series.fillna("").astype(str).map(_company_name_key)
-    mask=vals.isin(keys)
-    for root in [k for k in keys if len(k)>=6]:
-        mask |= vals.str.startswith(root+" ",na=False)
-    return mask
-
-@st.cache_data(show_spinner=False, ttl=30)
-def _live_canonical_company_rollup(entity_id, entity_name):
-    """Direct canonical company roll-up from Supabase.
-
-    This intentionally bypasses the legacy workbook projection for company profiles.
-    It uses the live pc_entities / pc_relationships / pc_assets / pc_mobile_assets tables
-    so newly-applied assets and vessels become visible immediately.
-    """
-    empty = {
-        "scope_ids": set(),
-        "relationships": pd.DataFrame(),
-        "assets": pd.DataFrame(),
-        "ports": pd.DataFrame(),
-        "terminals": pd.DataFrame(),
-        "vessels": pd.DataFrame(),
-        "vessel_relationships": pd.DataFrame(),
-        "error": "",
-    }
-    try:
-        sb = pc_db_client(service=True)
-        if sb is None:
-            empty["error"] = "No Supabase client"
-            return empty
-
-        erows = pc_safe_rows(
-            sb, "pc_entities",
-            "entity_id,name,entity_type,subtype,hq_city,hq_country,status,record_status,metadata",
-            10000, order="name"
-        )
-        rrows = pc_safe_rows(
-            sb, "pc_relationships",
-            "relationship_id,source_type,source_id,relationship_type,target_type,target_id,"
-            "ownership_percent,operating_control,confidence,record_status,evidence_source_id,notes,metadata",
-            30000
-        )
-        arows = pc_safe_rows(
-            sb, "pc_assets",
-            "asset_id,name,asset_type,subtype,country,region_city,latitude,longitude,"
-            "operator_entity_id,owner_entity_id,capacity_value,capacity_unit,status,record_status,"
-            "data_quality,source_id,metadata",
-            20000, order="name"
-        )
-        mrows = pc_safe_rows(
-            sb, "pc_mobile_assets",
-            "mobile_asset_id,name,asset_type,subtype,imo,mmsi,registration,call_sign,flag,"
-            "year_built,dwt,capacity_value,capacity_unit,owner_entity_id,operator_entity_id,"
-            "manager_entity_id,status,record_status,data_quality,source_id,metadata",
-            20000, order="name"
-        )
-
-        entities = {str(r.get("entity_id") or "").strip(): str(r.get("name") or "").strip()
-                    for r in (erows or [])}
-        relationships = rrows or []
-
-        # Start from exact selected canonical ID.
-        scope = {str(entity_id).strip()}
-
-        # Also include obvious branded canonical variants, e.g. DP World UAE / DP World Southampton.
-        root = _company_name_key(entity_name)
-        if root:
-            for r in erows or []:
-                eid = str(r.get("entity_id") or "").strip()
-                nm = _company_name_key(r.get("name"))
-                if eid and (nm == root or nm.startswith(root + " ")):
-                    scope.add(eid)
-
-        down = {
-            "owns","owns_group_company","parent_of","controls","controlled_entity",
-            "subsidiary","subsidiary_of_group","consolidates","group_company",
-            "owns_51_percent","owns_60_percent","owns_70_percent","owns_81_percent",
-        }
-        reverse = {"subsidiary_of","owned_by","controlled_by","part_of","member_of"}
-
-        # Traverse corporate hierarchy up to five levels.
-        for _ in range(5):
-            added = set()
-            for rr in relationships:
-                st = str(rr.get("source_type") or "").casefold()
-                tt = str(rr.get("target_type") or "").casefold()
-                if st != "entity" or tt != "entity":
-                    continue
-                sid = str(rr.get("source_id") or "").strip()
-                tid = str(rr.get("target_id") or "").strip()
-                rel = str(rr.get("relationship_type") or "").strip().casefold().replace("-","_").replace(" ","_")
-
-                if sid in scope:
-                    if (
-                        rel in down
-                        or rel.startswith("owns_")
-                        or rel.startswith("parent_")
-                        or "group_company" in rel
-                        or rel == "controls"
-                    ):
-                        if tid and tid not in scope:
-                            added.add(tid)
-
-                if tid in scope and rel in reverse:
-                    if sid and sid not in scope:
-                        added.add(sid)
-
-            if not added:
-                break
-            scope.update(added)
-
-        # Operational graph targets for this corporate scope.
-        graph_assets = set()
-        graph_vessels = set()
-        rel_display = []
-        vessel_rel_display = []
-
-        for rr in relationships:
-            sid = str(rr.get("source_id") or "").strip()
-            tid = str(rr.get("target_id") or "").strip()
-            st = str(rr.get("source_type") or "").strip().casefold()
-            tt = str(rr.get("target_type") or "").strip().casefold()
-            rel = str(rr.get("relationship_type") or "").strip()
-            rel_norm = rel.casefold().replace("-","_").replace(" ","_")
-
-            if sid not in scope:
-                continue
-
-            target_name = entities.get(tid, tid)
-            if tt == "asset":
-                for a in arows or []:
-                    if str(a.get("asset_id") or "").strip() == tid:
-                        target_name = str(a.get("name") or tid)
-                        break
-                if rel_norm in {"operates","owns","manages","controls","administers",
-                                "concession_holder","invested_in","develops"}:
-                    graph_assets.add(tid)
-
-            elif tt in {"mobile_asset","vessel"}:
-                for m in mrows or []:
-                    if str(m.get("mobile_asset_id") or "").strip() == tid:
-                        target_name = str(m.get("name") or tid)
-                        break
-                if rel_norm in {"operates","owns","manages","charters","controls"}:
-                    graph_vessels.add(tid)
-                    vessel_rel_display.append({
-                        "Vessel ID": tid,
-                        "Vessel Name": target_name,
-                        "Company ID": sid,
-                        "Company": entities.get(sid, sid),
-                        "Relationship": pretty_relationship(rel),
-                        "Role": pretty_relationship(rel),
-                        "Source ID": str(rr.get("evidence_source_id") or "").strip(),
-                    })
-
-            rel_display.append({
-                "Relationship ID": str(rr.get("relationship_id") or "").strip(),
-                "Source Entity": sid,
-                "Source": entities.get(sid, sid),
-                "Source Type": st,
-                "Relationship": rel,
-                "Target Entity": tid,
-                "Target": target_name,
-                "Target Type": tt,
-                "Ownership %": rr.get("ownership_percent"),
-                "Operating Control": rr.get("operating_control"),
-                "Confidence": rr.get("confidence"),
-                "Record Status": str(rr.get("record_status") or "").strip(),
-                "Source ID": str(rr.get("evidence_source_id") or "").strip(),
-                "Notes": str(rr.get("notes") or "").strip(),
-                "Metadata": rr.get("metadata") or {},
-            })
-
-        # Direct owner/operator links in pc_assets are equally authoritative.
-        live_assets = []
-        ports = []
-        terminals = []
-        for a in arows or []:
-            aid = str(a.get("asset_id") or "").strip()
-            owner = str(a.get("owner_entity_id") or "").strip()
-            operator = str(a.get("operator_entity_id") or "").strip()
-            if aid not in graph_assets and owner not in scope and operator not in scope:
-                continue
-
-            meta = a.get("metadata") if isinstance(a.get("metadata"), dict) else {}
-            research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
-            name = str(a.get("name") or "").strip()
-            atype = str(a.get("asset_type") or "").strip()
-            subtype = str(a.get("subtype") or "").strip()
-            company_id = operator or owner
-            company_name = entities.get(company_id, company_id)
-
-            base = {
-                "Asset ID": aid,
-                "Asset": name,
-                "Asset Type": atype,
-                "Subtype": subtype,
-                "Company ID": company_id,
-                "Owner / Operator Company ID": company_id,
-                "Company": company_name,
-                "Country": str(a.get("country") or research.get("country") or "").strip(),
-                "City / Area": str(a.get("region_city") or research.get("city_region") or research.get("city") or "").strip(),
-                "Latitude": a.get("latitude"),
-                "Longitude": a.get("longitude"),
-                "Status": str(a.get("status") or a.get("record_status") or "").strip(),
-                "Record Status": str(a.get("record_status") or "").strip(),
-                "Relationship / Role": "",
-                "Capacity": a.get("capacity_value") or research.get("capacity") or "",
-                "Metadata": meta,
-            }
-            live_assets.append(base)
-
-            nk = f"{name} {atype} {subtype}".casefold()
-            explicit_port = any(x in nk for x in (" port","port ","harbour","harbor"))
-            is_terminal = any(x in nk for x in ("terminal","depot","warehouse","logistics","yard","crossdock"))
-
-            if explicit_port:
-                ports.append({
-                    "Port ID": aid,
-                    "Port / Facility": name,
-                    "Country": base["Country"],
-                    "City / Area": base["City / Area"],
-                    "Facility Type": atype or subtype,
-                    "Operator Company ID": operator,
-                    "Operator": entities.get(operator, operator),
-                    "Owner Company ID": owner,
-                    "Status": base["Status"],
-                    "Latitude": base["Latitude"],
-                    "Longitude": base["Longitude"],
-                    "Key Role": str(research.get("operating_role") or research.get("strategic_role") or "").strip(),
-                    "Metadata": meta,
-                })
-
-            if is_terminal:
-                terminals.append({
-                    "Terminal ID": aid,
-                    "Terminal / Facility": name,
-                    "Port ID": str(research.get("parent_port_id") or "").strip(),
-                    "Parent Port": str(research.get("parent_port") or "").strip(),
-                    "Country": base["Country"],
-                    "City / Area": base["City / Area"],
-                    "Primary Operator Company ID": operator or owner,
-                    "Operator / Network": entities.get(operator or owner, operator or owner),
-                    "Status": base["Status"],
-                    "Ownership / Structure": "",
-                    "Facility Type": atype or subtype,
-                    "Latitude": base["Latitude"],
-                    "Longitude": base["Longitude"],
-                    "Metadata": meta,
-                })
-
-        # Direct owner/operator/manager links plus canonical graph vessel edges.
-        live_vessels = []
-        for m in mrows or []:
-            vid = str(m.get("mobile_asset_id") or "").strip()
-            owner = str(m.get("owner_entity_id") or "").strip()
-            operator = str(m.get("operator_entity_id") or "").strip()
-            manager = str(m.get("manager_entity_id") or "").strip()
-            if vid not in graph_vessels and owner not in scope and operator not in scope and manager not in scope:
-                continue
-
-            meta = m.get("metadata") if isinstance(m.get("metadata"), dict) else {}
-            research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
-            cap = m.get("capacity_value")
-            if cap in (None, ""):
-                cap = research.get("capacity")
-            live_vessels.append({
-                "Vessel ID": vid,
-                "Vessel Name": str(m.get("name") or "").strip(),
-                "IMO": str(m.get("imo") or "").strip(),
-                "MMSI": str(m.get("mmsi") or "").strip(),
-                "Call Sign": str(m.get("call_sign") or "").strip(),
-                "Flag": str(m.get("flag") or "").strip(),
-                "Vessel Type": str(m.get("asset_type") or "").strip(),
-                "Subtype / Class": str(m.get("subtype") or "").strip(),
-                "Year Built": m.get("year_built"),
-                "DWT": m.get("dwt"),
-                "Capacity": cap,
-                "Capacity Unit": str(m.get("capacity_unit") or "").strip(),
-                "Owner Company ID": owner,
-                "Operator Company ID": operator,
-                "Manager Company ID": manager,
-                "Owner": entities.get(owner, owner),
-                "Operator": entities.get(operator, operator),
-                "Manager": entities.get(manager, manager),
-                "Owner / Operator Text": " / ".join(
-                    x for x in [entities.get(owner, owner), entities.get(operator, operator)] if x
-                ),
-                "Status": str(m.get("status") or m.get("record_status") or "").strip(),
-                "Record Status": str(m.get("record_status") or "").strip(),
-                "Data Quality": str(m.get("data_quality") or "").strip(),
-                "Source ID": str(m.get("source_id") or "").strip(),
-                "Notes": str(meta.get("notes") or "").strip(),
-                "Metadata": meta,
-            })
-
-        return {
-            "scope_ids": scope,
-            "relationships": pd.DataFrame(rel_display),
-            "assets": pd.DataFrame(live_assets),
-            "ports": pd.DataFrame(ports),
-            "terminals": pd.DataFrame(terminals),
-            "vessels": pd.DataFrame(live_vessels),
-            "vessel_relationships": pd.DataFrame(vessel_rel_display),
-            "error": "",
-        }
-
-    except Exception as exc:
-        empty["error"] = f"{type(exc).__name__}: {exc}"
-        return empty
-
-
-def _overlay_live_company_rollup(prof, entity_id, entity_name):
-    live = _live_canonical_company_rollup(entity_id, entity_name)
-    prof["live_rollup_error"] = live.get("error","")
-    prof["live_scope_ids"] = live.get("scope_ids",set())
-
-    def _merge(existing, incoming, keys):
-        if incoming is None or incoming.empty:
-            return existing
-        if existing is None or existing.empty:
-            return incoming.copy()
-        combined = pd.concat([existing,incoming],ignore_index=True,sort=False)
-        dk=[k for k in keys if k in combined.columns]
-        return combined.drop_duplicates(subset=dk,keep="last") if dk else combined
-
-    prof["relationships"] = _merge(prof.get("relationships"), live.get("relationships"), ["Relationship ID"])
-    prof["assets"] = _merge(prof.get("assets"), live.get("assets"), ["Asset ID"])
-    prof["ports"] = _merge(prof.get("ports"), live.get("ports"), ["Port ID"])
-    prof["port_terminals"] = _merge(prof.get("port_terminals"), live.get("terminals"), ["Terminal ID"])
-    prof["maritime_vessels"] = _merge(prof.get("maritime_vessels"), live.get("vessels"), ["Vessel ID"])
-    prof["vessel_relationships"] = _merge(prof.get("vessel_relationships"), live.get("vessel_relationships"), ["Vessel ID","Company ID","Relationship"])
-    return prof
-
-
 def build_company_profile(entity_id, entity_name):
     prof={}
     prof["company_id"]=entity_id
     prof["name"]=entity_name
     scope_ids=company_scope_ids(entity_id)
-
-    # Expand a group profile with obvious canonical branded variants, then traverse
-    # each variant's corporate graph. This is important for groups such as DP World,
-    # AD Ports Group and Matson where ports/vessels may sit under regional/subsidiary IDs.
-    _companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
-    _brand_ids=set()
-    if not _companies.empty and "Company ID" in _companies.columns and "Company" in _companies.columns:
-        _root=_company_name_key(entity_name)
-        if _root:
-            _brand_keys=_companies["Company"].fillna("").astype(str).map(_company_name_key)
-            _brand_mask=_brand_keys.eq(_root) | _brand_keys.str.startswith(_root+" ",na=False)
-            _brand_ids.update(
-                x for x in _companies.loc[_brand_mask,"Company ID"].fillna("").astype(str).tolist()
-                if x
-            )
-
-    # Include branded IDs and their controlled/subsidiary scope.
-    for _cid in list(_brand_ids):
-        scope_ids.add(_cid)
-        try:
-            scope_ids.update(company_scope_ids(_cid))
-        except Exception:
-            pass
-
-    # IMPORTANT: compute investment/asset scope only AFTER group expansion.
-    # Earlier builds calculated this before branded subsidiaries were added,
-    # leaving DP World ports and vessels invisible even though they existed in data.
     investment_ids=company_investment_exposure_ids(scope_ids)
     asset_scope_ids=set(scope_ids) | set(investment_ids)
 
@@ -3140,12 +1501,6 @@ def build_company_profile(entity_id, entity_name):
     prof["investment_ids"]=investment_ids
     prof["investment_names"]=company_scope_names(investment_ids)
     prof["asset_scope_ids"]=asset_scope_ids
-    prof["scope_debug"]={
-        "group_scope_ids":len(scope_ids),
-        "investment_scope_ids":len(investment_ids),
-        "asset_scope_ids":len(asset_scope_ids),
-        "branded_ids":len(_brand_ids),
-    }
 
     # Corporate relationships
     rel=TABLES.get(("Core Entities","Relationships"),pd.DataFrame())
@@ -3154,35 +1509,7 @@ def build_company_profile(entity_id, entity_name):
         if "Source Entity" in rel.columns: m |= rel["Source Entity"].astype(str).isin(scope_ids)
         if "Target Entity" in rel.columns: m |= rel["Target Entity"].astype(str).isin(scope_ids)
         prof["relationships"]=rel[m].copy()
-    else:
-        prof["relationships"]=pd.DataFrame()
-
-    # Canonical graph-derived operational targets.
-    # These are authoritative when owner/operator IDs have not yet been denormalized
-    # into pc_assets / pc_mobile_assets.
-    graph_asset_ids=set()
-    graph_vessel_ids=set()
-    if not prof["relationships"].empty:
-        _rr=prof["relationships"].copy()
-        for _,_r in _rr.iterrows():
-            _src=str(_r.get("Source Entity","")).strip()
-            _tgt=str(_r.get("Target Entity","")).strip()
-            _tt=str(_r.get("Target Type","")).strip().casefold()
-            _rel=str(_r.get("Relationship","")).strip().casefold().replace("-","_").replace(" ","_")
-            if _src not in scope_ids or not _tgt:
-                continue
-            if _tt=="asset" and _rel in {
-                "operates","owns","manages","controls","administers",
-                "concession_holder","invested_in","develops"
-            }:
-                graph_asset_ids.add(_tgt)
-            if _tt in {"mobile_asset","vessel"} and _rel in {
-                "operates","owns","manages","charters","controls"
-            }:
-                graph_vessel_ids.add(_tgt)
-
-    prof["graph_asset_ids"]=graph_asset_ids
-    prof["graph_vessel_ids"]=graph_vessel_ids
+    else: prof["relationships"]=pd.DataFrame()
 
     # Shipyards owned / operated by this company
     yards=TABLES.get(("Defence & Shipbuilding","Shipyards"),pd.DataFrame())
@@ -3219,57 +1546,13 @@ def build_company_profile(entity_id, entity_name):
         for c in ["Owner Company ID","Operator Company ID"]:
             if c in v.columns: vm |= v[c].astype(str).isin(scope_ids)
     related_vessel_ids=set()
-    if not vr.empty:
-        _vrmask=pd.Series(False,index=vr.index)
-
-        # Primary match: canonical company IDs in the current corporate scope.
-        if "Company ID" in vr.columns:
-            _vrmask |= vr["Company ID"].fillna("").astype(str).isin(scope_ids)
-
-        # Name fallback is intentional. During staged/canonical migration a company
-        # can exist under a second canonical ID while the graph edge has the correct
-        # readable company name. Do not let that hide its vessels from the profile.
-        _scope_company_names=set([entity_name] + company_scope_names(scope_ids))
-        if "Company" in vr.columns:
-            _vrmask |= _company_name_matches(vr["Company"],_scope_company_names)
-
-        vrs=vr[_vrmask].copy()
+    if not vr.empty and "Company ID" in vr.columns:
+        vrs=vr[vr["Company ID"].astype(str).isin(scope_ids)].copy()
         prof["vessel_relationships"]=vrs
-        if "Vessel ID" in vrs.columns:
-            related_vessel_ids.update(
-                x for x in vrs["Vessel ID"].fillna("").astype(str).tolist() if x
-            )
-    else:
-        prof["vessel_relationships"]=pd.DataFrame()
-
-    # Direct vessel owner/operator IDs plus graph-linked vessel IDs.
-    if not v.empty and "Vessel ID" in v.columns:
-        if related_vessel_ids:
-            vm |= v["Vessel ID"].fillna("").astype(str).isin(related_vessel_ids)
-        if graph_vessel_ids:
-            vm |= v["Vessel ID"].fillna("").astype(str).isin(graph_vessel_ids)
-
-    # Final readable-name fallback for canonical graph rows whose vessel ID differs
-    # from a duplicate/legacy registry row but whose vessel name is authoritative.
-    if not v.empty and not prof["vessel_relationships"].empty and "Vessel Name" in v.columns:
-        _linked_names=set(
-            prof["vessel_relationships"].get("Vessel Name",pd.Series(dtype=str))
-            .fillna("").astype(str).str.strip().str.casefold()
-        )
-        _linked_names.discard("")
-        if _linked_names:
-            vm |= v["Vessel Name"].fillna("").astype(str).str.strip().str.casefold().isin(_linked_names)
-
+        if "Vessel ID" in vrs.columns: related_vessel_ids.update(vrs["Vessel ID"].astype(str).tolist())
+    else: prof["vessel_relationships"]=pd.DataFrame()
+    if not v.empty and related_vessel_ids and "Vessel ID" in v.columns: vm |= v["Vessel ID"].astype(str).isin(related_vessel_ids)
     prof["maritime_vessels"]=v[vm].copy() if not v.empty else pd.DataFrame()
-
-    # De-duplicate the profile vessel list on the strongest available identity.
-    if not prof["maritime_vessels"].empty:
-        _mv=prof["maritime_vessels"].copy()
-        _dedupe_cols=[c for c in ["Vessel ID","IMO"] if c in _mv.columns]
-        if _dedupe_cols:
-            prof["maritime_vessels"]=_mv.drop_duplicates(subset=_dedupe_cols,keep="last")
-        elif "Vessel Name" in _mv.columns:
-            prof["maritime_vessels"]=_mv.drop_duplicates(subset=["Vessel Name"],keep="last")
 
     # Vessel build records matching owned yards / sample defence vessels.
     builds=TABLES.get(("Maritime","Vessel Build Records"),pd.DataFrame())
@@ -3302,46 +1585,11 @@ def build_company_profile(entity_id, entity_name):
     caps=TABLES.get(("Defence & Shipbuilding","Yard Capabilities"),pd.DataFrame())
     prof["yard_capabilities"]=_match_any(caps,["Yard ID"],yard_ids)
 
-    # Infrastructure assets / facilities linked to this company.
-    # The database/legacy layers do not all use the same ownership/operator column,
-    # so match every supported company-link field rather than only "Company ID".
+    # Infrastructure assets / facilities directly owned by company
     assets=TABLES.get(("Infrastructure","Assets"),pd.DataFrame())
-    _asset_company_cols=[
-        "Company ID",
-        "Owner / Operator Company ID",
-        "Operator Company ID",
-        "Owner Company ID",
-        "Primary Operator Company ID",
-        "Entity ID",
-    ]
-    prof["assets"]=_match_any(assets,_asset_company_cols,asset_scope_ids)
-    if not assets.empty and graph_asset_ids and "Asset ID" in assets.columns:
-        _graph_assets=assets[assets["Asset ID"].fillna("").astype(str).isin(graph_asset_ids)].copy()
-        if not _graph_assets.empty:
-            _am=pd.concat([prof["assets"],_graph_assets],ignore_index=True,sort=False)
-            _ad=[c for c in ["Asset ID","Asset"] if c in _am.columns]
-            prof["assets"]=_am.drop_duplicates(subset=_ad,keep="last") if _ad else _am
-
-    # Name fallback for legacy/backfill rows where only a readable owner/operator survived.
-    if not assets.empty:
-        _asset_name_mask=pd.Series(False,index=assets.index)
-        _scope_names=set([entity_name] + company_scope_names(asset_scope_ids))
-        for _c in ["Company","Owner / Operator","Operator","Owner","Operator / Network","Relationship / Role"]:
-            if _c not in assets.columns:
-                continue
-            _asset_name_mask |= _company_name_matches(assets[_c],_scope_names)
-        _asset_named=assets[_asset_name_mask].copy()
-        if not _asset_named.empty:
-            _am=pd.concat([prof["assets"],_asset_named],ignore_index=True,sort=False)
-            _ad=[c for c in ["Asset ID","Asset"] if c in _am.columns]
-            prof["assets"]=_am.drop_duplicates(subset=_ad,keep="last") if _ad else _am
-
+    prof["assets"]=_match_any(assets,["Company ID"],scope_ids)
     infra_fac=TABLES.get(("Infrastructure","Facilities"),pd.DataFrame())
-    prof["infrastructure_facilities"]=_match_any(
-        infra_fac,
-        ["Owner / Operator Company ID","Company ID","Operator Company ID","Owner Company ID"],
-        asset_scope_ids
-    )
+    prof["infrastructure_facilities"]=_match_any(infra_fac,["Owner / Operator Company ID"],scope_ids)
 
     # Announcements related directly or through programmes
     anns=TABLES.get(("Defence & Shipbuilding","Announcements"),pd.DataFrame())
@@ -3459,39 +1707,26 @@ def build_company_profile(entity_id, entity_name):
     pnews=TABLES.get(("Maritime","Port News"),pd.DataFrame())
     ports=TABLES.get(("Maritime","Ports"),pd.DataFrame())
 
-    # direct terminal ownership/operator rows.
-    # Support both canonical projections and older AD Ports / legacy workbook link columns.
+    # direct terminal operator rows
     tm=pd.Series(False,index=pt.index) if not pt.empty else pd.Series(dtype=bool)
-    _scope_names=set([entity_name] + company_scope_names(asset_scope_ids))
     if not pt.empty:
-        for _c in [
-            "Primary Operator Company ID","Operator Company ID","Owner Company ID",
-            "Company ID","Owner / Operator Company ID"
-        ]:
-            if _c in pt.columns:
-                tm |= pt[_c].astype(str).isin(asset_scope_ids)
-        for _c in ["Operator / Network","Operator","Owner","Ownership / Structure","Company"]:
-            if _c in pt.columns:
-                tm |= _company_name_matches(pt[_c],_scope_names)
-    if not pt.empty and graph_asset_ids and "Terminal ID" in pt.columns:
-        tm |= pt["Terminal ID"].fillna("").astype(str).isin(graph_asset_ids)
+        if "Primary Operator Company ID" in pt.columns:
+            tm |= pt["Primary Operator Company ID"].astype(str).isin(asset_scope_ids)
+        if "Operator / Network" in pt.columns:
+            for nm in company_scope_names(asset_scope_ids):
+                tm |= pt["Operator / Network"].astype(str).str.contains(re.escape(nm),case=False,na=False)
     direct_terms=pt[tm].copy() if not pt.empty else pd.DataFrame()
 
-    # direct port owner/operator/authority rows.
+    # direct port operator/authority rows.
+    # Some networks (e.g. Associated British Ports) are modelled at port level rather than terminal level.
     direct_ports=pd.DataFrame()
     if not ports.empty:
         pm=pd.Series(False,index=ports.index)
-        for _c in [
-            "Operator Company ID","Owner Company ID","Company ID",
-            "Owner / Operator Company ID","Primary Operator Company ID"
-        ]:
-            if _c in ports.columns:
-                pm |= ports[_c].astype(str).isin(asset_scope_ids)
-        for _c in ["Operator","Owner","Operator / Network","Company","Ownership / Structure"]:
-            if _c in ports.columns:
-                pm |= _company_name_matches(ports[_c],_scope_names)
-        if graph_asset_ids and "Port ID" in ports.columns:
-            pm |= ports["Port ID"].fillna("").astype(str).isin(graph_asset_ids)
+        if "Operator Company ID" in ports.columns:
+            pm |= ports["Operator Company ID"].astype(str).isin(asset_scope_ids)
+        if "Operator" in ports.columns:
+            for nm in company_scope_names(asset_scope_ids):
+                pm |= ports["Operator"].astype(str).str.contains(re.escape(nm),case=False,na=False)
         direct_ports=ports[pm].copy()
 
     # ownership / JV rows can surface terminals even where primary operator differs
@@ -3511,12 +1746,7 @@ def build_company_profile(entity_id, entity_name):
 
     if not pt.empty and term_ids and "Terminal ID" in pt.columns:
         extra_terms=pt[pt["Terminal ID"].astype(str).isin(term_ids)]
-        _term_merge=pd.concat([direct_terms,extra_terms],ignore_index=True)
-        _term_dedupe=[c for c in ["Terminal ID","Terminal / Facility","Port ID"] if c in _term_merge.columns]
-        prof["port_terminals"]=(
-            _term_merge.drop_duplicates(subset=_term_dedupe,keep="last")
-            if _term_dedupe else _term_merge
-        )
+        prof["port_terminals"]=pd.concat([direct_terms,extra_terms],ignore_index=True).drop_duplicates()
     else:
         prof["port_terminals"]=direct_terms
 
@@ -3528,12 +1758,7 @@ def build_company_profile(entity_id, entity_name):
     terminal_parent_ports=ports[ports["Port ID"].astype(str).isin(port_ids)].copy() if (not ports.empty and port_ids and "Port ID" in ports.columns) else pd.DataFrame()
     port_frames=[x for x in [direct_ports,terminal_parent_ports] if isinstance(x,pd.DataFrame) and not x.empty]
     if port_frames:
-        _port_merge=pd.concat(port_frames,ignore_index=True)
-        _port_dedupe=[c for c in ["Port ID","Port / Facility"] if c in _port_merge.columns]
-        prof["ports"]=(
-            _port_merge.drop_duplicates(subset=_port_dedupe,keep="last")
-            if _port_dedupe else _port_merge
-        )
+        prof["ports"]=pd.concat(port_frames,ignore_index=True).drop_duplicates()
     else:
         prof["ports"]=pd.DataFrame()
 
@@ -3603,8 +1828,6 @@ def build_company_profile(entity_id, entity_name):
         prof["sanctions_links"]=pd.DataFrame()
     prof["sanctions_designations"]=des[des["Designation ID"].astype(str).isin(sanc_ids)].copy() if (sanc_ids and not des.empty and "Designation ID" in des.columns) else pd.DataFrame()
 
-    # Final authoritative live overlay: canonical DB wins over workbook/migration projections.
-    prof=_overlay_live_company_rollup(prof,entity_id,entity_name)
     return prof
 
 def profile_count(prof,key):
@@ -3620,8 +1843,8 @@ def readable_relationships(df, entity_id):
         src=str(r.get("Source Entity","")).strip()
         tgt=str(r.get("Target Entity","")).strip()
         rel=pretty_relationship(r.get("Relationship",""))
-        src_name=str(r.get("Source") or label(src) or src).strip()
-        tgt_name=str(r.get("Target") or label(tgt) or tgt).strip()
+        src_name=label(src)
+        tgt_name=label(tgt)
 
         st.markdown(
             f"<div class='pc-rel'><b>{src_name}</b> → {rel} → <b>{tgt_name}</b></div>",
@@ -4359,40 +2582,8 @@ def render_company_profile(entity_id, entity_name):
             st.info("No linked news, announcements or canonical event coverage.")
 
     with tabs[8]:
-        st.markdown("### Corporate & operational relationships")
+        st.markdown("### Corporate relationships")
         readable_relationships(prof["relationships"],entity_id)
-
-        if not prof["relationships"].empty:
-            _rdf=prof["relationships"].copy().head(120)
-            _dot=[
-                'digraph CompanyRelations {',
-                'rankdir=LR;',
-                'graph [bgcolor="transparent", pad="0.2", nodesep="0.35", ranksep="0.7"];',
-                'node [shape=box, style="rounded,filled", fillcolor="#111827", fontcolor="white", color="#4b5563", fontname="Arial", fontsize=10];',
-                'edge [color="#9ca3af", fontcolor="#d1d5db", fontname="Arial", fontsize=9];'
-            ]
-            _seen=set()
-            for _i,(_, _rr) in enumerate(_rdf.iterrows(),1):
-                _sid=str(_rr.get("Source Entity") or f"s{_i}")
-                _tid=str(_rr.get("Target Entity") or f"t{_i}")
-                _sname=str(_rr.get("Source") or label(_sid) or _sid)
-                _tname=str(_rr.get("Target") or label(_tid) or _tid)
-                _rel=pretty_relationship(_rr.get("Relationship","related_to"))
-                _sn="n"+hashlib.sha1(("s|"+_sid).encode("utf-8")).hexdigest()[:12]
-                _tn="n"+hashlib.sha1(("t|"+_tid).encode("utf-8")).hexdigest()[:12]
-                def _esc(v):
-                    return str(v).replace("\\","\\\\").replace('"','\\"').replace("\n"," ")
-                if _sn not in _seen:
-                    _dot.append(f'{_sn} [label="{_esc(_sname)}"];')
-                    _seen.add(_sn)
-                if _tn not in _seen:
-                    _dot.append(f'{_tn} [label="{_esc(_tname)}"];')
-                    _seen.add(_tn)
-                _dot.append(f'{_sn} -> {_tn} [label="{_esc(_rel)}"];')
-            _dot.append('}')
-            st.markdown("### Relationship network")
-            st.graphviz_chart("\n".join(_dot),use_container_width=True)
-
         if not prof["systems"].empty:
             st.markdown("### Trade systems / corridors")
             display_df(prof["systems"],50)
@@ -5717,7 +3908,7 @@ def render_company_security_risk(entity_id, entity_name):
         x=comp_exp[comp_exp["Source Vessel ID"].astype(str).isin(vids)].copy()
     a,b,c,dmetric=st.columns(4)
     a.metric("Linked vessels",len(cv))
-    b.metric("Trade / business / security events",len(ev))
+    b.metric("Security / disruption events",len(ev))
     c.metric("Compliance designations",len(d))
     dmetric.metric("Secondary exposures",len(x))
     if not d.empty:
@@ -5814,34 +4005,23 @@ def render_compliance_exposure_workspace():
 
 
 def _trade_alert_candidates():
-    """Return canonical alert/disruption events, honoring explicit DB alert flags first."""
+    """Return commercial/operational alerts, excluding routine corporate development."""
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     if events.empty:
         return events
-
-    cols=[c for c in ["Event Nature","Event Domain","Event Family","Event Type","Title","Description","Operational Impact","Trade / Commercial Impact"] if c in events.columns]
+    cols=[c for c in ["Event Family","Event Type","Title","Description","Operational Impact","Trade / Commercial Impact"] if c in events.columns]
     blob=pd.Series("",index=events.index,dtype="string")
     for c in cols:
         blob=blob.str.cat(events[c].fillna("").astype(str),sep=" ")
-
-    include=r"alert|warning|strike|labour|weather|typhoon|cyclone|hurricane|flood|earthquake|wildfire|storm|closure|outage|disruption|grounding|collision|allision|capsize|sinking|fire|explosion|attack|missile|drone|piracy|seizure|interdiction|sanction|customs|tariff|border|canal|channel|low water|cyber|fraud|smuggl|crime|restricted zone|blockade"
+    include=r"strike|labour|weather|typhoon|cyclone|hurricane|flood|earthquake|wildfire|storm|closure|outage|disruption|grounding|collision|allision|capsize|sinking|fire|explosion|attack|missile|drone|piracy|seizure|interdiction|sanction|customs|tariff|border|canal|channel|low water|cyber|fraud|smuggl|crime"
     corporate=r"new terminal|terminal opening|commissioning|new crane|crane order|equipment order|vessel order|fleet order|acquisition|investment|capex announcement|earnings|dividend|share buyback|service launch|office opening"
     inc=blob.str.contains(include,case=False,regex=True,na=False)
     corp=blob.str.contains(corporate,case=False,regex=True,na=False)
-
-    explicit=pd.Series(False,index=events.index)
-    if "Alert Worthy" in events.columns:
-        explicit |= events["Alert Worthy"].fillna(False).astype(str).str.casefold().isin({"true","1","yes","y"})
-    if "Intelligence Visible" in events.columns:
-        vis=events["Intelligence Visible"].fillna(False).astype(str).str.casefold().isin({"true","1","yes","y"})
-        sev=events.get("Severity",pd.Series(index=events.index,dtype=str)).fillna("").astype(str).str.casefold().isin({"critical","severe","high","moderate"})
-        explicit |= (vis & sev)
-
-    disruptive=inc & (~corp | blob.str.contains(r"closure|outage|strike|attack|weather|fire|explosion|disruption|sanction|seizure|piracy|drone|missile",case=False,regex=True,na=False))
-    view=events[explicit | disruptive].copy()
+    # A corporate story can still become an alert only when it independently contains disruption language.
+    view=events[inc & (~corp | blob.str.contains(r"closure|outage|strike|attack|weather|fire|explosion|disruption|sanction",case=False,regex=True,na=False))].copy()
     if "Start Date" in view.columns:
-        view["_dt"]=pd.to_datetime(view["Start Date"],errors="coerce",utc=True)
-        view=view.sort_values("_dt",ascending=False,na_position="last")
+        view["_dt"]=pd.to_datetime(view["Start Date"],errors="coerce")
+        view=view.sort_values("_dt",ascending=False)
     return view
 
 
@@ -5871,884 +4051,6 @@ def render_trade_alerts_workspace():
                 view=ev[blob.str.contains(pat,case=False,regex=True,na=False)]
             if view.empty: st.caption("No alerts in this category.")
             else: render_event_cards(view,60)
-
-
-
-def _security_text(v):
-    return str(v or "").strip()
-
-def _security_norm(v):
-    return re.sub(r"[^a-z0-9]+"," ",_security_text(v).casefold()).strip()
-
-def _security_country_from_record(row):
-    """Best available country label from canonical entity/asset metadata."""
-    for key in ("hq_country","country","Country","HQ Country"):
-        v=_security_text(row.get(key))
-        if v:
-            return v
-    meta=row.get("metadata")
-    if isinstance(meta,dict):
-        for key in ("country","hq_country","jurisdiction"):
-            v=_security_text(meta.get(key))
-            if v:
-                return v
-        ra=meta.get("research_attributes")
-        if isinstance(ra,dict):
-            for key in ("country","hq_country","jurisdiction"):
-                v=_security_text(ra.get(key))
-                if v:
-                    return v
-    return ""
-
-def _security_category(row):
-    """Classify government/security entities without pretending commercial companies are state agencies."""
-    blob=" ".join([
-        _security_text(row.get("name")),
-        _security_text(row.get("entity_type")),
-        _security_text(row.get("subtype")),
-    ]).casefold()
-
-    if any(x in blob for x in ("coast guard","maritime safety agency","maritime security agency")):
-        return "Coast Guard / Maritime Security"
-    if any(x in blob for x in ("navy","naval force","naval forces","fleet command","marine corps")):
-        return "Navy / Naval Forces"
-    if any(x in blob for x in ("air force","air command","air defence","air defense")):
-        return "Air Force / Air Defence"
-    if any(x in blob for x in ("border guard","border force","customs","gendarmerie","maritime police","marine police")):
-        return "Border / Customs / Gendarmerie"
-    if any(x in blob for x in ("ministry of defence","ministry of defense","department of defense","department of defence","armed forces","joint forces","general staff")):
-        return "Defence Ministry / Armed Forces"
-    if any(x in blob for x in ("procurement","acquisition","materiel","armament","defence equipment","defense equipment")):
-        return "Defence Procurement / Acquisition"
-    if any(x in blob for x in ("operational command","area command","logistics center","logistics centre","support command")):
-        return "Operational / Support Command"
-    if any(x in blob for x in ("government","ministry","authority","agency","command")) and any(
-        x in blob for x in ("security","defence","defense","military","maritime","naval","border")
-    ):
-        return "Government Security Organisation"
-    return ""
-
-def _security_vessel_service_hint(row):
-    """Recover a government service/operator from canonical vessel metadata or naming."""
-    vals=[]
-
-    def add(v):
-        s=_security_text(v)
-        if s and s not in vals:
-            vals.append(s)
-
-    for k in ("service","operator","owner","manager","organisation","organization"):
-        add(row.get(k))
-
-    meta=row.get("metadata")
-    if isinstance(meta,dict):
-        for k in ("service","operator","owner","manager","organisation","organization"):
-            add(meta.get(k))
-        ra=meta.get("research_attributes")
-        if isinstance(ra,dict):
-            for k in ("service","operator","owner","manager","organisation","organization"):
-                add(ra.get(k))
-
-    name=_security_text(row.get("name"))
-    n=name.casefold()
-    if n.startswith("uscgc "):
-        add("United States Coast Guard")
-    if n.startswith("ccgs "):
-        add("Canadian Coast Guard")
-    if n.startswith("jcg "):
-        add("Japan Coast Guard")
-    if n.startswith("icgs "):
-        add("Indian Coast Guard")
-
-    return vals
-
-
-def _match_security_org_ids(service_values, by_id, security_ids):
-    """Match readable service/operator text to canonical government/security entities."""
-    found=set()
-    norms=[_security_norm(v) for v in service_values if _security_norm(v)]
-    if not norms:
-        return found
-
-    aliases={
-        "us coast guard":"united states coast guard",
-        "u s coast guard":"united states coast guard",
-        "uscg":"united states coast guard",
-        "ccg":"canadian coast guard",
-        "jcg":"japan coast guard",
-        "icg":"indian coast guard",
-    }
-    norms=[aliases.get(n,n) for n in norms]
-
-    for eid in security_ids:
-        en=_security_norm(by_id.get(eid,{}).get("name"))
-        if not en:
-            continue
-        for n in norms:
-            if en==n or en in n or n in en:
-                found.add(eid)
-                break
-    return found
-
-
-@st.cache_data(show_spinner=False, ttl=45)
-def _live_government_security_model():
-    """Canonical government/security discovery layer from the live Supabase graph."""
-    result={
-        "entities":pd.DataFrame(),
-        "relationships":pd.DataFrame(),
-        "vessels":pd.DataFrame(),
-        "assets":pd.DataFrame(),
-        "error":"",
-    }
-    try:
-        sb=pc_db_client(service=True)
-        if sb is None:
-            result["error"]="No Supabase client"
-            return result
-
-        erows=pc_safe_rows(
-            sb,"pc_entities",
-            "entity_id,name,entity_type,subtype,hq_city,hq_country,status,record_status,metadata",
-            15000,order="name"
-        ) or []
-        rrows=pc_safe_rows(
-            sb,"pc_relationships",
-            "relationship_id,source_type,source_id,relationship_type,target_type,target_id,"
-            "ownership_percent,operating_control,confidence,record_status,evidence_source_id,notes,metadata",
-            40000
-        ) or []
-        mrows=pc_safe_rows(
-            sb,"pc_mobile_assets",
-            "mobile_asset_id,name,asset_type,subtype,imo,mmsi,registration,call_sign,flag,"
-            "year_built,dwt,capacity_value,capacity_unit,owner_entity_id,operator_entity_id,"
-            "manager_entity_id,status,record_status,data_quality,source_id,metadata",
-            25000,order="name"
-        ) or []
-        arows=pc_safe_rows(
-            sb,"pc_assets",
-            "asset_id,name,asset_type,subtype,country,region_city,latitude,longitude,"
-            "operator_entity_id,owner_entity_id,status,record_status,data_quality,source_id,metadata",
-            25000,order="name"
-        ) or []
-
-        by_id={_security_text(x.get("entity_id")):x for x in erows if _security_text(x.get("entity_id"))}
-        security_ids=set()
-        categories={}
-        countries={}
-
-        # First pass: direct classification and direct country.
-        for eid,row in by_id.items():
-            cat=_security_category(row)
-            if cat:
-                security_ids.add(eid)
-                categories[eid]=cat
-            c=_security_country_from_record(row)
-            if c:
-                countries[eid]=c
-
-        # Strong country hints for major state services where older rows lack hq_country.
-        service_country_hints={
-            "united states coast guard":"United States",
-            "us coast guard":"United States",
-            "u s coast guard":"United States",
-            "canadian coast guard":"Canada",
-            "royal canadian navy":"Canada",
-            "united states navy":"United States",
-            "u s navy":"United States",
-            "royal navy":"United Kingdom",
-            "royal australian navy":"Australia",
-            "australian border force":"Australia",
-            "japan coast guard":"Japan",
-            "indian coast guard":"India",
-            "indian navy":"India",
-        }
-        for eid,row in by_id.items():
-            nm=_security_norm(row.get("name"))
-            if not countries.get(eid):
-                for key,country in service_country_hints.items():
-                    if key in nm:
-                        countries[eid]=country
-                        break
-
-        # Propagate category/country down government command hierarchies.
-        hierarchy_rel={
-            "parent_of","controls","includes","contains","commands","command_of",
-            "subordinate_command","part_of","reports_to","component_of","under"
-        }
-        for _ in range(6):
-            changed=False
-            for rr in rrows:
-                if _security_text(rr.get("source_type")).casefold()!="entity" or _security_text(rr.get("target_type")).casefold()!="entity":
-                    continue
-                sid=_security_text(rr.get("source_id")); tid=_security_text(rr.get("target_id"))
-                rel=_security_text(rr.get("relationship_type")).casefold().replace("-","_").replace(" ","_")
-                if sid not in by_id or tid not in by_id:
-                    continue
-
-                if sid in security_ids and (rel in hierarchy_rel or "parent" in rel or "command" in rel or "part_of" in rel):
-                    if tid not in security_ids:
-                        security_ids.add(tid)
-                        categories[tid]=_security_category(by_id[tid]) or "Operational / Support Command"
-                        changed=True
-                    if countries.get(sid) and not countries.get(tid):
-                        countries[tid]=countries[sid]; changed=True
-
-                # Reverse-form relationship: child -> parent (PART_OF etc.).
-                if tid in security_ids and rel in {"part_of","reports_to","component_of","under","subordinate_to"}:
-                    if sid not in security_ids:
-                        security_ids.add(sid)
-                        categories[sid]=_security_category(by_id[sid]) or "Operational / Support Command"
-                        changed=True
-                    if countries.get(tid) and not countries.get(sid):
-                        countries[sid]=countries[tid]; changed=True
-            if not changed:
-                break
-
-        entity_rows=[]
-        for eid in sorted(security_ids):
-            row=by_id[eid]
-            entity_rows.append({
-                "Entity ID":eid,
-                "Organisation":_security_text(row.get("name")),
-                "Category":categories.get(eid) or _security_category(row) or "Government Security Organisation",
-                "Country":countries.get(eid) or _security_country_from_record(row),
-                "Entity Type":_security_text(row.get("entity_type")),
-                "Subtype":_security_text(row.get("subtype")),
-                "HQ City":_security_text(row.get("hq_city")),
-                "Status":_security_text(row.get("status")),
-                "Record Status":_security_text(row.get("record_status")),
-                "Metadata":row.get("metadata") or {},
-            })
-        edf=pd.DataFrame(entity_rows)
-
-        rel_rows=[]
-        linked_vessel_ids=set()
-        linked_asset_ids=set()
-
-        for rr in rrows:
-            sid=_security_text(rr.get("source_id")); tid=_security_text(rr.get("target_id"))
-            st=_security_text(rr.get("source_type")).casefold()
-            tt=_security_text(rr.get("target_type")).casefold()
-            if sid not in security_ids and tid not in security_ids:
-                continue
-            if tt in {"mobile_asset","vessel"} and sid in security_ids:
-                linked_vessel_ids.add(tid)
-            if tt=="asset" and sid in security_ids:
-                linked_asset_ids.add(tid)
-
-            rel_rows.append({
-                "Relationship ID":_security_text(rr.get("relationship_id")),
-                "Source ID":sid,
-                "Source":_security_text(by_id.get(sid,{}).get("name")) or sid,
-                "Relationship":pretty_relationship(rr.get("relationship_type")),
-                "Target Type":tt,
-                "Target ID":tid,
-                "Target":_security_text(by_id.get(tid,{}).get("name")) or tid,
-                "Confidence":rr.get("confidence"),
-                "Record Status":_security_text(rr.get("record_status")),
-            })
-
-        # Direct canonical owner/operator/manager IDs count, but many newly researched
-        # government vessels intentionally arrive before those FK columns are populated.
-        # Recover their service from metadata / vessel prefix as a safe discovery fallback.
-        inferred_vessel_orgs={}
-        for m in mrows:
-            vid=_security_text(m.get("mobile_asset_id"))
-            direct={
-                _security_text(m.get(k))
-                for k in ("owner_entity_id","operator_entity_id","manager_entity_id")
-                if _security_text(m.get(k)) in security_ids
-            }
-            inferred=_match_security_org_ids(
-                _security_vessel_service_hint(m),
-                by_id,
-                security_ids
-            )
-            orgs=direct | inferred
-            if orgs:
-                linked_vessel_ids.add(vid)
-                inferred_vessel_orgs[vid]=orgs
-
-        for a in arows:
-            if any(_security_text(a.get(k)) in security_ids for k in ("owner_entity_id","operator_entity_id")):
-                linked_asset_ids.add(_security_text(a.get("asset_id")))
-
-        vessel_rows=[]
-        for m in mrows:
-            vid=_security_text(m.get("mobile_asset_id"))
-            if vid not in linked_vessel_ids:
-                continue
-            linked_org_ids=set()
-            for rr in rrows:
-                if _security_text(rr.get("target_id"))==vid and _security_text(rr.get("source_id")) in security_ids:
-                    linked_org_ids.add(_security_text(rr.get("source_id")))
-            for k in ("owner_entity_id","operator_entity_id","manager_entity_id"):
-                eid=_security_text(m.get(k))
-                if eid in security_ids:
-                    linked_org_ids.add(eid)
-            linked_org_ids.update(inferred_vessel_orgs.get(vid,set()))
-            linked_orgs=[_security_text(by_id.get(x,{}).get("name")) or x for x in sorted(linked_org_ids)]
-            vcountries=[countries.get(x,"") for x in linked_org_ids if countries.get(x)]
-            vessel_rows.append({
-                "Vessel ID":vid,
-                "Vessel":_security_text(m.get("name")),
-                "IMO":_security_text(m.get("imo")),
-                "Hull / Registration":_security_text(m.get("registration")),
-                "Flag":_security_text(m.get("flag")),
-                "Type":_security_text(m.get("asset_type")),
-                "Subtype / Class":_security_text(m.get("subtype")),
-                "Organisation":" · ".join(linked_orgs),
-                "Country":vcountries[0] if vcountries else _security_text(m.get("flag")),
-                "Status":_security_text(m.get("status")),
-                "Record Status":_security_text(m.get("record_status")),
-                "Metadata":m.get("metadata") or {},
-            })
-
-        asset_rows=[]
-        for a in arows:
-            aid=_security_text(a.get("asset_id"))
-            if aid not in linked_asset_ids:
-                continue
-            linked_org_ids=set()
-            for rr in rrows:
-                if _security_text(rr.get("target_id"))==aid and _security_text(rr.get("source_id")) in security_ids:
-                    linked_org_ids.add(_security_text(rr.get("source_id")))
-            for k in ("owner_entity_id","operator_entity_id"):
-                eid=_security_text(a.get(k))
-                if eid in security_ids:
-                    linked_org_ids.add(eid)
-            linked_orgs=[_security_text(by_id.get(x,{}).get("name")) or x for x in sorted(linked_org_ids)]
-            acountries=[countries.get(x,"") for x in linked_org_ids if countries.get(x)]
-            asset_rows.append({
-                "Asset ID":aid,
-                "Facility / Base":_security_text(a.get("name")),
-                "Type":_security_text(a.get("asset_type")),
-                "Subtype":_security_text(a.get("subtype")),
-                "Country":_security_text(a.get("country")) or (acountries[0] if acountries else ""),
-                "City / Area":_security_text(a.get("region_city")),
-                "Organisation":" · ".join(linked_orgs),
-                "Status":_security_text(a.get("status")),
-                "Record Status":_security_text(a.get("record_status")),
-                "Latitude":a.get("latitude"),
-                "Longitude":a.get("longitude"),
-                "Metadata":a.get("metadata") or {},
-            })
-
-        result["entities"]=edf
-        result["relationships"]=pd.DataFrame(rel_rows)
-        result["vessels"]=pd.DataFrame(vessel_rows)
-        result["assets"]=pd.DataFrame(asset_rows)
-        return result
-    except Exception as exc:
-        result["error"]=f"{type(exc).__name__}: {exc}"
-        return result
-
-
-def render_government_vessel_detail(vrow, prefix="gov_vessel"):
-    """Compact expandable vessel profile from the live government/security vessel layer."""
-    if vrow is None:
-        return
-
-    name=_security_text(vrow.get("Vessel")) or "Unnamed vessel / platform"
-    cls=_security_text(vrow.get("Subtype / Class"))
-    typ=_security_text(vrow.get("Type"))
-    org=_security_text(vrow.get("Organisation"))
-    country=_security_text(vrow.get("Country"))
-    flag=_security_text(vrow.get("Flag"))
-    status=_security_text(vrow.get("Status"))
-    imo=_security_text(vrow.get("IMO"))
-    hull=_security_text(vrow.get("Hull / Registration"))
-    rec=_security_text(vrow.get("Record Status"))
-    meta=vrow.get("Metadata") if isinstance(vrow.get("Metadata"),dict) else {}
-    ra=meta.get("research_attributes") if isinstance(meta.get("research_attributes"),dict) else {}
-
-    st.markdown(f"### {name}")
-    st.caption(" · ".join([x for x in [cls or typ,org,country,status] if x]))
-
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("Type",cls or typ or "—")
-    c2.metric("Country",country or flag or "—")
-    c3.metric("Status",status or "—")
-    c4.metric("IMO / Hull",imo or hull or "—")
-
-    fields=[
-        ("Organisation / service",org),
-        ("Flag",flag),
-        ("Vessel type",typ),
-        ("Class / subtype",cls),
-        ("IMO",imo),
-        ("Hull / registration",hull),
-        ("Record status",rec),
-        ("Homeport",_security_text(ra.get("homeport") or meta.get("homeport"))),
-        ("Operating region",_security_text(ra.get("operating_region") or meta.get("operating_region"))),
-        ("Builder",_security_text(ra.get("builder") or meta.get("builder"))),
-        ("Shipyard",_security_text(ra.get("shipyard") or meta.get("shipyard"))),
-        ("Programme",_security_text(ra.get("programme") or meta.get("programme"))),
-        ("Commissioned",_security_text(ra.get("commissioned_date") or meta.get("commissioned_date"))),
-        ("Expected delivery",_security_text(ra.get("expected_delivery") or meta.get("expected_delivery"))),
-        ("Construction status",_security_text(ra.get("construction_status") or meta.get("construction_status"))),
-        ("Role",_security_text(ra.get("role") or meta.get("role"))),
-    ]
-    rows=[{"Field":a,"Value":b} for a,b in fields if b]
-    if rows:
-        display_df(pd.DataFrame(rows),120)
-
-    desc=_security_text(ra.get("description") or meta.get("description"))
-    if desc:
-        st.markdown("#### Notes")
-        st.write(desc)
-
-    sources=meta.get("research_sources")
-    if isinstance(sources,list) and sources:
-        with st.expander("Sources",expanded=False):
-            for i,s in enumerate(sources,1):
-                if isinstance(s,dict):
-                    title=_security_text(s.get("title")) or f"Source {i}"
-                    pub=_security_text(s.get("publisher"))
-                    url=_security_text(s.get("url"))
-                    if url:
-                        st.markdown(f"{i}. [{title}]({url})" + (f" — {pub}" if pub else ""))
-                    else:
-                        st.write(f"{i}. {title}" + (f" — {pub}" if pub else ""))
-
-
-def render_government_security():
-    model=_live_government_security_model()
-    if model.get("error"):
-        st.warning("Live government/security layer could not be loaded: "+model["error"])
-
-    entities=model.get("entities",pd.DataFrame()).copy()
-    vessels=model.get("vessels",pd.DataFrame()).copy()
-    assets=model.get("assets",pd.DataFrame()).copy()
-    relationships=model.get("relationships",pd.DataFrame()).copy()
-
-    if entities.empty:
-        st.info("No canonical government/security organisations are currently classified.")
-        return
-
-    countries=sorted([x for x in entities.get("Country",pd.Series(dtype=str)).fillna("").astype(str).unique() if x.strip()])
-    country=st.selectbox("Country",["All countries"]+countries,key="govsec_country")
-    if country!="All countries":
-        eview=entities[entities["Country"].astype(str).eq(country)].copy()
-        ids=set(eview["Entity ID"].astype(str))
-        vview=vessels[
-            vessels.get("Country",pd.Series(index=vessels.index,dtype=str)).astype(str).eq(country)
-            | vessels.get("Organisation",pd.Series(index=vessels.index,dtype=str)).astype(str).apply(
-                lambda x:any(_security_text(entities.loc[entities["Entity ID"].astype(str).isin(ids),"Organisation"].astype(str).eq(org)).any() for org in x.split(" · ")) if x else False
-            )
-        ].copy() if not vessels.empty else vessels
-        aview=assets[assets.get("Country",pd.Series(index=assets.index,dtype=str)).astype(str).eq(country)].copy() if not assets.empty else assets
-        rview=relationships[
-            relationships.get("Source ID",pd.Series(index=relationships.index,dtype=str)).astype(str).isin(ids)
-            | relationships.get("Target ID",pd.Series(index=relationships.index,dtype=str)).astype(str).isin(ids)
-        ].copy() if not relationships.empty else relationships
-    else:
-        eview=entities; vview=vessels; aview=assets; rview=relationships
-
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("Security organisations",len(eview))
-    c2.metric("Coast Guard / maritime",int(eview["Category"].astype(str).str.contains("Coast Guard|Maritime Security",case=False,regex=True).sum()))
-    c3.metric("Linked vessels / platforms",len(vview))
-    c4.metric("Linked facilities / bases",len(aview))
-
-    st.caption("This layer separates government/security organisations from commercial companies. It follows canonical entity relationships and direct owner/operator links rather than inferring state ownership from names alone.")
-
-    tabs=st.tabs([
-        "Directory",
-        "Coast Guard & Maritime",
-        "Defence / Navy",
-        "Vessels & Platforms",
-        "Bases & Facilities",
-        "Relationship Graph",
-    ])
-
-    with tabs[0]:
-        q=st.text_input("Find organisation",placeholder="United States Coast Guard, Royal Navy, border force...",key="govsec_org_q")
-        x=eview.copy()
-        if q.strip():
-            x=_contains_any(x,[q],["Organisation","Category","Country","Entity Type","Subtype"])
-        display_df(x[[c for c in ["Organisation","Category","Country","Entity Type","Subtype","HQ City","Status","Record Status"] if c in x.columns]],400)
-
-    with tabs[1]:
-        x=eview[eview["Category"].astype(str).str.contains("Coast Guard|Maritime Security|Border|Gendarmerie",case=False,regex=True,na=False)].copy()
-        if x.empty:
-            st.info("No coast guard / maritime-security organisations mapped for this selection.")
-        else:
-            display_df(x[[c for c in ["Organisation","Category","Country","Entity Type","Subtype","HQ City","Status"] if c in x.columns]],300)
-            cgids=set(x["Entity ID"].astype(str))
-            if not relationships.empty and not vessels.empty:
-                vids=set(relationships[
-                    relationships["Source ID"].astype(str).isin(cgids)
-                    & relationships["Target Type"].astype(str).isin(["mobile_asset","vessel"])
-                ]["Target ID"].astype(str))
-                cv=vessels[vessels["Vessel ID"].astype(str).isin(vids)].copy()
-                if not cv.empty:
-                    st.markdown("### Linked cutters, icebreakers and other platforms")
-                    cv=cv.sort_values(["Country","Organisation","Vessel"],na_position="last").reset_index(drop=True)
-                    display_df(cv[[c for c in ["Vessel","Subtype / Class","Flag","Organisation","Country","Status","IMO","Hull / Registration"] if c in cv.columns]],400)
-
-                    cg_pick=st.selectbox(
-                        "Inspect cutter / platform",
-                        range(len(cv)),
-                        format_func=lambda i: " — ".join([
-                            z for z in [
-                                str(cv.iloc[i].get("Vessel","")).strip(),
-                                str(cv.iloc[i].get("Country","")).strip(),
-                                str(cv.iloc[i].get("Organisation","")).strip(),
-                            ] if z
-                        ]),
-                        key="govsec_coastguard_vessel_pick"
-                    )
-                    render_government_vessel_detail(cv.iloc[cg_pick],prefix="coastguard")
-
-    with tabs[2]:
-        x=eview[eview["Category"].astype(str).str.contains("Defence|Navy|Naval|Air Force|Armed Forces|Procurement",case=False,regex=True,na=False)].copy()
-        if x.empty:
-            st.info("No defence/naval organisations mapped for this selection.")
-        else:
-            display_df(x[[c for c in ["Organisation","Category","Country","Entity Type","Subtype","HQ City","Status"] if c in x.columns]],300)
-
-    with tabs[3]:
-        q=st.text_input("Find vessel / platform",placeholder="USCGC Healy, CCGS Arpatuuq, cutter, icebreaker...",key="govsec_vessel_q")
-        x=vview.copy()
-        if q.strip() and not x.empty:
-            x=_contains_any(x,[q],["Vessel","Subtype / Class","Flag","Organisation","Country","Status","IMO","Hull / Registration"])
-        if x.empty:
-            st.info("No linked government/security vessels are mapped for this selection.")
-        else:
-            x=x.sort_values(["Country","Organisation","Vessel"],na_position="last").reset_index(drop=True)
-            display_df(x[[c for c in ["Vessel","Subtype / Class","Type","Organisation","Country","Flag","Status","IMO","Hull / Registration","Record Status"] if c in x.columns]],500)
-
-            st.markdown("### Inspect a vessel")
-            pick=st.selectbox(
-                "Vessel / platform",
-                range(len(x)),
-                format_func=lambda i: " — ".join([
-                    z for z in [
-                        str(x.iloc[i].get("Vessel","")).strip(),
-                        str(x.iloc[i].get("Country","")).strip(),
-                        str(x.iloc[i].get("Organisation","")).strip(),
-                    ] if z
-                ]),
-                key="govsec_vessel_detail_pick"
-            )
-            render_government_vessel_detail(x.iloc[pick],prefix="govsec")
-
-    with tabs[4]:
-        if aview.empty:
-            st.info("No linked government/security facilities or bases are mapped for this selection yet.")
-        else:
-            display_df(aview[[c for c in ["Facility / Base","Type","Subtype","Organisation","Country","City / Area","Status","Record Status"] if c in aview.columns]],400)
-            m=aview.copy()
-            m["lat"]=pd.to_numeric(m.get("Latitude"),errors="coerce")
-            m["lon"]=pd.to_numeric(m.get("Longitude"),errors="coerce")
-            m=m.dropna(subset=["lat","lon"])
-            if not m.empty:
-                st.map(m[["lat","lon"]],use_container_width=True)
-
-    with tabs[5]:
-        if rview.empty:
-            st.info("No canonical relationships mapped for this selection.")
-        else:
-            display_df(rview[[c for c in ["Source","Relationship","Target","Target Type","Confidence","Record Status"] if c in rview.columns]],600)
-
-
-
-@st.cache_data(show_spinner=False, ttl=60)
-def _live_policy_rows(table_candidates):
-    """Return rows from the first available canonical policy/compliance table."""
-    try:
-        sb=pc_db_client(service=True)
-        if sb is None:
-            return pd.DataFrame(), ""
-        for table in table_candidates:
-            try:
-                rows=pc_safe_rows(sb,table,"*",20000)
-            except Exception:
-                rows=[]
-            if rows:
-                return pd.DataFrame(rows), table
-    except Exception:
-        pass
-    return pd.DataFrame(), ""
-
-def _policy_title_columns(df):
-    if df is None or df.empty:
-        return pd.DataFrame()
-    out=df.copy()
-    rename={}
-    special={
-        "designation_id":"Designation ID","designation_date":"Designation Date",
-        "target_type":"Target Type","target_name":"Target Name",
-        "imo_identifier":"IMO / Identifier","imo_or_identifier":"IMO / Identifier",
-        "identifier":"IMO / Identifier","regime_linkage":"Regime / Linkage",
-        "designation_basis_link":"Designation Basis / Link",
-        "model_coverage_status":"Model Coverage Status",
-        "authority_id":"Authority ID","authority_name":"Authority",
-        "programme_id":"Programme ID","program_id":"Programme ID",
-        "programme_name":"Programme","program_name":"Programme",
-        "authority_sponsor":"Authority / Sponsor",
-        "jurisdiction_geography":"Jurisdiction / Geography",
-        "regime_type":"Regime Type","effective_observed_from":"Effective / Observed From",
-        "enforcement_mechanisms":"Enforcement Mechanisms",
-        "legal_analytical_note":"Legal / Analytical Note",
-        "direct_indirect":"Direct / Indirect","reason_basis":"Reason / Basis",
-        "source_vessel":"Source Vessel","counterparty_related_entity":"Counterparty / Related Entity",
-        "related_entity_type":"Related Entity Type","event_geography":"Event / Geography",
-        "exposure_type":"Exposure Type","analytical_note":"Analytical Note",
-        "classification_rule":"Classification Rule",
-        "legal_analytical_effect":"Legal / Analytical Effect",
-        "last_verified":"Last Verified","effective_date":"Effective Date",
-        "restriction_type":"Restriction Type",
-    }
-    for c in out.columns:
-        key=str(c).strip().casefold().replace(" ","_").replace("/","_").replace("-","_")
-        key=re.sub(r"_+","_",key).strip("_")
-        rename[c]=special.get(key," ".join(w.capitalize() for w in key.split("_")))
-    return out.rename(columns=rename)
-
-def _policy_live_first(legacy_df, table_candidates, dedupe_cols=None):
-    """Canonical Supabase first; workbook rows are migration fallback only."""
-    live,table=_live_policy_rows(table_candidates)
-    live=_policy_title_columns(live)
-    legacy=legacy_df.copy() if legacy_df is not None else pd.DataFrame()
-    if live.empty:
-        return legacy, "Legacy migration fallback"
-    if legacy.empty:
-        return live, f"Live canonical · {table}"
-    combined=pd.concat([live,legacy],ignore_index=True,sort=False)
-    keys=[c for c in (dedupe_cols or []) if c in combined.columns]
-    if keys:
-        combined=combined.drop_duplicates(subset=keys,keep="first")
-    return combined, f"Live canonical · {table} + fallback"
-
-
-def _security_business_event_frame():
-    """Build the commercial-security layer from the shared live event tables."""
-    candidates=[]
-    for key in [
-        ("Intelligence","Events"),
-        ("Intelligence","Event Register"),
-        ("Events","Events"),
-        ("Maritime","Security Events"),
-        ("Trade","Events"),
-    ]:
-        df=TABLES.get(key,pd.DataFrame())
-        if df is not None and not df.empty:
-            candidates.append(df.copy())
-
-    # Fall back to any obvious event dataframe exposed by the app.
-    for name in ("EVENTS","events","event_df","hazard_events"):
-        obj=globals().get(name)
-        if isinstance(obj,pd.DataFrame) and not obj.empty:
-            candidates.append(obj.copy())
-
-    if not candidates:
-        return pd.DataFrame()
-
-    df=pd.concat(candidates,ignore_index=True,sort=False)
-
-    # Normalize a compact set of analytical columns without discarding source columns.
-    def first_col(names):
-        for n in names:
-            if n in df.columns:
-                return df[n]
-        return pd.Series("",index=df.index)
-
-    out=df.copy()
-    out["Event Date"]=first_col(["Start Date","Date","Event Date","event_date","start_date"])
-    out["Title"]=first_col(["Title","Event","Event Title","title","event_title"])
-    out["Event Type"]=first_col(["Event Type","Type","Category","event_type","category"])
-    out["Severity"]=first_col(["Severity","Risk","Risk Level","severity"])
-    out["Status"]=first_col(["Status","Event Status","status"])
-    out["Country"]=first_col(["Country / Countries","Country","country"])
-    out["Location"]=first_col(["Location","Area","Region","location","region"])
-    out["Operational Impact"]=first_col(["Operational Impact","Operational impact","operational_impact"])
-    out["Trade / Commercial Impact"]=first_col([
-        "Trade / Commercial Impact","Commercial Impact","Business Impact",
-        "trade_commercial_impact","commercial_impact","business_impact"
-    ])
-    out["Confidence"]=first_col(["Confidence","confidence"])
-
-    blob=(
-        out["Event Type"].astype(str)+" "+
-        out["Title"].astype(str)+" "+
-        out["Operational Impact"].astype(str)+" "+
-        out["Trade / Commercial Impact"].astype(str)
-    ).str.casefold()
-
-    security_terms = (
-        "attack|strike|drone|missile|piracy|hijack|seizure|boarding|mine|explosion|"
-        "conflict|war|security|military|naval|coast guard|interdiction|detention|"
-        "sabotage|terror|armed|hostile|sanction|blockade|restricted zone|gps|jamming|spoof"
-    )
-    business_terms = (
-        "port|terminal|shipping|vessel|tanker|container|cargo|trade|logistics|supply chain|"
-        "freight|insurance|rate|delay|closure|disruption|export|import|energy|oil|gas|"
-        "aviation|airspace|rail|road|warehouse|industrial|company|operator|crew"
-    )
-
-    sec=blob.str.contains(security_terms,regex=True,na=False)
-    biz=blob.str.contains(business_terms,regex=True,na=False)
-
-    # Keep clear security incidents, plus events explicitly carrying commercial impacts.
-    commercial_text=out["Trade / Commercial Impact"].astype(str).str.strip()
-    keep=sec & (biz | commercial_text.ne(""))
-    filtered=out[keep].copy()
-    dedupe_cols=[c for c in ["Event Date","Title","Event Type","Country","Location","Severity","Status"] if c in filtered.columns]
-    if dedupe_cols:
-        filtered=filtered.drop_duplicates(subset=dedupe_cols,keep="first")
-    return filtered
-
-def _sbr_priority_score(df):
-    """Simple transparent display prioritisation; no hidden probability estimate."""
-    if df.empty:
-        return pd.Series(dtype=float)
-    sev=df.get("Severity",pd.Series("",index=df.index)).astype(str).str.casefold()
-    score=pd.Series(0,index=df.index,dtype=float)
-    score += sev.map({
-        "critical":5,"severe":5,"high":4,"elevated":3,"medium":2,"moderate":2,"low":1
-    }).fillna(0)
-    status=df.get("Status",pd.Series("",index=df.index)).astype(str).str.casefold()
-    score += status.str.contains("active|ongoing|developing",regex=True,na=False).astype(int)*2
-    impact=df.get("Trade / Commercial Impact",pd.Series("",index=df.index)).astype(str)
-    score += impact.str.strip().ne("").astype(int)*2
-    return score
-
-def render_security_business_rail(limit=4):
-    """Compact secondary security drawer for the Trade overview."""
-    df=_security_business_event_frame()
-
-    with st.expander("Security & disruption", expanded=False):
-        st.caption("Secondary lens — only incidents with a clear trade or operational consequence.")
-
-        if df is None or df.empty:
-            st.caption("No current security-linked trade disruptions.")
-            return
-
-        x=df.copy()
-        x["_priority"]=_sbr_priority_score(x)
-        x["_date_sort"]=pd.to_datetime(x["Event Date"],errors="coerce")
-        x=x.sort_values(["_priority","_date_sort"],ascending=[False,False],na_position="last").head(limit)
-
-        for _,r in x.iterrows():
-            title=str(r.get("Title","") or "Security-linked disruption").strip()
-            sev=str(r.get("Severity","") or "Unrated").strip()
-            loc=str(r.get("Location","") or r.get("Country","") or "").strip()
-            impact=str(r.get("Trade / Commercial Impact","") or r.get("Operational Impact","") or "").strip()
-            if len(impact) > 110:
-                impact = impact[:107].rstrip() + "…"
-
-            st.markdown(f"**{title}**")
-            meta=" · ".join(z for z in [sev,loc] if z)
-            if meta:
-                st.caption(meta)
-            if impact:
-                st.write(impact)
-            st.divider()
-
-        if st.button("Open security-to-business view", use_container_width=True, key="overview_open_security_business"):
-            request_nav("Security & Business Risk")
-            st.rerun()
-
-def render_security_business_risk():
-    df=_security_business_event_frame()
-
-    st.caption(
-        "This page sits behind the main Trade view: security incidents are included only where they create "
-        "a meaningful operational, commercial, corridor, infrastructure or company consequence."
-    )
-
-    if df.empty:
-        st.info("No security-linked commercial events are available in the current canonical/migration layer.")
-        return
-
-    df=df.copy()
-    df["_priority"]=_sbr_priority_score(df)
-    df["_date_sort"]=pd.to_datetime(df["Event Date"],errors="coerce")
-    df=df.sort_values(["_priority","_date_sort"],ascending=[False,False],na_position="last")
-
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("Security-linked events",len(df))
-    c2.metric("High / severe",int(df["Severity"].astype(str).str.contains("High|Severe|Critical",case=False,regex=True,na=False).sum()))
-    c3.metric("Active / developing",int(df["Status"].astype(str).str.contains("Active|Ongoing|Developing",case=False,regex=True,na=False).sum()))
-    c4.metric("Commercial impact recorded",int(df["Trade / Commercial Impact"].astype(str).str.strip().ne("").sum()))
-
-    st.markdown("### Priority security-to-business picture")
-    st.caption(
-        "Prioritised by reported severity, active status and whether a commercial impact has been recorded. "
-        "This is a display order, not a forecast probability."
-    )
-    showcols=[
-        "Event Date","Title","Event Type","Severity","Status","Country","Location",
-        "Operational Impact","Trade / Commercial Impact","Confidence"
-    ]
-    display_df(df[[c for c in showcols if c in df.columns]].head(20),520)
-
-    st.markdown("### Filter by consequence")
-    f1,f2,f3=st.columns(3)
-    q=f1.text_input("Search",placeholder="Hormuz, port strike, tanker, airspace...",key="sbr_search")
-    countries=sorted([x for x in df["Country"].fillna("").astype(str).unique() if x.strip()])
-    country=f2.selectbox("Country / geography",["All"]+countries,key="sbr_country")
-    severity_opts=sorted([x for x in df["Severity"].fillna("").astype(str).unique() if x.strip()])
-    sev=f3.selectbox("Severity",["All"]+severity_opts,key="sbr_severity")
-
-    x=df.copy()
-    if q.strip():
-        mask=pd.Series(False,index=x.index)
-        for c in ["Title","Event Type","Country","Location","Operational Impact","Trade / Commercial Impact"]:
-            mask |= x[c].astype(str).str.contains(q,case=False,na=False,regex=False)
-        x=x[mask]
-    if country!="All":
-        x=x[x["Country"].astype(str).eq(country)]
-    if sev!="All":
-        x=x[x["Severity"].astype(str).eq(sev)]
-
-    tabs=st.tabs([
-        "All security-business events",
-        "Maritime & Ports",
-        "Energy & Industry",
-        "Aviation",
-        "Supply Chain / Logistics",
-    ])
-
-    def subset_terms(frame,terms):
-        if frame.empty:
-            return frame
-        blob=(
-            frame["Title"].astype(str)+" "+
-            frame["Event Type"].astype(str)+" "+
-            frame["Operational Impact"].astype(str)+" "+
-            frame["Trade / Commercial Impact"].astype(str)
-        )
-        return frame[blob.str.contains("|".join(terms),case=False,regex=True,na=False)]
-
-    with tabs[0]:
-        display_df(x[[c for c in showcols if c in x.columns]],600)
-
-    with tabs[1]:
-        y=subset_terms(x,["ship","vessel","port","terminal","tanker","container","maritime","strait","sea","piracy"])
-        display_df(y[[c for c in showcols if c in y.columns]],500) if not y.empty else st.info("No matching maritime/port security-business events.")
-
-    with tabs[2]:
-        y=subset_terms(x,["oil","gas","lng","refinery","pipeline","energy","power","industrial","plant"])
-        display_df(y[[c for c in showcols if c in y.columns]],500) if not y.empty else st.info("No matching energy/industry security-business events.")
-
-    with tabs[3]:
-        y=subset_terms(x,["airspace","airport","aviation","airline","flight","drone"])
-        display_df(y[[c for c in showcols if c in y.columns]],500) if not y.empty else st.info("No matching aviation security-business events.")
-
-    with tabs[4]:
-        y=subset_terms(x,["logistics","supply chain","freight","warehouse","rail","road","truck","cargo","delay","closure","disruption"])
-        display_df(y[[c for c in showcols if c in y.columns]],500) if not y.empty else st.info("No matching logistics/supply-chain security-business events.")
-
-    st.markdown("### Why it matters")
-    st.caption(
-        "The Trade app should not duplicate the Intelligence app. This layer translates security reporting into "
-        "business consequences: operational disruption, corridor exposure, port/terminal effects, vessel risk, "
-        "insurance/freight implications, infrastructure exposure and company impacts."
-    )
 
 
 def _market_db_rows(table, columns="*", limit=2000, order=None):
@@ -6866,7 +4168,7 @@ TRADE_REGIONS = {
     "Central America & Caribbean": {"center": (18.0, -78.0), "zoom": 3.0, "countries": ["Panama","Costa Rica","Guatemala","Honduras","El Salvador","Nicaragua","Belize","Bahamas","Haiti","Jamaica","Dominican Republic","Cuba","Trinidad and Tobago"]},
     "South America": {"center": (-18.0, -60.0), "zoom": 2.5, "countries": ["Brazil","Argentina","Chile","Uruguay","Colombia","Ecuador","Peru","Venezuela","Guyana","Suriname","Paraguay","Bolivia"]},
     "South Asia": {"center": (21.0, 78.0), "zoom": 3.0, "countries": ["India","Pakistan","Bangladesh","Sri Lanka","Nepal","Maldives"]},
-    "Asia-Pacific": {"center": (16.0, 116.0), "zoom": 2.4, "countries": ["China","Japan","South Korea","Taiwan","Philippines","Indonesia","Malaysia","Singapore","Vietnam","Thailand","Australia","New Zealand","Papua New Guinea","South China Sea"]},
+    "Asia-Pacific": {"center": (16.0, 116.0), "zoom": 2.4, "countries": ["China","Japan","South Korea","Taiwan","Philippines","Indonesia","Malaysia","Singapore","Vietnam","Thailand","Australia","New Zealand","Papua New Guinea"]},
     "Central Asia": {"center": (43.0, 66.0), "zoom": 3.2, "countries": ["Kazakhstan","Uzbekistan","Turkmenistan","Kyrgyzstan","Tajikistan","Azerbaijan"]},
     "Arctic": {"center": (70.0, 10.0), "zoom": 2.1, "countries": ["Canada","United States","Russia","Norway","Finland","Sweden","Denmark","Iceland"]},
 }
@@ -6882,72 +4184,11 @@ def _trade_region_filter(df, region, country_cols):
     pattern="|".join(re.escape(x) for x in countries)
     return df[blob.str.contains(pattern,case=False,regex=True,na=False)].copy()
 
-
-def _trade_recaap_projection():
-    """Legacy ReCAAP projection fallback.
-
-    When canonical DB ReCAAP events exist, do not project the same observations
-    from Excel again.
-    """
-    canonical = TABLES.get(("Events & Hazards","Events"), pd.DataFrame())
-    if not canonical.empty and "Event ID" in canonical.columns:
-        if canonical["Event ID"].fillna("").astype(str).str.startswith("EVT_RECAAP_").any():
-            return pd.DataFrame(), pd.DataFrame()
-    obs=TABLES.get(("Intelligence","Event Observations"),pd.DataFrame()).copy()
-    if obs.empty or "Source Dataset" not in obs.columns:
-        return pd.DataFrame(),pd.DataFrame()
-    r=obs[obs["Source Dataset"].fillna("").astype(str).str.casefold().eq("recaap_incidents_2024_2026")].copy()
-    if r.empty:
-        return pd.DataFrame(),pd.DataFrame()
-
-    def _clean(v):
-        if pd.isna(v): return ""
-        return str(v).strip()
-    def _country(row):
-        c=_clean(row.get("Country",""))
-        if c: return c
-        t=_clean(row.get("Region / Theatre", ""))
-        tl=t.casefold()
-        for name in ["Bangladesh","India","Indonesia","Malaysia","Philippines","Singapore","Vietnam"]:
-            if name.casefold() in tl: return name
-        if "malacca" in tl or "singapore" in tl: return "Singapore / Malaysia / Indonesia"
-        if "south china sea" in tl: return "South China Sea"
-        return t
-
-    erows=[]; lrows=[]
-    for _,row in r.iterrows():
-        oid=_clean(row.get("Observation ID","")) or _clean(row.get("Source Record ID",""))
-        if not oid: continue
-        eid=f"RECAAP_{oid}"
-        vessel=_clean(row.get("Subject Name","")); raw_type=_clean(row.get("Event Type",""))
-        title=f"ReCAAP: {raw_type or 'Piracy / armed robbery'}" + (f" — {vessel}" if vessel else "")
-        country=_country(row); loc=_clean(row.get("Location",""))
-        normalized_type="Attempted piracy / armed robbery" if "attempt" in raw_type.casefold() else "Piracy / armed robbery"
-        erows.append({
-            "Event ID":eid,"Start Date":row.get("Date",""),"End Date":"","Event Family":"Maritime Crime",
-            "Event Type":normalized_type,"Severity":_clean(row.get("Severity","")),"Status":"Recorded","Mode":"Maritime",
-            "Country / Countries":country,"Location":loc,"Title":title,"Description":_clean(row.get("Description","")),
-            "Operational Impact":_clean(row.get("Operational Impact","")),"Trade / Commercial Impact":_clean(row.get("Trade Impact","")),
-            "Confidence":_clean(row.get("Confidence","")),"Source Record":oid,"Primary Source URL":_clean(row.get("Source Reference",""))
-        })
-        lat=pd.to_numeric(pd.Series([row.get("Latitude")]),errors="coerce").iloc[0]
-        lon=pd.to_numeric(pd.Series([row.get("Longitude")]),errors="coerce").iloc[0]
-        if pd.notna(lat) and pd.notna(lon):
-            lrows.append({"Location Record":f"RECAAP_LOC_{oid}","Event ID":eid,"Location":loc,"Country":country,
-                          "Latitude":float(lat),"Longitude":float(lon),"Accuracy":"ReCAAP reported coordinates",
-                          "Notes":f"ReCAAP category: {_clean(row.get('Subtype',''))}"})
-    return pd.DataFrame(erows),pd.DataFrame(lrows)
-
 def render_trade_regional_maps():
     header("Regional Maps","A shared regional operating picture across ports, disruptions and trade exposure. Use the filters to move from geography to mode and event impact.")
     region=st.selectbox("Region",list(TRADE_REGIONS),key="trade_region_map")
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     locs=TABLES.get(("Events & Hazards","Event Locations"),pd.DataFrame()).copy()
-    recaap_events,recaap_locs=_trade_recaap_projection()
-    if not recaap_events.empty:
-        events=pd.concat([events,recaap_events],ignore_index=True,sort=False)
-    if not recaap_locs.empty:
-        locs=pd.concat([locs,recaap_locs],ignore_index=True,sort=False)
     ports_df=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
     events=_trade_region_filter(events,region,["Country / Countries","Location","Title"])
     ports_view=_trade_region_filter(ports_df,region,["Country","Port / Facility"])
@@ -6993,465 +4234,21 @@ def render_trade_regional_maps():
         cols=[c for c in ["Port / Facility","Country","Operator","Facility Type","Key Role","Coverage Note"] if c in ports_view.columns]
         display_df(ports_view[cols] if cols else ports_view,360)
 
-
-# ---------- World Bank macro ingestion + country dashboard ----------
-# The World Bank Indicators API v2 is public and does not require an API key.
-WORLD_BANK_API_BASE = "https://api.worldbank.org/v2"
-WORLD_BANK_SOURCE_ID = "SRC_OPEN_WB"
-WORLD_BANK_COUNTRIES = {
-    "ARE": "United Arab Emirates",
-    "SAU": "Saudi Arabia",
-    "CHN": "China",
-    "USA": "United States",
-    "GBR": "United Kingdom",
-    "DEU": "Germany",
-    "IND": "India",
-    "KEN": "Kenya",
-    "ZAF": "South Africa",
-    "BRA": "Brazil",
-}
-
-# Ten indicators are featured in the Country & Macro snapshot. The wider tracked
-# catalogue is also ingested and remains searchable in the full observations table.
-WORLD_BANK_FEATURED = [
-    "NY.GDP.MKTP.CD",       # GDP
-    "NY.GDP.MKTP.KD.ZG",    # GDP growth
-    "FP.CPI.TOTL.ZG",       # inflation
-    "FI.RES.TOTL.CD",       # reserves
-    "NE.TRD.GNFS.ZS",       # trade / GDP
-    "NE.EXP.GNFS.CD",       # exports
-    "NE.IMP.GNFS.CD",       # imports
-    "BN.CAB.XOKA.CD",       # current account
-    "BX.KLT.DINV.CD.WD",    # FDI inflows
-    "SP.POP.TOTL",          # population
-]
-
-WORLD_BANK_INDICATORS = {
-    "NY.GDP.MKTP.CD":      ("GDP (current US$)", "current US$"),
-    "NY.GDP.MKTP.KD.ZG":   ("GDP growth (annual %)", "%"),
-    "FP.CPI.TOTL.ZG":      ("Inflation, consumer prices (annual %)", "%"),
-    "FI.RES.TOTL.CD":      ("Total reserves (current US$)", "current US$"),
-    "NE.TRD.GNFS.ZS":      ("Trade (% of GDP)", "% of GDP"),
-    "NE.EXP.GNFS.CD":      ("Exports of goods and services (current US$)", "current US$"),
-    "NE.IMP.GNFS.CD":      ("Imports of goods and services (current US$)", "current US$"),
-    "BN.CAB.XOKA.CD":      ("Current account balance (BoP, current US$)", "current US$"),
-    "BX.KLT.DINV.CD.WD":   ("Foreign direct investment, net inflows (BoP, current US$)", "current US$"),
-    "SP.POP.TOTL":         ("Population, total", "people"),
-    "NY.GDP.PCAP.CD":      ("GDP per capita (current US$)", "current US$ per person"),
-    "NE.EXP.GNFS.ZS":      ("Exports of goods and services (% of GDP)", "% of GDP"),
-    "NE.IMP.GNFS.ZS":      ("Imports of goods and services (% of GDP)", "% of GDP"),
-    "NE.GDI.FTOT.ZS":      ("Gross fixed capital formation (% of GDP)", "% of GDP"),
-    "NV.IND.TOTL.ZS":      ("Industry, including construction, value added (% of GDP)", "% of GDP"),
-    "NV.IND.MANF.ZS":      ("Manufacturing, value added (% of GDP)", "% of GDP"),
-    "SL.UEM.TOTL.ZS":      ("Unemployment, total (% of total labor force)", "%"),
-    "PA.NUS.FCRF":         ("Official exchange rate (LCU per US$, period average)", "LCU per US$"),
-    "FR.INR.RINR":         ("Real interest rate (%)", "%"),
-    "GC.DOD.TOTL.GD.ZS":   ("Central government debt, total (% of GDP)", "% of GDP"),
-    "GC.TAX.TOTL.GD.ZS":   ("Tax revenue (% of GDP)", "% of GDP"),
-    "FS.AST.PRVT.GD.ZS":   ("Domestic credit to private sector (% of GDP)", "% of GDP"),
-    "CM.MKT.LCAP.GD.ZS":   ("Market capitalization of listed domestic companies (% of GDP)", "% of GDP"),
-    "BX.TRF.PWKR.CD.DT":   ("Personal remittances, received (current US$)", "current US$"),
-    "IT.NET.USER.ZS":      ("Individuals using the Internet (% of population)", "% of population"),
-    "IS.AIR.GOOD.MT.K1":   ("Air transport, freight (million ton-km)", "million ton-km"),
-    "IS.SHP.GOOD.TU":      ("Container port traffic (TEU: 20 foot equivalent units)", "TEU"),
-    "TX.VAL.MRCH.CD.WT":   ("Merchandise exports (current US$)", "current US$"),
-    "TM.VAL.MRCH.CD.WT":   ("Merchandise imports (current US$)", "current US$"),
-    "LP.LPI.OVRL.XQ":      ("Logistics performance index: Overall (1=low to 5=high)", "index 1-5"),
-}
-
-
-def _world_bank_fetch(indicator_code, start_year=2016, end_year=None, country_codes=None):
-    """Fetch one World Bank indicator for the tracked P&C country set."""
-    end_year = int(end_year or pd.Timestamp.utcnow().year)
-    country_codes = country_codes or list(WORLD_BANK_COUNTRIES)
-    joined = ";".join(country_codes)
-    url = f"{WORLD_BANK_API_BASE}/country/{joined}/indicator/{indicator_code}"
-    params = {
-        "format": "json",
-        "per_page": 20000,
-        "date": f"{int(start_year)}:{end_year}",
-    }
-    req = Request(url + "?" + urlencode(params), headers={"User-Agent": "PC-Trade-System/3.3"})
-    try:
-        with urlopen(req, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8", errors="replace"))
-        rows = payload[1] if isinstance(payload, list) and len(payload) > 1 and payload[1] else []
-        return rows, ""
-    except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
-        return [], str(exc)
-
-
-def _macro_db_frame(limit=20000):
-    try:
-        sb = pc_db_client(service=True)
-        if sb is None:
-            return pd.DataFrame()
-        rows = pc_safe_rows(
-            sb,
-            "pc_macro_indicators",
-            "macro_record_id,country,indicator_code,indicator_name,observation_date,period_start,period_end,value,unit,source_id,observation_id,metadata",
-            limit,
-            order="period_end",
-        ) or []
-        return pd.DataFrame(rows)
-    except Exception:
-        return pd.DataFrame()
-
-
-def _macro_latest_refresh_time(macro):
-    if macro is None or macro.empty or "metadata" not in macro.columns:
-        return None
-    vals=[]
-    for meta in macro["metadata"].tolist():
-        if not isinstance(meta, dict):
-            continue
-        raw = meta.get("world_bank_retrieved_at") or meta.get("retrieved_at")
-        if not raw:
-            continue
-        dt = pd.to_datetime(raw, errors="coerce", utc=True)
-        if pd.notna(dt):
-            vals.append(dt)
-    return max(vals) if vals else None
-
-
-def _world_bank_refresh_due(macro, hours=24):
-    last = _macro_latest_refresh_time(macro)
-    if last is None:
-        return True
-    now = pd.Timestamp.now(tz="UTC")
-    return (now - last).total_seconds() >= float(hours) * 3600.0
-
-
-def refresh_world_bank_macro(start_year=2016, end_year=None, auto=False):
-    """Fetch the tracked World Bank catalogue and upsert it into pc_macro_indicators.
-
-    Existing natural-key rows are resolved to their macro_record_id before upsert, so
-    repeated refreshes update observations rather than adding a duplicate copy.
-    """
-    sb = pc_db_client(service=True)
-    if sb is None:
-        return {"ok": False, "error": "Supabase service client is unavailable.", "rows": 0, "indicators": 0}
-
-    end_year = int(end_year or pd.Timestamp.utcnow().year)
-    existing = _macro_db_frame(limit=50000)
-    key_to_id = {}
-    if not existing.empty:
-        for _, r in existing.iterrows():
-            k = (
-                str(r.get("country") or "").strip(),
-                str(r.get("indicator_code") or "").strip(),
-                str(r.get("observation_date") or "")[:10],
-            )
-            rid = str(r.get("macro_record_id") or "").strip()
-            if all(k) and rid and k not in key_to_id:
-                key_to_id[k] = rid
-
-    fetched_at = pd.Timestamp.now(tz="UTC").isoformat()
-    rows=[]
-    errors=[]
-    successful=0
-    for code, (name, unit) in WORLD_BANK_INDICATORS.items():
-        recs, err = _world_bank_fetch(code, start_year=start_year, end_year=end_year)
-        if err:
-            errors.append(f"{code}: {err}")
-            continue
-        successful += 1
-        for rec in recs:
-            value = rec.get("value")
-            year = str(rec.get("date") or "").strip()
-            iso3 = str(rec.get("countryiso3code") or "").strip()
-            country = str((rec.get("country") or {}).get("value") or WORLD_BANK_COUNTRIES.get(iso3) or "").strip()
-            if value is None or not year.isdigit() or not country:
-                continue
-            obs_date = f"{year}-12-31"
-            row = {
-                "country": country,
-                "indicator_code": code,
-                "indicator_name": name,
-                "observation_date": obs_date,
-                "period_start": f"{year}-01-01",
-                "period_end": obs_date,
-                "value": value,
-                "unit": unit,
-                "source_id": WORLD_BANK_SOURCE_ID,
-                "metadata": {
-                    "country_id": iso3,
-                    "provider": "World Bank",
-                    "api": "World Bank Indicators API v2",
-                    "world_bank_retrieved_at": fetched_at,
-                    "featured": code in WORLD_BANK_FEATURED,
-                    "source_url": f"{WORLD_BANK_API_BASE}/country/{iso3}/indicator/{code}?format=json",
-                },
-            }
-            rid = key_to_id.get((country, code, obs_date))
-            if rid:
-                row["macro_record_id"] = rid
-            rows.append(row)
-
-    # De-duplicate the fetched payload itself, retaining the latest copy of each key.
-    dedup={}
-    for row in rows:
-        dedup[(row["country"], row["indicator_code"], row["observation_date"])] = row
-    rows=list(dedup.values())
-
-    written=0
-    try:
-        for i in range(0, len(rows), 400):
-            batch=rows[i:i+400]
-            if not batch:
-                continue
-            sb.table("pc_macro_indicators").upsert(batch).execute()
-            written += len(batch)
-    except Exception as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "rows": written,
-            "indicators": successful,
-            "fetch_errors": errors,
-        }
-
-    # Force a fresh read on this rerun/session after canonical writes.
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
-    return {
-        "ok": True,
-        "rows": written,
-        "indicators": successful,
-        "fetch_errors": errors,
-        "auto": bool(auto),
-        "start_year": int(start_year),
-        "end_year": end_year,
-    }
-
-
-def _macro_human_value(value, unit):
-    try:
-        v=float(value)
-    except (TypeError, ValueError):
-        return "—"
-    u=str(unit or "")
-    if "current US$" in u and "per person" not in u:
-        av=abs(v)
-        if av >= 1_000_000_000_000:
-            return f"${v/1_000_000_000_000:,.2f}tn"
-        if av >= 1_000_000_000:
-            return f"${v/1_000_000_000:,.1f}bn"
-        if av >= 1_000_000:
-            return f"${v/1_000_000:,.1f}m"
-        return f"${v:,.0f}"
-    if u == "current US$ per person":
-        return f"${v:,.0f}"
-    if "%" in u:
-        return f"{v:,.2f}%"
-    if u == "people":
-        av=abs(v)
-        if av >= 1_000_000_000:
-            return f"{v/1_000_000_000:,.2f}bn"
-        if av >= 1_000_000:
-            return f"{v/1_000_000:,.1f}m"
-        return f"{v:,.0f}"
-    if u == "TEU":
-        return f"{v:,.0f} TEU"
-    if u == "index 1-5":
-        return f"{v:,.2f}"
-    return f"{v:,.2f}"
-
-
-def _latest_macro_rows(frame):
-    if frame is None or frame.empty:
-        return pd.DataFrame()
-    x=frame.copy()
-    x["_period"] = pd.to_datetime(x.get("period_end"), errors="coerce")
-    x["_obs"] = pd.to_datetime(x.get("observation_date"), errors="coerce")
-    x=x.sort_values(["_period","_obs"],ascending=[False,False],na_position="last")
-    keys=[c for c in ["country","indicator_code"] if c in x.columns]
-    if keys:
-        x=x.drop_duplicates(keys,keep="first")
-    return x.drop(columns=["_period","_obs"],errors="ignore")
-
-
-def render_country_macro():
-    """DB-first country macro dashboard with World Bank refresh and searchable history."""
-    st.caption(
-        "Country-level macro, trade and logistics context. The World Bank v2 feed is written into the canonical "
-        "pc_macro_indicators table; ten priority indicators lead the view and the wider catalogue remains searchable."
-    )
-
-    macro=_macro_db_frame(limit=50000)
-
-    # Refresh once a day when this workspace is opened. A failed refresh never blocks
-    # the existing database view, and manual refresh is always available below.
-    auto_key="pc_world_bank_auto_refresh_attempted"
-    if not st.session_state.get(auto_key) and _world_bank_refresh_due(macro,24):
-        st.session_state[auto_key]=True
-        with st.spinner("Refreshing World Bank macro observations…"):
-            res=refresh_world_bank_macro(start_year=2016,auto=True)
-        if res.get("ok"):
-            macro=_macro_db_frame(limit=50000)
-        else:
-            st.caption(f"World Bank auto-refresh skipped: {res.get('error','unknown error')}")
-
-    try:
-        sb=pc_db_client(service=True)
-        chok=pd.DataFrame(pc_safe_rows(sb,"pc_chokepoints","*",1500) or []) if sb else pd.DataFrame()
-        status=pd.DataFrame(pc_safe_rows(sb,"pc_chokepoint_status","*",3000,order="observation_timestamp") or []) if sb else pd.DataFrame()
-    except Exception:
-        chok=pd.DataFrame(); status=pd.DataFrame()
-
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("Macro observations",len(macro))
-    c2.metric("Tracked indicators",int(macro["indicator_code"].nunique()) if not macro.empty and "indicator_code" in macro else 0)
-    c3.metric("Countries",int(macro["country"].nunique()) if not macro.empty and "country" in macro else 0)
-    c4.metric("Chokepoints / crossings",len(chok))
-
-    tabs=st.tabs(["Macro indicators","Borders & chokepoints","Current status"])
-    with tabs[0]:
-        controls=st.columns([2,1,1])
-        countries=sorted(x for x in macro.get("country",pd.Series(dtype=str)).dropna().astype(str).unique() if x) if not macro.empty else []
-        default_country="United Arab Emirates" if "United Arab Emirates" in countries else (countries[0] if countries else "All")
-        opts=["All"]+countries
-        chosen=controls[0].selectbox("Country",opts,index=(opts.index(default_country) if default_country in opts else 0),key="macro_country_v340")
-        start_year=controls[1].selectbox("Refresh history",[2016,2018,2020,2022,2024],index=0,key="macro_refresh_start")
-        if controls[2].button("Refresh World Bank",use_container_width=True,key="macro_refresh_world_bank"):
-            with st.spinner("Fetching World Bank indicators and updating Supabase…"):
-                res=refresh_world_bank_macro(start_year=int(start_year),auto=False)
-            if res.get("ok"):
-                st.success(f"Updated {res.get('rows',0):,} observations across {res.get('indicators',0)} indicators.")
-                st.session_state[auto_key]=True
-                st.rerun()
-            else:
-                st.error(f"World Bank refresh failed: {res.get('error','unknown error')}")
-
-        last_refresh=_macro_latest_refresh_time(macro)
-        if last_refresh is not None:
-            st.caption(f"World Bank canonical refresh: {last_refresh.strftime('%Y-%m-%d %H:%M UTC')} · no API key required")
-        else:
-            st.caption("World Bank Indicators API v2 · no API key required")
-
-        if macro.empty:
-            st.info("No macro series are loaded yet. Use Refresh World Bank to populate the canonical table.")
-        else:
-            country_view=macro if chosen=="All" else macro[macro["country"].astype(str).eq(chosen)].copy()
-            latest=_latest_macro_rows(country_view)
-
-            st.markdown("### Priority snapshot")
-            featured=latest[latest.get("indicator_code",pd.Series(index=latest.index,dtype=str)).astype(str).isin(WORLD_BANK_FEATURED)].copy()
-            if not featured.empty:
-                featured["_rank"]=featured["indicator_code"].astype(str).map({c:i for i,c in enumerate(WORLD_BANK_FEATURED)}).fillna(999)
-                featured=featured.sort_values("_rank").drop(columns=["_rank"],errors="ignore").head(10)
-                cards=st.columns(5)
-                for i,(_,r) in enumerate(featured.iterrows()):
-                    with cards[i%5]:
-                        label=str(r.get("indicator_name") or r.get("indicator_code") or "Indicator")
-                        short={
-                            "NY.GDP.MKTP.CD":"GDP",
-                            "NY.GDP.MKTP.KD.ZG":"GDP growth",
-                            "FP.CPI.TOTL.ZG":"Inflation",
-                            "FI.RES.TOTL.CD":"Reserves",
-                            "NE.TRD.GNFS.ZS":"Trade / GDP",
-                            "NE.EXP.GNFS.CD":"Exports",
-                            "NE.IMP.GNFS.CD":"Imports",
-                            "BN.CAB.XOKA.CD":"Current account",
-                            "BX.KLT.DINV.CD.WD":"FDI inflows",
-                            "SP.POP.TOTL":"Population",
-                        }.get(str(r.get("indicator_code") or ""),label)
-                        val=_macro_human_value(r.get("value"),r.get("unit"))
-                        year=str(r.get("period_end") or r.get("observation_date") or "")[:4]
-                        st.metric(short,val)
-                        st.caption(year)
-            else:
-                st.caption("The ten priority indicators have not been loaded for this selection yet.")
-
-            st.markdown("### Search all macro observations")
-            q=st.text_input(
-                "Search indicators, codes, countries or years",
-                placeholder="reserves, exports, logistics performance, GDP per capita, 2024…",
-                key="macro_indicator_search_v340",
-            )
-            scope=country_view.copy()
-            if q.strip():
-                blob=scope[[c for c in ["country","indicator_code","indicator_name","observation_date","period_start","period_end","unit"] if c in scope.columns]].fillna("").astype(str).agg(" ".join,axis=1)
-                scope=scope[blob.str.contains(q.strip(),case=False,regex=False,na=False)]
-            else:
-                # Without a search term, show one latest record per indicator rather than
-                # flooding the page with the entire historical database.
-                scope=_latest_macro_rows(scope)
-
-            if not scope.empty:
-                scope=scope.copy()
-                scope["Value"]=[_macro_human_value(v,u) for v,u in zip(scope.get("value",pd.Series(index=scope.index)),scope.get("unit",pd.Series(index=scope.index)))]
-                scope["Period"] = scope.get("period_end",pd.Series(index=scope.index,dtype=str)).astype(str).str[:10]
-                clean=scope.rename(columns={"country":"Country","indicator_code":"Code","indicator_name":"Indicator","unit":"Unit"})
-                cols=[c for c in ["Country","Indicator","Code","Period","Value","Unit"] if c in clean.columns]
-                st.dataframe(clean[cols].head(500),use_container_width=True,hide_index=True,height=460)
-                st.caption(f"Showing {min(len(clean),500):,} of {len(clean):,} matching rows. Search returns historical observations; blank search shows latest observations only.")
-            else:
-                st.info("No macro observations match that search.")
-
-            # A compact historical chart for one selected series.
-            series_codes=sorted(x for x in country_view.get("indicator_code",pd.Series(dtype=str)).dropna().astype(str).unique() if x)
-            if chosen!="All" and series_codes:
-                labels={c:WORLD_BANK_INDICATORS.get(c,(c,""))[0] for c in series_codes}
-                pick=st.selectbox("Historical series",series_codes,format_func=lambda c:labels.get(c,c),key="macro_series_v340")
-                hist=country_view[country_view["indicator_code"].astype(str).eq(pick)].copy()
-                hist["Period"]=pd.to_datetime(hist.get("period_end"),errors="coerce")
-                hist["value"]=pd.to_numeric(hist.get("value"),errors="coerce")
-                hist=hist.dropna(subset=["Period","value"]).sort_values("Period").drop_duplicates("Period",keep="last")
-                if len(hist)>=2:
-                    st.line_chart(hist.set_index("Period")[["value"]],use_container_width=True)
-                    st.caption(WORLD_BANK_INDICATORS.get(pick,(pick,""))[1])
-
-    with tabs[1]:
-        if chok.empty:
-            st.info("No chokepoint records are loaded.")
-        else:
-            q=st.text_input("Search borders & chokepoints",placeholder="Hormuz, Panama, border, rail crossing…",key="macro_chok_search_v340")
-            view=chok.copy()
-            if q.strip():
-                blob=view.fillna("").astype(str).agg(" ".join,axis=1)
-                view=view[blob.str.contains(q.strip(),case=False,regex=False,na=False)]
-            display_df(view,420)
-
-    with tabs[2]:
-        if status.empty:
-            st.info("No current chokepoint-status observations are loaded.")
-        else:
-            display_df(status,420)
-
 # ---------- workspace navigation ----------
 st.sidebar.markdown("<div class='pc-kicker'>Power & Corridors Intelligence</div>",unsafe_allow_html=True)
 st.sidebar.markdown("### Trade System")
-st.sidebar.markdown("### Controls")
-st.sidebar.radio(
-    "Appearance",
-    ["Dark","Light"],
-    horizontal=True,
-    key="pc_trade_appearance",
-)
-if st.sidebar.button("↻ Refresh database", use_container_width=True, key="pc_trade_refresh_database"):
-    st.cache_data.clear()
-    try:
-        st.cache_resource.clear()
-    except Exception:
-        pass
-    st.rerun()
-st.sidebar.caption("Refresh after applying records or relationships in Power Admin.")
-
 _bst=backend_status()
 st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend")
 
 NAV_SECTIONS={
-    "OPERATING PICTURE":["Overview","Regional Maps","Port Activity","Alerts & Disruptions","Watch Areas"],
-    "DOMAINS":["Maritime","Rail","Aviation","Trucking","Government & Security","Defence & Shipbuilding","Energy & Industry"],
+    "OPERATING PICTURE":["Overview","Regional Maps","Alerts & Disruptions","Watch Areas"],
+    "DOMAINS":["Maritime","Rail","Aviation","Trucking","Defence & Shipbuilding","Energy & Industry"],
     "TRADE NETWORK":["Ports & Terminals","Corridors & Systems","Companies","Vessels","Investments"],
     "MARKETS & POLICY":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Sanctions & Compliance","Trade Policy","Contracts"],
     "MONITORING & TOOLS":["Hormuz Monitor","Live Feeds","News & Signals","Search","Reference & Benchmarks","Data"],
 }
 VISIBLE_PAGES=[p for items in NAV_SECTIONS.values() for p in items]
-HIDDEN_ROUTES={"Ports","Shipyards","Network Map","News & Events","Reference Library","Ferries","Cruise","Maritime Security","Maritime Disruptions","Security & Business Risk"}
+HIDDEN_ROUTES={"Ports","Shipyards","Network Map","News & Events","Reference Library","Ferries","Cruise","Maritime Security","Maritime Disruptions","Port Activity"}
 # Deep links from the separate P&C Intelligence app.
 try:
     _qp=st.query_params
@@ -7500,28 +4297,13 @@ st.sidebar.markdown("<div class='pc-small'>ACTIVE DATA LAYERS</div>",unsafe_allo
 st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> Shared data model</span>",unsafe_allow_html=True)
 st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> PortWatch</span>",unsafe_allow_html=True)
 st.sidebar.markdown("<span class='pc-feed-health'><span class='pc-dot pc-dot-live'></span> Hormuz</span>",unsafe_allow_html=True)
-news_key_present=bool(_newsdata_key())
+news_key_present=bool(_secret("NEWSDATA_API_KEY"))
 news_class="pc-dot-live" if news_key_present else "pc-dot-key"
 news_label="NewsData" if news_key_present else "NewsData · key needed"
 st.sidebar.markdown(f"<span class='pc-feed-health'><span class='pc-dot {news_class}'></span> {news_label}</span>",unsafe_allow_html=True)
 st.sidebar.caption("CGMIX and GDELT remain deferred. Live API views keep the last successful session result if a refresh fails.")
 
-# Resolve workspace label safely before breadcrumb rendering.
-workspace = globals().get("workspace")
-if not workspace:
-    _section_map = globals().get("NAV_SECTIONS", {})
-    if isinstance(_section_map, dict):
-        workspace = next(
-            (section for section, items in _section_map.items() if page in items),
-            "Trade System"
-        )
-    else:
-        workspace = "Trade System"
-
-st.markdown(
-    f"<div class='pc-breadcrumb'><b>{workspace}</b> &nbsp;/&nbsp; {page}</div>",
-    unsafe_allow_html=True
-)
+st.markdown(f"<div class='pc-breadcrumb'><b>{workspace}</b> &nbsp;/&nbsp; {page}</div>",unsafe_allow_html=True)
 
 def page_company_selector():
     companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
@@ -7581,161 +4363,6 @@ def filter_distinct_port_terminals(port_row, port_terminals):
             keep.loc[idx] = False
 
     return df[keep].copy()
-
-
-
-def live_db_terminals_for_port(port_row):
-    """Resolve terminal_of relationships directly from Supabase for the selected port.
-
-    This bypasses the legacy workbook Port ID entirely, so newly-created canonical
-    relationships are visible immediately after a Streamlit rerun/redeploy.
-    """
-    try:
-        sb=pc_db_client(service=True)
-    except Exception:
-        sb=None
-    if sb is None:
-        return pd.DataFrame(), "Supabase client unavailable"
-
-    pname=str(port_row.get("Port / Facility","") or "").strip()
-    pcountry=str(port_row.get("Country","") or "").strip()
-    if not pname:
-        return pd.DataFrame(), "Selected port has no name"
-
-    try:
-        # Find canonical parent-port assets by exact name first.
-        q=sb.table("pc_assets").select(
-            "asset_id,name,asset_type,subtype,country,region_city,status,metadata"
-        ).eq("name",pname)
-        parents=q.limit(20).execute().data or []
-
-        if pcountry:
-            same=[
-                p for p in parents
-                if not p.get("country")
-                or str(p.get("country","")).strip().casefold()==pcountry.casefold()
-            ]
-            if same:
-                parents=same
-
-        # Conservative normalized-name fallback.
-        if not parents:
-            cand=sb.table("pc_assets").select(
-                "asset_id,name,asset_type,subtype,country,region_city,status,metadata"
-            ).limit(5000).execute().data or []
-
-            def _norm(v):
-                s=str(v or "").strip().casefold().replace("&"," and ")
-                s=re.sub(r"\b(port of|port|harbour|harbor)\b"," ",s)
-                s=re.sub(r"[^a-z0-9]+"," ",s)
-                return re.sub(r"\s+"," ",s).strip()
-
-            pk=_norm(pname)
-            parents=[
-                p for p in cand
-                if _norm(p.get("name"))==pk
-                and (
-                    not pcountry
-                    or not p.get("country")
-                    or str(p.get("country","")).strip().casefold()==pcountry.casefold()
-                )
-            ]
-
-        if not parents:
-            return pd.DataFrame(), f"No canonical pc_assets parent matched {pname}"
-
-        parent_ids=[str(p.get("asset_id")) for p in parents if p.get("asset_id")]
-        if not parent_ids:
-            return pd.DataFrame(), "Matched parent has no asset_id"
-
-        rels=[]
-        for pid in parent_ids:
-            batch=(sb.table("pc_relationships")
-                   .select("relationship_id,source_type,source_id,relationship_type,target_type,target_id,record_status")
-                   .eq("target_id",pid)
-                   .eq("target_type","asset")
-                   .limit(1000).execute().data or [])
-            rels.extend(batch)
-
-        rels=[
-            r for r in rels
-            if str(r.get("relationship_type") or "").strip().casefold().replace("-","_").replace(" ","_")=="terminal_of"
-            and str(r.get("source_type") or "").strip().casefold()=="asset"
-        ]
-
-        if not rels:
-            return pd.DataFrame(), f"Canonical parent found ({', '.join(parent_ids)}) but no terminal_of relationships found"
-
-        child_ids=sorted({
-            str(r.get("source_id")) for r in rels if r.get("source_id")
-        })
-        rows=[]
-
-        for cid in child_ids:
-            child=(sb.table("pc_assets")
-                   .select("asset_id,name,asset_type,subtype,country,region_city,status,metadata")
-                   .eq("asset_id",cid).limit(1).execute().data or [])
-            facility=(sb.table("pc_logistics_facilities")
-                      .select("asset_id,facility_type,owner_entity_id,operator_entity_id,area_sqm,rail_connected,customs_bonded,source_id,metadata")
-                      .eq("asset_id",cid).limit(1).execute().data or [])
-            if not child:
-                continue
-
-            a=child[0]
-            f=facility[0] if facility else {}
-
-            opid=str(f.get("operator_entity_id") or "")
-            ownerid=str(f.get("owner_entity_id") or "")
-            opname=""
-            ownername=""
-            if opid:
-                e=sb.table("pc_entities").select("name").eq("entity_id",opid).limit(1).execute().data or []
-                if e: opname=str(e[0].get("name") or "")
-            if ownerid:
-                e=sb.table("pc_entities").select("name").eq("entity_id",ownerid).limit(1).execute().data or []
-                if e: ownername=str(e[0].get("name") or "")
-
-            meta={}
-            for candidate in (a.get("metadata"),f.get("metadata")):
-                if isinstance(candidate,dict):
-                    meta.update(candidate)
-            research=meta.get("research_attributes") if isinstance(meta.get("research_attributes"),dict) else {}
-
-            capacity=(
-                research.get("container_capacity_teu_per_year")
-                or research.get("container_capacity_teu_year")
-                or research.get("capacity_teu_per_year")
-                or research.get("capacity_teu")
-                or ""
-            )
-
-            rows.append({
-                "Terminal ID":cid,
-                "Terminal / Facility":a.get("name") or cid,
-                "Terminal":a.get("name") or cid,
-                "Port ID":str(port_row.get("Port ID","") or ""),
-                "Parent Port":pname,
-                "Port":pname,
-                "Country":a.get("country") or pcountry,
-                "City / Area":a.get("region_city") or "",
-                "Primary Operator Company ID":opid,
-                "Primary Operator":opname,
-                "Operator / Network":opname,
-                "Owner Company ID":ownerid,
-                "Owner":ownername,
-                "Facility Type":f.get("facility_type") or a.get("subtype") or "",
-                "Cargo Profile":research.get("cargo_profile") or research.get("cargo") or "",
-                "Container Capacity TEU/yr":capacity,
-                "Status":a.get("status") or "",
-                "Ownership / Structure":research.get("ownership_structure") or "",
-                "Source ID":f.get("source_id") or "",
-                "Data Status":"Supabase live relationship",
-            })
-
-        return pd.DataFrame(rows), f"{len(rows)} live terminal link(s) from Supabase"
-
-    except Exception as exc:
-        return pd.DataFrame(), f"Supabase terminal-link query failed: {exc}"
 
 
 def render_port_commercial_network(port_row, port_terminals):
@@ -7877,597 +4504,78 @@ def render_port_terminal_cards(port_id, port_terminals):
                                 st.rerun()
         st.markdown("<div style='height:8px'></div>",unsafe_allow_html=True)
 
+if page=="Overview":
+    header("Trade System Overview","A connected operational picture across companies, infrastructure, movement systems, commercial activity and risk.")
 
-def _first_existing_col(df, names):
-    for c in names:
-        if c in df.columns:
-            return c
-    return None
-
-def _compact_trade_table(df, preferred_cols, height=260):
-    if df is None or df.empty:
-        st.caption("No records available.")
-        return
-    cols=[c for c in preferred_cols if c in df.columns]
-    if not cols:
-        cols=list(df.columns[:8])
-    display_df(df[cols],height)
-
-def _recent_commercial_records():
-    """Commercial/deal/investment records for the trade homepage, independent of security events."""
-    frames=[]
-    sources=[
-        (("Commercial","Infra Deals"),"Infrastructure deal"),
-        (("Commercial","Transactions V125"),"Transaction"),
-        (("Commercial","Contracts"),"Contract"),
-        (("Core Entities","Relationships"),"Corporate relationship"),
-        (("Events & Hazards","Events"),"Commercial event"),
-    ]
-    # Also support legacy sheet keys actually used in the app.
-    alt_keys=[
-        (("Trade & Commercial","Infra Deals"),"Infrastructure deal"),
-        (("Trade & Commercial","Transactions V125"),"Transaction"),
-        (("Trade & Commercial","Contracts"),"Contract"),
-        (("Commercial Activity","Infra Deals"),"Infrastructure deal"),
-        (("Commercial Activity","Contracts"),"Contract"),
-    ]
-    for key,label in sources+alt_keys:
-        df=TABLES.get(key,pd.DataFrame())
-        if df is None or df.empty:
-            continue
-        x=df.copy()
-        x["_source_type"]=label
-        frames.append(x)
-
-    # Fallback to globally visible contract/deal tables where available.
-    for key,df in TABLES.items():
-        if df is None or df.empty:
-            continue
-        sheet=str(key[1]) if isinstance(key,tuple) and len(key)>1 else str(key)
-        if sheet in {"Infra Deals","Transactions V125","Contracts"}:
-            x=df.copy()
-            x["_source_type"]=sheet
-            frames.append(x)
-
-    if not frames:
-        return pd.DataFrame()
-
-    allc=pd.concat(frames,ignore_index=True,sort=False)
-
-    date_col=_first_existing_col(allc,[
-        "Date","Announcement Date","Transaction Date","Contract Date",
-        "Start Date","Effective Date","as_of","As Of"
-    ])
-    if date_col:
-        allc["_trade_date"]=pd.to_datetime(allc[date_col],errors="coerce")
-        allc=allc.sort_values("_trade_date",ascending=False,na_position="last")
-
-    # Suppress clearly security-only event rows from the commercial feed.
-    title_col=_first_existing_col(allc,["Title","Deal","Transaction","Contract","Name","Event"])
-    family_col=_first_existing_col(allc,["Event Family","Category","Type"])
-    if title_col:
-        blob=allc[title_col].astype(str)
-        if family_col:
-            blob=blob+" "+allc[family_col].astype(str)
-        sec=blob.str.contains(
-            "attack|strike|drone|missile|piracy|hijack|seizure|military|war|security incident",
-            case=False,regex=True,na=False
-        )
-        commercial=blob.str.contains(
-            "invest|acqui|terminal|port|contract|concession|expansion|capex|logistics|"
-            "shipping|rail|airport|warehouse|refinery|pipeline|energy|freight|trade",
-            case=False,regex=True,na=False
-        )
-        allc=allc[~sec | commercial]
-
-    dedupe=[]
-    for c in ["Title","Deal","Transaction","Contract","Name","Date","Announcement Date"]:
-        if c in allc.columns:
-            dedupe.append(c)
-    if dedupe:
-        try:
-            allc=allc.drop_duplicates(subset=dedupe,keep="first")
-        except Exception:
-            pass
-    return allc
-
-def _trade_network_snapshot():
     companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
     ports=TABLES.get(("Maritime","Ports"),pd.DataFrame())
-    terminals=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame())
     vessels=TABLES.get(("Maritime","Vessels"),pd.DataFrame())
-    rail=TABLES.get(("Rail","Rail Networks"),pd.DataFrame())
     systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame())
-    routes=TABLES.get(("Infrastructure","Transport Routes"),pd.DataFrame())
-    return {
-        "Companies":len(companies),
-        "Ports":len(ports),
-        "Terminals":len(terminals),
-        "Vessels":len(vessels),
-        "Rail networks":len(rail),
-        "Corridors / systems":max(len(systems),len(routes)),
-    }
+    events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame())
+    sanctions=TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame())
 
-def _clean_trade_value(v):
-    if v is None or (isinstance(v,float) and pd.isna(v)):
-        return ""
-    x=str(v).strip()
-    return "" if x.casefold() in {"nan","none","<na>"} else x
+    metrics=st.columns(6)
+    for box,(title,value) in zip(metrics,[
+        ("Companies",len(companies)),("Ports",len(ports)),("Vessels",len(vessels)),
+        ("Systems",len(systems)),("Events",len(events)),("Sanctions",len(sanctions))
+    ]):
+        box.metric(title,f"{value:,}")
 
-def _render_trade_pulse():
-    records=_recent_commercial_records()
-    st.markdown("### Commercial pulse")
-    st.caption("Recent deals, contracts and investment — who did what, with whom, where and for how much.")
-    if records.empty:
-        st.info("No recent commercial activity records available.")
-        return
+    st.markdown("### Risk & disruption snapshot")
+    compliance=TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()).copy()
+    restrictions=TABLES.get(("Maritime","Vessel Restrictions"),pd.DataFrame()).copy()
+    monitoring=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame()).copy()
+    security_events=events.copy()
+    if not security_events.empty and "Event Family" in security_events.columns:
+        security_events=security_events[security_events["Event Family"].astype(str).str.contains(
+            "Security|Conflict|Maritime|Port|Weather|Natural|Labour|Civil|Cyber",case=False,regex=True,na=False
+        )]
+    r1,r2,r3,r4=st.columns(4)
+    r1.metric("Security / disruption events",len(security_events))
+    r2.metric("Active monitoring",int(monitoring.get("Status",pd.Series(dtype=str)).astype(str).str.contains("Active",case=False,na=False).sum()) if not monitoring.empty else 0)
+    r3.metric("Vessel restrictions",len(restrictions))
+    r4.metric("Operational compliance",len(compliance))
+    st.caption("Security is shown here as trade exposure: disrupted assets, restricted vessels, watch areas and operational consequences. The dedicated P&C Intelligence app provides the deeper security workflow.")
 
-    def c(names):
-        return _first_existing_col(records,names)
+    st.markdown("### Connected coverage")
+    st.markdown("<div class='pc-section-note'>These are working entry points, not description cards. Search within a coverage family or open its full workspace.</div>",unsafe_allow_html=True)
+    cov_tabs=st.tabs(["Commercial networks","Movement systems","Infrastructure","Intelligence","Compliance","Defence & shipbuilding"])
 
-    dc=c(["Date","Announcement Date","Announced Date","Transaction Date","Contract Date","Start Date","Effective Date","As Of"])
-    tc=c(["Title","Deal","Transaction","Contract","Name","Event","Target / Asset","Target Company"])
-    ac=c(["Buyer","Buyer Company","Customer","Client","Awarding Authority","Contracting Authority","Investor","Acquirer","Company","Company Name"])
-    bc=c(["Seller","Supplier","Contractor","Counterparty","Target","Target Company","Target / Asset","Partner","Awardee"])
-    gc=c(["Country","Country / Region","Geography","Region","Location","Market"])
-    vc=c(["Value","Reported Value","Deal Value","Transaction Value","Contract Value","CAPEX","Capex","Investment"])
-    cc=c(["Currency"])
-    sc=c(["Status","Deal Status","Contract Status","Transaction Status"])
-    yc=c(["Type","Deal Type","Transaction Type","Contract Type","Category"])
-
-    rows=[]
-    for _,r in records.head(30).iterrows():
-        a=_clean_trade_value(r.get(ac,'')) if ac else ''
-        b=_clean_trade_value(r.get(bc,'')) if bc else ''
-        typ=_clean_trade_value(r.get(yc,'')) if yc else _clean_trade_value(r.get('_source_type',''))
-        activity=_clean_trade_value(r.get(tc,'')) if tc else ''
-        if not activity:
-            target=_clean_trade_value(r.get('Target / Asset','')) or _clean_trade_value(r.get('Target Company',''))
-            activity=' · '.join(x for x in [typ,target] if x)
-        if not a:
-            a=_clean_trade_value(r.get('Investor / Buyer','')) or _clean_trade_value(r.get('Buyer',''))
-        if not b:
-            b=_clean_trade_value(r.get('Target / Asset','')) or _clean_trade_value(r.get('Target Company',''))
-        who=' → '.join(x for x in [a,b] if x and x!=a) if a else b
-        raw_val=r.get(vc,'') if vc else ''
-        cur=_clean_trade_value(r.get(cc,'')) if cc else ''
-        if isinstance(raw_val,(int,float)) and not pd.isna(raw_val):
-            value=(f"{cur} {raw_val:,.0f}".strip())
+    def coverage_search(tab_key, placeholder, sheets, launches):
+        q=st.text_input("Search this coverage",placeholder=placeholder,key=f"coverage_{tab_key}")
+        bcols=st.columns(max(1,len(launches)))
+        for i,(label_txt,target) in enumerate(launches):
+            with bcols[i]:
+                if st.button(label_txt,use_container_width=True,key=f"coverage_launch_{tab_key}_{i}"):
+                    request_nav(target); st.rerun()
+        if q.strip():
+            hits=ranked_search(q.strip(),limit=80)
+            sub=hits[hits["sheet"].isin(sheets)].head(12) if not hits.empty else pd.DataFrame()
+            if sub.empty: st.info("No matching records in this coverage area.")
+            else:
+                for _,h in sub.iterrows(): readable_search_card(h)
         else:
-            value=_clean_trade_value(raw_val)
-            if value and cur and not value.startswith(cur): value=f"{cur} {value}"
-        rows.append({
-            "Date":r.get(dc,'') if dc else '',
-            "Activity":activity,
-            "Who":who,
-            "Type":typ,
-            "Value / CAPEX":value,
-            "Market":_clean_trade_value(r.get(gc,'')) if gc else '',
-            "Status":_clean_trade_value(r.get(sc,'')) if sc else '',
-        })
-    view=pd.DataFrame(rows)
-    # Blank, unidentified rows are not decision-useful.
-    view=view[(view["Activity"].astype(str).str.strip()!="") | (view["Who"].astype(str).str.strip()!="")].copy()
-    display_df(view.head(20),390)
+            st.caption("Search here, or use the buttons above to open the full view.")
 
-@st.cache_data(show_spinner=False, ttl=30)
-def _live_canonical_activity():
-    """Fresh DB-native trade updates with readable context, plus low-level additions as fallback."""
-    try:
-        sb=pc_db_client(service=True)
-        if sb is None: return pd.DataFrame()
-        rows=[]
-        entities_rows=pc_safe_rows(sb,"pc_entities","entity_id,name,entity_type,subtype,hq_country,status,created_at,updated_at",12000,order="name") or []
-        assets_rows=pc_safe_rows(sb,"pc_assets","asset_id,name,asset_type,subtype,country,region_city,status,created_at,updated_at",16000,order="name") or []
-        entity_names={str(r.get("entity_id") or ""):str(r.get("name") or "") for r in entities_rows}
-        asset_names={str(r.get("asset_id") or ""):str(r.get("name") or "") for r in assets_rows}
+    with cov_tabs[0]:
+        coverage_search("commercial","DP World, APM Terminals, KKR, Brookfield, acquisition...",["Companies","Relationships","Infra Deals","Transactions V125","Port Ownership"],[("Companies","Companies"),("Contracts & deals","Contracts")])
+    with cov_tabs[1]:
+        coverage_search("movement","Jebel Ali, Maersk vessel, ferry, rail, airport...",["Ports","Port Terminals","Vessels","Rail Networks","Rail Nodes","Ferry Routes","Cruise Routes","Aircraft"],[("Ports","Ports"),("Vessels","Vessels"),("Corridors","Corridors & Systems")])
+    with cov_tabs[2]:
+        coverage_search("infrastructure","Middle Corridor, dry port, free zone, waterway...",["Corridors","Regional Systems","System Nodes","System Links","System Dependencies","Assets","Facilities","Waterway Systems"],[("Corridors & systems","Corridors & Systems"),("Ports","Ports")])
+    with cov_tabs[3]:
+        coverage_search("intelligence","Rotterdam strike, typhoon, attack, disruption...",["Events","Strategic Events","Monitoring","Disruption Watch","Weather Labour Events","Impact Chains"],[("Watch Areas","Watch Areas"),("News & events","News & Events"),("News & signals","News & Signals")])
+    with cov_tabs[4]:
+        coverage_search("compliance","OFAC, sanctions, export controls, trade agreement...",["Sanctions Designations","Sanctions Entity Links","Compliance Regimes","Compliance Designations","Compliance Exposure","Watchlist Taxonomy","Trade Agreements","Trade Remedies & Restrictions","Customs & Procurement"],[("Sanctions & compliance","Sanctions & Compliance"),("Trade policy","Trade Policy")])
+    with cov_tabs[5]:
+        coverage_search("defence","Seaspan, Fincantieri, shipyard, submarine, delivery...",["Shipyards","Programmes","Contracts","Sales & Delivery Routes","Vessel Build Records","Fleet Orders"],[("Shipyards","Shipyards"),("Contracts","Contracts")])
 
-        def add(kind,name,when,detail="",status="",priority=5,object_id=""):
-            name=_clean_trade_value(name)
-            if not name: return
-            rows.append({"When":when,"Update":kind,"Record":name,"Detail":_clean_trade_value(detail),"Status":_clean_trade_value(status),"_priority":priority,"_object_id":object_id})
-
-        # Events/news-like canonical updates first.
-        for r in pc_safe_rows(sb,"pc_events","event_id,title,start_date,severity,status,event_family,event_type,description,commercial_impact,alert_worthy,trade_visible,intelligence_visible,created_at",500,order="created_at") or []:
-            flags=[]
-            if r.get("alert_worthy") is True: flags.append("Alert")
-            if r.get("trade_visible") is True: flags.append("Trade")
-            detail=r.get("commercial_impact") or r.get("description") or " · ".join(x for x in [r.get("event_family"),r.get("event_type")] if x)
-            add("Alert / event" if r.get("alert_worthy") else "Trade event",r.get("title"),r.get("created_at") or r.get("start_date"),detail,r.get("status") or r.get("severity"),1,str(r.get("event_id") or ""))
-
-        # Transactions/investments with resolved company names.
-        for r in pc_safe_rows(sb,"pc_transactions","transaction_id,announced_date,effective_date,buyer_entity_id,seller_name,target_entity_id,target_asset_id,target_name,asset_class,country_region,transaction_type,reported_value,currency,status,created_at",500,order="announced_date") or []:
-            buyer=entity_names.get(str(r.get("buyer_entity_id") or ""),"")
-            target=entity_names.get(str(r.get("target_entity_id") or ""),"") or asset_names.get(str(r.get("target_asset_id") or ""),"") or r.get("target_name") or ""
-            seller=r.get("seller_name") or ""
-            who=" → ".join(x for x in [buyer or seller,target] if _clean_trade_value(x))
-            val=r.get("reported_value")
-            money=f"{r.get('currency') or ''} {val:,.0f}".strip() if isinstance(val,(int,float)) and not pd.isna(val) else ""
-            title=" · ".join(x for x in [r.get("transaction_type"),who] if _clean_trade_value(x)) or target
-            detail=" · ".join(x for x in [r.get("country_region"),money] if _clean_trade_value(x))
-            add("Deal / investment",title,r.get("created_at") or r.get("announced_date") or r.get("effective_date"),detail,r.get("status"),2,str(r.get("transaction_id") or ""))
-
-        # Trade flows are substantive trade updates, not raw database rows.
-        for r in pc_safe_rows(sb,"pc_trade_flows","trade_flow_id,observation_date,period_start,period_end,origin_country,destination_country,origin_asset_id,destination_asset_id,commodity,transport_mode,confidence,metadata",500,order="observation_date") or []:
-            meta=r.get("metadata") if isinstance(r.get("metadata"),dict) else {}
-            origin=asset_names.get(str(r.get("origin_asset_id") or ""),"") or meta.get("origin_node") or r.get("origin_country") or ""
-            dest=asset_names.get(str(r.get("destination_asset_id") or ""),"") or meta.get("destination_node") or r.get("destination_country") or ""
-            route=" → ".join(x for x in [str(origin).strip(),str(dest).strip()] if x)
-            title=" · ".join(x for x in [r.get("commodity"),route] if _clean_trade_value(x)) or route or "Trade flow"
-            add("Trade flow",title,r.get("observation_date") or r.get("period_end") or r.get("period_start"),r.get("transport_mode") or "",r.get("confidence"),2,str(r.get("trade_flow_id") or ""))
-
-        # Relationship changes are often the most useful context for newly added entities.
-        rels=pc_safe_rows(sb,"pc_relationships","relationship_id,source_type,source_id,relationship_type,target_type,target_id,record_status,created_at,updated_at,metadata",800,order="created_at") or []
-        for r in rels:
-            sid=str(r.get("source_id") or ""); tid=str(r.get("target_id") or "")
-            sname=entity_names.get(sid) if str(r.get("source_type") or "").casefold()=="entity" else asset_names.get(sid)
-            tname=entity_names.get(tid) if str(r.get("target_type") or "").casefold()=="entity" else asset_names.get(tid)
-            if not sname or not tname: continue
-            rel=pretty_relationship(r.get("relationship_type"))
-            add("Network relationship",f"{sname} → {tname}",r.get("created_at") or r.get("updated_at"),rel,r.get("record_status"),3,str(r.get("relationship_id") or ""))
-
-        # New infrastructure/company additions remain visible, but below substantive updates.
-        for r in entities_rows:
-            add("New company / entity",r.get("name"),r.get("created_at") or r.get("updated_at")," · ".join(x for x in [r.get("entity_type"),r.get("subtype"),r.get("hq_country")] if x),r.get("status"),5,str(r.get("entity_id") or ""))
-        for r in assets_rows:
-            add("New infrastructure",r.get("name"),r.get("created_at") or r.get("updated_at")," · ".join(x for x in [r.get("asset_type"),r.get("subtype"),r.get("region_city"),r.get("country")] if x),r.get("status"),4,str(r.get("asset_id") or ""))
-
-        out=pd.DataFrame(rows)
-        if out.empty: return out
-        out["_dt"]=pd.to_datetime(out["When"],errors="coerce",utc=True)
-        return out.sort_values(["_dt","_priority"],ascending=[False,True],na_position="last")
-    except Exception:
-        return pd.DataFrame()
-
-def _render_live_canonical_activity(limit=30):
-    st.markdown("### Latest trade updates")
-    st.caption("New alerts, commercial events, deals, infrastructure, trade flows and network relationships from the live canonical database.")
-    df=_live_canonical_activity()
-    if df.empty:
-        st.caption("No timestamped canonical activity is available from the live database.")
-        return
-    q=st.text_input("Filter latest data",placeholder="EGA, Canada, ship, KEZAD, port, bauxite, alert...",key="latest_canonical_filter")
-    view=df.copy()
-    if q.strip():
-        blob=view.astype(str).agg(" ".join,axis=1)
-        view=view[blob.str.contains(q.strip(),case=False,regex=False,na=False)]
-
-    # Lead with decision-useful updates. Keep raw entity additions secondary.
-    substantive=view[view["Update"].isin(["Alert / event","Trade event","Deal / investment","Trade flow","Network relationship","New infrastructure"])].head(limit)
-    if substantive.empty:
-        substantive=view.head(limit)
-    display_df(substantive[[c for c in ["When","Update","Record","Detail","Status"] if c in substantive.columns]],430)
-
-    additions=view[view["Update"].eq("New company / entity")].head(25)
-    if not additions.empty:
-        with st.expander(f"Recently added companies/entities ({len(additions)})",expanded=False):
-            display_df(additions[[c for c in ["When","Record","Detail","Status"] if c in additions.columns]],300)
-
-def _render_recent_additions():
-    st.markdown("### Latest additions")
-    st.caption("Newest canonical records from Supabase. Legacy/reference additions appear only when live timestamps are unavailable.")
-    live=_live_canonical_activity()
-    if live is not None and not live.empty:
-        display_df(live.head(18),330)
-        return
-
-    blocks=[]
-    candidates=[
-        ("Companies",TABLES.get(("Core Entities","Companies"),pd.DataFrame()),["Company","Company Name","Name"],["updated_at","created_at","As Of","as_of"]),
-        ("Infrastructure",TABLES.get(("Infrastructure","Assets"),pd.DataFrame()),["Asset","Name","Port / Facility","Terminal / Facility"],["updated_at","created_at","As Of","as_of"]),
-        ("Vessels",TABLES.get(("Maritime","Vessels"),pd.DataFrame()),["Vessel Name","Name"],["updated_at","created_at","As Of","as_of"]),
-        ("Defence",TABLES.get(("Defence & Shipbuilding","Defence Vessels"),pd.DataFrame()),["Vessel","Programme","Contract"],["updated_at","created_at","Date","As Of"]),
-        ("Corridors",TABLES.get(("Infrastructure","Transport Routes"),pd.DataFrame()),["Route","Corridor","Name"],["updated_at","created_at","As Of","as_of"]),
-    ]
-    for label,df,ncands,dcands in candidates:
-        if df is None or df.empty: continue
-        nc=_first_existing_col(df,ncands); dc=_first_existing_col(df,dcands); x=df.copy()
-        if dc:
-            x['_d']=pd.to_datetime(x[dc],errors='coerce'); x=x.sort_values('_d',ascending=False,na_position='last')
-        for _,r in x.head(4).iterrows():
-            blocks.append({"Area":label,"Added / updated":r.get(dc,'') if dc else '',"Record":r.get(nc,'') if nc else ''})
-    if not blocks:
-        st.info("No recent-addition metadata is available in the current data layer.")
-        return
-    recent=pd.DataFrame(blocks); recent['_d']=pd.to_datetime(recent['Added / updated'],errors='coerce')
-    recent=recent.sort_values('_d',ascending=False,na_position='last').drop(columns=['_d'])
-    display_df(recent.head(18),330)
-
-def _render_business_infrastructure():
-    st.markdown("### Business & infrastructure")
-    st.caption("Core trade-network coverage with current companies, infrastructure, fleets, defence and corridors.")
-    tabs=st.tabs(["Companies","Ports & terminals","Vessels","Defence","Corridors"])
-    with tabs[0]:
-        _compact_trade_table(TABLES.get(("Core Entities","Companies"),pd.DataFrame()),["Company","Company Name","Name","Country","HQ Country","Sector","Business Segments","Status","As Of"],280)
-    with tabs[1]:
-        terms=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame()); ports=TABLES.get(("Maritime","Ports"),pd.DataFrame()); df=terms if not terms.empty else ports
-        _compact_trade_table(df,["Terminal / Facility","Port / Facility","Port","Country","City / Area","Operator / Network","Operator","Facility Type","Status"],280)
-    with tabs[2]:
-        _compact_trade_table(TABLES.get(("Maritime","Vessels"),pd.DataFrame()),["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Owner","Operator","Status"],280)
-    with tabs[3]:
-        df=TABLES.get(("Defence & Shipbuilding","Defence Vessels"),pd.DataFrame())
-        _compact_trade_table(df,["Vessel","Programme","Class / Type","Customer / Operator","Contract","Builder","Status","Delivery"],280)
-    with tabs[4]:
-        routes=TABLES.get(("Infrastructure","Transport Routes"),pd.DataFrame()); systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame()); df=routes if not routes.empty else systems
-        _compact_trade_table(df,["Route","Corridor","System","Name","Mode","Region","Origin","Destination","Status"],280)
-
-def _render_quick_access():
-    st.markdown("### Quick access")
-    for label,target in [("Companies","Companies"),("Ports & terminals","Ports"),("Vessels","Vessels"),("Corridors","Corridors & Systems"),("Defence","Defence & Shipbuilding"),("Regional maps","Regional Maps")]:
-        if st.button(label,use_container_width=True,key='homequick_'+label.replace(' ','_')):
-            request_nav(target); st.rerun()
-
-
-def _render_operational_brief():
-    st.markdown("### Operational brief")
-    st.caption("Four concise trade-impact items. Full incident detail stays in Intelligence.")
-
-    events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
-    if events.empty:
-        st.caption("No current operational records.")
-        return
-
-    date_col=_first_existing_col(events,["Date","Start Date","Event Date"])
-    if date_col:
-        events["_d"]=pd.to_datetime(events[date_col],errors="coerce")
-        events=events.sort_values("_d",ascending=False,na_position="last")
-
-    title_col=_first_existing_col(events,["Title","Event","Event Title"])
-    impact_col=_first_existing_col(events,["Trade / Commercial Impact","Commercial Impact","Operational Impact"])
-    location_col=_first_existing_col(events,["Location","Region","Country"])
-    status_col=_first_existing_col(events,["Status","Event Status"])
-    severity_col=_first_existing_col(events,["Severity","Risk","Risk Level"])
-
-    # Prefer rows that actually contain a business/commercial consequence.
-    if impact_col:
-        impacted=events[events[impact_col].astype(str).str.strip().ne("")]
-        if not impacted.empty:
-            events=impacted
-
-    for _,r in events.head(4).iterrows():
-        title=str(r.get(title_col,"") if title_col else "").strip() or "Operational issue"
-        impact=str(r.get(impact_col,"") if impact_col else "").strip()
-        location=str(r.get(location_col,"") if location_col else "").strip()
-        status=str(r.get(status_col,"") if status_col else "").strip()
-        severity=str(r.get(severity_col,"") if severity_col else "").strip()
-        date=str(r.get(date_col,"") if date_col else "").strip()
-
-        if len(title) > 92:
-            title=title[:89].rstrip()+"…"
-        if len(impact) > 145:
-            impact=impact[:142].rstrip()+"…"
-
-        meta=" · ".join(x for x in [date,severity,status,location] if x)
-
-        st.markdown(
-            f"""<div class="pc-card" style="padding:12px 14px;margin-bottom:10px;">
-            <div class="pc-label">{html_lib.escape(meta)}</div>
-            <div style="font-weight:700;font-size:0.98rem;line-height:1.35;margin:5px 0 6px;">
-                {html_lib.escape(title)}
-            </div>
-            <div class="pc-card-body" style="font-size:0.9rem;line-height:1.4;">
-                {html_lib.escape(impact)}
-            </div>
-            </div>""",
-            unsafe_allow_html=True
-        )
-
-    if st.button("Open operational events",use_container_width=True,key="home_operational_events"):
-        request_nav("Alerts & Disruptions")
-        st.rerun()
-
-
-def _regional_business_security_events():
-    """Regional map layer for Trade using the live canonical event/location layer first."""
-    candidates=[]
-    for key in [
-        ("Events & Hazards","Events"),
-        ("Intelligence","Events"),
-        ("Intelligence","Event Register"),
-        ("Events","Events"),
-        ("Trade","Events"),
-        ("Maritime","Security Events"),
-    ]:
-        df=TABLES.get(key,pd.DataFrame())
-        if df is not None and not df.empty:
-            candidates.append(df.copy())
-
-    for name in ("EVENTS","events","event_df","hazard_events"):
-        obj=globals().get(name)
-        if isinstance(obj,pd.DataFrame) and not obj.empty:
-            candidates.append(obj.copy())
-
-    if not candidates:
-        return pd.DataFrame()
-
-    df=pd.concat(candidates,ignore_index=True,sort=False)
-
-    def first_col(names):
-        for n in names:
-            if n in df.columns:
-                return df[n]
-        return pd.Series("",index=df.index)
-
-    out=df.copy()
-    out["Event ID"]=first_col(["Event ID","event_id","ID"])
-    out["Event Date"]=first_col(["Start Date","Date","Event Date","event_date","start_date"])
-    out["Title"]=first_col(["Title","Event","Event Title","title","event_title"])
-    out["Event Type"]=first_col(["Event Type","Type","Category","event_type","category"])
-    out["Event Family"]=first_col(["Event Family","Family","event_family"])
-    out["Severity"]=first_col(["Severity","Risk","Risk Level","severity"])
-    out["Status"]=first_col(["Status","Event Status","status"])
-    out["Country"]=first_col(["Country / Countries","Country","country"])
-    out["Location"]=first_col(["Location","Area","Region","location","region"])
-    out["Operational Impact"]=first_col(["Operational Impact","Operational impact","operational_impact"])
-    out["Trade / Commercial Impact"]=first_col([
-        "Trade / Commercial Impact","Commercial Impact","Business Impact",
-        "trade_commercial_impact","commercial_impact","business_impact"
-    ])
-    out["Latitude"]=pd.to_numeric(first_col(["Latitude","latitude","lat"]),errors="coerce")
-    out["Longitude"]=pd.to_numeric(first_col(["Longitude","longitude","lon","lng"]),errors="coerce")
-
-    # Canonical pc_events keeps coordinates in pc_event_locations. Merge those here so
-    # Trade Regional Maps uses the same live location layer as P&C Intelligence.
-    locs=TABLES.get(("Events & Hazards","Event Locations"),pd.DataFrame())
-    if isinstance(locs,pd.DataFrame) and not locs.empty and "Event ID" in out.columns and "Event ID" in locs.columns:
-        ll=locs.copy()
-        keep=[c for c in ["Event ID","Location","Country","Latitude","Longitude"] if c in ll.columns]
-        if keep:
-            ll=ll[keep].copy()
-            # One representative location per event for the overview map. The full
-            # event-location table remains available elsewhere for drill-down.
-            ll=ll.drop_duplicates(subset=["Event ID"],keep="first")
-            rename={c:f"_loc_{c}" for c in keep if c!="Event ID"}
-            ll=ll.rename(columns=rename)
-            out=out.merge(ll,on="Event ID",how="left")
-            if "_loc_Latitude" in out.columns:
-                out["Latitude"]=out["Latitude"].fillna(pd.to_numeric(out["_loc_Latitude"],errors="coerce"))
-            if "_loc_Longitude" in out.columns:
-                out["Longitude"]=out["Longitude"].fillna(pd.to_numeric(out["_loc_Longitude"],errors="coerce"))
-            if "_loc_Location" in out.columns:
-                blank=out["Location"].fillna("").astype(str).str.strip().eq("")
-                out.loc[blank,"Location"]=out.loc[blank,"_loc_Location"]
-            if "_loc_Country" in out.columns:
-                blank=out["Country"].fillna("").astype(str).str.strip().eq("")
-                out.loc[blank,"Country"]=out.loc[blank,"_loc_Country"]
-
-    blob=(
-        out["Event Family"].astype(str)+" "+
-        out["Event Type"].astype(str)+" "+
-        out["Title"].astype(str)+" "+
-        out["Operational Impact"].astype(str)+" "+
-        out["Trade / Commercial Impact"].astype(str)
-    ).str.casefold()
-
-    business_terms=(
-        "trade|commercial|port|terminal|shipping|vessel|tanker|container|cargo|logistics|"
-        "freight|supply chain|rail|aviation|airport|energy|oil|gas|lng|refinery|pipeline|"
-        "industrial|factory|warehouse|investment|capex|expansion|acquisition|concession|"
-        "corridor|route|throughput|export|import|market|company|operator"
-    )
-    security_terms=(
-        "security|attack|strike|drone|missile|piracy|hijack|seizure|boarding|mine|"
-        "conflict|war|military|naval|sanction|blockade|restricted zone|jamming|spoof|"
-        "collision|grounding|fire|explosion|casualty|sinking"
-    )
-
-    out["Business Relevance"]=blob.str.contains(business_terms,regex=True,na=False) | out["Trade / Commercial Impact"].astype(str).str.strip().ne("")
-    out["Security Relevance"]=blob.str.contains(security_terms,regex=True,na=False)
-    keep=out["Business Relevance"] | out["Security Relevance"]
-
-    filtered=out[keep].copy()
-    dedupe_cols=[c for c in ["Event ID","Event Date","Title","Event Type","Country","Location"] if c in filtered.columns]
-    if dedupe_cols:
-        filtered=filtered.drop_duplicates(subset=dedupe_cols,keep="first")
-    return filtered
-
-def render_regional_business_security_maps():
-    """Trade-first regional map view with business, infrastructure and security layers."""
-    df=_regional_business_security_events()
-
-    st.caption(
-        "Regional Maps in Trade show business activity, infrastructure, movement systems and disruption. "
-        "Security is one layer of exposure, not the primary lens."
-    )
-
-    if df is None or df.empty:
-        st.info("No regional business/security events available in the current canonical/migration layer.")
-        return
-
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("Business-relevant events",int(df["Business Relevance"].sum()))
-    c2.metric("Security-relevant events",int(df["Security Relevance"].sum()))
-    c3.metric("Mapped events",int((df["Latitude"].notna() & df["Longitude"].notna()).sum()))
-    c4.metric("Countries / markets",df["Country"].astype(str).replace("",pd.NA).dropna().nunique())
-
-    f1,f2,f3=st.columns(3)
-    layer=f1.selectbox(
-        "Map layer",
-        ["Business + Security","Business only","Security only"],
-        key="regional_map_layer_trade"
-    )
-    countries=sorted([x for x in df["Country"].fillna("").astype(str).unique() if x.strip()])
-    country=f2.selectbox("Country / market",["All"]+countries,key="regional_map_country_trade")
-    q=f3.text_input("Search",placeholder="port, LNG, strike, rail, investment...",key="regional_map_search_trade")
-
-    x=df.copy()
-    if layer=="Business only":
-        x=x[x["Business Relevance"]]
-    elif layer=="Security only":
-        x=x[x["Security Relevance"]]
-    if country!="All":
-        x=x[x["Country"].astype(str).eq(country)]
-    if q.strip():
-        mask=pd.Series(False,index=x.index)
-        for c in ["Title","Event Type","Event Family","Country","Location","Operational Impact","Trade / Commercial Impact"]:
-            mask |= x[c].astype(str).str.contains(q,case=False,na=False,regex=False)
-        x=x[mask]
-
-    mapped=x[x["Latitude"].notna() & x["Longitude"].notna()].copy()
-    if not mapped.empty:
-        mm=mapped.rename(columns={"Latitude":"lat","Longitude":"lon"})
-        st.map(mm[["lat","lon"]],use_container_width=True)
-    else:
-        st.info("No coordinates available for the selected regional layer.")
-
-    tabs=st.tabs(["Business & infrastructure","Security exposure","All regional events"])
-    cols=["Event Date","Title","Event Type","Severity","Status","Country","Location","Operational Impact","Trade / Commercial Impact"]
-
-    with tabs[0]:
-        y=x[x["Business Relevance"]].copy()
-        display_df(y[[c for c in cols if c in y.columns]],500) if not y.empty else st.info("No business-relevant events in this selection.")
-    with tabs[1]:
-        y=x[x["Security Relevance"]].copy()
-        display_df(y[[c for c in cols if c in y.columns]],500) if not y.empty else st.info("No security-relevant events in this selection.")
-    with tabs[2]:
-        display_df(x[[c for c in cols if c in x.columns]],550)
-
-if page=="Overview":
-    header("Trade System","Live news, markets, port activity, companies, infrastructure, fleets, contracts, investment and corridors across the global trade network.")
-
-    top_news,top_right=st.columns([1.55,1.0],gap="large")
-    with top_news:
-        render_overview_news()
-    with top_right:
-        _render_operational_brief()
-        st.markdown("---")
-        st.markdown("### Markets now")
-        render_live_market_dashboard(compact=True)
-
-    st.markdown("---")
-    render_overview_portwatch()
-
-    st.markdown("---")
-    _render_live_canonical_activity(30)
-
-    st.markdown("---")
-    q=st.text_input("Search the trade system",placeholder="Company, port, vessel, corridor, contract, programme, refinery, terminal...",key="trade_home_search_top")
-    if q.strip():
-        hits=ranked_search(q.strip(),limit=25)
-        if hits.empty: st.info("No matching records.")
-        else:
-            for _,h in hits.head(10).iterrows(): readable_search_card(h)
-
-    st.markdown("---")
-    main,right=st.columns([3.0,1.15],gap="large")
-    with main:
-        _render_trade_pulse()
-        st.markdown("---")
-        _render_recent_additions()
-        st.markdown("---")
-        _render_business_infrastructure()
-    with right:
-        _render_quick_access()
-        st.markdown("---")
-        render_security_business_rail(4)
-
-    with st.expander("Detailed recent operational events",expanded=False):
-        events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
-        if not events.empty:
-            if "Date" in events.columns:
-                events['_dt']=pd.to_datetime(events['Date'],errors='coerce'); events=events.sort_values('_dt',ascending=False,na_position='last')
-            render_event_cards(events,4)
-        else: st.info("No recent operational events.")
+    st.markdown("### Latest recorded events")
+    latest=events.copy()
+    if not latest.empty and "Date" in latest.columns:
+        latest["_dt"]=pd.to_datetime(latest["Date"],errors="coerce")
+        latest=latest.sort_values("_dt",ascending=False)
+    render_event_cards(latest,12)
 
 elif page=="Search":
     header("Search P&C","One query across companies, ports, shipyards, vessels, contracts, transactions, news, events and systems.")
@@ -8514,11 +4622,7 @@ elif page=="Search":
             st.warning("No matching records found.")
 
 elif page=="Regional Maps":
-    header(
-        "Regional Maps",
-        "Regional business, infrastructure, corridor and security exposure — with trade and commercial activity as the primary lens."
-    )
-    render_regional_business_security_maps()
+    render_trade_regional_maps()
 
 elif page=="Alerts & Disruptions":
     render_trade_alerts_workspace()
@@ -9152,20 +5256,8 @@ elif page in ["Ports","Ports & Terminals"]:
             st.markdown(f"## {pname}")
             c1,c2,c3=st.columns(3)
             pt_raw=terms[terms["Port ID"].astype(str).eq(pid)].copy() if not terms.empty and "Port ID" in terms.columns else pd.DataFrame()
-
-            # Pull canonical terminal_of relationships live from Supabase.
-            live_terms, live_term_status = live_db_terminals_for_port(row)
-            if not live_terms.empty:
-                pt_raw=pd.concat([pt_raw,live_terms],ignore_index=True,sort=False)
-                if "Terminal ID" in pt_raw.columns:
-                    pt_raw=pt_raw.drop_duplicates(subset=["Terminal ID"],keep="last")
             pt=filter_distinct_port_terminals(row,pt_raw)
             c1.metric("Terminals",len(pt))
-            if live_term_status:
-                if live_terms.empty:
-                    st.caption(f"Terminal link status: {live_term_status}")
-                else:
-                    st.success(f"Terminal link status: {live_term_status}")
             c2.markdown(f"<div class='pc-card'><div class='pc-label'>Country</div><div class='pc-big'>{row.get('Country','')}</div></div>",unsafe_allow_html=True)
             c3.markdown(f"<div class='pc-card'><div class='pc-label'>Operator</div><div class='pc-big'>{row.get('Operator','') or 'Multiple / authority-led'}</div></div>",unsafe_allow_html=True)
             render_port_commercial_network(row,pt)
@@ -9204,7 +5296,7 @@ elif page in ["Ports","Ports & Terminals"]:
                 if ev.empty:
                     st.info("No linked security/disruption events for this port yet.")
                 else:
-                    security_mask=ev.get("Event Family",pd.Series(index=ev.index,dtype=str)).astype(str).str.contains("Trade|Commercial|Infrastructure|Investment|Port|Terminal|Maritime|Shipping|Logistics|Rail|Aviation|Energy|Industrial|Security|Conflict|Weather|Natural|Labour|Civil|Cyber",case=False,regex=True,na=False)
+                    security_mask=ev.get("Event Family",pd.Series(index=ev.index,dtype=str)).astype(str).str.contains("Security|Conflict|Maritime|Port|Weather|Natural|Labour|Civil|Cyber",case=False,regex=True,na=False)
                     sev=ev[security_mask].copy()
                     render_event_cards(sev,50)
                     if sev.empty: st.info("No events currently classified into the security/disruption view.")
@@ -9480,24 +5572,6 @@ elif page=="Live Feeds":
         display_df(catalog[showcols] if showcols else catalog,100,show_ids=True)
         st.caption("Design rule: green = immediately usable, amber = credential/contributor gated, trial = not a production dependency, grey = registered/deferred/excluded.")
 
-
-elif page=="Government & Security":
-    header(
-        "Government & Security",
-        "Country-first directory for defence ministries, armed forces, navies, coast guards, border organisations, operational commands, vessels and linked facilities."
-    )
-    render_government_security()
-
-
-
-elif page=="Security & Business Risk":
-    header(
-        "Security & Business Risk",
-        "A secondary drill-down for security incidents that materially affect trade, infrastructure, transport corridors or companies."
-    )
-    render_security_business_risk()
-
-
 elif page=="Defence & Shipbuilding":
     header("Defence & Shipbuilding","Shipyards, government procurement, naval and research-vessel programmes, contracts, delivery routes and industrial capacity.")
     dcos=TABLES.get(("Defence & Shipbuilding","Defence Companies"),pd.DataFrame()).copy()
@@ -9543,46 +5617,7 @@ elif page=="Defence & Shipbuilding":
                 request_nav("Shipyards","yard_pick_id",yards.iloc[pick].get("Yard ID",""),yards.iloc[pick].get("Shipyard",""))
                 st.rerun()
     with tabs[3]:
-        if vessels.empty:
-            st.info("No defence / government vessels are available.")
-        else:
-            vv=vessels.copy()
-            # Country is not guaranteed on every legacy defence vessel row, so expose whatever geography exists.
-            sort_cols=[c for c in ["Customer / Operator","Vessel"] if c in vv.columns]
-            if sort_cols:
-                vv=vv.sort_values(sort_cols,na_position="last")
-            vv=vv.reset_index(drop=True)
-
-            display_df(vv[[c for c in ["Vessel","Class / Type","Customer / Operator","Build Yard ID","Status","Build / Delivery Route"] if c in vv.columns]],300)
-
-            st.markdown("### Inspect a vessel")
-            dpick=st.selectbox(
-                "Defence / government vessel",
-                range(len(vv)),
-                format_func=lambda i: " — ".join([
-                    z for z in [
-                        str(vv.iloc[i].get("Vessel","")).strip(),
-                        str(vv.iloc[i].get("Class / Type","")).strip(),
-                        str(vv.iloc[i].get("Customer / Operator","")).strip(),
-                    ] if z
-                ]),
-                key="defence_vessel_detail_pick"
-            )
-            dr=vv.iloc[dpick]
-            did=str(dr.get("Vessel ID","")).strip()
-            dname=str(dr.get("Vessel","")).strip() or did
-            if did:
-                render_defence_vessel_profile(did,dname)
-            else:
-                st.markdown(f"### {dname}")
-                display_df(
-                    pd.DataFrame([
-                        {"Field":c,"Value":dr.get(c,"")}
-                        for c in ["Class / Type","Customer / Operator","Build Yard ID","Status","Build / Delivery Route"]
-                        if str(dr.get(c,"")).strip()
-                    ]),
-                    50
-                )
+        display_df(vessels[[c for c in ["Vessel","Class / Type","Customer / Operator","Build Yard ID","Status","Build / Delivery Route"] if c in vessels.columns]],300)
     with tabs[4]:
         display_df(contracts[[c for c in ["Date","Customer","Contractor Entity ID","Value","Scope","Contract Type","Status / Evidence Note"] if c in contracts.columns]],260)
     with tabs[5]:
@@ -9833,17 +5868,15 @@ elif page=="Sanctions & Compliance":
         "Sanctions & Compliance",
         "Government sanctions, programmes and designations. Government sanctions remain separate from analytical and operational watchlists."
     )
-    des,des_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame()),["pc_sanctions_designations","sanctions_designations"],["Designation ID"])
-    auth,auth_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Sanctions Authorities"),pd.DataFrame()),["pc_sanctions_authorities","sanctions_authorities"],["Authority ID"])
-    progs,progs_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Sanctions Programmes"),pd.DataFrame()),["pc_sanctions_programmes","pc_sanctions_programs","sanctions_programmes"],["Programme ID"])
-    links,links_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Sanctions Entity Links"),pd.DataFrame()),["pc_sanctions_entity_links","sanctions_entity_links"],["Designation ID","Entity ID"])
-    watch,watch_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Watchlist Taxonomy"),pd.DataFrame()),["pc_watchlist_taxonomy","watchlist_taxonomy"],["Class"])
-    rules,rules_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Policy Interaction Rules"),pd.DataFrame()),["pc_policy_interaction_rules","policy_interaction_rules"])
-    compliance_regimes,regime_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Compliance Regimes"),pd.DataFrame()),["pc_compliance_regimes","compliance_regimes"],["Regime"])
-    compliance_designations,compdes_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()),["pc_compliance_designations","compliance_designations"])
-    compliance_exposure,exposure_source=_policy_live_first(TABLES.get(("Trade Policy & Compliance","Compliance Exposure"),pd.DataFrame()),["pc_compliance_exposure","compliance_exposure"])
-    _policy_sources={x for x in [des_source,auth_source,progs_source,links_source,watch_source,rules_source,regime_source,compdes_source,exposure_source] if x}
-    st.caption("Data bridge: " + " · ".join(sorted(_policy_sources)))
+    des=TABLES.get(("Trade Policy & Compliance","Sanctions Designations"),pd.DataFrame()).copy()
+    auth=TABLES.get(("Trade Policy & Compliance","Sanctions Authorities"),pd.DataFrame()).copy()
+    progs=TABLES.get(("Trade Policy & Compliance","Sanctions Programmes"),pd.DataFrame()).copy()
+    links=TABLES.get(("Trade Policy & Compliance","Sanctions Entity Links"),pd.DataFrame()).copy()
+    watch=TABLES.get(("Trade Policy & Compliance","Watchlist Taxonomy"),pd.DataFrame()).copy()
+    rules=TABLES.get(("Trade Policy & Compliance","Policy Interaction Rules"),pd.DataFrame()).copy()
+    compliance_regimes=TABLES.get(("Trade Policy & Compliance","Compliance Regimes"),pd.DataFrame()).copy()
+    compliance_designations=TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()).copy()
+    compliance_exposure=TABLES.get(("Trade Policy & Compliance","Compliance Exposure"),pd.DataFrame()).copy()
 
     if des.empty and compliance_designations.empty:
         st.info("Sanctions data unavailable.")
@@ -9954,7 +5987,7 @@ elif page=="Sanctions & Compliance":
 elif page=="__DEFERRED_USCG_SAFETY_COMPLIANCE__":
     header(
         "USCG Safety & Compliance",
-        "Live CGMIX/PSIX and Incident Investigation Report lookups. This is an external evidence layer and is not written into the canonical data model."
+        "Live CGMIX/PSIX and Incident Investigation Report lookups. This is an external evidence layer and is not written into the canonical Excel model."
     )
     st.caption("Source: U.S. Coast Guard CGMIX · PSIX is a weekly FOIA/MISLE snapshot · live requests cached for 30 minutes")
     t1,t2=st.tabs(["PSIX Vessel / Inspection Search","Incident Investigations"])
@@ -10127,22 +6160,19 @@ elif page=="News & Signals":
         "News & Signals",
         "Open-source discovery across trade, ports, logistics, maritime, rail, aviation and infrastructure. Results remain leads for verification and entity matching."
     )
-    api_key=_newsdata_key()
+    api_key=_secret("NEWSDATA_API_KEY")
     if not api_key:
-        st.markdown("<div class='pc-hero'><div class='pc-hero-title'>NewsData.io connector ready</div><div class='pc-hero-copy'>Add <b>NEWSDATA_API_KEY</b> or grouped <b>[newsdata] api_key</b> to Streamlit Secrets to activate this workspace. No external requests are made until the key is present.</div></div>",unsafe_allow_html=True)
+        st.markdown("<div class='pc-hero'><div class='pc-hero-title'>NewsData.io connector ready</div><div class='pc-hero-copy'>Add <b>NEWSDATA_API_KEY</b> to Streamlit Secrets to activate this workspace. No external requests are made until the key is present.</div></div>",unsafe_allow_html=True)
     else:
-        st.caption("Source: NewsData.io · cached for 10 minutes · discovery layer only · relevance-gated")
+        st.caption("Source: NewsData.io · cached for 60 minutes · discovery layer only")
     presets={
-        "Business & trade":"trade business company investment contract acquisition infrastructure logistics shipping freight",
-        "Conflict & geopolitics":"conflict geopolitics war military security sanctions blockade border strait",
-        "Maritime security":"ship vessel tanker attack drone missile seizure piracy maritime security",
-        "Ports & terminals":"port terminal strike closure disruption congestion concession investment",
-        "Logistics & supply chain":"logistics shipping freight supply chain disruption congestion delay shortage",
-        "Energy & commodities":"oil gas LNG refinery pipeline energy commodity crude",
-        "Rail & intermodal":"rail railway freight intermodal derailment strike disruption infrastructure",
-        "Aviation & air cargo":"airport aviation air cargo disruption closure strike logistics",
-        "Trade & sanctions":"trade sanctions export controls customs tariff shipping compliance",
-        "Infrastructure & deals":"port terminal logistics railway acquisition investment concession contract capex",
+        "Maritime security":"ship vessel tanker attack drone missile seizure piracy",
+        "Ports & terminals":"port terminal strike closure disruption explosion congestion",
+        "Logistics & supply chain":"logistics shipping freight disruption congestion delay shortage",
+        "Rail & intermodal":"rail railway freight intermodal derailment strike disruption",
+        "Aviation & air cargo":"airport aviation air cargo disruption closure strike",
+        "Trade & sanctions":"trade sanctions export controls shipping compliance",
+        "Infrastructure & deals":"port terminal logistics railway acquisition investment concession contract",
         "Custom":""
     }
     c1,c2=st.columns([1.2,2.8])
@@ -10155,11 +6185,6 @@ elif page=="News & Signals":
             ndf,nerr=load_newsdata_articles(query.strip(),api_key,"en",10)
             st.session_state["newsdata_results"]=(ndf,nerr,query.strip())
     ndf,nerr,lastq=st.session_state.get("newsdata_results",(pd.DataFrame(),"",""))
-    if not ndf.empty:
-        ndf=ndf[ndf.apply(_news_trade_relevant,axis=1)].copy()
-        if not ndf.empty:
-            ndf["_title_key"]=ndf.get("title",pd.Series(index=ndf.index,dtype=str)).fillna("").astype(str).str.casefold().str.replace(r"[^a-z0-9]+"," ",regex=True).str.strip()
-            ndf=ndf.drop_duplicates("_title_key").drop(columns=["_title_key"],errors="ignore")
     if nerr:
         st.warning(f"NewsData.io is temporarily unavailable. {nerr}")
     elif not ndf.empty:
