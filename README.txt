@@ -1,12 +1,11 @@
-P&C Trade v3.3.44 — Complete Entity Graph Roll-up
+P&C Intelligence v3.3.41 — Alert Card HTML Rendering Fix
 
-Replace only app.py.
+Replace pc_intelligence_app.py only.
+
+Fixes:
+- Raw <div class="pc-card-impact"> markup rendering as code on alert cards.
+- Uses single-line card HTML to avoid Markdown code-block parsing.
+- Escapes dynamic event text safely.
+- Uses Trade / commercial impact label when that fallback field is displayed.
+
 No SQL changes required.
-
-Fixes company/entity profiles so canonical relationships are read in both directions.
-Profiles now include all pc_relationships touching the selected company/group scope, and
-pull related pc_assets / pc_mobile_assets whether the company is the source or target
-of the relationship. Direct owner/operator/manager foreign keys remain supported.
-
-This addresses empty or partial profiles for Port of Long Beach, DP World, AD Ports Group,
-Matson and other entities where canonical relationships were stored in mixed directions.
