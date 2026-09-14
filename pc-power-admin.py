@@ -18,29 +18,49 @@ except Exception:
     ai_research=None
     ai_configured=lambda: False
 
-st.set_page_config(page_title="P&C Power Admin",page_icon="◈",layout="wide")
+st.set_page_config(page_title="P&C Workflow Console",page_icon="◈",layout="wide",initial_sidebar_state="expanded")
+
+# Match the Trade/Intelligence apps: dark by default, with a persistent light/dark toggle.
+appearance = st.session_state.get("pc_admin_appearance", "Dark")
+
 st.markdown("""
 <style>
-:root{--bg:#07111f;--panel:#0d1a2b;--line:#28415f;--text:#f3f6fa;--muted:#b8c5d4;--gold:#d7b66a}
-.stApp{background:var(--bg);color:var(--text)} [data-testid="stSidebar"]{background:#091725!important}
-h1,h2,h3,p,label{color:var(--text)!important}
-textarea, [data-baseweb="textarea"] textarea, [data-testid="stTextArea"] textarea{
-  background:#f4f7fb!important;
-  color:#111827!important;
-  -webkit-text-fill-color:#111827!important;
-  caret-color:#111827!important;
-  font-family:Consolas, "SFMono-Regular", Menlo, Monaco, monospace!important;
+:root{--bg:#07111f;--panel:#0d1a2b;--panel2:#102238;--line:#28415f;--text:#f3f6fa;--muted:#b8c5d4;--gold:#d7b66a}
+.stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"]{background:var(--bg);color:var(--text)}
+[data-testid="stSidebar"]{background:#091725!important;border-right:1px solid var(--line)!important}
+h1,h2,h3,h4,h5,h6,p,label,li,span{color:var(--text)!important}
+.pc-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px}
+.pc-k{color:var(--gold);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}
+[data-baseweb="select"]>div,[data-baseweb="input"]>div,.stTextInput input{background:var(--panel)!important;color:var(--text)!important;border-color:var(--line)!important}
+textarea,[data-baseweb="textarea"] textarea,[data-testid="stTextArea"] textarea{
+  background:#f4f7fb!important;color:#111827!important;-webkit-text-fill-color:#111827!important;caret-color:#111827!important;
+  font-family:Consolas,"SFMono-Regular",Menlo,Monaco,monospace!important;
 }
-[data-testid="stTextArea"] > div,
-[data-testid="stTextArea"] [data-baseweb="textarea"]{
-  background:#f4f7fb!important;
-}
-input, [data-baseweb="input"] input{
-  color:#111827!important;
-  -webkit-text-fill-color:#111827!important;
-}
-.pc-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px}.pc-k{color:var(--gold);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}
+[data-testid="stTextArea"]>div,[data-testid="stTextArea"] [data-baseweb="textarea"]{background:#f4f7fb!important}
+.stButton>button,.stDownloadButton>button{background:var(--panel2)!important;color:var(--text)!important;border:1px solid var(--line)!important}
+.stButton>button:hover,.stDownloadButton>button:hover{border-color:var(--gold)!important;color:#fff!important}
+.stDataFrame{border:1px solid var(--line);border-radius:8px}
 </style>""",unsafe_allow_html=True)
+
+if appearance == "Light":
+    st.markdown("""
+    <style>
+    :root{--bg:#f5f7fa;--panel:#ffffff;--panel2:#f0f3f7;--line:#cbd5e1;--text:#16202a;--muted:#5d6b7a;--gold:#9a7626}
+    .stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"]{background:var(--bg)!important;color:var(--text)!important}
+    [data-testid="stSidebar"]{background:#eef2f6!important;border-right:1px solid var(--line)!important}
+    h1,h2,h3,h4,h5,h6,p,label,li,span{color:var(--text)!important}
+    .pc-card{background:#ffffff!important;border-color:var(--line)!important}
+    .pc-k{color:var(--gold)!important}
+    [data-baseweb="select"]>div,[data-baseweb="input"]>div,.stTextInput input{background:#ffffff!important;color:#16202a!important;border-color:var(--line)!important}
+    textarea,[data-baseweb="textarea"] textarea,[data-testid="stTextArea"] textarea{background:#ffffff!important;color:#111827!important;-webkit-text-fill-color:#111827!important}
+    [data-testid="stTextArea"]>div,[data-testid="stTextArea"] [data-baseweb="textarea"]{background:#ffffff!important}
+    .stButton>button,.stDownloadButton>button{background:#ffffff!important;color:#29465f!important;border-color:#b8c3cf!important}
+    .stButton>button p,.stDownloadButton>button p{color:#29465f!important}
+    .stDataFrame{border-color:#cbd5e1!important}
+    [data-testid="stHeader"],[data-testid="stToolbar"]{background:#f5f7fa!important;color:#16202a!important}
+    [data-testid="stHeader"] *,[data-testid="stToolbar"] *{color:#16202a!important}
+    </style>
+    """,unsafe_allow_html=True)
 
 if os.getenv("PC_REQUIRE_AUTH","false").lower()=="true":
     ctx=require_super_admin()
@@ -49,8 +69,24 @@ else:
 
 sb=service_client()
 st.sidebar.markdown("<div class='pc-k'>Power & Corridors</div>",unsafe_allow_html=True)
-st.sidebar.markdown("## Power Admin")
-PAGES=["Dashboard","Workflow Center","AI Research Workflow","Bundle Review","Dependency Graph","Bulk Import Workflow","Multi-Table Bulk Loader","Reconciliation Center","Document Loader","Distribution Lists","Migration","Database Coverage","Data Completion","Model Registry","Batch Staging","Staging Resolution","Review Queue","ReCAAP Vessel Resolver","Organizations","Users & Access","Research Jobs","Trade System Builder","Market Data","Governance & Quality"]
+st.sidebar.markdown("## Workflow Console")
+st.sidebar.caption("Seven focused workflows. Create, ingest, reconcile and review without the old maintenance clutter.")
+st.sidebar.radio(
+    "Appearance",
+    ["Dark","Light"],
+    horizontal=True,
+    key="pc_admin_appearance",
+)
+NAV = {
+    "Home": "Workflow Center",
+    "AI Research": "AI Research Workflow",
+    "Bulk Load": "Multi-Table Bulk Loader",
+    "Documents": "Document Loader",
+    "Email & Distribution": "Distribution Lists",
+    "Reconcile & Review": "Reconciliation Center",
+    "System": "Governance & Quality",
+}
+PAGES=list(NAV.keys())
 
 # ---------------------------------------------------------------------------
 # Bulk review / validation helpers
@@ -973,9 +1009,9 @@ def _workflow_upsert(job_id, workflow_type, title, stage, order, status="running
 def _workflow_job_rows(job_type=None,limit=100):
     if not sb:
         return []
-    # Use "*" here because pc_ingestion_jobs deployments do not all expose
-    # updated_at/completed_at/source_scope. created_at is the stable timestamp.
-    q=sb.table("pc_ingestion_jobs").select("*").order("created_at",desc=True).limit(limit)
+    q=sb.table("pc_ingestion_jobs").select(
+        "ingestion_job_id,job_type,title,status,stats,error_text,created_at,updated_at,completed_at,source_scope"
+    ).order("created_at",desc=True).limit(limit)
     if job_type:
         q=q.eq("job_type",job_type)
     try:
@@ -1006,70 +1042,23 @@ def _staging_summary(job_id):
     return out
 
 def _run_reconciliation(job_id):
+    """Use the dependency-autocreate engine first; fall back only for older databases."""
     try:
-        return sb.rpc("pc_run_standard_reconciliation",{"p_job_id":job_id}).execute().data
-    except Exception:
-        # compatibility path before SQL 031 is installed
-        result={}
-        try: result["prepare"]=_prepare_canonical_candidates(sb,job_id)
-        except Exception as exc: result["prepare_error"]=str(exc)
-        try: result["repair"]=sb.rpc("pc_repair_unresolved_identity_candidates",{"p_job_id":job_id}).execute().data
-        except Exception as exc: result["repair_error"]=str(exc)
-        try: result["event_relationships"]=_process_relationship_backlog(sb,job_id)
-        except Exception as exc: result["event_relationships_error"]=str(exc)
-        try: result["generic_relationships"]=_process_generic_relationship_backlog(sb,job_id)
-        except Exception as exc: result["generic_relationships_error"]=str(exc)
-        return result
-
-
-def _dependency_reconcile(job_id):
-    """Use SQL 032 when installed; fall back to the legacy reconciliation path."""
-    try:
-        return sb.rpc("pc_reconcile_ingestion_job",{"p_ingestion_job_id":job_id}).execute().data
-    except Exception:
-        return _run_reconciliation(job_id)
-
-def _dependency_exceptions(job_id=None, limit=1500):
-    if not sb:
-        return []
-    try:
-        q=sb.table("pc_v_ingestion_dependency_exceptions").select("*").limit(limit)
-        if job_id:
-            q=q.eq("ingestion_job_id",job_id)
-        return q.execute().data or []
-    except Exception:
-        q=sb.table("pc_staged_records").select(
-            "staged_record_id,ingestion_job_id,target_table,natural_key,resolution_status,review_status,validation_status,payload,created_at"
-        ).limit(limit)
-        if job_id:
-            q=q.eq("ingestion_job_id",job_id)
-        rows=q.execute().data or []
-        for r in rows:
-            rs=str(r.get("resolution_status") or "")
-            p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
-            if r.get("target_table")=="pc_event_links" and isinstance(p.get("linked_entities"),list):
-                typ="ARRAY_EVENT_LINK"
-            elif rs=="BROKEN_REFERENCE": typ="BROKEN_REFERENCE"
-            elif rs=="PARTIAL": typ="PARTIAL_RELATIONSHIP"
-            elif rs=="AMBIGUOUS": typ="TRUE_AMBIGUITY"
-            elif rs=="INVALID": typ="UNSUPPORTED_OR_INVALID_TARGET"
-            elif rs=="NEW" and r.get("review_status")=="pending": typ="READY_FOR_CANONICAL_PREP"
-            else: typ="REVIEW"
-            r["exception_type"]=typ
-        return [
-            r for r in rows
-            if r.get("review_status")!="applied"
-            or r.get("resolution_status") in {"BROKEN_REFERENCE","PARTIAL","AMBIGUOUS","INVALID"}
-        ]
-
-def _bundle_counts(job_id):
-    rows=_dependency_exceptions(job_id,3000)
-    counts={}
-    for r in rows:
-        k=r.get("exception_type") or "REVIEW"
-        counts[k]=counts.get(k,0)+1
-    return counts
-
+        return sb.rpc("pc_reconcile_ingestion_job_v2",{"p_ingestion_job_id":str(job_id)}).execute().data
+    except Exception as v2_exc:
+        try:
+            return sb.rpc("pc_run_standard_reconciliation",{"p_job_id":job_id}).execute().data
+        except Exception:
+            result={"v2_error":str(v2_exc)}
+            try: result["prepare"]=_prepare_canonical_candidates(sb,job_id)
+            except Exception as exc: result["prepare_error"]=str(exc)
+            try: result["repair"]=sb.rpc("pc_repair_unresolved_identity_candidates",{"p_job_id":job_id}).execute().data
+            except Exception as exc: result["repair_error"]=str(exc)
+            try: result["event_relationships"]=_process_relationship_backlog(sb,job_id)
+            except Exception as exc: result["event_relationships_error"]=str(exc)
+            try: result["generic_relationships"]=_process_generic_relationship_backlog(sb,job_id)
+            except Exception as exc: result["generic_relationships_error"]=str(exc)
+            return result
 
 def _docx_text(raw):
     with zipfile.ZipFile(io.BytesIO(raw)) as z:
@@ -1083,6 +1072,64 @@ def _docx_text(raw):
             lines.append(text.strip())
     return "\n".join(lines)
 
+def _extract_pdf_text(raw):
+    """Extract PDF text using whichever parser is available in the deployment.
+
+    pypdf is preferred, but older deployments may already have PyPDF2,
+    pdfplumber or PyMuPDF installed.  We deliberately try all of them so a
+    missing optional package does not crash the entire AI Research page.
+    """
+    errors=[]
+
+    try:
+        from pypdf import PdfReader
+        reader=PdfReader(io.BytesIO(raw))
+        text="\n".join((p.extract_text() or "") for p in reader.pages)
+        if text.strip():
+            return text
+        errors.append("pypdf returned no extractable text")
+    except Exception as exc:
+        errors.append(f"pypdf: {exc}")
+
+    try:
+        from PyPDF2 import PdfReader
+        reader=PdfReader(io.BytesIO(raw))
+        text="\n".join((p.extract_text() or "") for p in reader.pages)
+        if text.strip():
+            return text
+        errors.append("PyPDF2 returned no extractable text")
+    except Exception as exc:
+        errors.append(f"PyPDF2: {exc}")
+
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+            text="\n".join((p.extract_text() or "") for p in pdf.pages)
+        if text.strip():
+            return text
+        errors.append("pdfplumber returned no extractable text")
+    except Exception as exc:
+        errors.append(f"pdfplumber: {exc}")
+
+    try:
+        import fitz  # PyMuPDF
+        pdf=fitz.open(stream=raw,filetype="pdf")
+        try:
+            text="\n".join(page.get_text("text") or "" for page in pdf)
+        finally:
+            pdf.close()
+        if text.strip():
+            return text
+        errors.append("PyMuPDF returned no extractable text")
+    except Exception as exc:
+        errors.append(f"PyMuPDF: {exc}")
+
+    raise RuntimeError(
+        "No usable PDF text parser is installed (or the PDF contains no "
+        "extractable text). Add `pypdf>=5.0` to requirements.txt. Details: "
+        + " | ".join(errors)
+    )
+
 def _extract_document_text(upload):
     raw=upload.getvalue()
     lname=upload.name.lower()
@@ -1091,12 +1138,7 @@ def _extract_document_text(upload):
     if lname.endswith((".txt",".md",".csv")):
         return raw.decode("utf-8-sig",errors="replace")
     if lname.endswith(".pdf"):
-        try:
-            from pypdf import PdfReader
-            reader=PdfReader(io.BytesIO(raw))
-            return "\n".join((p.extract_text() or "") for p in reader.pages)
-        except Exception as exc:
-            raise RuntimeError(f"PDF parser unavailable or failed: {exc}")
+        return _extract_pdf_text(raw)
     raise RuntimeError("Supported document types: DOCX, PDF, TXT, MD.")
 
 def _canonical_link_candidates(kind, query="",limit=100):
@@ -1124,7 +1166,9 @@ def _table_exists(name):
         return False
 
 
-page=st.sidebar.radio("Workspace",PAGES)
+selected_page=st.sidebar.radio("",PAGES,label_visibility="collapsed")
+page=NAV[selected_page]
+st.sidebar.caption("Research → stage → auto-resolve → review exceptions → apply")
 
 if sb is None:
     st.warning("Supabase service connection is not configured yet. The app is valid and can be deployed now; add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to secrets before using database actions.")
@@ -1728,15 +1772,12 @@ Do not return a pc_relationships proposal without source_name and target_name.
 
 
 def _jsonable(v):
-    """Recursively convert pandas/Python values into PostgREST-safe JSON.
-
-    Excel imports commonly arrive as pandas Timestamp/datetime/date objects.  Those
-    must be serialized before pc_staged_records.payload is sent to Supabase.
-    """
+    """Convert pandas / Excel / Python values into PostgREST-safe JSON values."""
     if isinstance(v, dict):
         return {str(k): _jsonable(x) for k, x in v.items()}
     if isinstance(v, (list, tuple, set)):
         return [_jsonable(x) for x in v]
+
     if isinstance(v, pd.Timestamp):
         return None if pd.isna(v) else v.isoformat()
     if isinstance(v, datetime):
@@ -1745,18 +1786,21 @@ def _jsonable(v):
         return v.isoformat()
     if isinstance(v, Decimal):
         return float(v)
-    # numpy scalar values (including numpy datetime64) expose .item(); normalize
-    # them without requiring numpy as a direct application dependency.
-    if type(v).__module__.startswith("numpy") and hasattr(v, "item"):
+
+    if hasattr(v, "item") and not isinstance(v, (str, bytes, bytearray)):
         try:
-            return _jsonable(v.item())
+            item = v.item()
+            if item is not v:
+                return _jsonable(item)
         except Exception:
             pass
+
     try:
         if pd.isna(v):
             return None
     except Exception:
         pass
+
     return v
 
 
@@ -2643,7 +2687,7 @@ elif page=="Workflow Center":
                 st.info("Run SQL 028_document_ingestion.sql to enable document records.")
         with tabs[3]:
             try:
-                stale=safe_rows(sb,"pc_v_stale_ingestion_jobs","*",250,order="created_at")
+                stale=safe_rows(sb,"pc_v_stale_ingestion_jobs","*",250,order="updated_at")
             except Exception:
                 stale=[]
             if stale:
@@ -2654,206 +2698,307 @@ elif page=="Workflow Center":
                 now=pd.Timestamp.utcnow()
                 for j in all_jobs:
                     if j.get("status")!="running": continue
-                    d=pd.to_datetime(j.get("created_at"),utc=True,errors="coerce")
+                    d=pd.to_datetime(j.get("updated_at") or j.get("created_at"),utc=True,errors="coerce")
                     if pd.notna(d) and now-d>pd.Timedelta(minutes=45):
                         calc.append({**j,"time_since_update":str(now-d)})
                 dataframe(calc)
 
 elif page=="AI Research Workflow":
-    title("AI research workflow","Unified controlled path: AI research or researched workbook → stage → IDs → reconcile → relationships → review → apply → QA.")
-    # Bulk imports are already-researched bundles.  Once staged they use the same
-    # identity/dependency/review/apply/QA controls as AI research jobs, so surface
-    # both here instead of forcing the analyst into a separate downstream process.
-    jobs=_workflow_job_rows("AI_RESEARCH",100)+_workflow_job_rows("BATCH_IMPORT",100)
-    jobs=sorted(jobs,key=lambda j:str(j.get("created_at") or ""),reverse=True)
-    if not jobs:
-        st.info("No AI research or bulk-import jobs yet. Create research in Research Jobs or upload a workbook in Multi-Table Bulk Loader.")
+    title(
+        "AI research workflow",
+        "Create research here, then stage → auto-resolve → review exceptions → apply → QA. No separate Research Jobs page is required."
+    )
+
+    if not sb:
+        st.error("Supabase service connection required.")
     else:
-        labels=[f"{j.get('job_type') or 'JOB'} | {j.get('title') or 'Research / import'} | {j.get('status')} | {j.get('ingestion_job_id')}" for j in jobs]
-        choice=st.selectbox("Research / import job",labels)
-        job=jobs[labels.index(choice)]
-        jid=job["ingestion_job_id"]
-        workflow_type="BULK_IMPORT" if job.get("job_type")=="BATCH_IMPORT" else "AI_RESEARCH"
-        summ=_staging_summary(jid)
-        stages=WORKFLOW_STAGES.get(workflow_type,WORKFLOW_STAGES["AI_RESEARCH"])
-        st.caption(f"Source workflow: {job.get('job_type') or workflow_type}")
-        st.progress(min(1.0,max(0.0,(1 + (1 if job.get("status")=="completed" else 0) + (1 if summ.get("total") else 0) + (1 if summ.get("ready") else 0) + (1 if summ.get("applied") else 0))/len(stages))))
-        st.caption(" → ".join(stages))
-        c1,c2,c3,c4,c5=st.columns(5)
-        c1.metric("Staged",summ.get("total",0)); c2.metric("Ready",summ.get("ready",0))
-        c3.metric("Unresolved",summ.get("unresolved",0)); c4.metric("Partial",summ.get("partial",0)); c5.metric("Applied",summ.get("applied",0))
+        launch_tab, manage_tab, history_tab = st.tabs(["Launch research","Run & reconcile","Recent jobs"])
 
-        a,b,c,d=st.columns(4)
-        if a.button("1 · Prepare IDs",type="primary"):
-            with st.spinner("Preparing canonical candidates..."):
-                res=_prepare_canonical_candidates(sb,jid)
-            _workflow_upsert(jid,workflow_type,job.get("title") or "Research / import","PREPARE_IDS",3,stats={"prepare":res})
-            st.success(res); st.rerun()
-        if b.button("2 · Reconcile / repair"):
-            with st.spinner("Running standard reconciliation..."):
-                res=_dependency_reconcile(jid)
-            _workflow_upsert(jid,workflow_type,job.get("title") or "Research / import","RECONCILE",4,stats={"reconcile":res})
-            st.success("Reconciliation complete."); st.json(res); st.rerun()
-        if c.button("3 · Resolve relationships"):
-            out={}
-            try: out["event_links"]=_process_relationship_backlog(sb,jid)
-            except Exception as exc: out["event_links_error"]=str(exc)
-            try: out["relationships"]=_process_generic_relationship_backlog(sb,jid)
-            except Exception as exc: out["relationships_error"]=str(exc)
-            _workflow_upsert(jid,workflow_type,job.get("title") or "Research / import","RELATIONSHIPS",5,stats=out)
-            st.json(out); st.rerun()
-        if d.button("4 · Re-check"):
-            st.json(_staging_summary(jid))
+        with launch_tab:
+            st.markdown("### New AI research job")
+            campaign=st.selectbox("Campaign",list(AI_CAMPAIGNS),key="aiwf_campaign")
+            seed_prompt=AI_CAMPAIGNS[campaign]
+            prompt=st.text_area(
+                "Research query",
+                value=seed_prompt,
+                placeholder="Describe exactly what you want the AI researcher to find, verify and stage.",
+                height=190,
+                key="aiwf_prompt"
+            )
 
-        st.markdown("#### Next")
-        if summ.get("unresolved",0) or summ.get("ambiguous",0) or summ.get("partial",0):
-            st.warning("This job still needs cleanup. Use Reconciliation Center before Review Queue.")
-        elif summ.get("total",0):
-            st.success("Identity/relationship resolution looks ready for Review Queue approval and apply.")
-        else:
-            st.info("No staged rows were found for this job.")
+            research_docs=st.file_uploader(
+                "Attach source documents (optional)",
+                type=["pdf","docx","txt","md"],
+                accept_multiple_files=True,
+                key="aiwf_documents",
+                help="Documents are read before web research. Their extracted text is passed to the researcher and, when the Documents tables are installed, preserved in pc_documents."
+            )
+            if research_docs:
+                st.caption(f"{len(research_docs)} document(s) attached. The researcher will read these before outward web research.")
+                with st.expander("Attached document preview"):
+                    for _doc in research_docs:
+                        try:
+                            _txt=_extract_document_text(_doc)
+                            st.markdown(f"**{_doc.name}** · {len(_txt):,} extracted characters")
+                            st.text(_txt[:2500] + ("\n…" if len(_txt)>2500 else ""))
+                        except Exception as _exc:
+                            st.warning(f"{_doc.name}: {_exc}")
 
+            c1,c2,c3=st.columns(3)
+            with c1:
+                context=st.selectbox("Product context",["TRADE","INTELLIGENCE"],index=0,key="aiwf_context")
+            with c2:
+                use_web=st.checkbox("Use current web research",True,key="aiwf_web")
+                use_canonical_context=st.checkbox(
+                    "Use canonical database context",True,
+                    help="Pass likely matching companies/assets/vessels and existing graph links from Supabase to the researcher before web research.",
+                    key="aiwf_canonical"
+                )
+            with c3:
+                st.metric("Pending staged",count_rows(sb,"pc_staged_records",{"review_status":"pending"}))
 
-elif page=="Bundle Review":
-    title("Bundle review","Review one research job as a connected bundle: primary events, dependencies, links, relationships and only the exceptions that still need a person.")
-    jobs=_workflow_job_rows(None,150)
-    if not jobs:
-        st.info("No ingestion jobs found.")
-    else:
-        labels=[f"{j.get('title') or j.get('job_type')} | {j.get('status')} | {j.get('ingestion_job_id')}" for j in jobs]
-        selected=st.selectbox("Research / ingestion job",labels,key="bundle_review_job")
-        job=jobs[labels.index(selected)]
-        jid=job["ingestion_job_id"]
-        summ=_staging_summary(jid)
-        counts=_bundle_counts(jid)
+            canonical_context={}
+            if use_canonical_context and prompt.strip():
+                try:
+                    canonical_context=build_canonical_research_context(sb,prompt)
+                    cc=canonical_context.get("candidate_counts",{})
+                    st.caption(
+                        f"Canonical pre-check: {cc.get('entities',0)} companies/entities · "
+                        f"{cc.get('assets',0)} assets · {cc.get('mobile_assets',0)} vessels · "
+                        f"{cc.get('relationships',0)} existing relationships."
+                    )
+                    with st.expander("Preview canonical candidates sent to the researcher"):
+                        st.json(canonical_context)
+                except Exception as exc:
+                    st.warning(f"Canonical context pre-check failed; research can still run through normal staging: {exc}")
+                    canonical_context={}
 
-        c1,c2,c3,c4,c5=st.columns(5)
-        c1.metric("Staged",summ.get("total",0))
-        c2.metric("Ready",summ.get("ready",0))
-        c3.metric("Partial",summ.get("partial",0))
-        c4.metric("Ambiguous",summ.get("ambiguous",0))
-        c5.metric("Broken",counts.get("BROKEN_REFERENCE",0)+counts.get("EVENT_LINK_DEPENDENCY",0))
+            st.caption(
+                "Research output is staged first. The dependency engine can create missing source-backed companies, facilities, vessels and other endpoints before relationships are applied."
+            )
 
-        st.markdown("#### Dependency-aware workflow")
-        st.code("Research bundle → canonical entities/assets/events → natural-key aliases → event links → relationships → review exceptions → apply")
-
-        b1,b2=st.columns([1,2])
-        if b1.button("Resolve safe dependencies",type="primary"):
-            with st.spinner("Resolving dependencies and applying deterministic records..."):
-                result=_dependency_reconcile(jid)
-            st.success("Dependency pass complete.")
-            st.json(result)
-            st.rerun()
-
-        with b2:
-            if counts:
-                st.caption("Remaining exception categories")
-                st.json(counts)
-            else:
-                st.success("No unresolved dependency exceptions found.")
-
-        tabs=st.tabs(["Events","Entities","Event links","Relationships","Exceptions"])
-        with tabs[0]:
-            rows=(sb.table("pc_staged_records").select(
-                "staged_record_id,natural_key,resolution_status,review_status,validation_status,payload"
-            ).eq("ingestion_job_id",jid).eq("target_table","pc_events").limit(500).execute().data or [])
-            view=[]
-            for r in rows:
-                p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
-                view.append({
-                    "Natural key":r.get("natural_key"),
-                    "Canonical event ID":r.get("resolved_entity_id") or p.get("event_id"),
-                    "Title":p.get("title") or p.get("name"),
-                    "Resolution":r.get("resolution_status"),
-                    "Review":r.get("review_status"),
-                    "Validation":r.get("validation_status")
-                })
-            dataframe(view)
-        with tabs[1]:
-            rows=(sb.table("pc_staged_records").select(
-                "staged_record_id,natural_key,resolution_status,resolved_entity_id,review_status,validation_status,payload"
-            ).eq("ingestion_job_id",jid).eq("target_table","pc_entities").limit(1000).execute().data or [])
-            view=[]
-            for r in rows:
-                p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
-                view.append({
-                    "Name":p.get("name") or p.get("canonical_name"),
-                    "Type":p.get("entity_type"),
-                    "Canonical ID":r.get("resolved_entity_id") or p.get("entity_id"),
-                    "Resolution":r.get("resolution_status"),
-                    "Review":r.get("review_status")
-                })
-            dataframe(view)
-        with tabs[2]:
-            rows=(sb.table("pc_staged_records").select(
-                "staged_record_id,natural_key,resolution_status,review_status,validation_status,payload"
-            ).eq("ingestion_job_id",jid).eq("target_table","pc_event_links").limit(1000).execute().data or [])
-            view=[]
-            for r in rows:
-                p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
-                linked=p.get("linked_entities")
-                if isinstance(linked,list):
-                    linked_display=", ".join(map(str,linked))
+            if st.button("Run AI research job",type="primary",disabled=not bool(prompt.strip()),key="aiwf_run"):
+                if not ai_configured():
+                    st.error("Configure OPENAI_API_KEY and OPENAI_MODEL in Streamlit secrets.")
                 else:
-                    linked_display=p.get("linked_name") or p.get("linked_id") or ""
-                view.append({
-                    "Event key":p.get("event_natural_key") or p.get("event_id"),
-                    "Linked object(s)":linked_display,
-                    "Relationship":p.get("relationship") or p.get("link_type"),
-                    "Resolution":r.get("resolution_status"),
-                    "Review":r.get("review_status")
-                })
-            dataframe(view)
-        with tabs[3]:
-            rows=(sb.table("pc_staged_records").select(
-                "staged_record_id,natural_key,resolution_status,review_status,validation_status,payload"
-            ).eq("ingestion_job_id",jid).eq("target_table","pc_relationships").limit(1000).execute().data or [])
-            dataframe(rows)
-        with tabs[4]:
-            dataframe(_dependency_exceptions(jid,1500))
+                    effective_prompt=prompt
+                    document_manifest=[]
+                    document_blocks=[]
+                    total_document_chars=0
+                    max_total_document_chars=120000
+                    max_document_chars=60000
 
-elif page=="Dependency Graph":
-    title("Dependency graph","See what is preventing a research job from becoming canonical, in dependency order rather than raw staging status.")
-    jobs=_workflow_job_rows(None,150)
-    if not jobs:
-        st.info("No jobs found.")
-    else:
-        labels=[f"{j.get('title') or j.get('job_type')} | {j.get('ingestion_job_id')}" for j in jobs]
-        selected=st.selectbox("Job",labels,key="dep_graph_job")
-        job=jobs[labels.index(selected)]
-        jid=job["ingestion_job_id"]
-        rows=_dependency_exceptions(jid,2000)
+                    document_failures=[]
+                    for _doc in (research_docs or []):
+                        _raw=_doc.getvalue()
+                        _hash=hashlib.sha256(_raw).hexdigest()
+                        try:
+                            _text=_extract_document_text(_doc)
+                        except Exception as _doc_parse_exc:
+                            document_failures.append({
+                                "file_name":_doc.name,
+                                "error":str(_doc_parse_exc),
+                            })
+                            st.warning(
+                                f"Could not extract {_doc.name}; this file will be skipped rather than aborting the research job. "
+                                f"{_doc_parse_exc}"
+                            )
+                            continue
+                        _usable=_text[:max_document_chars]
+                        remaining=max_total_document_chars-total_document_chars
+                        if remaining <= 0:
+                            _usable=""
+                        elif len(_usable)>remaining:
+                            _usable=_usable[:remaining]
+                        total_document_chars += len(_usable)
 
-        categories={
-            "READY_FOR_CANONICAL_PREP":"Canonical dependencies to prepare",
-            "ARRAY_EXPANSION_REQUIRED":"Array event links to expand",
-            "EVENT_LINK_DEPENDENCY":"Event links waiting on canonical dependencies",
-            "PARTIAL_RELATIONSHIP":"Relationships missing one endpoint",
-            "TRUE_AMBIGUITY":"True ambiguities requiring analyst choice",
-            "BROKEN_REFERENCE":"Broken references",
-            "UNSUPPORTED_OR_INVALID_TARGET":"Unsupported / invalid target-table mappings",
-            "REVIEW":"Other review"
-        }
-        counts={}
-        for r in rows:
-            k=r.get("exception_type") or "REVIEW"
-            counts[k]=counts.get(k,0)+1
+                        _doc_id=None
+                        if _table_exists("pc_documents"):
+                            try:
+                                _existing=(sb.table("pc_documents").select("document_id").eq("file_sha256",_hash).limit(1).execute().data or [])
+                                _payload={
+                                    "title":Path(_doc.name).stem,
+                                    "document_type":"research_source",
+                                    "file_name":_doc.name,
+                                    "file_sha256":_hash,
+                                    "mime_type":mimetypes.guess_type(_doc.name)[0],
+                                    "extracted_text":_text,
+                                    "metadata":{
+                                        "original_size_bytes":len(_raw),
+                                        "ingested_via":"AI_RESEARCH_WORKFLOW"
+                                    }
+                                }
+                                if _existing:
+                                    _doc_id=_existing[0]["document_id"]
+                                    sb.table("pc_documents").update(_payload).eq("document_id",_doc_id).execute()
+                                else:
+                                    _doc_id=sb.table("pc_documents").insert(_payload).execute().data[0]["document_id"]
+                            except Exception as _doc_exc:
+                                st.warning(f"Could not preserve {_doc.name} in pc_documents; research will still use its extracted text: {_doc_exc}")
 
-        for key,label in categories.items():
-            n=counts.get(key,0)
-            if not n:
-                continue
-            with st.expander(f"{label} · {n}",expanded=key in {"TRUE_AMBIGUITY","BROKEN_REFERENCE","EVENT_LINK_DEPENDENCY"}):
-                subset=[r for r in rows if (r.get("exception_type") or "REVIEW")==key]
-                dataframe(subset)
+                        document_manifest.append({
+                            "file_name":_doc.name,
+                            "sha256":_hash,
+                            "document_id":_doc_id,
+                            "extracted_chars":len(_text),
+                            "chars_sent_to_researcher":len(_usable),
+                            "truncated":len(_usable)<len(_text),
+                        })
+                        if _usable:
+                            document_blocks.append(
+                                "\n\n===== SOURCE DOCUMENT: " + _doc.name + " =====\n" +
+                                _usable +
+                                "\n===== END SOURCE DOCUMENT: " + _doc.name + " ====="
+                            )
 
-        st.divider()
-        if st.button("Fix all deterministic dependencies",type="primary"):
-            with st.spinner("Running event-first dependency reconciliation..."):
-                result=_dependency_reconcile(jid)
-            st.json(result)
-            st.rerun()
+                    if document_blocks:
+                        effective_prompt += (
+                            "\n\nDOCUMENT-FIRST INSTRUCTION: Read the attached source documents below before web research. "
+                            "Treat them as seed evidence, verify material facts outward where requested, preserve provenance, "
+                            "deduplicate overlapping stories, and do not invent facts.\n" + "".join(document_blocks)
+                        )
 
+                    if use_canonical_context and canonical_context:
+                        effective_prompt += canonical_context_prompt_block(canonical_context)
+
+                    job=sb.table("pc_ingestion_jobs").insert({
+                        "job_type":"AI_RESEARCH",
+                        "title":campaign if campaign!="Custom research" else prompt[:100],
+                        "query_text":prompt,
+                        "source_scope":{
+                            "product":context,
+                            "web_search":use_web,
+                            "campaign":campaign,
+                            "canonical_context":bool(use_canonical_context),
+                            "canonical_candidate_counts":(canonical_context or {}).get("candidate_counts",{}),
+                            "documents":document_manifest,
+                            "document_count":len(document_manifest),
+                        },
+                        "status":"running",
+                    }).execute().data[0]
+                    job_id=job["ingestion_job_id"]
+                    _workflow_upsert(job_id,"AI_RESEARCH",job.get("title") or "AI research","RESEARCH",1)
+
+                    try:
+                        with st.status("Running AI research...",expanded=True) as status:
+                            st.write("Sending research brief to OpenAI...")
+                            result=ai_research(
+                                effective_prompt,
+                                context,
+                                use_web,
+                                output_contract=AI_OUTPUT_CONTRACT
+                            )
+                            st.write("Research returned. Validating and staging structured proposals...")
+                            staged,rejected,resolution=stage_ai_result(sb,job_id,result)
+
+                            if staged==0 and result:
+                                sb.table("pc_staged_records").insert({
+                                    "ingestion_job_id":job_id,
+                                    "target_table":"research_bundle",
+                                    "natural_key":str(job_id),
+                                    "action":"REVIEW",
+                                    "payload":result,
+                                    "confidence":0.5,
+                                    "validation_status":"needs_structuring",
+                                    "review_status":"pending",
+                                }).execute()
+                                staged=1
+
+                            auto_result={}
+                            if staged:
+                                st.write("Running dependency-aware auto reconciliation...")
+                                auto_result=_run_reconciliation(job_id)
+
+                            stats={
+                                "staged_records":staged,
+                                "discarded_invalid_records":rejected,
+                                "campaign":campaign,
+                                "product":context,
+                                "resolution":resolution,
+                                "auto_reconcile":auto_result,
+                                "documents":document_manifest,
+                            }
+                            sb.table("pc_ingestion_jobs").update({"status":"completed","stats":stats}).eq("ingestion_job_id",job_id).execute()
+                            _workflow_upsert(job_id,"AI_RESEARCH",job.get("title") or "AI research","RECONCILE",4,stats=stats)
+                            status.update(label=f"Research complete — {staged} staged record(s)",state="complete",expanded=False)
+
+                        st.success(f"Research complete. {staged} proposal(s) staged and auto-reconciled.")
+                        st.session_state["aiwf_last_job_id"]=job_id
+                        st.rerun()
+                    except Exception as exc:
+                        sb.table("pc_ingestion_jobs").update({"status":"failed","error_text":str(exc)}).eq("ingestion_job_id",job_id).execute()
+                        st.error(str(exc))
+
+        with manage_tab:
+            all_jobs=_workflow_job_rows(None,200)
+            jobs=[j for j in all_jobs if str(j.get("job_type") or "").upper() in {"AI_RESEARCH","BATCH_IMPORT"}]
+            if not jobs:
+                st.info("No research or structured bulk-import jobs yet. Launch research above or use Bulk Load.")
+            else:
+                labels=[
+                    f"{'AI research' if str(j.get('job_type') or '').upper()=='AI_RESEARCH' else 'Bulk research import'}"
+                    f" · {j.get('title') or 'Untitled'} | {j.get('status')} | {j.get('ingestion_job_id')}"
+                    for j in jobs
+                ]
+                default_idx=0
+                last=str(st.session_state.get("aiwf_last_job_id") or "")
+                if last:
+                    for i,j in enumerate(jobs):
+                        if str(j.get("ingestion_job_id"))==last:
+                            default_idx=i; break
+                choice=st.selectbox("Research / import job",labels,index=default_idx,key="aiwf_job_select")
+                job=jobs[labels.index(choice)]
+                jid=job["ingestion_job_id"]
+                workflow_type="AI_RESEARCH" if str(job.get("job_type") or "").upper()=="AI_RESEARCH" else "BULK_IMPORT"
+                workflow_label="AI research" if workflow_type=="AI_RESEARCH" else "Bulk research import"
+                summ=_staging_summary(jid)
+                stages=WORKFLOW_STAGES[workflow_type]
+                st.caption(" → ".join(stages))
+                c1,c2,c3,c4,c5=st.columns(5)
+                c1.metric("Staged",summ.get("total",0)); c2.metric("Ready",summ.get("ready",0))
+                c3.metric("Unresolved",summ.get("unresolved",0)); c4.metric("Partial",summ.get("partial",0)); c5.metric("Applied",summ.get("applied",0))
+
+                a,b,c,d=st.columns(4)
+                if a.button("Prepare IDs",key="aiwf_prepare"):
+                    with st.spinner("Preparing canonical candidates..."):
+                        res=_prepare_canonical_candidates(sb,jid)
+                    _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"PREPARE_IDS",3,stats={"prepare":res})
+                    st.success(res); st.rerun()
+                if b.button("Auto reconcile",type="primary",key="aiwf_reconcile"):
+                    with st.spinner("Resolving dependencies, identities and relationships..."):
+                        res=_run_reconciliation(jid)
+                    _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"RECONCILE",4,stats={"reconcile":res})
+                    st.success("Dependency-aware reconciliation complete."); st.json(res); st.rerun()
+                if c.button("Resolve relationships",key="aiwf_relationships"):
+                    out={}
+                    try: out["event_links"]=_process_relationship_backlog(sb,jid)
+                    except Exception as exc: out["event_links_error"]=str(exc)
+                    try: out["relationships"]=_process_generic_relationship_backlog(sb,jid)
+                    except Exception as exc: out["relationships_error"]=str(exc)
+                    _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"RELATIONSHIPS",5,stats=out)
+                    st.json(out); st.rerun()
+                if d.button("Refresh status",key="aiwf_refresh"):
+                    st.json(_staging_summary(jid))
+
+                st.markdown("#### Next")
+                if summ.get("unresolved",0) or summ.get("ambiguous",0) or summ.get("partial",0):
+                    st.warning("Only remaining exceptions should require analyst review. Open Reconcile & Review to inspect them.")
+                elif summ.get("total",0):
+                    st.success("Resolution looks clean. Continue to Reconcile & Review for approval/apply and QA.")
+                else:
+                    st.info("No staged rows were found for this job.")
+
+        with history_tab:
+            jobs=safe_rows(
+                sb,"pc_ingestion_jobs",
+                "ingestion_job_id,job_type,title,query_text,status,stats,error_text,created_at,started_at,completed_at",
+                100,order="created_at"
+            )
+            workflow_jobs=[
+                j for j in jobs
+                if str(j.get("job_type") or "").upper() in {"AI_RESEARCH","BATCH_IMPORT"}
+            ]
+            dataframe(workflow_jobs)
 
 elif page=="Bulk Import Workflow":
     title("Bulk import workflow","Ordered bulk path: upload → map tables → map fields → fill IDs → stage → reconcile → review → apply → QA.")
@@ -2893,7 +3038,6 @@ elif page=="Multi-Table Bulk Loader":
     else:
         up=st.file_uploader("Workbook / CSV / JSON",type=["xlsx","xls","csv","json"],key="multitable_bulk")
         if up:
-            jid=None
             try:
                 sections,file_hash=_parse_multitable_upload(up)
                 st.caption(f"{len(sections)} source section(s) · SHA-256 {file_hash[:16]}…")
@@ -2922,7 +3066,6 @@ elif page=="Multi-Table Bulk Loader":
 
                 auto_resolve=st.checkbox("Run reconciliation after staging",value=True)
                 if st.button("Stage all selected tables",type="primary"):
-                    started_at=pd.Timestamp.utcnow().isoformat()
                     job=sb.table("pc_ingestion_jobs").insert({
                         "job_type":"BATCH_IMPORT",
                         "title":up.name,
@@ -2931,7 +3074,7 @@ elif page=="Multi-Table Bulk Loader":
                             "sections":{k:{"target_table":v["target"],"rows":len(v["df"])} for k,v in configs.items()}
                         },
                         "status":"running",
-                        "started_at":started_at
+                        "started_at":pd.Timestamp.utcnow().isoformat()
                     }).execute().data[0]
                     jid=job["ingestion_job_id"]
                     wid=_workflow_upsert(jid,"BULK_IMPORT",up.name,"STAGE",5,metadata={"file_sha256":file_hash})
@@ -2964,8 +3107,6 @@ elif page=="Multi-Table Bulk Loader":
                             table_counts[target]=table_counts.get(target,0)+1
 
                     for i in range(0,len(all_payloads),250):
-                        # Final boundary sanitization: protects nested payloads and any
-                        # staging metadata from pandas Timestamp / datetime / NaN values.
                         batch=_jsonable(all_payloads[i:i+250])
                         sb.table("pc_staged_records").insert(batch).execute()
 
@@ -2977,41 +3118,32 @@ elif page=="Multi-Table Bulk Loader":
                         "stats":{"rows":len(all_payloads),"tables":table_counts,"reconciliation":result}
                     }).eq("ingestion_job_id",jid).execute()
                     _workflow_upsert(jid,"BULK_IMPORT",up.name,"RECONCILE" if auto_resolve else "STAGE",6 if auto_resolve else 5,stats={"rows":len(all_payloads),"tables":table_counts})
-                    st.success(f"Staged {len(all_payloads):,} rows across {len(table_counts)} canonical tables.")
-                    st.json({"job_id":jid,"tables":table_counts,"reconciliation":result})
-                    st.markdown("### Continue in AI research workflow")
-                    st.info(
-                        "This researched workbook is now a BATCH_IMPORT job in the same controlled "
-                        "downstream workflow used by AI research: IDs → reconcile → relationships → "
-                        "review → apply → QA. Open **AI Research Workflow** and select this job ID."
+                    st.success(
+                        f"Staged {len(all_payloads):,} rows across {len(table_counts)} canonical tables. "
+                        "This job is now available under AI Research → Run & reconcile and Reconcile & Review."
                     )
-                    st.code(str(jid))
-                    post=_staging_summary(jid)
-                    a,b,c,d=st.columns(4)
-                    a.metric("Staged",post.get("total",0))
-                    b.metric("Ready",post.get("ready",0))
-                    c.metric("Needs cleanup",post.get("unresolved",0)+post.get("ambiguous",0)+post.get("partial",0))
-                    d.metric("Applied",post.get("applied",0))
+                    st.session_state["aiwf_last_job_id"]=jid
+                    st.json({"job_id":jid,"tables":table_counts,"reconciliation":result})
             except Exception as exc:
-                # Never leave a failed workbook import indefinitely marked running.
-                if jid:
-                    err=f"{type(exc).__name__}: {exc}"
-                    try:
+                try:
+                    if "jid" in locals() and jid:
                         sb.table("pc_ingestion_jobs").update({
                             "status":"failed",
                             "completed_at":pd.Timestamp.utcnow().isoformat(),
-                            "error_text":err
+                            "error_text":str(exc)
                         }).eq("ingestion_job_id",jid).execute()
-                    except Exception:
-                        pass
-                    try:
-                        _workflow_upsert(jid,"BULK_IMPORT",up.name,"STAGE",5,status="failed",stats={"error":err})
-                    except Exception:
-                        pass
+                        _workflow_upsert(
+                            jid,"BULK_IMPORT",
+                            up.name if "up" in locals() and up else "Bulk import",
+                            "STAGE",5,status="failed",
+                            metadata={"failure_reason":str(exc)}
+                        )
+                except Exception:
+                    pass
                 st.exception(exc)
 
 elif page=="Reconciliation Center":
-    title("Reconciliation center","Clean and match remaining staged data before apply: names, IDs, duplicate candidates, unresolved identities and incomplete relationships.")
+    title("Reconcile & review","One-click dependency creation and matching first; people review only genuine ambiguity, conflicts, or unsupported structures.")
     if not sb:
         st.error("Supabase required.")
     else:
@@ -3039,8 +3171,8 @@ elif page=="Reconciliation Center":
                 st.info("Select one ingestion job to run cleanup safely.")
             else:
                 st.markdown("#### Standard cleanup order")
-                st.code("Normalize names → fill deterministic staging keys → prepare candidates → repair unresolved identities → resolve relationship endpoints → re-check")
-                if st.button("Run standard reconciliation",type="primary"):
+                st.code("Normalize → create safe missing dependencies → resolve aliases/endpoints → apply safe relationships → normalize staging → QA")
+                if st.button("Run auto reconcile",type="primary"):
                     with st.spinner("Reconciling staged data..."):
                         res=_run_reconciliation(jid)
                     st.success("Reconciliation completed.")
@@ -3063,7 +3195,7 @@ elif page=="Reconciliation Center":
             dataframe(stale)
         with tabs[4]:
             st.markdown("Install these SQL migrations in order:")
-            st.code("027_workflow_orchestration.sql\n028_document_ingestion.sql\n029_intelligence_authoring.sql\n030_distribution_lists.sql\n031_reconciliation_cleanup.sql\n032_event_first_dependency_engine.sql")
+            st.code("027_workflow_orchestration.sql\n028_document_ingestion.sql\n029_intelligence_authoring.sql\n030_distribution_lists.sql\n031_reconciliation_cleanup.sql\n032_event_first_dependency_engine.sql\n033_dependency_autocreate_engine.sql\n034_ingestion_quality_checks.sql\n035_dependency_regression_checks.sql\n036_compact_workflow_views.sql")
             st.caption("The cleanup functions are job-scoped and operate on staging before canonical apply.")
 
 elif page=="Document Loader":
@@ -3146,11 +3278,13 @@ elif page=="Document Loader":
                             prompt=extraction_prompt + "\n\nSOURCE DOCUMENT:\n" + text[:60000]
                             result=ai_research(prompt,"DOCUMENT",False,output_contract=AI_OUTPUT_CONTRACT)
                             staged,rejected,resolution=stage_ai_result(sb,job["ingestion_job_id"],result)
+                            auto_result=_run_reconciliation(job["ingestion_job_id"]) if staged else {}
                             sb.table("pc_ingestion_jobs").update({
                                 "status":"completed","completed_at":pd.Timestamp.utcnow().isoformat(),
-                                "stats":{"document_id":doc_id,"staged_records":staged,"rejected":rejected,"resolution":resolution}
+                                "stats":{"document_id":doc_id,"staged_records":staged,"rejected":rejected,"resolution":resolution,"auto_reconcile":auto_result}
                             }).eq("ingestion_job_id",job["ingestion_job_id"]).execute()
-                            st.success(f"{staged} proposal(s) staged from the document.")
+                            st.success(f"{staged} proposal(s) staged and auto-reconciled from the document.")
+                            st.json(auto_result,expanded=False)
             except Exception as exc:
                 st.exception(exc)
 
