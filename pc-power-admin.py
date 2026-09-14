@@ -2829,23 +2829,27 @@ def _repair_identity_resolution_states(job_id):
 
 
 def _repair_obvious_job_blockers(job_id):
-    """Repair legacy mapping/provenance/type issues and refresh resolution."""
-    result={
-        "field_repair":_repair_staged_payloads_from_source(job_id),
-        "identity_repair":_repair_identity_resolution_states(job_id),
-    }
+    """Repair legacy mapping/provenance/type issues and preserve repaired identity states.
+
+    Important ordering: the database reconciliation RPC can classify pc_events as INVALID
+    even when the staged event is schema-complete and source-backed. Therefore run the
+    general reconciliation first, then perform the conservative exact-ID identity repair
+    last. This keeps valid NEW/MATCHED parent identities/events available for safe apply.
+    Child event_links are resolved only after their parent event has been applied canonically.
+    """
+    result={"field_repair":_repair_staged_payloads_from_source(job_id)}
+
     try:
         result["reconcile"]=_run_reconciliation(job_id)
     except Exception as exc:
         result["reconcile_error"]=str(exc)
-    try:
-        result["event_links"]=_process_relationship_backlog(sb,job_id)
-    except Exception as exc:
-        result["event_links_error"]=str(exc)
-    try:
-        result["relationships"]=_process_generic_relationship_backlog(sb,job_id)
-    except Exception as exc:
-        result["relationships_error"]=str(exc)
+
+    # Run this AFTER the generic reconciliation so repaired NEW/MATCHED states are not
+    # immediately overwritten back to INVALID by the RPC.
+    result["identity_repair"]=_repair_identity_resolution_states(job_id)
+
+    # Do not force child links READY before their canonical parents exist. The normal
+    # Refresh action will resolve these after the parent identities/events are applied.
     return result
 
 
@@ -4280,7 +4284,7 @@ elif page=="Reconciliation Center":
                         st.session_state[f"diag_repair_result_{jid}"]=repair
                         st.write("Field repair",repair.get("field_repair"))
                         st.write("Identity-state repair",repair.get("identity_repair"))
-                        status.update(label="Repair pass complete — refreshing",state="complete",expanded=False)
+                        status.update(label="Parent repair complete — checking for safe parent rows",state="complete",expanded=False)
                     st.rerun()
 
                 repair=st.session_state.get(f"diag_repair_result_{jid}")
@@ -4319,9 +4323,10 @@ elif page=="Reconciliation Center":
 
                 if any(str(r.get("resolution_status") or "").upper()=="BROKEN_REFERENCE" for r in blocked_rows):
                     st.info(
-                        "BROKEN_REFERENCE is a dependency issue, not an identity mystery: the child event-link/"
-                        "relationship is waiting for its parent event/entity/asset to exist canonically. "
-                        "Fix/apply the parent rows first, refresh, then the relationship resolver can promote the child links."
+                        "BROKEN_REFERENCE is a dependency issue, not an identity mystery. Use this order: "
+                        "(1) Fix obvious blockers, (2) apply the newly-safe parent event/entity rows, "
+                        "(3) Refresh safe/apply status, which reruns relationship resolution, then "
+                        "(4) apply the child event-link rows once they become safe."
                     )
 
                 raw_ready=int(summ.get("ready",0) or 0)
