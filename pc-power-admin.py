@@ -3160,6 +3160,66 @@ def _blocked_reason_summary(blocked_rows):
     return reason_rows,table_rows
 
 
+
+def _apply_safe_parent_records(job_id):
+    """Apply only safe parent records before retrying dependent child links."""
+    safe, blocked=_job_apply_candidates(job_id)
+    parent_tables={"pc_entities","pc_assets","pc_mobile_assets","pc_events"}
+    parents=[item for item in safe if str(item[0].get("target_table") or "") in parent_tables]
+    applied=0
+    failed=[]
+    for r,v in parents:
+        try:
+            if str(r.get("review_status") or "pending").lower()!="approved":
+                sb.table("pc_staged_records").update({
+                    "review_status":"approved",
+                    "validation_status":"reviewed",
+                }).eq("staged_record_id",r["staged_record_id"]).execute()
+                r["review_status"]="approved"
+            apply_staged_record(sb,r,r.get("payload") or {})
+            applied+=1
+        except Exception as exc:
+            failed.append({
+                "record":r.get("natural_key"),
+                "table":r.get("target_table"),
+                "error":str(exc),
+            })
+    return {
+        "safe_parent_candidates":len(parents),
+        "applied":applied,
+        "failed":len(failed),
+        "failures":failed,
+    }
+
+
+def _resolve_missing_parent_dependencies(job_id):
+    """Apply safe parents first, then rerun dependency normalization/resolution."""
+    result={}
+    result["parent_apply"]=_apply_safe_parent_records(job_id)
+
+    # After parent canonical writes, rerun SQL normalizers and relationship processors.
+    try:
+        result["sql_repairs"]=_try_sql_ingestion_repairs(job_id)
+    except Exception as exc:
+        result["sql_repairs_error"]=str(exc)
+    try:
+        result["event_links"]=_process_relationship_backlog(sb,job_id)
+    except Exception as exc:
+        result["event_links_error"]=str(exc)
+    try:
+        result["relationships"]=_process_generic_relationship_backlog(sb,job_id)
+    except Exception as exc:
+        result["relationships_error"]=str(exc)
+    try:
+        result["sql_repairs_after_relationships"]=_try_sql_ingestion_repairs(job_id)
+    except Exception as exc:
+        result["sql_repairs_after_relationships_error"]=str(exc)
+
+    # Apply children that became safe.
+    child_apply=_apply_safe_candidates_priority(job_id)
+    result["child_apply"]=child_apply
+    return result
+
 if page=="Dashboard":
     title("Platform control","One canonical data model; Trade, Intelligence and NERAI product entitlements; tenant workspaces; AI staging and review.")
     tables=[("Organizations","pc_organizations"),("Users","pc_profiles"),("Entities","pc_entities"),("Assets","pc_assets"),("Vessels / mobile","pc_mobile_assets"),("Events","pc_events"),("Staged changes","pc_staged_records"),("Open DQ issues","pc_data_quality_issues")]
@@ -4699,6 +4759,38 @@ elif page=="Reconciliation Center":
                             {"diagnostic":k,"count":v}
                             for k,v in sorted(diag_counts.items(),key=lambda x:(-x[1],x[0]))
                         ])
+
+                        if diag_counts.get("PARENT_EVENT_MISSING",0):
+                            st.warning(
+                                f"{diag_counts.get('PARENT_EVENT_MISSING',0)} child link(s) are waiting for a parent event "
+                                "that is not yet canonical. Apply the safe parent event first, then retry the children."
+                            )
+                            if st.button(
+                                "▶ Apply missing parent(s) + retry child links",
+                                type="primary",
+                                key=f"resolve_missing_parent_{jid}",
+                                use_container_width=True
+                            ):
+                                with st.status("Applying safe parent records and retrying dependencies...",expanded=True) as status:
+                                    dep_result=_resolve_missing_parent_dependencies(jid)
+                                    st.session_state[f"dependency_recovery_{jid}"]=dep_result
+                                    st.write("Parent apply",dep_result.get("parent_apply"))
+                                    st.write("Child apply",dep_result.get("child_apply"))
+                                    status.update(
+                                        label="Dependency recovery pass complete — refreshing",
+                                        state="complete",
+                                        expanded=False
+                                    )
+                                st.rerun()
+
+                        dep_result=st.session_state.get(f"dependency_recovery_{jid}")
+                        if dep_result:
+                            pa=dep_result.get("parent_apply") or {}
+                            ca=dep_result.get("child_apply") or {}
+                            st.caption(
+                                f"Last dependency recovery: {pa.get('applied',0)} parent(s) applied; "
+                                f"{ca.get('applied',0)} newly-safe child record(s) applied."
+                            )
 
                 raw_ready=int(summ.get("ready",0) or 0)
                 if raw_ready != len(safe_candidates):
