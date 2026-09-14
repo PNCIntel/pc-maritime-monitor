@@ -822,23 +822,32 @@ FIELD_ALIASES = {
     "imo_number":"imo","imo_no":"imo","imo_no.":"imo",
     "country_name":"country","city":"region_city","region":"region_city",
     "operator_id":"operator_entity_id","owner_id":"owner_entity_id","manager_id":"manager_entity_id",
-    "source_url":"source_url","research_sources":"metadata",
+    "source_url":"source_url",
 }
 
 def _norm_field(v):
     return re.sub(r"[^a-z0-9]+","_",str(v or "").strip().casefold()).strip("_")
 
 def _table_write_columns_live(sb, table):
+    """Return writable columns plus critical canonical fields needed by staging.
+
+    Some deployments of pc_get_table_write_columns omit fields that the staging
+    validator/reconciler still requires (for example entity_type) or provenance
+    fields we preserve in metadata. Always union the RPC result with the canonical
+    staging field set instead of trusting the RPC list as exhaustive.
+    """
+    base=set(REQUIRED_BY_TABLE.get(table,[])) | set(ID_FIELDS.get(table,("", "", 0))[:1]) | {
+        "name","title","entity_type","asset_type","event_type","subtype","status","country","region_city",
+        "imo","mmsi","flag","owner_entity_id","operator_entity_id","manager_entity_id","source_id",
+        "source_url","metadata"
+    }
     try:
         r=sb.rpc("pc_get_table_write_columns",{"p_table_name":table}).execute().data
         if isinstance(r,list):
-            return [str(x) for x in r]
+            base.update(str(x) for x in r if x)
     except Exception:
         pass
-    return sorted(set(REQUIRED_BY_TABLE.get(table,[])) | set(ID_FIELDS.get(table,("", "", 0))[:1]) | {
-        "name","title","entity_type","asset_type","event_type","subtype","status","country","region_city",
-        "imo","mmsi","flag","owner_entity_id","operator_entity_id","manager_entity_id","source_id","metadata"
-    })
+    return sorted(base)
 
 def _auto_column_mapping(source_columns, target_columns):
     targets={_norm_field(x):x for x in target_columns}
@@ -900,6 +909,49 @@ def _payload_from_mapping(row, mapping_df, target_table):
         meta=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {}
         meta=dict(meta)
         meta.setdefault("source_payload",{}).update(source_payload)
+        payload["metadata"]=meta
+
+    # Preserve provenance even when source_url / research_sources are not physical
+    # columns on the canonical table. The validator accepts metadata provenance.
+    meta=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {}
+    meta=dict(meta)
+
+    src_url=_clean_upload_scalar(row.get("source_url")) if isinstance(row,dict) else None
+    if src_url:
+        payload.setdefault("source_url",src_url)
+        meta.setdefault("source_url",src_url)
+
+    rs=_clean_upload_scalar(row.get("research_sources")) if isinstance(row,dict) else None
+    if rs:
+        parsed=_jsonish(rs)
+        if isinstance(parsed,list):
+            vals=parsed
+        elif isinstance(parsed,str):
+            vals=[x.strip() for x in re.split(r"\s*[;|]\s*",parsed) if x.strip()]
+        else:
+            vals=[parsed]
+        current=meta.get("research_sources") if isinstance(meta.get("research_sources"),list) else []
+        for u in vals:
+            if u and u not in current:
+                current.append(u)
+        meta["research_sources"]=current
+
+    # Recover critical canonical fields from original row even if UI mapping missed them.
+    critical_by_table={
+        "pc_entities":["entity_id","name","entity_type","subtype","country"],
+        "pc_assets":["asset_id","name","asset_type","subtype","country","region_city"],
+        "pc_mobile_assets":["mobile_asset_id","name","asset_type","subtype","imo","mmsi","flag"],
+        "pc_events":["event_id","event_type","event_domain","event_family","title","severity","status"],
+        "pc_event_links":["event_link_id","event_id","linked_type","linked_id","relationship"],
+        "pc_relationships":["relationship_id","source_type","source_id","relationship_type","target_type","target_id"],
+    }
+    for field in critical_by_table.get(target_table,[]):
+        if payload.get(field) in (None,""):
+            val=_clean_upload_scalar(row.get(field)) if isinstance(row,dict) else None
+            if val is not None:
+                payload[field]=val
+
+    if meta:
         payload["metadata"]=meta
 
     return payload
@@ -2499,6 +2551,125 @@ def _qa_applied_job(job_id):
         "errors":errors,
     }
 
+
+def _workflow_step_header(step_no, title, state="pending", detail=None):
+    """Render a visual workflow step header with clear completion state."""
+    state=str(state or "pending").lower()
+    if state=="complete":
+        icon="✅"
+        label="COMPLETED"
+        tone="success"
+    elif state=="active":
+        icon="🟢"
+        label="READY"
+        tone="success"
+    elif state=="warning":
+        icon="🟠"
+        label="REVIEW"
+        tone="warning"
+    elif state=="blocked":
+        icon="⛔"
+        label="BLOCKED"
+        tone="error"
+    else:
+        icon="⚪"
+        label="PENDING"
+        tone="info"
+
+    st.markdown(f"### {icon} {step_no}. {title}")
+    msg=f"{label}"
+    if detail:
+        msg += f" · {detail}"
+    if tone=="success":
+        st.success(msg)
+    elif tone=="warning":
+        st.warning(msg)
+    elif tone=="error":
+        st.error(msg)
+    else:
+        st.info(msg)
+
+
+def _repair_staged_payloads_from_source(job_id):
+    """Repair already-staged bulk rows whose important fields were stranded in metadata.source_payload."""
+    if not sb or not job_id:
+        return {"checked":0,"updated":0,"unchanged":0,"errors":[]}
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,payload")
+              .eq("ingestion_job_id",job_id)
+              .limit(10000).execute().data or [])
+    except Exception as exc:
+        return {"checked":0,"updated":0,"unchanged":0,"errors":[str(exc)]}
+
+    updated=0
+    unchanged=0
+    errors=[]
+    fields_by_table={
+        "pc_entities":["entity_id","name","entity_type","subtype","country","hq_country","hq_location","status","source_url","notes"],
+        "pc_assets":["asset_id","name","asset_type","subtype","country","region_city","owner_entity_id","operator_entity_id","status","source_url","notes"],
+        "pc_mobile_assets":["mobile_asset_id","name","asset_type","subtype","imo","mmsi","call_sign","flag","build_year","owner_entity_id","operator_entity_id","manager_entity_id","status","source_url","notes"],
+        "pc_events":["event_id","event_type","event_domain","event_family","severity","status","mode","countries","location","title","description","operational_impact","commercial_impact","confidence","source_url"],
+        "pc_event_links":["event_link_id","event_id","linked_type","linked_id","relationship","source_url"],
+        "pc_relationships":["relationship_id","source_type","source_id","relationship_type","target_type","target_id","confidence","source_url","notes"],
+    }
+
+    for r in rows:
+        payload=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+        meta=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {}
+        source_payload=meta.get("source_payload") if isinstance(meta.get("source_payload"),dict) else {}
+        changed=False
+
+        for f in fields_by_table.get(str(r.get("target_table") or ""),[]):
+            if payload.get(f) in (None,"") and source_payload.get(f) not in (None,""):
+                payload[f]=source_payload.get(f)
+                changed=True
+
+        # Promote source provenance.
+        src=payload.get("source_url") or source_payload.get("source_url") or meta.get("source_url")
+        if src:
+            if payload.get("source_url") in (None,""):
+                payload["source_url"]=src
+                changed=True
+            if meta.get("source_url") in (None,""):
+                meta["source_url"]=src
+                changed=True
+
+        rs=source_payload.get("research_sources")
+        if rs:
+            parsed=_jsonish(rs)
+            if isinstance(parsed,list):
+                vals=parsed
+            elif isinstance(parsed,str):
+                vals=[x.strip() for x in re.split(r"\\s*[;|]\\s*",parsed) if x.strip()]
+            else:
+                vals=[parsed]
+            current=meta.get("research_sources") if isinstance(meta.get("research_sources"),list) else []
+            before=len(current)
+            for u in vals:
+                if u and u not in current:
+                    current.append(u)
+            if len(current)!=before:
+                meta["research_sources"]=current
+                changed=True
+
+        if meta:
+            payload["metadata"]=meta
+
+        if changed:
+            try:
+                sb.table("pc_staged_records").update({
+                    "payload":_jsonable(payload),
+                    "validation_status":"pending",
+                }).eq("staged_record_id",r["staged_record_id"]).execute()
+                updated+=1
+            except Exception as exc:
+                errors.append(f"{r.get('staged_record_id')}: {exc}")
+        else:
+            unchanged+=1
+
+    return {"checked":len(rows),"updated":updated,"unchanged":unchanged,"errors":errors}
+
 if page=="Dashboard":
     title("Platform control","One canonical data model; Trade, Intelligence and NERAI product entitlements; tenant workspaces; AI staging and review.")
     tables=[("Organizations","pc_organizations"),("Users","pc_profiles"),("Entities","pc_entities"),("Assets","pc_assets"),("Vessels / mobile","pc_mobile_assets"),("Events","pc_events"),("Staged changes","pc_staged_records"),("Open DQ issues","pc_data_quality_issues")]
@@ -3335,59 +3506,126 @@ elif page=="AI Research Workflow":
                     )
 
                 st.markdown("## Workflow")
-                st.caption("Run the steps in order. Green means you can continue; amber means analyst review is still required.")
+                st.caption("Run the steps in order. Completed steps turn green with a check mark; amber means analyst review is still required.")
+
+                # Visual progress summary
+                stage_rank={"UPLOAD":1,"MAP_TABLES":1,"MAP_FIELDS":1,"FILL_KEYS":1,"STAGE":1,
+                            "PREPARE_IDS":2,"RECONCILE":3,"RELATIONSHIPS":4,"REVIEW":4,
+                            "APPLY":5,"QA":6,"COMPLETE":6}
+                current_rank=stage_rank.get(str((wf or {}).get("current_stage") or "").upper(),1) if isinstance(wf,dict) else 1
+                pct=min(100,max(0,int((current_rank/6)*100)))
+                st.progress(pct/100.0,text=f"Workflow progress: step {current_rank} of 6")
+
+                # Determine completion state from actual database/workflow status.
+                wf_stage=str((wf or {}).get("current_stage") or "").upper() if isinstance(wf,dict) else ""
+                wf_status=str((wf or {}).get("status") or "").lower() if isinstance(wf,dict) else ""
+                exceptions=int(summ.get("partial",0) or 0)+int(summ.get("unresolved",0) or 0)+int(summ.get("ambiguous",0) or 0)
+
+                # STEP 0 — repair legacy/staged mapping issues before doing anything else.
+                st.markdown("### 🛠️ Repair imported fields")
+                st.caption(
+                    "Use this when rows show missing required fields or 'no source URL' even though "
+                    "those values were present in the uploaded workbook. It promotes fields stranded "
+                    "in metadata.source_payload back into the staged payload."
+                )
+                if st.button("Repair staged fields for this job",key=f"aiwf_repair_{jid}",use_container_width=True):
+                    with st.spinner("Repairing staged payloads from original source fields..."):
+                        repair=_repair_staged_payloads_from_source(jid)
+                    st.success(
+                        f"Repair checked {repair.get('checked',0)} row(s) and updated {repair.get('updated',0)}."
+                    )
+                    if repair.get("errors"):
+                        st.warning(f"{len(repair['errors'])} row(s) could not be repaired.")
+                        st.write(repair["errors"])
+                    # Re-run reconciliation after repair so status counters update.
+                    try:
+                        _run_reconciliation(jid)
+                    except Exception:
+                        pass
+                    st.rerun()
 
                 # STEP 1
-                st.markdown("### 1. Prepare canonical IDs")
+                step1_done = wf_stage in {"PREPARE_IDS","RECONCILE","RELATIONSHIPS","REVIEW","APPLY","QA","COMPLETE"} or int(summ.get("ready",0) or 0)>0 or int(summ.get("applied",0) or 0)>0
+                _workflow_step_header(
+                    1,"Prepare canonical IDs",
+                    "complete" if step1_done else "active",
+                    "Canonical IDs prepared" if step1_done else "Run this first"
+                )
                 st.caption("Assign/reuse canonical IDs for NEW and MATCHED companies, assets, vessels and events before relationships are resolved.")
-                if st.button("1 · Prepare IDs",key="aiwf_prepare",use_container_width=True):
-                    with st.spinner("Preparing canonical candidates..."):
-                        res=_prepare_canonical_candidates(sb,jid)
-                    _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"PREPARE_IDS",3,stats={"prepare":res})
-                    st.success("ID preparation complete.")
-                    st.json(res)
-                    st.rerun()
+                if not step1_done:
+                    if st.button("1 · Prepare IDs",key="aiwf_prepare",use_container_width=True):
+                        with st.spinner("Preparing canonical candidates..."):
+                            res=_prepare_canonical_candidates(sb,jid)
+                        _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"PREPARE_IDS",3,stats={"prepare":res})
+                        st.success("ID preparation complete.")
+                        st.json(res)
+                        st.rerun()
+                else:
+                    st.caption("No action needed unless you intentionally want to rerun ID preparation.")
 
                 # STEP 2
-                st.markdown("### 2. Reconcile identities")
+                step2_done = wf_stage in {"RECONCILE","RELATIONSHIPS","REVIEW","APPLY","QA","COMPLETE"} or int(summ.get("ready",0) or 0)>0 or int(summ.get("applied",0) or 0)>0
+                _workflow_step_header(
+                    2,"Reconcile identities",
+                    "complete" if step2_done else ("active" if step1_done else "blocked"),
+                    f"{summ.get('ready',0)} ready"
+                )
                 st.caption("Match staged records to existing canonical records and classify NEW / MATCHED / READY / PARTIAL / AMBIGUOUS.")
-                if st.button("2 · Auto reconcile",type="primary",key="aiwf_reconcile",use_container_width=True):
-                    with st.spinner("Resolving dependencies and identities..."):
-                        res=_run_reconciliation(jid)
-                    _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"RECONCILE",4,stats={"reconcile":res})
-                    st.success("Dependency-aware reconciliation complete.")
-                    st.json(res)
-                    st.rerun()
+                if not step2_done and step1_done:
+                    if st.button("2 · Auto reconcile",type="primary",key="aiwf_reconcile",use_container_width=True):
+                        with st.spinner("Resolving dependencies and identities..."):
+                            res=_run_reconciliation(jid)
+                        _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"RECONCILE",4,stats={"reconcile":res})
+                        st.success("Dependency-aware reconciliation complete.")
+                        st.json(res)
+                        st.rerun()
 
                 # STEP 3
-                st.markdown("### 3. Resolve relationship endpoints")
+                step3_done = wf_stage in {"RELATIONSHIPS","REVIEW","APPLY","QA","COMPLETE"} or (int(summ.get("ready",0) or 0)>0 and int(summ.get("unresolved",0) or 0)==0)
+                _workflow_step_header(
+                    3,"Resolve relationship endpoints",
+                    "complete" if step3_done else ("active" if step2_done else "blocked"),
+                    "Relationship pass completed" if step3_done else "Resolve event/entity/asset links"
+                )
                 st.caption("Resolve event links, ownership, operator/manager and other graph edges to canonical IDs.")
-                if st.button("3 · Resolve relationships",key="aiwf_relationships",use_container_width=True):
-                    out={}
-                    try: out["event_links"]=_process_relationship_backlog(sb,jid)
-                    except Exception as exc: out["event_links_error"]=str(exc)
-                    try: out["relationships"]=_process_generic_relationship_backlog(sb,jid)
-                    except Exception as exc: out["relationships_error"]=str(exc)
-                    _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"RELATIONSHIPS",5,stats=out)
-                    st.success("Relationship resolution pass complete.")
-                    st.json(out)
-                    st.rerun()
+                if not step3_done and step2_done:
+                    if st.button("3 · Resolve relationships",key="aiwf_relationships",use_container_width=True):
+                        out={}
+                        try: out["event_links"]=_process_relationship_backlog(sb,jid)
+                        except Exception as exc: out["event_links_error"]=str(exc)
+                        try: out["relationships"]=_process_generic_relationship_backlog(sb,jid)
+                        except Exception as exc: out["relationships_error"]=str(exc)
+                        _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"RELATIONSHIPS",5,stats=out)
+                        st.success("Relationship resolution pass complete.")
+                        st.json(out)
+                        st.rerun()
 
                 # STEP 4
-                st.markdown("### 4. Review only the exceptions")
-                exceptions=int(summ.get("partial",0) or 0)+int(summ.get("unresolved",0) or 0)+int(summ.get("ambiguous",0) or 0)
+                step4_done = step3_done and exceptions==0
+                _workflow_step_header(
+                    4,"Review only the exceptions",
+                    "complete" if step4_done else ("warning" if exceptions else ("active" if step3_done else "blocked")),
+                    "No exceptions remain" if step4_done else (
+                        f"{exceptions} exception(s) need review" if exceptions else "Waiting for relationship resolution"
+                    )
+                )
                 if exceptions:
                     st.warning(
                         f"{exceptions} exception(s) still need analyst review "
                         f"({summ.get('partial',0)} partial, {summ.get('unresolved',0)} unresolved, "
                         f"{summ.get('ambiguous',0)} ambiguous). Open **Reconcile & Review** from the left menu."
                     )
-                else:
+                elif step3_done:
                     st.success("No reconciliation exceptions remain.")
 
                 # STEP 5 — direct safe apply for this job
-                st.markdown("### 5. Apply safe ready records")
                 safe_candidates, blocked_rows=_job_apply_candidates(jid)
+                step5_done = int(summ.get("applied",0) or 0)>0 and len(safe_candidates)==0
+                _workflow_step_header(
+                    5,"Apply safe ready records",
+                    "complete" if step5_done else ("active" if safe_candidates else ("warning" if blocked_rows else "pending")),
+                    f"{summ.get('applied',0)} applied · {len(safe_candidates)} ready to apply · {len(blocked_rows)} blocked"
+                )
                 st.caption(
                     f"{len(safe_candidates)} job-scoped record(s) currently pass the safe-apply policy. "
                     f"{len(blocked_rows)} row(s) are blocked by review, schema, source, duplicate or relationship checks."
@@ -3433,9 +3671,14 @@ elif page=="AI Research Workflow":
                         dataframe(blocked_rows)
 
                 # STEP 6
-                st.markdown("### 6. QA canonical writes")
+                step6_done = wf_stage in {"QA","COMPLETE"} and wf_status in {"completed","complete","success","succeeded"}
+                _workflow_step_header(
+                    6,"QA canonical writes",
+                    "complete" if step6_done else ("active" if int(summ.get("applied",0) or 0)>0 else "pending"),
+                    "QA completed" if step6_done else "Verify applied rows in canonical tables"
+                )
                 st.caption("Verify that records marked applied are actually present in their canonical destination tables.")
-                if st.button("6 · Run QA",key=f"aiwf_qa_{jid}",use_container_width=True):
+                if not step6_done and st.button("6 · Run QA",key=f"aiwf_qa_{jid}",use_container_width=True):
                     with st.spinner("Checking canonical tables..."):
                         qa=_qa_applied_job(jid)
                     _workflow_upsert(
