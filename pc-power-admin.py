@@ -2663,6 +2663,7 @@ def _try_sql_ingestion_repairs(job_id):
     out={}
     for name in (
         "pc_repair_staged_payload_v2",
+        "pc_normalize_event_dependencies_v3",
         "pc_finalize_already_exists_v2",
         "pc_requeue_resolved_event_links_v2",
     ):
