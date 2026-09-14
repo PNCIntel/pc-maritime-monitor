@@ -1043,6 +1043,16 @@ def _workflow_upsert(job_id, workflow_type, title, stage, order, status="running
         }
         if hit:
             wid=hit[0]["workflow_run_id"]
+            # Workflow progression is monotonic. A later refresh/reconcile pass must
+            # never send a job backwards from APPLY/QA to RECONCILE/RELATIONSHIPS.
+            current_order=int(hit[0].get("stage_order") or 0)
+            incoming_order=int(order or 0)
+            if incoming_order < current_order:
+                patch["current_stage"]=hit[0].get("current_stage")
+                patch["stage_order"]=current_order
+                # Preserve completed/success state when a lower-order diagnostic pass runs.
+                if str(hit[0].get("status") or "").lower() in {"completed","complete","success","succeeded"}:
+                    patch["status"]=hit[0].get("status")
             sb.table("pc_workflow_runs").update(patch).eq("workflow_run_id",wid).execute()
         else:
             patch["ingestion_job_id"]=job_id
@@ -1231,24 +1241,69 @@ def _audit_bulk_jobs(limit=250):
         })
     return out
 
-def _run_reconciliation(job_id):
-    """Use the dependency-autocreate engine first; fall back only for older databases."""
+
+def _snapshot_applied_staging(job_id):
+    if not sb or not job_id:
+        return {}
     try:
-        return sb.rpc("pc_reconcile_ingestion_job_v2",{"p_ingestion_job_id":str(job_id)}).execute().data
-    except Exception as v2_exc:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,review_status,resolution_status,validation_status,resolved_entity_id,resolution_method,resolution_confidence,candidate_count")
+              .eq("ingestion_job_id",str(job_id))
+              .eq("review_status","applied")
+              .limit(10000).execute().data or [])
+        return {str(r["staged_record_id"]):r for r in rows if r.get("staged_record_id")}
+    except Exception:
+        return {}
+
+
+def _restore_applied_staging(snapshot):
+    """Applied rows are terminal and must not be downgraded by reconciliation RPCs."""
+    restored=0
+    errors=[]
+    for sid,r in (snapshot or {}).items():
+        patch={
+            "review_status":"applied",
+            "resolution_status":r.get("resolution_status"),
+            "validation_status":r.get("validation_status"),
+            "resolved_entity_id":r.get("resolved_entity_id"),
+            "resolution_method":r.get("resolution_method"),
+            "resolution_confidence":r.get("resolution_confidence"),
+            "candidate_count":r.get("candidate_count"),
+        }
+        patch={k:v for k,v in patch.items() if v is not None or k=="review_status"}
         try:
-            return sb.rpc("pc_run_standard_reconciliation",{"p_job_id":job_id}).execute().data
-        except Exception:
-            result={"v2_error":str(v2_exc)}
-            try: result["prepare"]=_prepare_canonical_candidates(sb,job_id)
-            except Exception as exc: result["prepare_error"]=str(exc)
-            try: result["repair"]=sb.rpc("pc_repair_unresolved_identity_candidates",{"p_job_id":job_id}).execute().data
-            except Exception as exc: result["repair_error"]=str(exc)
-            try: result["event_relationships"]=_process_relationship_backlog(sb,job_id)
-            except Exception as exc: result["event_relationships_error"]=str(exc)
-            try: result["generic_relationships"]=_process_generic_relationship_backlog(sb,job_id)
-            except Exception as exc: result["generic_relationships_error"]=str(exc)
-            return result
+            sb.table("pc_staged_records").update(patch).eq("staged_record_id",sid).execute()
+            restored+=1
+        except Exception as exc:
+            errors.append(f"{sid}: {exc}")
+    return {"restored":restored,"errors":errors}
+
+
+def _run_reconciliation(job_id):
+    """Run reconciliation without ever downgrading rows already applied canonically."""
+    applied_snapshot=_snapshot_applied_staging(job_id)
+    result=None
+    try:
+        try:
+            result=sb.rpc("pc_reconcile_ingestion_job_v2",{"p_ingestion_job_id":str(job_id)}).execute().data
+        except Exception as v2_exc:
+            try:
+                result=sb.rpc("pc_run_standard_reconciliation",{"p_job_id":job_id}).execute().data
+            except Exception:
+                result={"v2_error":str(v2_exc)}
+                try: result["prepare"]=_prepare_canonical_candidates(sb,job_id)
+                except Exception as exc: result["prepare_error"]=str(exc)
+                try: result["repair"]=sb.rpc("pc_repair_unresolved_identity_candidates",{"p_job_id":job_id}).execute().data
+                except Exception as exc: result["repair_error"]=str(exc)
+                try: result["event_relationships"]=_process_relationship_backlog(sb,job_id)
+                except Exception as exc: result["event_relationships_error"]=str(exc)
+                try: result["generic_relationships"]=_process_generic_relationship_backlog(sb,job_id)
+                except Exception as exc: result["generic_relationships_error"]=str(exc)
+        return result
+    finally:
+        restore=_restore_applied_staging(applied_snapshot)
+        if isinstance(result,dict):
+            result["applied_state_restore"]=restore
 
 def _docx_text(raw):
     with zipfile.ZipFile(io.BytesIO(raw)) as z:
@@ -1542,9 +1597,14 @@ def _relationship_resolution_rows(sb, limit=2000, filters=None):
         return []
 
 def _process_relationship_backlog(sb, job_id=None):
-    params={"p_ingestion_job_id":str(job_id)} if job_id else {}
-    data=_rpc_data(sb,"pc_process_relationship_backlog",params)
-    return data or {}
+    applied_snapshot=_snapshot_applied_staging(job_id) if job_id else {}
+    try:
+        params={"p_ingestion_job_id":str(job_id)} if job_id else {}
+        data=_rpc_data(sb,"pc_process_relationship_backlog",params)
+        return data or {}
+    finally:
+        if applied_snapshot:
+            _restore_applied_staging(applied_snapshot)
 
 
 def _apply_ready_event_relationships(sb, job_id=None):
@@ -1564,9 +1624,14 @@ def _generic_relationship_resolution_rows(sb, limit=5000, filters=None):
         return []
 
 def _process_generic_relationship_backlog(sb, job_id=None):
-    params={"p_ingestion_job_id":str(job_id)} if job_id else {}
-    data=_rpc_data(sb,"pc_process_generic_relationship_backlog",params)
-    return data or {}
+    applied_snapshot=_snapshot_applied_staging(job_id) if job_id else {}
+    try:
+        params={"p_ingestion_job_id":str(job_id)} if job_id else {}
+        data=_rpc_data(sb,"pc_process_generic_relationship_backlog",params)
+        return data or {}
+    finally:
+        if applied_snapshot:
+            _restore_applied_staging(applied_snapshot)
 
 def _apply_ready_generic_relationships(sb, job_id=None):
     params={"p_ingestion_job_id":str(job_id)} if job_id else {}
@@ -3930,6 +3995,7 @@ elif page=="AI Research Workflow":
                     )
                     if qa.get("missing",0)==0 and not qa.get("errors"):
                         st.success(f"QA passed: {qa.get('found',0)} canonical record(s) verified.")
+                        st.caption("Applied rows are now terminal and will not be downgraded by later Refresh/Reconcile passes.")
                     else:
                         st.warning(
                             f"QA checked {qa.get('checked',0)} applied rows: "
