@@ -1599,6 +1599,24 @@ def _canonical_db_core_trade_frames():
 
         op_map, owner_map, role_map = _canonical_relationship_role_maps(rels_df)
 
+        # Asset-to-asset containment / location graph.
+        # Bulk Load port datasets stage terminal -> port as LOCATED_AT, while
+        # some older datasets use TERMINAL_OF / PART_OF / CONTAINED_BY.
+        parent_port_map = {}
+        for rr in rrows or []:
+            stype = str(rr.get("source_type") or "").strip().casefold()
+            ttype = str(rr.get("target_type") or "").strip().casefold()
+            rel = str(rr.get("relationship_type") or "").strip().casefold().replace("-", "_").replace(" ", "_")
+            sid = str(rr.get("source_id") or "").strip()
+            tid = str(rr.get("target_id") or "").strip()
+            if (
+                stype == "asset"
+                and ttype == "asset"
+                and sid and tid
+                and rel in {"located_at","terminal_of","part_of","contained_by","within_port","berth_of"}
+            ):
+                parent_port_map.setdefault(sid, tid)
+
         # ---- Infrastructure assets ----
         infra_assets = []
         port_rows = []
@@ -1611,7 +1629,11 @@ def _canonical_db_core_trade_frames():
             kind = f"{atype} {subtype}".casefold()
             name_kind = f"{name} {atype} {subtype}".casefold()
             meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
-            research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
+            nested_research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
+            # Bulk-import research stores many useful attributes at metadata top level.
+            # Preserve those and let nested research_attributes override only where present.
+            research = dict(meta)
+            research.update(nested_research)
 
             operator_id = op_map.get(aid, "")
             owner_id = owner_map.get(aid, "")
@@ -1662,12 +1684,27 @@ def _canonical_db_core_trade_frames():
                 })
 
             # Terminal / depot / warehouse / logistics-facility assets.
-            if any(term in name_kind for term in ("terminal", "depot", "warehouse", "logistics", "crossdock", "yard")):
+            if any(term in name_kind for term in (
+                "terminal","depot","warehouse","logistics","crossdock","yard",
+                "berth","wharf","quay","pier"
+            )):
+                parent_port_id = str(
+                    research.get("parent_port_id")
+                    or meta.get("parent_port_id")
+                    or parent_port_map.get(aid)
+                    or ""
+                ).strip()
+                parent_port_name = str(
+                    research.get("parent_port")
+                    or meta.get("parent_port")
+                    or asset_names.get(parent_port_id, "")
+                    or ""
+                ).strip()
                 terminal_rows.append({
                     "Terminal ID": aid,
                     "Terminal / Facility": name,
-                    "Port ID": str(research.get("parent_port_id") or "").strip(),
-                    "Parent Port": str(research.get("parent_port") or "").strip(),
+                    "Port ID": parent_port_id,
+                    "Parent Port": parent_port_name,
                     "Country": base["Country"],
                     "City / Area": base["City / Area"],
                     "Primary Operator Company ID": operator_id or company_id,
@@ -7166,10 +7203,11 @@ def filter_distinct_port_terminals(port_row, port_terminals):
 
 
 def live_db_terminals_for_port(port_row):
-    """Resolve terminal_of relationships directly from Supabase for the selected port.
+    """Resolve subordinate terminal/facility assets directly from Supabase.
 
-    This bypasses the legacy workbook Port ID entirely, so newly-created canonical
-    relationships are visible immediately after a Streamlit rerun/redeploy.
+    Supports both historical TERMINAL_OF edges and current Power Admin bulk-import
+    LOCATED_AT/PART_OF containment edges, so newly loaded port datasets appear
+    immediately without requiring legacy workbook IDs.
     """
     try:
         sb=pc_db_client(service=True)
@@ -7238,14 +7276,18 @@ def live_db_terminals_for_port(port_row):
                    .limit(1000).execute().data or [])
             rels.extend(batch)
 
+        accepted_parent_links={"terminal_of","located_at","part_of","contained_by","within_port","berth_of"}
         rels=[
             r for r in rels
-            if str(r.get("relationship_type") or "").strip().casefold().replace("-","_").replace(" ","_")=="terminal_of"
+            if str(r.get("relationship_type") or "").strip().casefold().replace("-","_").replace(" ","_") in accepted_parent_links
             and str(r.get("source_type") or "").strip().casefold()=="asset"
         ]
 
         if not rels:
-            return pd.DataFrame(), f"Canonical parent found ({', '.join(parent_ids)}) but no terminal_of relationships found"
+            return pd.DataFrame(), (
+                f"Canonical parent found ({', '.join(parent_ids)}) but no subordinate "
+                "terminal/location relationships found"
+            )
 
         child_ids=sorted({
             str(r.get("source_id")) for r in rels if r.get("source_id")
@@ -7267,6 +7309,27 @@ def live_db_terminals_for_port(port_row):
 
             opid=str(f.get("operator_entity_id") or "")
             ownerid=str(f.get("owner_entity_id") or "")
+
+            # Current bulk imports commonly express operators/owners through
+            # pc_relationships rather than denormalized pc_logistics_facilities.
+            if not opid or not ownerid:
+                asset_rels=(sb.table("pc_relationships")
+                    .select("source_type,source_id,relationship_type,target_type,target_id,record_status")
+                    .eq("target_id",cid)
+                    .eq("target_type","asset")
+                    .limit(200).execute().data or [])
+                for rr in asset_rels:
+                    if str(rr.get("source_type") or "").strip().casefold()!="entity":
+                        continue
+                    reln=str(rr.get("relationship_type") or "").strip().casefold().replace("-","_").replace(" ","_")
+                    eid=str(rr.get("source_id") or "").strip()
+                    if not eid:
+                        continue
+                    if not opid and reln in {"operates","manages","operator_of","concession_holder"}:
+                        opid=eid
+                    if not ownerid and reln in {"owns","controls","owner_of","parent_of"}:
+                        ownerid=eid
+
             opname=""
             ownername=""
             if opid:
@@ -7280,7 +7343,9 @@ def live_db_terminals_for_port(port_row):
             for candidate in (a.get("metadata"),f.get("metadata")):
                 if isinstance(candidate,dict):
                     meta.update(candidate)
-            research=meta.get("research_attributes") if isinstance(meta.get("research_attributes"),dict) else {}
+            nested_research=meta.get("research_attributes") if isinstance(meta.get("research_attributes"),dict) else {}
+            research=dict(meta)
+            research.update(nested_research)
 
             capacity=(
                 research.get("container_capacity_teu_per_year")
@@ -7310,10 +7375,11 @@ def live_db_terminals_for_port(port_row):
                 "Status":a.get("status") or "",
                 "Ownership / Structure":research.get("ownership_structure") or "",
                 "Source ID":f.get("source_id") or "",
+                "Metadata":meta,
                 "Data Status":"Supabase live relationship",
             })
 
-        return pd.DataFrame(rows), f"{len(rows)} live terminal link(s) from Supabase"
+        return pd.DataFrame(rows), f"{len(rows)} live terminal/facility link(s) from Supabase"
 
     except Exception as exc:
         return pd.DataFrame(), f"Supabase terminal-link query failed: {exc}"
