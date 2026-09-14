@@ -2367,6 +2367,138 @@ def _job_control_panel(job, key_prefix="jobctl"):
         st.caption(f"Showing {len(rows)} staged row(s).")
         dataframe(rows)
 
+
+def _job_apply_candidates(job_id):
+    """Return job-scoped staged rows that are resolution-ready and safe to apply."""
+    if not sb or not job_id:
+        return [], []
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,ingestion_job_id,target_entity_type,target_table,natural_key,source_record_key,action,confidence,validation_status,review_status,resolution_status,resolved_entity_id,resolution_method,resolution_confidence,candidate_count,payload,current_record,source_id,created_at")
+              .eq("ingestion_job_id",job_id)
+              .limit(10000).execute().data or [])
+    except Exception as exc:
+        return [], [{"record":"<query>","error":str(exc)}]
+
+    candidates=[]
+    blocked=[]
+    for r in rows:
+        review=str(r.get("review_status") or "pending").lower()
+        if review in {"applied","rejected","needs_changes"}:
+            continue
+        resolution=str(r.get("resolution_status") or "UNRESOLVED").upper()
+        if resolution not in {"READY","MATCHED","NEW"}:
+            blocked.append({
+                "record":r.get("natural_key"),
+                "table":r.get("target_table"),
+                "resolution_status":resolution,
+                "reason":"not resolution-ready",
+            })
+            continue
+        try:
+            v=validate_staged_for_bulk(sb,r)
+        except Exception as exc:
+            blocked.append({
+                "record":r.get("natural_key"),
+                "table":r.get("target_table"),
+                "resolution_status":resolution,
+                "reason":f"validation error: {exc}",
+            })
+            continue
+        if v.get("safe"):
+            candidates.append((r,v))
+        else:
+            blocked.append({
+                "record":r.get("natural_key"),
+                "table":r.get("target_table"),
+                "resolution_status":resolution,
+                "reason":v.get("risk") or "not safe",
+            })
+    return candidates, blocked
+
+
+def _approve_and_apply_job_safe(job_id):
+    """Approve then apply all safe, resolution-ready staged rows for one job."""
+    candidates, blocked=_job_apply_candidates(job_id)
+    applied=0
+    approved=0
+    failed=[]
+    for r,v in candidates:
+        try:
+            if str(r.get("review_status") or "pending").lower()!="approved":
+                sb.table("pc_staged_records").update({
+                    "review_status":"approved",
+                    "validation_status":"reviewed",
+                }).eq("staged_record_id",r["staged_record_id"]).execute()
+                r["review_status"]="approved"
+                approved+=1
+            apply_staged_record(sb,r,r.get("payload") or {})
+            applied+=1
+        except Exception as exc:
+            failed.append({
+                "record":r.get("natural_key"),
+                "table":r.get("target_table"),
+                "error":str(exc),
+            })
+    return {
+        "safe_candidates":len(candidates),
+        "approved_now":approved,
+        "applied":applied,
+        "failed":len(failed),
+        "blocked":len(blocked),
+        "failures":failed,
+        "blocked_rows":blocked,
+    }
+
+
+def _qa_applied_job(job_id):
+    """Check that applied staging rows can be found in their canonical tables."""
+    if not sb or not job_id:
+        return {"checked":0,"found":0,"missing":0,"errors":[]}
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,natural_key,payload,review_status")
+              .eq("ingestion_job_id",job_id)
+              .eq("review_status","applied")
+              .limit(10000).execute().data or [])
+    except Exception as exc:
+        return {"checked":0,"found":0,"missing":0,"errors":[str(exc)]}
+
+    found=0
+    missing=[]
+    errors=[]
+    for r in rows:
+        table=str(r.get("target_table") or "")
+        payload=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+        conflict=APPLY_CONFLICT_KEYS.get(table)
+        keys=[x.strip() for x in conflict.split(",")] if conflict else []
+        filters={k:payload.get(k) for k in keys if payload.get(k) not in (None,"")}
+        if not table or not filters or len(filters)!=len(keys):
+            errors.append(f"{r.get('natural_key')}: no complete apply/conflict key")
+            continue
+        try:
+            q=sb.table(table).select(",".join(keys)).limit(1)
+            for k,v in filters.items():
+                q=q.eq(k,v)
+            hit=q.execute().data or []
+            if hit:
+                found+=1
+            else:
+                missing.append({
+                    "record":r.get("natural_key"),
+                    "table":table,
+                    "key":filters,
+                })
+        except Exception as exc:
+            errors.append(f"{r.get('natural_key')}: {exc}")
+    return {
+        "checked":len(rows),
+        "found":found,
+        "missing":len(missing),
+        "missing_rows":missing,
+        "errors":errors,
+    }
+
 if page=="Dashboard":
     title("Platform control","One canonical data model; Trade, Intelligence and NERAI product entitlements; tenant workspaces; AI staging and review.")
     tables=[("Organizations","pc_organizations"),("Users","pc_profiles"),("Entities","pc_entities"),("Assets","pc_assets"),("Vessels / mobile","pc_mobile_assets"),("Events","pc_events"),("Staged changes","pc_staged_records"),("Open DQ issues","pc_data_quality_issues")]
@@ -3181,50 +3313,179 @@ elif page=="AI Research Workflow":
                     f"Created: {job.get('created_at') or '—'} · "
                     f"Job ID: {jid}"
                 )
-                c1,c2,c3,c4,c5=st.columns(5)
-                c1.metric("Staged",summ.get("total",0)); c2.metric("Ready",summ.get("ready",0))
-                c3.metric("Unresolved",summ.get("unresolved",0)); c4.metric("Partial",summ.get("partial",0)); c5.metric("Applied",summ.get("applied",0))
+                # Complete status picture — do not hide buckets.
+                c1,c2,c3,c4,c5,c6,c7=st.columns(7)
+                c1.metric("Staged",summ.get("total",0))
+                c2.metric("Ready",summ.get("ready",0))
+                c3.metric("Pending",summ.get("pending",0))
+                c4.metric("Approved",summ.get("approved",0))
+                c5.metric("Partial",summ.get("partial",0))
+                c6.metric("Unresolved",summ.get("unresolved",0))
+                c7.metric("Applied",summ.get("applied",0))
 
-                a,b,c,d=st.columns(4)
-                if a.button("Prepare IDs",key="aiwf_prepare"):
+                accounted=(
+                    int(summ.get("pending",0) or 0)+int(summ.get("approved",0) or 0)+
+                    int(summ.get("applied",0) or 0)+int(summ.get("rejected",0) or 0)+
+                    int(summ.get("needs_changes",0) or 0)
+                )
+                if accounted != int(summ.get("total",0) or 0):
+                    st.caption(
+                        f"Review-state accounting: {accounted}/{summ.get('total',0)} rows. "
+                        "Rows can also be in custom review states; use Refresh details below to inspect them."
+                    )
+
+                st.markdown("## Workflow")
+                st.caption("Run the steps in order. Green means you can continue; amber means analyst review is still required.")
+
+                # STEP 1
+                st.markdown("### 1. Prepare canonical IDs")
+                st.caption("Assign/reuse canonical IDs for NEW and MATCHED companies, assets, vessels and events before relationships are resolved.")
+                if st.button("1 · Prepare IDs",key="aiwf_prepare",use_container_width=True):
                     with st.spinner("Preparing canonical candidates..."):
                         res=_prepare_canonical_candidates(sb,jid)
                     _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"PREPARE_IDS",3,stats={"prepare":res})
-                    st.success(res); st.rerun()
-                if b.button("Auto reconcile",type="primary",key="aiwf_reconcile"):
-                    with st.spinner("Resolving dependencies, identities and relationships..."):
+                    st.success("ID preparation complete.")
+                    st.json(res)
+                    st.rerun()
+
+                # STEP 2
+                st.markdown("### 2. Reconcile identities")
+                st.caption("Match staged records to existing canonical records and classify NEW / MATCHED / READY / PARTIAL / AMBIGUOUS.")
+                if st.button("2 · Auto reconcile",type="primary",key="aiwf_reconcile",use_container_width=True):
+                    with st.spinner("Resolving dependencies and identities..."):
                         res=_run_reconciliation(jid)
                     _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"RECONCILE",4,stats={"reconcile":res})
-                    st.success("Dependency-aware reconciliation complete."); st.json(res); st.rerun()
-                if c.button("Resolve relationships",key="aiwf_relationships"):
+                    st.success("Dependency-aware reconciliation complete.")
+                    st.json(res)
+                    st.rerun()
+
+                # STEP 3
+                st.markdown("### 3. Resolve relationship endpoints")
+                st.caption("Resolve event links, ownership, operator/manager and other graph edges to canonical IDs.")
+                if st.button("3 · Resolve relationships",key="aiwf_relationships",use_container_width=True):
                     out={}
                     try: out["event_links"]=_process_relationship_backlog(sb,jid)
                     except Exception as exc: out["event_links_error"]=str(exc)
                     try: out["relationships"]=_process_generic_relationship_backlog(sb,jid)
                     except Exception as exc: out["relationships_error"]=str(exc)
                     _workflow_upsert(jid,workflow_type,job.get("title") or workflow_label,"RELATIONSHIPS",5,stats=out)
-                    st.json(out); st.rerun()
-                if d.button("Refresh status",key="aiwf_refresh"):
-                    st.json(_staging_summary(jid))
+                    st.success("Relationship resolution pass complete.")
+                    st.json(out)
+                    st.rerun()
 
-                st.markdown("#### Next")
-                if summ.get("unresolved",0) or summ.get("ambiguous",0) or summ.get("partial",0):
-                    st.warning("Only remaining exceptions should require analyst review. Open Reconcile & Review to inspect them.")
-                elif summ.get("total",0):
-                    st.success("Resolution looks clean. Continue to Reconcile & Review for approval/apply and QA.")
+                # STEP 4
+                st.markdown("### 4. Review only the exceptions")
+                exceptions=int(summ.get("partial",0) or 0)+int(summ.get("unresolved",0) or 0)+int(summ.get("ambiguous",0) or 0)
+                if exceptions:
+                    st.warning(
+                        f"{exceptions} exception(s) still need analyst review "
+                        f"({summ.get('partial',0)} partial, {summ.get('unresolved',0)} unresolved, "
+                        f"{summ.get('ambiguous',0)} ambiguous). Open **Reconcile & Review** from the left menu."
+                    )
                 else:
+                    st.success("No reconciliation exceptions remain.")
+
+                # STEP 5 — direct safe apply for this job
+                st.markdown("### 5. Apply safe ready records")
+                safe_candidates, blocked_rows=_job_apply_candidates(jid)
+                st.caption(
+                    f"{len(safe_candidates)} job-scoped record(s) currently pass the safe-apply policy. "
+                    f"{len(blocked_rows)} row(s) are blocked by review, schema, source, duplicate or relationship checks."
+                )
+                if safe_candidates:
+                    confirm_apply=st.checkbox(
+                        f"I have reviewed the status above and want to approve + apply {len(safe_candidates)} safe record(s)",
+                        key=f"aiwf_confirm_apply_{jid}"
+                    )
+                    if st.button(
+                        f"5 · Approve + Apply Safe Ready ({len(safe_candidates)})",
+                        type="primary",
+                        disabled=not confirm_apply,
+                        key=f"aiwf_apply_safe_{jid}",
+                        use_container_width=True
+                    ):
+                        with st.status("Approving and applying safe records...",expanded=True) as status:
+                            result=_approve_and_apply_job_safe(jid)
+                            st.write(
+                                f"Applied {result.get('applied',0)} / {result.get('safe_candidates',0)} safe candidate(s)."
+                            )
+                            if result.get("failures"):
+                                st.write(result["failures"])
+                            status.update(
+                                label=(
+                                    f"Apply complete — {result.get('applied',0)} applied"
+                                    if not result.get("failed")
+                                    else f"Apply finished — {result.get('applied',0)} applied, {result.get('failed',0)} failed"
+                                ),
+                                state="complete" if not result.get("failed") else "error",
+                                expanded=bool(result.get("failed"))
+                            )
+                        _workflow_upsert(
+                            jid,workflow_type,job.get("title") or workflow_label,
+                            "APPLY",7,stats={"apply":result}
+                        )
+                        st.rerun()
+                else:
+                    st.info("No safe ready rows are waiting to apply for this job.")
+
+                if blocked_rows:
+                    with st.expander(f"Why {len(blocked_rows)} row(s) are not safe to apply"):
+                        dataframe(blocked_rows)
+
+                # STEP 6
+                st.markdown("### 6. QA canonical writes")
+                st.caption("Verify that records marked applied are actually present in their canonical destination tables.")
+                if st.button("6 · Run QA",key=f"aiwf_qa_{jid}",use_container_width=True):
+                    with st.spinner("Checking canonical tables..."):
+                        qa=_qa_applied_job(jid)
+                    _workflow_upsert(
+                        jid,workflow_type,job.get("title") or workflow_label,
+                        "QA",8,stats={"qa":qa}
+                    )
+                    if qa.get("missing",0)==0 and not qa.get("errors"):
+                        st.success(f"QA passed: {qa.get('found',0)} canonical record(s) verified.")
+                    else:
+                        st.warning(
+                            f"QA checked {qa.get('checked',0)} applied rows: "
+                            f"{qa.get('found',0)} found, {qa.get('missing',0)} missing, "
+                            f"{len(qa.get('errors') or [])} check error(s)."
+                        )
+                    st.json(qa)
+
+                with st.expander("Refresh / raw workflow status"):
+                    if st.button("Refresh status",key="aiwf_refresh"):
+                        st.json(_staging_summary(jid))
+                    st.json({
+                        "job_id":jid,
+                        "job_status":job.get("status"),
+                        "staging_summary":summ,
+                        "safe_apply_candidates":len(safe_candidates),
+                        "blocked_rows":len(blocked_rows),
+                    })
+
+                st.markdown("#### What to do now")
+                if int(summ.get("total",0) or 0)==0:
                     stats=job.get("stats") if isinstance(job.get("stats"),dict) else {}
                     table_stats=stats.get("tables") if isinstance(stats.get("tables"),dict) else {}
                     if table_stats:
-                        st.warning(
-                            "This ingestion job reports imported table rows but no pc_staged_records are "
-                            "currently attached to the job. If the records were not already applied, open "
-                            "Recent jobs / diagnostics and verify that the bulk loader staged rows with this "
-                            "same ingestion_job_id."
+                        st.error(
+                            "This job reports imported rows but has no staging rows attached. "
+                            "Use Recent jobs → recovery controls to inspect/retry the load."
                         )
                         st.json({"reported_tables":table_stats,"job_stats":stats})
                     else:
                         st.info("No staged rows were found for this job.")
+                elif exceptions:
+                    st.warning(
+                        "Finish Steps 1–3 if needed, review the exceptions in Reconcile & Review, "
+                        "then return here and use Step 5 to apply the safe ready records."
+                    )
+                elif safe_candidates:
+                    st.success(
+                        f"The job is ready for Step 5: {len(safe_candidates)} safe record(s) can be approved and applied now."
+                    )
+                else:
+                    st.success("Nothing else is waiting for safe apply. Run Step 6 QA.")
 
         with history_tab:
             jobs=safe_rows(
