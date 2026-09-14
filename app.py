@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.47-fleet-graph-browser"
+APP_VERSION = "v3.3.49-search-stability-maritime-fix"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2568,6 +2568,60 @@ def pretty_relationship(v):
     }
     return replacements.get(s,s)
 
+# ---------- smart search helpers ----------
+def _search_norm(v):
+    """Normalize names/phrases so searches work across punctuation, ampersands and formatting."""
+    import unicodedata
+    x="" if v is None else str(v)
+    if x.lower()=="nan": x=""
+    x=html_lib.unescape(x).casefold()
+    x=unicodedata.normalize("NFKD",x)
+    x="".join(ch for ch in x if not unicodedata.combining(ch))
+    x=x.replace("&"," and ").replace("+"," plus ")
+    x=re.sub(r"[^a-z0-9]+"," ",x)
+    return re.sub(r"\s+"," ",x).strip()
+
+def _search_tokens(q):
+    n=_search_norm(q)
+    # keep short meaningful company tokens such as p o / dp / bp / zim
+    return [t for t in n.split() if t and (len(t)>1 or t in {"p","o"})]
+
+def _smart_filter(df,q,columns=None,require_all=True):
+    """Human search across selected/all columns with punctuation-insensitive token matching."""
+    if df is None or df.empty or not str(q).strip():
+        return df.copy() if isinstance(df,pd.DataFrame) else pd.DataFrame()
+    use=[c for c in (columns or list(df.columns)) if c in df.columns]
+    if not use: return df.iloc[0:0].copy()
+    blob=df[use].fillna("").astype(str).agg(" | ".join,axis=1).map(_search_norm)
+    toks=_search_tokens(q)
+    phrase=_search_norm(q)
+    compact=phrase.replace(" ","")
+    masks=[]
+    for t in toks:
+        masks.append(blob.str.contains(re.escape(t),regex=True,na=False))
+    if masks:
+        mask=masks[0].copy()
+        for m in masks[1:]:
+            mask = (mask & m) if require_all else (mask | m)
+    else:
+        mask=blob.str.contains(re.escape(phrase),regex=True,na=False)
+    # compact fallback makes P&O / P and O / CMA-CGM more forgiving.
+    if compact:
+        blob_compact=blob.str.replace(" ","",regex=False)
+        mask |= blob_compact.str.contains(re.escape(compact),regex=True,na=False)
+    out=df[mask].copy()
+    if out.empty and require_all and len(toks)>1:
+        return _smart_filter(df,q,columns,require_all=False)
+    return out
+
+def _smart_unique_values(df,columns,limit=500):
+    vals=[]
+    if df is None or df.empty: return vals
+    for c in columns:
+        if c in df.columns:
+            vals += [str(x).strip() for x in df[c].dropna().tolist() if str(x).strip() and str(x).lower()!="nan"]
+    return sorted(dict.fromkeys(vals),key=lambda x:x.casefold())[:limit]
+
 # ---------- global search ----------
 SEARCH_PRIORITY={
     "Companies":8,"Entity Registry":7,"Defence Companies":9,"Shipyards":10,"Programmes":10,"Contracts":9,
@@ -2602,14 +2656,18 @@ SINDEX=search_index()
 
 def ranked_search(q, limit=80):
     if not q or SINDEX.empty: return pd.DataFrame()
-    phrase=q.strip().lower(); tokens=[t for t in re.findall(r"[\w&+.-]+",phrase) if len(t)>1]
+    phrase=_search_norm(q); tokens=_search_tokens(q); compact=phrase.replace(" ","")
     scored=[]
     for _,r in SINDEX.iterrows():
-        text=r.text.lower(); title=r.title.lower();
+        text=_search_norm(r.text); title=_search_norm(r.title)
+        text_compact=text.replace(" ",""); title_compact=title.replace(" ","")
         matched=sum(1 for t in tokens if t in text)
-        if matched==0: continue
-        score=matched*10 + (30 if phrase in text else 0) + (20 if phrase in title else 0) + SEARCH_PRIORITY.get(r.sheet,3)
+        compact_match=bool(compact and compact in text_compact)
+        if matched==0 and not compact_match: continue
+        score=matched*10 + (30 if phrase and phrase in text else 0) + (25 if phrase and phrase in title else 0) + SEARCH_PRIORITY.get(r.sheet,3)
         if tokens and all(t in text for t in tokens): score+=20
+        if compact_match: score+=12
+        if compact and compact in title_compact: score+=15
         scored.append((score,r.wb,r.sheet,r.row,r.title))
     scored.sort(reverse=True,key=lambda x:x[0])
     return pd.DataFrame(scored[:limit],columns=["score","wb","sheet","row","title"])
@@ -4109,7 +4167,7 @@ def render_company_financials(entity_id):
         return
     if not fin.empty:
         fin["_dt"]=pd.to_datetime(fin.get("Period End",""),errors="coerce")
-        periods=sorted([x for x in fin.get("Period End",pd.Series(dtype=str)).astype(str).unique() if x],reverse=True)
+        periods=list(reversed(_smart_unique_values(fin,["Period End"])))
         selected=st.selectbox("Financial period",["Latest"]+periods,key=f"fin_period_{entity_id}")
         if selected=="Latest":
             latest=fin["_dt"].max()
@@ -4438,12 +4496,14 @@ def render_company_profile(entity_id, entity_name):
 
 def entity_search_matches(q, limit=20):
     if ECAT.empty or not q: return pd.DataFrame()
-    tokens=[t.lower() for t in re.findall(r"[\w&+.-]+",q) if len(t)>1]
+    tokens=_search_tokens(q); phrase=_search_norm(q); compact=phrase.replace(" ","")
     scores=[]
     for _,r in ECAT.iterrows():
-        text=f"{r['name']} {r['kind']}".lower()
-        s=sum(10 for t in tokens if t in text)
-        if q.lower() in text: s+=30
+        text=_search_norm(f"{r['name']} {r['kind']}"); tc=text.replace(" ","")
+        matched=sum(1 for t in tokens if t in text)
+        s=matched*10
+        if phrase and phrase in text: s+=30
+        if compact and compact in tc: s+=15
         if s: scores.append((s,r["id"],r["name"],r["kind"]))
     scores.sort(reverse=True)
     return pd.DataFrame(scores[:limit],columns=["score","id","name","kind"])
@@ -5787,13 +5847,15 @@ def render_marsec_workspace():
     marsec=events[mask].copy()
     c1,c2=st.columns(2)
     with c1:
-        families=sorted([x for x in marsec.get("Event Type",pd.Series(dtype=str)).astype(str).unique() if x])
+        families=_smart_unique_values(marsec,["Event Type","Event Family"])
         et=st.selectbox("Incident type",["All"]+families,key="marsec_type_filter")
     with c2:
-        countries=sorted([x for x in marsec.get("Country / Countries",pd.Series(dtype=str)).astype(str).unique() if x])
+        countries=_smart_unique_values(marsec,["Country / Countries","Country","Location"])
         country=st.selectbox("Country / area",["All"]+countries,key="marsec_country_filter")
-    if et!="All": marsec=marsec[marsec["Event Type"].astype(str).eq(et)]
-    if country!="All": marsec=marsec[marsec["Country / Countries"].astype(str).eq(country)]
+    if et!="All":
+        marsec=_smart_filter(marsec,et,["Event Type","Event Family"])
+    if country!="All":
+        marsec=_smart_filter(marsec,country,["Country / Countries","Country","Location"])
     st.markdown("### Incident feed")
     render_event_cards(marsec,100)
 
@@ -6335,7 +6397,7 @@ def render_government_security():
         st.info("No canonical government/security organisations are currently classified.")
         return
 
-    countries=sorted([x for x in entities.get("Country",pd.Series(dtype=str)).fillna("").astype(str).unique() if x.strip()])
+    countries=_smart_unique_values(entities,["Country"])
     country=st.selectbox("Country",["All countries"]+countries,key="govsec_country")
     if country!="All countries":
         eview=entities[entities["Country"].astype(str).eq(country)].copy()
@@ -6697,9 +6759,9 @@ def render_security_business_risk():
     st.markdown("### Filter by consequence")
     f1,f2,f3=st.columns(3)
     q=f1.text_input("Search",placeholder="Hormuz, port strike, tanker, airspace...",key="sbr_search")
-    countries=sorted([x for x in df["Country"].fillna("").astype(str).unique() if x.strip()])
+    countries=_smart_unique_values(df,["Country"])
     country=f2.selectbox("Country / geography",["All"]+countries,key="sbr_country")
-    severity_opts=sorted([x for x in df["Severity"].fillna("").astype(str).unique() if x.strip()])
+    severity_opts=_smart_unique_values(df,["Severity"])
     sev=f3.selectbox("Severity",["All"]+severity_opts,key="sbr_severity")
 
     x=df.copy()
@@ -6842,7 +6904,7 @@ def render_freight_commodity_markets():
             candidates=df[(df["value_numeric"].notna()) & (df["observation_date"].notna())].copy() if "value_numeric" in df else pd.DataFrame()
             if not candidates.empty:
                 candidates["series_label"]=(candidates["route_code"].fillna("").astype(str)+" · "+candidates["metric_name"].fillna("").astype(str)+" · "+candidates["vessel_class"].fillna("").astype(str)).str.strip(" ·")
-                labels=sorted([x for x in candidates["series_label"].unique() if x])
+                labels=_smart_unique_values(candidates,["series_label"])
                 if labels:
                     pick=st.selectbox("Series",labels,key="market_series_pick")
                     series=candidates[candidates["series_label"].eq(pick)][["observation_date","value_numeric"]].dropna().sort_values("observation_date")
@@ -7318,7 +7380,7 @@ def render_country_macro():
     tabs=st.tabs(["Macro indicators","Borders & chokepoints","Current status"])
     with tabs[0]:
         controls=st.columns([2,1,1])
-        countries=sorted(x for x in macro.get("country",pd.Series(dtype=str)).dropna().astype(str).unique() if x) if not macro.empty else []
+        countries=_smart_unique_values(macro,["country"]) if not macro.empty else []
         default_country="United Arab Emirates" if "United Arab Emirates" in countries else (countries[0] if countries else "All")
         opts=["All"]+countries
         chosen=controls[0].selectbox("Country",opts,index=(opts.index(default_country) if default_country in opts else 0),key="macro_country_v340")
@@ -7400,7 +7462,7 @@ def render_country_macro():
                 st.info("No macro observations match that search.")
 
             # A compact historical chart for one selected series.
-            series_codes=sorted(x for x in country_view.get("indicator_code",pd.Series(dtype=str)).dropna().astype(str).unique() if x)
+            series_codes=_smart_unique_values(country_view,["indicator_code"])
             if chosen!="All" and series_codes:
                 labels={c:WORLD_BANK_INDICATORS.get(c,(c,""))[0] for c in series_codes}
                 pick=st.selectbox("Historical series",series_codes,format_func=lambda c:labels.get(c,c),key="macro_series_v340")
@@ -8567,7 +8629,7 @@ def render_regional_business_security_maps():
         ["Business + Security","Business only","Security only"],
         key="regional_map_layer_trade"
     )
-    countries=sorted([x for x in df["Country"].fillna("").astype(str).unique() if x.strip()])
+    countries=_smart_unique_values(df,["Country"])
     country=f2.selectbox("Country / market",["All"]+countries,key="regional_map_country_trade")
     q=f3.text_input("Search",placeholder="port, LNG, strike, rail, investment...",key="regional_map_search_trade")
 
@@ -8737,7 +8799,7 @@ elif page=="Maritime":
     header("Maritime","Vessels, incidents, disruptions, piracy, port exposure and navigation risk in one maritime workspace.")
     tabs=st.tabs(["Overview","Incidents","Disruptions","Vessels","Ports","Ferries","Cruise","Navigation & Compliance"])
     with tabs[0]:
-        v=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
+        v=commercial_vessels_with_official_stubs().copy()
         p=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
         ev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
         m1,m2,m3,m4=st.columns(4)
@@ -8757,11 +8819,51 @@ elif page=="Maritime":
     with tabs[2]:
         render_marsec_workspace()
     with tabs[3]:
-        v=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
-        display_df(v[[c for c in ["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Status","Primary Service","Owner Company ID","Operator Company ID"] if c in v.columns]],420)
+        v=commercial_vessels_with_official_stubs().copy()
+        vq=st.text_input(
+            "Search fleet / company / IMO / owner / operator",
+            placeholder="MSC, CMA CGM, P&O Ferries, Maersk, IMO, flag, vessel type...",
+            key="maritime_vessel_search"
+        )
+        vv=v.copy()
+        fleet_live=pd.DataFrame(); fleet_labels=[]
+        if vq.strip():
+            direct=_smart_filter(vv,vq)
+            fleet_live,fleet_labels=_fleet_browser_company_matches(vq)
+            if not fleet_live.empty:
+                direct_ids=set(direct.get("Vessel ID",pd.Series(dtype=str)).fillna("").astype(str)) if not direct.empty else set()
+                add_ids=set(fleet_live.get("Vessel ID",pd.Series(dtype=str)).fillna("").astype(str))
+                ids={x for x in direct_ids|add_ids if x}
+                vv=vv[vv.get("Vessel ID",pd.Series(index=vv.index,dtype=str)).fillna("").astype(str).isin(ids)].copy()
+                existing=set(vv.get("Vessel ID",pd.Series(dtype=str)).fillna("").astype(str))
+                missing=fleet_live[~fleet_live.get("Vessel ID",pd.Series(dtype=str)).fillna("").astype(str).isin(existing)]
+                if not missing.empty: vv=pd.concat([vv,missing],ignore_index=True,sort=False)
+            else:
+                vv=direct
+        if fleet_labels:
+            st.caption("Company / group matches: " + " · ".join(dict.fromkeys(fleet_labels)))
+        if not vv.empty:
+            m1,m2,m3=st.columns(3)
+            m1.metric("Vessels in view",len(vv))
+            m2.metric("With IMO",int(vv.get("IMO",pd.Series(index=vv.index,dtype=str)).fillna("").astype(str).str.strip().ne("").sum()))
+            m3.metric("Vessel types",int(vv.get("Vessel Type",pd.Series(index=vv.index,dtype=str)).fillna("").astype(str).replace("",pd.NA).nunique()))
+            cols=[c for c in ["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Owner","Operator","Manager","Owner / Operator Text","Matched Company / Group","Status","Primary Service"] if c in vv.columns]
+            display_df(vv[cols].head(500),420) if cols else display_df(vv.head(500),420)
+        else:
+            st.info("No matching vessels.")
     with tabs[4]:
         p=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
-        display_df(p[[c for c in ["Port / Facility","Country","Operator","Facility Type","Key Role","Coverage Note"] if c in p.columns]],420)
+        pq=st.text_input("Search port / country / company / operator",placeholder="UAE, DP World, Long Beach, Rotterdam, PSA...",key="maritime_port_search")
+        pv=_smart_filter(p,pq) if pq.strip() else p.copy()
+        pc1,pc2=st.columns(2)
+        countries=["All countries"]+_smart_unique_values(p,["Country"])
+        operators=["All operators"]+_smart_unique_values(p,["Operator","Primary Operator","Company"])
+        p_country=pc1.selectbox("Country",countries,key="maritime_port_country")
+        p_operator=pc2.selectbox("Operator / company",operators,key="maritime_port_operator")
+        if p_country!="All countries": pv=_smart_filter(pv,p_country,["Country"])
+        if p_operator!="All operators": pv=_smart_filter(pv,p_operator,["Operator","Primary Operator","Company"])
+        cols=[c for c in ["Port / Facility","Country","City / Area","Operator","Primary Operator","Facility Type","Key Role","Coverage Note"] if c in pv.columns]
+        display_df(pv[cols].head(500),420) if cols else display_df(pv.head(500),420)
     with tabs[5]:
         systems=TABLES.get(("Maritime","Ferry Systems"),pd.DataFrame()).copy()
         routes=TABLES.get(("Maritime","Ferry Routes"),pd.DataFrame()).copy()
@@ -8835,11 +8937,11 @@ elif page=="Rail":
     m3.metric("Rail nodes",len(nodes))
     m4.metric("Port / intermodal links",len(connections))
 
-    q=st.text_input("Search rail network",placeholder="Etihad Rail, Hafeet Rail, CPKC, Georgia, Khalifa Port, intermodal...")
+    q=st.text_input("Search rail network / country / port / operator",placeholder="Etihad Rail, UAE, Khalifa Port, CPKC, intermodal, locomotive...")
     if q:
-        operators=_contains_any(operators,[q]); networks=_contains_any(networks,[q])
-        nodes=_contains_any(nodes,[q]); links=_contains_any(links,[q])
-        fleet=_contains_any(fleet,[q]); connections=_contains_any(connections,[q]); news=_contains_any(news,[q])
+        operators=_smart_filter(operators,q); networks=_smart_filter(networks,q)
+        nodes=_smart_filter(nodes,q); links=_smart_filter(links,q)
+        fleet=_smart_filter(fleet,q); connections=_smart_filter(connections,q); news=_smart_filter(news,q)
 
     tabs=st.tabs(["Operators","Networks & Corridors","Nodes / Terminals","Port & Intermodal Connections","Fleet","Security & Disruption","News & Events"])
     with tabs[0]:
@@ -8875,9 +8977,9 @@ elif page=="Trucking":
     m2.metric("Road / logistics assets",len(assets))
     m3.metric("Corporate / operating links",len(rels))
 
-    q=st.text_input("Search trucking",placeholder="TFI, Canpar, Qube, Canada, Australia, intermodal...")
+    q=st.text_input("Search trucking / company / country / terminal",placeholder="TFI, Canada, Qube, Melbourne, intermodal, depot...")
     if q:
-        operators=_contains_any(operators,[q]); assets=_contains_any(assets,[q]); rels=_contains_any(rels,[q])
+        operators=_smart_filter(operators,q); assets=_smart_filter(assets,q); rels=_smart_filter(rels,q)
 
     tabs=st.tabs(["Operators","Assets & Networks","Ownership & Relationships"])
     with tabs[0]:
@@ -8919,11 +9021,11 @@ elif page=="Ferries":
     m3.metric("Terminals",len(terminals))
     m4.metric("Fleet / service records",len(status)+len(staging))
 
-    q=st.text_input("Search ferry network",placeholder="BC Ferries, Washington State, Alaska, Auckland, Manila, freight, terminal...")
+    q=st.text_input("Search ferry network / operator / country / route / terminal",placeholder="P&O Ferries, BC Ferries, UK, Dover, freight, terminal...")
     if q:
-        systems=_contains_any(systems,[q]); routes=_contains_any(routes,[q])
-        terminals=_contains_any(terminals,[q]); status=_contains_any(status,[q])
-        perf=_contains_any(perf,[q]); obs=_contains_any(obs,[q]); staging=_contains_any(staging,[q])
+        systems=_smart_filter(systems,q); routes=_smart_filter(routes,q)
+        terminals=_smart_filter(terminals,q); status=_smart_filter(status,q)
+        perf=_smart_filter(perf,q); obs=_smart_filter(obs,q); staging=_smart_filter(staging,q)
 
     tabs=st.tabs(["Systems & Routes","All Routes","Terminals","Fleet","Performance & Disruption"])
 
@@ -9164,10 +9266,10 @@ elif page=="Cruise":
     m3.metric("Destinations",len(destinations))
     m4.metric("Great Lakes records",len(gl))
 
-    q=st.text_input("Search cruise coverage",placeholder="Great Lakes, Germany, Caribbean, Alaska, Viking, MSC, AIDA...")
+    q=st.text_input("Search cruise line / ship / destination / country",placeholder="MSC Cruises, Viking, Caribbean, Alaska, Germany, Great Lakes...")
     if q:
-        lines=_contains_any(lines,[q]); ships=_contains_any(ships,[q])
-        destinations=_contains_any(destinations,[q]); routes=_contains_any(routes,[q]); gl=_contains_any(gl,[q])
+        lines=_smart_filter(lines,q); ships=_smart_filter(ships,q)
+        destinations=_smart_filter(destinations,q); routes=_smart_filter(routes,q); gl=_smart_filter(gl,q)
 
     tabs=st.tabs(["Cruise Lines","Ships","Destinations","Routes","Great Lakes"])
     with tabs[0]:
@@ -9244,12 +9346,23 @@ elif page=="Companies":
         st.session_state["company_search_text"]=""
 
     q=st.text_input(
-        "Find company",
-        placeholder="APM Terminals, AD Ports, Inocea, Seaspan...",
+        "Find company / group / country / sector",
+        placeholder="DP World, P&O, UAE, Canada, port operator, shipping, logistics...",
         key="company_search_text"
     )
-    if q:
-        opts=[x for x in opts if q.lower() in x["Company"].lower()]
+    company_view=companies.copy()
+    if q.strip():
+        company_view=_smart_filter(company_view,q)
+    fc1,fc2=st.columns(2)
+    countries=["All countries"]+_smart_unique_values(companies,["HQ Country","Country / Geography","Country"] )
+    ctry=fc1.selectbox("Country",countries,key="company_country_filter")
+    types=["All entity types"]+_smart_unique_values(companies,["Entity Type","Subtype","Industrial Model"] )
+    etype=fc2.selectbox("Type / sector",types,key="company_type_filter")
+    if ctry!="All countries":
+        company_view=_smart_filter(company_view,ctry,["HQ Country","Country / Geography","Country"] )
+    if etype!="All entity types":
+        company_view=_smart_filter(company_view,etype,["Entity Type","Subtype","Industrial Model"] )
+    opts=company_view[["Company ID","Company"]].drop_duplicates().sort_values("Company").to_dict("records") if not company_view.empty else []
 
     if opts:
         requested_index=None
@@ -9316,7 +9429,7 @@ elif page in ["Ports","Ports & Terminals"]:
             with st.expander("Search global port reference"):
                 rq=st.text_input("Reference port search",placeholder="Ningbo, Qingdao, Singapore, Rotterdam...",key="global_port_reference_q")
                 rv=ref_ports.copy()
-                if rq.strip(): rv=_contains_any(rv,[rq],["Port Name","Country Name","name","iso3"])
+                if rq.strip(): rv=_smart_filter(rv,rq,["Port Name","Country Name","name","iso3"])
                 display_df(rv[[c for c in ["Port Name","Country Name","Latitude","Longitude","throughput","export","import","trans"] if c in rv.columns]].head(250),300)
         # Resolve incoming relationship navigation BEFORE creating keyed widgets.
         # Streamlit does not allow session_state for a widget key to be mutated
@@ -9334,10 +9447,42 @@ elif page in ["Ports","Ports & Terminals"]:
         if requested_port or requested_terminal:
             st.session_state["port_search_text"]=""
 
-        q=st.text_input("Find port",placeholder="Rotterdam, Shanghai, Odesa, Vancouver, Constanța...",key="port_search_text")
+        q=st.text_input("Find port / country / city / company / terminal",placeholder="DP World, UAE, Long Beach, Rotterdam, PSA, container terminal...",key="port_search_text")
         p=ports.copy()
 
-        if q: p=_contains_any(p,[q],["Port / Facility","Country","Operator"])
+        # Search ports directly, then promote terminal/operator matches to their parent port.
+        if q.strip():
+            direct=_smart_filter(p,q)
+            parent_ids=set(); parent_names=set()
+            if not terms.empty:
+                tm=_smart_filter(terms,q)
+                if not tm.empty:
+                    if "Port ID" in tm.columns: parent_ids.update(tm["Port ID"].fillna("").astype(str))
+                    if "Parent Port" in tm.columns: parent_names.update(tm["Parent Port"].fillna("").astype(str))
+            extra=pd.Series(False,index=p.index)
+            if parent_ids and "Port ID" in p.columns: extra |= p["Port ID"].fillna("").astype(str).isin(parent_ids)
+            if parent_names and "Port / Facility" in p.columns: extra |= p["Port / Facility"].fillna("").astype(str).isin(parent_names)
+            ids=set(direct.get("Port ID",pd.Series(dtype=str)).fillna("").astype(str)) if not direct.empty and "Port ID" in direct.columns else set()
+            if ids and "Port ID" in p.columns: extra |= p["Port ID"].fillna("").astype(str).isin(ids)
+            p=p[extra].copy()
+
+        pf1,pf2=st.columns(2)
+        countries=["All countries"]+_smart_unique_values(ports,["Country"])
+        country_filter=pf1.selectbox("Country",countries,key="port_country_filter")
+        operators=["All operators / companies"]+_smart_unique_values(pd.concat([ports,terms],ignore_index=True,sort=False),["Operator","Primary Operator","Company","Owner"])
+        operator_filter=pf2.selectbox("Operator / company",operators,key="port_operator_filter")
+        if country_filter!="All countries":
+            p=_smart_filter(p,country_filter,["Country"] )
+        if operator_filter!="All operators / companies":
+            direct_op=_smart_filter(p,operator_filter,["Operator","Owner","Company"] )
+            parent_ids=set()
+            if not terms.empty:
+                tm=_smart_filter(terms,operator_filter,["Primary Operator","Operator","Owner","Company"] )
+                if not tm.empty and "Port ID" in tm.columns: parent_ids.update(tm["Port ID"].fillna("").astype(str))
+            mask=pd.Series(False,index=p.index)
+            if not direct_op.empty and "Port ID" in p.columns: mask |= p["Port ID"].fillna("").astype(str).isin(set(direct_op["Port ID"].fillna("").astype(str)))
+            if parent_ids and "Port ID" in p.columns: mask |= p["Port ID"].fillna("").astype(str).isin(parent_ids)
+            p=p[mask].copy()
         p=p.sort_values("Port / Facility").reset_index(drop=True)
         if p.empty:
             st.warning("No matching port.")
@@ -9438,10 +9583,10 @@ elif page=="Watch Areas":
     wt1,wt2,wt3,wt4=st.tabs(["Active monitoring","Disruption watch","Weather & labour","Strategic events"])
     with wt1:
         q=st.text_input("Search monitoring",placeholder="Hormuz, Black Sea, Red Sea, port strike...",key="watch_monitor_q")
-        display_df(_contains_any(monitoring,[q]) if q.strip() and not monitoring.empty else monitoring,300)
+        display_df(_smart_filter(monitoring,q) if q.strip() and not monitoring.empty else monitoring,300)
     with wt2:
         q=st.text_input("Search disruption watch",placeholder="port, rail, aviation, weather, conflict...",key="watch_disrupt_q")
-        dview=_contains_any(disruption,[q]) if q.strip() and not disruption.empty else disruption
+        dview=_smart_filter(disruption,q) if q.strip() and not disruption.empty else disruption
         display_df(dview,300)
         if not dview.empty:
             dview=dview.reset_index(drop=True)
@@ -9450,10 +9595,10 @@ elif page=="Watch Areas":
             render_trade_disruption_brief(dview.iloc[dpick])
     with wt3:
         q=st.text_input("Search weather / labour",placeholder="typhoon, earthquake, strike, protest...",key="watch_weather_q")
-        display_df(_contains_any(weather,[q]) if q.strip() and not weather.empty else weather,300)
+        display_df(_smart_filter(weather,q) if q.strip() and not weather.empty else weather,300)
     with wt4:
         q=st.text_input("Search strategic events",placeholder="attack, closure, acquisition, sanctions...",key="watch_strategic_q")
-        display_df(_contains_any(strategic,[q]) if q.strip() and not strategic.empty else strategic,300)
+        display_df(_smart_filter(strategic,q) if q.strip() and not strategic.empty else strategic,300)
 elif page=="Port Activity":
     header(
         "Global Port Activity",
@@ -9476,7 +9621,7 @@ elif page=="Port Activity":
         status_label="LIVE API" if live_status=="live" else "LAST SUCCESSFUL SNAPSHOT"
         status_cls="live" if live_status=="live" else "stale"
         st.markdown(f"<span class='pc-data-status pc-data-status-{status_cls}'>{status_label}</span>",unsafe_allow_html=True)
-        countries=sorted(x for x in live.get("country",pd.Series(dtype=str)).dropna().astype(str).unique() if x.strip())
+        countries=_smart_unique_values(live,["country"])
         c1,c2=st.columns([1,2])
         with c1:
             selected_country=st.selectbox("Country",["All"]+countries,key="portwatch_country")
@@ -9727,7 +9872,7 @@ elif page=="Defence & Shipbuilding":
     k4.metric("Vessels",len(vessels))
     k5.metric("Contracts",len(contracts))
 
-    q=st.text_input("Search defence & shipbuilding",placeholder="GRSE, NCPOR, ADSB, Fincantieri, Davie, icebreaker, research vessel...")
+    q=st.text_input("Search defence / shipyard / company / country / vessel",placeholder="Fincantieri, Canada, Davie, icebreaker, Coast Guard, GRSE...")
     if q:
         dcos=_contains_any(dcos,[q]); yards=_contains_any(yards,[q]); programmes=_contains_any(programmes,[q])
         vessels=_contains_any(vessels,[q]); contracts=_contains_any(contracts,[q]); announcements=_contains_any(announcements,[q]); routes=_contains_any(routes,[q])
@@ -9813,9 +9958,9 @@ elif page=="Shipyards":
         requested_yard=st.session_state.pop("yard_pick_id",None)
         if requested_yard:
             st.session_state["yard_search_text"]=""
-        q=st.text_input("Find shipyard / country / company",placeholder="Lévis, Rauma, Antalya, Bollinger, Inocea...",key="yard_search_text")
+        q=st.text_input("Find shipyard / country / owner / capability",placeholder="Canada, Bollinger, Inocea, dry dock, icebreaker, Rauma...",key="yard_search_text")
         y=yards.copy()
-        if q: y=_contains_any(y,[q],["Shipyard","Location","Country","Yard Model","Current / Representative Work"])
+        if q: y=_smart_filter(y,q,["Shipyard","Location","Country","Yard Model","Current / Representative Work","Company Entity ID"])
         y=y.sort_values("Shipyard").reset_index(drop=True)
         default_yard=0
         if requested_yard and "Yard ID" in y.columns:
@@ -9886,7 +10031,7 @@ elif page=="Vessels":
         c=commercial.copy()
         fleet_live=pd.DataFrame(); fleet_labels=[]
         if q:
-            direct=_contains_any(c,[q])
+            direct=_smart_filter(c,q)
             fleet_live,fleet_labels=_fleet_browser_company_matches(q)
             if not fleet_live.empty:
                 direct_ids=set(direct.get("Vessel ID",pd.Series(dtype=str)).fillna("").astype(str)) if not direct.empty else set()
@@ -9937,7 +10082,7 @@ elif page=="Vessels":
 
     elif domain=="Defence / Government":
         d=defence.copy()
-        if q: d=_contains_any(d,[q])
+        if q: d=_smart_filter(d,q)
         d=d.reset_index(drop=True)
         if d.empty:
             st.info("No matching defence / government vessel.")
@@ -9964,7 +10109,7 @@ elif page=="Vessels":
     else:
         s=service.copy()
         if q:
-            s=_contains_any(s,[q])
+            s=_smart_filter(s,q)
         s=s.reset_index(drop=True)
         if s.empty:
             st.info("No matching service craft.")
@@ -9991,13 +10136,13 @@ elif page=="Vessels":
 
 elif page=="Contracts":
     header("Contracts & Commercial","Government procurement, commercial transactions, infrastructure deals, vessel sales and delivery routes.")
-    q=st.text_input("Filter",placeholder="AD Ports, UAE, Coast Guard, CLI, port terminals, icebreakers...")
+    q=st.text_input("Search contract / buyer / seller / country / asset",placeholder="Raytheon, Boeing, AD Ports, UAE, Coast Guard, port terminal, icebreaker...")
     defence=TABLES.get(("Defence & Shipbuilding","Contracts"),pd.DataFrame())
     tx=TABLES.get(("Transactions","Transactions V125"),pd.DataFrame())
     deals=TABLES.get(("Transactions","Infra Deals"),pd.DataFrame())
     routes=TABLES.get(("Defence & Shipbuilding","Sales & Delivery Routes"),pd.DataFrame())
     if q:
-        defence=_contains_any(defence,[q]); tx=_contains_any(tx,[q]); deals=_contains_any(deals,[q]); routes=_contains_any(routes,[q])
+        defence=_smart_filter(defence,q); tx=_smart_filter(tx,q); deals=_smart_filter(deals,q); routes=_smart_filter(routes,q)
     # simple commercial composition figure
     counts=pd.Series({"Defence / government":len(defence),"Corporate transactions":len(tx),"Infrastructure deals":len(deals),"Sales / delivery routes":len(routes)})
     st.bar_chart(counts,horizontal=True)
@@ -10017,7 +10162,7 @@ elif page=="Trade Policy":
         statuses=sorted([x for x in agreements["Status"].astype(str).unique().tolist() if x.strip()]) if "Status" in agreements.columns else []
         status_sel=st.multiselect("Status",statuses,default=[])
         a=agreements.copy()
-        if q: a=_contains_any(a,[q])
+        if q: a=_smart_filter(a,q)
         if status_sel: a=a[a["Status"].isin(status_sel)]
 
         c1,c2=st.columns(2)
@@ -10096,8 +10241,8 @@ elif page=="Sanctions & Compliance":
         d=des.copy()
         l=links.copy()
         if q:
-            d=_contains_any(d,[q])
-            l=_contains_any(l,[q])
+            d=_smart_filter(d,q)
+            l=_smart_filter(l,q)
 
             # If the query matches an entity-link record, include its designation.
             if not l.empty and "Designation ID" in l.columns and "Designation ID" in des.columns:
@@ -10277,7 +10422,7 @@ elif page=="News & Events":
     header("News & Events","Map assets and systems affected by war, weather, natural hazards, labour, operational incidents and announced commercial activity.")
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     locations=TABLES.get(("Events & Hazards","Event Locations"),pd.DataFrame()).copy()
-    q=st.text_input("Search events / location / company / system",placeholder="Rotterdam, strike, Black Sea, AD Ports, typhoon, Genoa...")
+    q=st.text_input("Search event / incident / company / port / vessel / location",placeholder="collision, strike, Rotterdam, Black Sea, AD Ports, vessel name, fire...")
     families=sorted([x for x in events.get("Event Family",pd.Series(dtype=str)).unique().tolist() if str(x).strip()])
     selected=st.multiselect("Event families",families,default=[])
     e=events
@@ -10500,11 +10645,11 @@ elif page=="Corridors & Systems":
     systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame()).copy()
     ct1,ct2,ct3,ct4=st.tabs(["Corridors","Connected systems","Waterways","Exposure & routes"])
     with ct1:
-        cq=st.text_input("Find corridor",placeholder="Middle Corridor, Great Lakes, Hormuz, Arctic...",key="corridor_search")
-        display_df(_contains_any(corridors,[cq]) if cq.strip() and not corridors.empty else corridors,250)
+        cq=st.text_input("Find corridor / country / port / mode / operator",placeholder="Middle Corridor, Canada, Khalifa Port, rail, Hormuz, Arctic...",key="corridor_search")
+        display_df(_smart_filter(corridors,cq) if cq.strip() and not corridors.empty else corridors,250)
     with ct3:
-        wq=st.text_input("Find waterway",placeholder="Suez, Panama, Bosporus, St Lawrence...",key="waterway_search")
-        display_df(_contains_any(waterways,[wq]) if wq.strip() and not waterways.empty else waterways,250)
+        wq=st.text_input("Find waterway / country / connected port",placeholder="Suez, Egypt, Panama, Bosporus, St Lawrence...",key="waterway_search")
+        display_df(_smart_filter(waterways,wq) if wq.strip() and not waterways.empty else waterways,250)
     with ct4:
         et1,et2,et3=st.tabs(["Tanker exposure","Great Lakes cargo","Defence delivery routes"])
         with et1: display_df(tanker_corr,250)
@@ -10589,7 +10734,7 @@ elif page=="Maritime Security":
 
     q=st.text_input("Search maritime security",placeholder="Hercules Star, IMO 9916135, Hormuz, Red Sea, Black Sea...")
     if q and not inc.empty:
-        inc=_contains_any(inc,[q])
+        inc=_smart_filter(inc,q)
 
     tabs=st.tabs(["Vessel Incidents","Theatre Baselines","Operational Measures","Chokepoints"])
     with tabs[0]:
