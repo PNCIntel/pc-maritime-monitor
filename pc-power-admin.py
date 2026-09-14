@@ -2785,7 +2785,22 @@ def _process_job_automatically(job_id,max_passes=8):
         if step["summary"]["safe_now"]==0 and step["summary"]["blocked_now"]==0 and step["summary"]["exceptions"]==0:
             report["outcome"]="complete"
             break
-        if signature==last_signature and int(apply_result.get("applied",0) or 0)==0 and int(step.get("already_exists_finalized",0) or 0)==0:
+
+        applied_this_pass=(
+            int((parent_apply or {}).get("applied",0) or 0)
+            + int((child_apply or {}).get("applied",0) or 0)
+        )
+        finalized_this_pass=(
+            int(step.get("already_exists_finalized_before_parent_apply",0) or 0)
+            + int(step.get("already_exists_finalized_children",0) or 0)
+            + int(step.get("already_exists_finalized_final",0) or 0)
+        )
+        step["progress"]={
+            "applied_this_pass":applied_this_pass,
+            "already_exists_finalized_this_pass":finalized_this_pass,
+        }
+
+        if signature==last_signature and applied_this_pass==0 and finalized_this_pass==0:
             report["outcome"]="manual_review_required"
             break
         last_signature=signature
