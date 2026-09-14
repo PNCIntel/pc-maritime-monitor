@@ -2664,6 +2664,7 @@ def _try_sql_ingestion_repairs(job_id):
     for name in (
         "pc_repair_staged_payload_v2",
         "pc_normalize_event_dependencies_v3",
+        "pc_rewrite_dependency_endpoints_v4",
         "pc_finalize_already_exists_v2",
         "pc_requeue_resolved_event_links_v2",
     ):
@@ -4664,11 +4665,40 @@ elif page=="Reconciliation Center":
 
                 if any(str(r.get("resolution_status") or "").upper()=="BROKEN_REFERENCE" for r in blocked_rows):
                     st.info(
-                        "BROKEN_REFERENCE is a dependency issue, not an identity mystery. Use this order: "
-                        "(1) Fix obvious blockers, (2) apply the newly-safe parent event/entity rows, "
-                        "(3) Refresh safe/apply status, which reruns relationship resolution, then "
-                        "(4) apply the child event-link rows once they become safe."
+                        "BROKEN_REFERENCE is now shown with endpoint-level diagnostics below. "
+                        "This tells us whether the event is missing, the linked endpoint is missing, "
+                        "the staged parent has a different canonical ID, or the resolver state is simply stale."
                     )
+
+                    if st.button(
+                        "🔎 Run dependency diagnostics",
+                        key=f"diag_dependencies_{jid}",
+                        use_container_width=True
+                    ):
+                        try:
+                            diag=(sb.rpc(
+                                "pc_debug_ingestion_dependencies",
+                                {"p_ingestion_job_id":str(jid)}
+                            ).execute().data or [])
+                            st.session_state[f"dependency_diag_{jid}"]=diag
+                        except Exception as exc:
+                            st.error(
+                                "Dependency diagnostics RPC is unavailable. Install migration 040 first. "
+                                f"Database response: {exc}"
+                            )
+
+                    diag=st.session_state.get(f"dependency_diag_{jid}") or []
+                    if diag:
+                        st.markdown("##### Exact broken-reference diagnostics")
+                        dataframe(diag)
+                        diag_counts={}
+                        for d in diag:
+                            k=str(d.get("diagnostic") or "UNKNOWN")
+                            diag_counts[k]=diag_counts.get(k,0)+1
+                        dataframe([
+                            {"diagnostic":k,"count":v}
+                            for k,v in sorted(diag_counts.items(),key=lambda x:(-x[1],x[0]))
+                        ])
 
                 raw_ready=int(summ.get("ready",0) or 0)
                 if raw_ready != len(safe_candidates):
