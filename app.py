@@ -7283,15 +7283,76 @@ def live_db_terminals_for_port(port_row):
             and str(r.get("source_type") or "").strip().casefold()=="asset"
         ]
 
-        if not rels:
-            return pd.DataFrame(), (
-                f"Canonical parent found ({', '.join(parent_ids)}) but no subordinate "
-                "terminal/location relationships found"
-            )
-
+        # Preferred path: explicit canonical relationship edges.
         child_ids=sorted({
             str(r.get("source_id")) for r in rels if r.get("source_id")
         })
+
+        # Bulk-loader reconciliation can legitimately match a source port such as
+        # PORT_UAE_JEBEL_ALI_PORT onto an existing canonical ID such as ASSET014.
+        # If relationship endpoints were not rewritten during apply, the terminal
+        # assets can still retain the original parent_port_id inside metadata.
+        # Recover those children conservatively by matching the parent hint to the
+        # selected canonical port name/country.
+        if not child_ids:
+            def _norm_parent_hint(v):
+                s=str(v or "").strip().casefold().replace("&"," and ")
+                # Turn import IDs such as PORT_UAE_JEBEL_ALI_PORT into words.
+                s=re.sub(r"^(port|asset|terminal|term)[_\-]+","",s)
+                s=s.replace("_"," ").replace("-"," ")
+                s=re.sub(r"\b(port of|port|harbour|harbor|uae|united arab emirates)\b"," ",s)
+                s=re.sub(r"[^a-z0-9]+"," ",s)
+                return re.sub(r"\s+"," ",s).strip()
+
+            selected_key=_norm_parent_hint(pname)
+            fallback_assets=(sb.table("pc_assets")
+                .select("asset_id,name,asset_type,subtype,country,region_city,status,metadata")
+                .limit(10000).execute().data or [])
+
+            recovered=[]
+            for ca in fallback_assets:
+                cid=str(ca.get("asset_id") or "").strip()
+                if not cid or cid in parent_ids:
+                    continue
+
+                ccountry=str(ca.get("country") or "").strip()
+                if pcountry and ccountry and ccountry.casefold()!=pcountry.casefold():
+                    continue
+
+                cmeta=ca.get("metadata") if isinstance(ca.get("metadata"),dict) else {}
+                nested=cmeta.get("research_attributes") if isinstance(cmeta.get("research_attributes"),dict) else {}
+                hints=[
+                    cmeta.get("parent_port"),
+                    cmeta.get("parent_port_id"),
+                    nested.get("parent_port"),
+                    nested.get("parent_port_id"),
+                ]
+                hint_keys={_norm_parent_hint(h) for h in hints if str(h or "").strip()}
+
+                # Parent can also be expressed through source_payload metadata.
+                sp=cmeta.get("source_payload") if isinstance(cmeta.get("source_payload"),dict) else {}
+                for h in (sp.get("parent_port"),sp.get("parent_port_id")):
+                    if str(h or "").strip():
+                        hint_keys.add(_norm_parent_hint(h))
+
+                name_kind=(str(ca.get("name") or "")+" "+str(ca.get("asset_type") or "")+" "+str(ca.get("subtype") or "")).casefold()
+                terminalish=any(tok in name_kind for tok in (
+                    "terminal","berth","wharf","quay","pier","depot","yard","logistics"
+                ))
+                if not terminalish:
+                    continue
+
+                if selected_key and selected_key in hint_keys:
+                    recovered.append(cid)
+
+            child_ids=sorted(set(recovered))
+
+        if not child_ids:
+            return pd.DataFrame(), (
+                f"Canonical parent found ({', '.join(parent_ids)}) but no subordinate "
+                "terminal/location relationships or matching parent metadata were found"
+            )
+
         rows=[]
 
         for cid in child_ids:
@@ -7379,7 +7440,8 @@ def live_db_terminals_for_port(port_row):
                 "Data Status":"Supabase live relationship",
             })
 
-        return pd.DataFrame(rows), f"{len(rows)} live terminal/facility link(s) from Supabase"
+        path_label="relationship graph" if rels else "parent metadata fallback"
+        return pd.DataFrame(rows), f"{len(rows)} live terminal/facility link(s) from Supabase · {path_label}"
 
     except Exception as exc:
         return pd.DataFrame(), f"Supabase terminal-link query failed: {exc}"
