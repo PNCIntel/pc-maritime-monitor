@@ -2675,10 +2675,15 @@ def _try_sql_ingestion_repairs(job_id):
 
 
 def _process_job_automatically(job_id,max_passes=8):
-    """Run the normal ingestion path automatically until no further safe progress is possible.
+    """Run ingestion in dependency-safe order until no further progress is possible.
 
-    The operator should normally use this instead of manually sequencing repair/reconcile/apply/refresh.
-    Genuine ambiguity/unsupported rows remain for Manual matching.
+    Critical ordering rule:
+      generic reconcile -> repair/normalize identity states -> APPLY PARENTS ->
+      resolve relationships -> normalize/requeue children -> APPLY CHILDREN.
+
+    Never run a generic reconciliation between the final event normalization and
+    parent apply, because older reconciliation SQL can reclassify a valid staged
+    pc_events row back to INVALID.
     """
     report={"job_id":str(job_id),"passes":[],"total_applied_this_run":0}
     last_signature=None
@@ -2686,33 +2691,48 @@ def _process_job_automatically(job_id,max_passes=8):
     for pass_no in range(1,max_passes+1):
         step={"pass":pass_no}
 
-        # Repair mapping/provenance and finalize canonical no-op duplicates.
+        # A) Repair field mapping/provenance first.
         try:
-            step["sql_repairs"]=_try_sql_ingestion_repairs(job_id)
+            step["field_repair"]=_repair_staged_payloads_from_source(job_id)
         except Exception as exc:
-            step["sql_repairs_error"]=str(exc)
-        try:
-            step["python_repair"]=_repair_obvious_job_blockers(job_id)
-        except Exception as exc:
-            step["python_repair_error"]=str(exc)
-        step["already_exists_finalized"]=_finalize_already_exists_rows(job_id)
+            step["field_repair_error"]=str(exc)
 
-        # Prepare IDs and reconcile identities/dependencies.
+        # B) Prepare canonical IDs before matching.
         try:
             step["prepare_ids"]=_prepare_canonical_candidates(sb,job_id)
         except Exception as exc:
             step["prepare_ids_error"]=str(exc)
+
+        # C) Run the legacy/general resolver ONCE early in the pass.
         try:
-            step["reconcile_before"]=_run_reconciliation(job_id)
+            step["reconcile_early"]=_run_reconciliation(job_id)
         except Exception as exc:
-            step["reconcile_before_error"]=str(exc)
+            step["reconcile_early_error"]=str(exc)
 
-        # Apply everything currently safe, parent tables first.
-        apply_result=_apply_safe_candidates_priority(job_id)
-        step["apply"]=apply_result
-        report["total_applied_this_run"]+=int(apply_result.get("applied",0) or 0)
+        # D) IMPORTANT: normalize/repair identity state AFTER general reconcile.
+        # Nothing that can downgrade pc_events runs between here and parent apply.
+        try:
+            step["sql_normalize_before_parent_apply"]=_try_sql_ingestion_repairs(job_id)
+        except Exception as exc:
+            step["sql_normalize_before_parent_apply_error"]=str(exc)
+        try:
+            step["identity_repair_before_parent_apply"]=_repair_identity_resolution_states(job_id)
+        except Exception as exc:
+            step["identity_repair_before_parent_apply_error"]=str(exc)
+        step["already_exists_finalized_before_parent_apply"]=_finalize_already_exists_rows(job_id)
 
-        # Newly-created parents may unlock relationships/event links.
+        # E) Apply all currently-safe records in parent-first priority order.
+        parent_apply=_apply_safe_candidates_priority(job_id)
+        step["parent_apply"]=parent_apply
+        report["total_applied_this_run"]+=int(parent_apply.get("applied",0) or 0)
+
+        # F) Parent writes may unlock event links and graph relationships.
+        # First normalize dependencies against the canonical parents that now exist.
+        try:
+            step["sql_normalize_after_parent_apply"]=_try_sql_ingestion_repairs(job_id)
+        except Exception as exc:
+            step["sql_normalize_after_parent_apply_error"]=str(exc)
+
         try:
             step["event_links"]=_process_relationship_backlog(sb,job_id)
         except Exception as exc:
@@ -2721,10 +2741,27 @@ def _process_job_automatically(job_id,max_passes=8):
             step["relationships"]=_process_generic_relationship_backlog(sb,job_id)
         except Exception as exc:
             step["relationships_error"]=str(exc)
+
+        # G) Re-run dependency normalizers AFTER relationship processors because
+        # those processors can leave children BROKEN_REFERENCE/PARTIAL.
+        # Do NOT call the generic reconciliation RPC here.
         try:
-            step["reconcile_after"]=_run_reconciliation(job_id)
+            step["sql_normalize_children"]=_try_sql_ingestion_repairs(job_id)
         except Exception as exc:
-            step["reconcile_after_error"]=str(exc)
+            step["sql_normalize_children_error"]=str(exc)
+        step["already_exists_finalized_children"]=_finalize_already_exists_rows(job_id)
+
+        # H) Apply newly-safe child links/relationships.
+        child_apply=_apply_safe_candidates_priority(job_id)
+        step["child_apply"]=child_apply
+        report["total_applied_this_run"]+=int(child_apply.get("applied",0) or 0)
+
+        # I) Final normalization only. Again, no generic reconcile at the tail.
+        try:
+            step["sql_normalize_final"]=_try_sql_ingestion_repairs(job_id)
+        except Exception as exc:
+            step["sql_normalize_final_error"]=str(exc)
+        step["already_exists_finalized_final"]=_finalize_already_exists_rows(job_id)
 
         safe_after,blocked_after=_job_apply_candidates(job_id)
         summ=_staging_summary(job_id)
