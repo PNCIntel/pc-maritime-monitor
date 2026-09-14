@@ -2689,6 +2689,20 @@ def _repair_staged_payloads_from_source(job_id):
 
     return {"checked":len(rows),"updated":updated,"unchanged":unchanged,"errors":errors}
 
+
+def _blocked_reason_summary(blocked_rows):
+    """Aggregate safe-apply blockers by reason and table for operator review."""
+    by_reason={}
+    by_table={}
+    for r in blocked_rows or []:
+        reason=str(r.get("reason") or "unknown").strip()
+        table=str(r.get("table") or "unknown").strip()
+        by_reason[reason]=by_reason.get(reason,0)+1
+        by_table[table]=by_table.get(table,0)+1
+    reason_rows=[{"reason":k,"count":v} for k,v in sorted(by_reason.items(), key=lambda x:(-x[1],x[0]))]
+    table_rows=[{"table":k,"count":v} for k,v in sorted(by_table.items(), key=lambda x:(-x[1],x[0]))]
+    return reason_rows, table_rows
+
 if page=="Dashboard":
     title("Platform control","One canonical data model; Trade, Intelligence and NERAI product entitlements; tenant workspaces; AI staging and review.")
     tables=[("Organizations","pc_organizations"),("Users","pc_profiles"),("Entities","pc_entities"),("Assets","pc_assets"),("Vessels / mobile","pc_mobile_assets"),("Events","pc_events"),("Staged changes","pc_staged_records"),("Open DQ issues","pc_data_quality_issues")]
@@ -4021,7 +4035,7 @@ elif page=="Reconciliation Center":
         jid=None if selected=="All jobs" else jobs[labels.index(selected)]["ingestion_job_id"]
         if jid:
             st.json(_staging_summary(jid))
-        tabs=st.tabs(["Queue","One-click cleanup","Relationships","Stale jobs","SQL pack"])
+        tabs=st.tabs(["Queue","Safe apply & diagnostics","Manual matching","One-click cleanup","Relationships","Stale jobs","SQL pack"])
         with tabs[0]:
             try:
                 q=sb.table("pc_v_reconciliation_queue").select("*").limit(1000)
@@ -4036,6 +4050,259 @@ elif page=="Reconciliation Center":
             dataframe(rows)
         with tabs[1]:
             if not jid:
+                st.info("Select one ingestion job to review safe/apply status.")
+            else:
+                st.markdown("#### Safe apply & diagnostics")
+                st.caption(
+                    "This is the main promotion screen. Resolution-ready does not always mean safe-to-apply: "
+                    "schema, source, foreign-key, duplicate, relationship and apply-key checks are evaluated here."
+                )
+
+                summ=_staging_summary(jid)
+                safe_candidates, blocked_rows=_job_apply_candidates(jid)
+                reason_rows, table_rows=_blocked_reason_summary(blocked_rows)
+
+                c1,c2,c3,c4,c5=st.columns(5)
+                c1.metric("Staged",summ.get("total",0))
+                c2.metric("Safe to apply now",len(safe_candidates))
+                c3.metric("Blocked",len(blocked_rows))
+                c4.metric("Exceptions",summ.get("wf_exceptions",summ.get("partial",0)+summ.get("unresolved",0)+summ.get("ambiguous",0)))
+                c5.metric("Applied",summ.get("wf_applied",summ.get("applied",0)))
+
+                last_result=st.session_state.get(f"safe_apply_result_{jid}")
+                if last_result:
+                    if last_result.get("failed",0):
+                        st.warning(
+                            f"Last apply: {last_result.get('applied',0)} applied, "
+                            f"{last_result.get('failed',0)} failed."
+                        )
+                    else:
+                        st.success(
+                            f"Last apply completed: {last_result.get('applied',0)} record(s) promoted."
+                        )
+
+                if safe_candidates:
+                    st.success(
+                        f"{len(safe_candidates)} record(s) currently pass every safe-apply check. "
+                        "You can promote them now without waiting for the blocked/review set."
+                    )
+                    if st.button(
+                        f"✅ Apply {len(safe_candidates)} safe records now",
+                        type="primary",
+                        key=f"recon_apply_safe_{jid}",
+                        use_container_width=True
+                    ):
+                        with st.status(
+                            f"Applying {len(safe_candidates)} safe records...",
+                            expanded=True
+                        ) as status:
+                            result=_approve_and_apply_job_safe(jid)
+                            st.session_state[f"safe_apply_result_{jid}"]=result
+                            st.write({
+                                "safe_candidates":result.get("safe_candidates",0),
+                                "approved_now":result.get("approved_now",0),
+                                "applied":result.get("applied",0),
+                                "failed":result.get("failed",0),
+                                "blocked":result.get("blocked",0),
+                            })
+                            if result.get("failures"):
+                                st.write(result.get("failures"))
+                            status.update(
+                                label=(
+                                    f"Applied {result.get('applied',0)} safe record(s). Refreshing the remaining queue."
+                                    if not result.get("failed")
+                                    else f"Applied {result.get('applied',0)}; {result.get('failed',0)} failed."
+                                ),
+                                state="complete" if not result.get("failed") else "error",
+                                expanded=bool(result.get("failed"))
+                            )
+                        try:
+                            _run_reconciliation(jid)
+                        except Exception:
+                            pass
+                        st.rerun()
+                else:
+                    st.info("No records currently pass every safe-apply check.")
+
+                b1,b2=st.columns(2)
+                if b1.button("Refresh safe/apply status",key=f"recon_refresh_safe_{jid}",use_container_width=True):
+                    try:
+                        _run_reconciliation(jid)
+                    except Exception:
+                        pass
+                    st.rerun()
+                if b2.button("Repair imported fields",key=f"recon_repair_fields_{jid}",use_container_width=True):
+                    with st.spinner("Repairing staged fields from original source payload..."):
+                        repair=_repair_staged_payloads_from_source(jid)
+                    st.session_state[f"repair_result_{jid}"]=repair
+                    try:
+                        _run_reconciliation(jid)
+                    except Exception:
+                        pass
+                    st.rerun()
+
+                if st.session_state.get(f"repair_result_{jid}"):
+                    repair=st.session_state[f"repair_result_{jid}"]
+                    st.caption(
+                        f"Last field repair: checked {repair.get('checked',0)}, "
+                        f"updated {repair.get('updated',0)}, unchanged {repair.get('unchanged',0)}, "
+                        f"errors {len(repair.get('errors') or [])}."
+                    )
+
+                st.markdown("##### Why records are blocked")
+                if blocked_rows:
+                    st.warning(
+                        f"{len(blocked_rows)} staged row(s) are not currently safe to apply. "
+                        "The summaries below show exactly why."
+                    )
+                    d1,d2=st.columns(2)
+                    with d1:
+                        st.markdown("**By failure reason**")
+                        dataframe(reason_rows)
+                    with d2:
+                        st.markdown("**By target table**")
+                        dataframe(table_rows)
+
+                    with st.expander(f"Show all {len(blocked_rows)} blocked rows",expanded=False):
+                        dataframe(blocked_rows)
+
+                    # Give the operator a focused reason filter.
+                    reason_options=[r["reason"] for r in reason_rows]
+                    if reason_options:
+                        selected_reason=st.selectbox(
+                            "Inspect one blocker category",
+                            reason_options,
+                            key=f"recon_block_reason_{jid}"
+                        )
+                        focused=[r for r in blocked_rows if str(r.get("reason") or "unknown").strip()==selected_reason]
+                        dataframe(focused)
+                else:
+                    st.success("No blocked rows remain.")
+
+                # Explain the crucial distinction that caused confusion.
+                raw_ready=int(summ.get("ready",0) or 0)
+                if raw_ready and raw_ready != len(safe_candidates):
+                    st.caption(
+                        f"Resolution-ready: {raw_ready}. Safe-to-apply: {len(safe_candidates)}. "
+                        "The difference is caused by the validation/safety checks shown above."
+                    )
+
+        with tabs[2]:
+            if not jid:
+                st.info("Select one ingestion job to match records manually.")
+            else:
+                st.markdown("#### Manual canonical matching")
+                st.caption(
+                    "Use this only for genuine exceptions. Apply all safe rows first, then match the smaller "
+                    "remaining set here. Matching updates the staged row only; it does not overwrite canonical data."
+                )
+                try:
+                    ex_rows=(sb.table("pc_staged_records")
+                             .select("staged_record_id,target_table,natural_key,resolution_status,resolved_entity_id,resolution_method,candidate_count,payload,review_status,confidence")
+                             .eq("ingestion_job_id",jid)
+                             .in_("resolution_status",["UNRESOLVED","AMBIGUOUS","PARTIAL"])
+                             .limit(1000).execute().data or [])
+                except Exception as exc:
+                    ex_rows=[]
+                    st.error(f"Could not load exception rows: {exc}")
+
+                identity_tables={"pc_entities":"entity","pc_assets":"asset","pc_mobile_assets":"mobile_asset","pc_events":"event"}
+                identity_ex=[r for r in ex_rows if str(r.get("target_table") or "") in identity_tables]
+                relationship_ex=[r for r in ex_rows if str(r.get("target_table") or "") in {"pc_event_links","pc_relationships"}]
+
+                c1,c2,c3=st.columns(3)
+                c1.metric("Identity exceptions",len(identity_ex))
+                c2.metric("Relationship exceptions",len(relationship_ex))
+                c3.metric("Total exceptions",len(ex_rows))
+
+                if identity_ex:
+                    def _ex_label(r):
+                        p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+                        nm=p.get("name") or p.get("title") or r.get("natural_key") or r.get("staged_record_id")
+                        return f"{nm} | {r.get('target_table')} | {r.get('resolution_status')}"
+                    labels=[_ex_label(r) for r in identity_ex]
+                    chosen=st.selectbox("Exception to match",labels,key="manual_match_exception")
+                    row=identity_ex[labels.index(chosen)]
+                    kind=identity_tables[str(row.get("target_table"))]
+                    payload=row.get("payload") if isinstance(row.get("payload"),dict) else {}
+                    default_query=str(payload.get("name") or payload.get("title") or "").strip()
+                    search=st.text_input("Search canonical registry",value=default_query,key="manual_match_search")
+                    candidates=_canonical_link_candidates(kind,search,100) if search.strip() else []
+
+                    if candidates:
+                        idfield={"entity":"entity_id","asset":"asset_id","mobile_asset":"mobile_asset_id","event":"event_id"}[kind]
+                        def _cand_label(r):
+                            rid=r.get(idfield)
+                            nm=r.get("name") or r.get("title") or rid
+                            extra=[]
+                            if kind=="mobile_asset" and r.get("imo"): extra.append(f"IMO {r.get('imo')}")
+                            if r.get("country"): extra.append(str(r.get("country")))
+                            return f"{nm} | {rid}" + (f" | {' · '.join(extra)}" if extra else "")
+                        cand_labels=[_cand_label(r) for r in candidates]
+                        cand_choice=st.selectbox("Canonical match",cand_labels,key="manual_match_candidate")
+                        candidate=candidates[cand_labels.index(cand_choice)]
+                        resolved_id=candidate.get(idfield)
+
+                        st.json({
+                            "staged_record":row.get("natural_key"),
+                            "resolution_status":row.get("resolution_status"),
+                            "proposed_match_id":resolved_id,
+                            "proposed_match":candidate.get("name") or candidate.get("title"),
+                        })
+
+                        if st.button("Match selected staged record",type="primary",key="manual_match_apply"):
+                            try:
+                                sb.table("pc_staged_records").update({
+                                    "resolved_entity_id":resolved_id,
+                                    "resolution_status":"MATCHED",
+                                    "resolution_method":"manual_match",
+                                    "resolution_confidence":1.0,
+                                    "candidate_count":len(candidates),
+                                    "review_status":"pending",
+                                    "validation_status":"pending",
+                                }).eq("staged_record_id",row["staged_record_id"]).execute()
+                                st.success(f"Matched to {resolved_id}. Re-running reconciliation...")
+                                try:
+                                    _run_reconciliation(jid)
+                                except Exception:
+                                    pass
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Could not save manual match: {exc}")
+                    else:
+                        st.info("No canonical candidates found. Refine the search or treat this as a NEW record.")
+
+                    if st.button("Treat selected record as NEW",key="manual_match_new"):
+                        try:
+                            # NEW keeps the prepared canonical ID in the payload and removes a forced match.
+                            sb.table("pc_staged_records").update({
+                                "resolved_entity_id":None,
+                                "resolution_status":"NEW",
+                                "resolution_method":"manual_new",
+                                "resolution_confidence":1.0,
+                                "candidate_count":0,
+                                "review_status":"pending",
+                                "validation_status":"pending",
+                            }).eq("staged_record_id",row["staged_record_id"]).execute()
+                            st.success("Marked as NEW. Re-running reconciliation...")
+                            try:
+                                _run_reconciliation(jid)
+                            except Exception:
+                                pass
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Could not mark NEW: {exc}")
+                else:
+                    st.success("No identity exceptions remain for manual matching.")
+
+                if relationship_ex:
+                    st.warning(
+                        f"{len(relationship_ex)} relationship/event-link exception(s) remain. "
+                        "Use the Relationships tab to resolve their endpoints after identity matching."
+                    )
+
+        with tabs[3]:
+            if not jid:
                 st.info("Select one ingestion job to run cleanup safely.")
             else:
                 st.markdown("#### Standard cleanup order")
@@ -4046,7 +4313,7 @@ elif page=="Reconciliation Center":
                     st.success("Reconciliation completed.")
                     st.json(res)
                     st.rerun()
-        with tabs[2]:
+        with tabs[4]:
             if jid:
                 c1,c2=st.columns(2)
                 if c1.button("Resolve event links"):
@@ -4055,13 +4322,13 @@ elif page=="Reconciliation Center":
                     st.json(_process_generic_relationship_backlog(sb,jid)); st.rerun()
             else:
                 st.info("Select a job.")
-        with tabs[3]:
+        with tabs[5]:
             try:
                 stale=sb.table("pc_v_stale_ingestion_jobs").select("*").limit(250).execute().data or []
             except Exception:
                 stale=[]
             dataframe(stale)
-        with tabs[4]:
+        with tabs[6]:
             st.markdown("Install these SQL migrations in order:")
             st.code("027_workflow_orchestration.sql\n028_document_ingestion.sql\n029_intelligence_authoring.sql\n030_distribution_lists.sql\n031_reconciliation_cleanup.sql\n032_event_first_dependency_engine.sql\n033_dependency_autocreate_engine.sql\n034_ingestion_quality_checks.sql\n035_dependency_regression_checks.sql\n036_compact_workflow_views.sql")
             st.caption("The cleanup functions are job-scoped and operate on staging before canonical apply.")
