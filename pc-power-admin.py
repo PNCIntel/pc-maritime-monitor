@@ -1093,15 +1093,34 @@ def _staging_summary(job_id):
         ).eq("ingestion_job_id",job_id).limit(10000).execute().data or [])
     except Exception:
         rows=[]
-    out={"total":len(rows),"pending":0,"approved":0,"applied":0,"unresolved":0,"ambiguous":0,"partial":0,"ready":0,"missing_name":0}
+    out={
+        "total":len(rows),"pending":0,"approved":0,"applied":0,
+        "unresolved":0,"ambiguous":0,"partial":0,"ready":0,"missing_name":0,
+        # Mutually-exclusive workflow buckets used by the operator UI.
+        "wf_applied":0,"wf_approved":0,"wf_exceptions":0,"wf_ready":0,"wf_other":0
+    }
     for r in rows:
-        rv=str(r.get("review_status") or "pending")
+        rv=str(r.get("review_status") or "pending").lower()
         out[rv]=out.get(rv,0)+1
-        rs=str(r.get("resolution_status") or "UNRESOLVED")
+        rs=str(r.get("resolution_status") or "UNRESOLVED").upper()
         if rs=="UNRESOLVED": out["unresolved"]+=1
         if rs=="AMBIGUOUS": out["ambiguous"]+=1
         if rs=="PARTIAL": out["partial"]+=1
         if rs in {"READY","MATCHED","NEW"}: out["ready"]+=1
+
+        # Exclusive workflow classification. This avoids misleading overlaps such
+        # as a row being counted in both Ready and Applied.
+        if rv=="applied":
+            out["wf_applied"]+=1
+        elif rv=="approved":
+            out["wf_approved"]+=1
+        elif rs in {"UNRESOLVED","AMBIGUOUS","PARTIAL"}:
+            out["wf_exceptions"]+=1
+        elif rs in {"READY","MATCHED","NEW"}:
+            out["wf_ready"]+=1
+        else:
+            out["wf_other"]+=1
+
         p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
         if r.get("target_table") in {"pc_entities","pc_assets","pc_mobile_assets"} and not p.get("name"):
             out["missing_name"]+=1
@@ -3485,25 +3504,18 @@ elif page=="AI Research Workflow":
                     f"Job ID: {jid}"
                 )
                 # Complete status picture — do not hide buckets.
-                c1,c2,c3,c4,c5,c6,c7=st.columns(7)
+                c1,c2,c3,c4,c5,c6=st.columns(6)
                 c1.metric("Staged",summ.get("total",0))
-                c2.metric("Ready",summ.get("ready",0))
-                c3.metric("Pending",summ.get("pending",0))
-                c4.metric("Approved",summ.get("approved",0))
-                c5.metric("Partial",summ.get("partial",0))
-                c6.metric("Unresolved",summ.get("unresolved",0))
-                c7.metric("Applied",summ.get("applied",0))
-
-                accounted=(
-                    int(summ.get("pending",0) or 0)+int(summ.get("approved",0) or 0)+
-                    int(summ.get("applied",0) or 0)+int(summ.get("rejected",0) or 0)+
-                    int(summ.get("needs_changes",0) or 0)
+                c2.metric("Ready",summ.get("wf_ready",0))
+                c3.metric("Exceptions",summ.get("wf_exceptions",0))
+                c4.metric("Approved",summ.get("wf_approved",0))
+                c5.metric("Applied",summ.get("wf_applied",0))
+                c6.metric("Other",summ.get("wf_other",0))
+                st.caption(
+                    "These workflow counters are mutually exclusive: "
+                    "Ready + Exceptions + Approved + Applied + Other = Staged. "
+                    "Resolution diagnostics remain available under Refresh / raw workflow status."
                 )
-                if accounted != int(summ.get("total",0) or 0):
-                    st.caption(
-                        f"Review-state accounting: {accounted}/{summ.get('total',0)} rows. "
-                        "Rows can also be in custom review states; use Refresh details below to inspect them."
-                    )
 
                 st.markdown("## Workflow")
                 st.caption("Run the steps in order. Completed steps turn green with a check mark; amber means analyst review is still required.")
@@ -3628,36 +3640,53 @@ elif page=="AI Research Workflow":
                     st.warning(
                         f"{exceptions} exception(s) still need analyst review "
                         f"({summ.get('partial',0)} partial, {summ.get('unresolved',0)} unresolved, "
-                        f"{summ.get('ambiguous',0)} ambiguous). Open **Reconcile & Review** from the left menu."
+                        f"{summ.get('ambiguous',0)} ambiguous)."
+                    )
+                    st.caption(
+                        "You do not need to hold the rest of the job. Apply the safe rows in Step 5 first, "
+                        "then return to Reconcile & Review for only the remaining exceptions."
                     )
                 elif step3_done:
                     st.success("No reconciliation exceptions remain.")
 
-                # STEP 5 — direct safe apply for this job
+                # STEP 5 — iterative apply-and-refresh for this job.
+                # Safe rows can be promoted immediately even while other rows remain partial/blocked.
                 safe_candidates, blocked_rows=_job_apply_candidates(jid)
-                step5_done = int(summ.get("applied",0) or 0)>0 and len(safe_candidates)==0
+                step5_done = (
+                    int(summ.get("wf_applied",0) or 0)>0
+                    and len(safe_candidates)==0
+                    and len(blocked_rows)==0
+                    and exceptions==0
+                )
+                step5_state = (
+                    "complete" if step5_done
+                    else "active" if safe_candidates
+                    else "warning" if (blocked_rows or exceptions)
+                    else "pending"
+                )
                 _workflow_step_header(
-                    5,"Apply safe ready records",
-                    "complete" if step5_done else ("active" if safe_candidates else ("warning" if blocked_rows else "pending")),
-                    f"{summ.get('applied',0)} applied · {len(safe_candidates)} ready to apply · {len(blocked_rows)} blocked"
+                    5,"Apply fixed / safe records",
+                    step5_state,
+                    f"{summ.get('wf_applied',0)} applied · {len(safe_candidates)} safe now · {len(blocked_rows)} remain blocked"
                 )
                 st.caption(
-                    f"{len(safe_candidates)} job-scoped record(s) currently pass the safe-apply policy. "
-                    f"{len(blocked_rows)} row(s) are blocked by review, schema, source, duplicate or relationship checks."
+                    "Apply the records that are already resolved and safe now. The page will refresh immediately "
+                    "afterward so you can continue working only the smaller remaining exception set."
                 )
+
                 if safe_candidates:
-                    confirm_apply=st.checkbox(
-                        f"I have reviewed the status above and want to approve + apply {len(safe_candidates)} safe record(s)",
-                        key=f"aiwf_confirm_apply_{jid}"
+                    st.success(
+                        f"{len(safe_candidates)} record(s) are already safe to promote. "
+                        "Applying them will not wait for the remaining partial/blocked rows."
                     )
-                    if st.button(
-                        f"5 · Approve + Apply Safe Ready ({len(safe_candidates)})",
+                    c_apply,c_refresh=st.columns([3,1])
+                    if c_apply.button(
+                        f"Apply {len(safe_candidates)} Safe Records Now",
                         type="primary",
-                        disabled=not confirm_apply,
-                        key=f"aiwf_apply_safe_{jid}",
+                        key=f"aiwf_apply_safe_now_{jid}",
                         use_container_width=True
                     ):
-                        with st.status("Approving and applying safe records...",expanded=True) as status:
+                        with st.status("Applying resolved safe records...",expanded=True) as status:
                             result=_approve_and_apply_job_safe(jid)
                             st.write(
                                 f"Applied {result.get('applied',0)} / {result.get('safe_candidates',0)} safe candidate(s)."
@@ -3666,9 +3695,9 @@ elif page=="AI Research Workflow":
                                 st.write(result["failures"])
                             status.update(
                                 label=(
-                                    f"Apply complete — {result.get('applied',0)} applied"
+                                    f"Applied {result.get('applied',0)} safe record(s) — refreshing remaining queue"
                                     if not result.get("failed")
-                                    else f"Apply finished — {result.get('applied',0)} applied, {result.get('failed',0)} failed"
+                                    else f"Applied {result.get('applied',0)}; {result.get('failed',0)} failed"
                                 ),
                                 state="complete" if not result.get("failed") else "error",
                                 expanded=bool(result.get("failed"))
@@ -3678,19 +3707,41 @@ elif page=="AI Research Workflow":
                             "APPLY",7,stats={"apply":result}
                         )
                         st.rerun()
+                    if c_refresh.button(
+                        "Refresh",
+                        key=f"aiwf_refresh_after_apply_{jid}",
+                        use_container_width=True
+                    ):
+                        st.rerun()
                 else:
-                    st.info("No safe ready rows are waiting to apply for this job.")
+                    st.info("No additional safe rows are waiting to apply right now.")
 
-                if blocked_rows:
-                    with st.expander(f"Why {len(blocked_rows)} row(s) are not safe to apply"):
+                # Make the remaining work explicit and smaller.
+                remaining_count=len(blocked_rows)
+                if remaining_count:
+                    st.warning(
+                        f"After safe rows are applied, only {remaining_count} blocked/review row(s) remain in this job."
+                    )
+                    with st.expander(f"Work remaining: {remaining_count} blocked row(s)", expanded=False):
                         dataframe(blocked_rows)
+                elif exceptions:
+                    st.warning(f"{exceptions} reconciliation exception(s) remain for analyst review.")
 
                 # STEP 6
                 step6_done = wf_stage in {"QA","COMPLETE"} and wf_status in {"completed","complete","success","succeeded"}
+                qa_ready = (
+                    int(summ.get("wf_applied",0) or 0)>0
+                    and len(safe_candidates)==0
+                    and len(blocked_rows)==0
+                    and exceptions==0
+                )
                 _workflow_step_header(
                     6,"QA canonical writes",
-                    "complete" if step6_done else ("active" if int(summ.get("applied",0) or 0)>0 else "pending"),
-                    "QA completed" if step6_done else "Verify applied rows in canonical tables"
+                    "complete" if step6_done else ("active" if qa_ready else ("blocked" if (blocked_rows or exceptions or safe_candidates) else "pending")),
+                    "QA completed" if step6_done else (
+                        "Ready to verify applied rows" if qa_ready
+                        else "Finish review/apply before QA"
+                    )
                 )
                 st.caption("Verify that records marked applied are actually present in their canonical destination tables.")
                 if not step6_done and st.button("6 · Run QA",key=f"aiwf_qa_{jid}",use_container_width=True):
@@ -3733,17 +3784,17 @@ elif page=="AI Research Workflow":
                         st.json({"reported_tables":table_stats,"job_stats":stats})
                     else:
                         st.info("No staged rows were found for this job.")
-                elif exceptions:
-                    st.warning(
-                        "Finish Steps 1–3 if needed, review the exceptions in Reconcile & Review, "
-                        "then return here and use Step 5 to apply the safe ready records."
-                    )
                 elif safe_candidates:
                     st.success(
-                        f"The job is ready for Step 5: {len(safe_candidates)} safe record(s) can be approved and applied now."
+                        f"Apply the {len(safe_candidates)} safe record(s) now. The job will refresh and leave only the smaller review set."
+                    )
+                elif exceptions or blocked_rows:
+                    st.warning(
+                        f"Only the remaining exception set needs work now: {exceptions} reconciliation exception(s), "
+                        f"{len(blocked_rows)} blocked row(s). Resolve/match those, then apply again."
                     )
                 else:
-                    st.success("Nothing else is waiting for safe apply. Run Step 6 QA.")
+                    st.success("All staged rows are accounted for and nothing remains to apply. Run Step 6 QA.")
 
         with history_tab:
             jobs=safe_rows(
