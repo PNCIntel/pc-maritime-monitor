@@ -1766,6 +1766,75 @@ For pc_relationships records specifically, ALWAYS include human-readable endpoin
 - target_name: researched/canonical human-readable target name
 - target_id: canonical P&C ID only when supplied in canonical context and deterministically matched; otherwise omit/null
 Do not return a pc_relationships proposal without source_name and target_name.
+
+ENTITY COMPLETION REQUIREMENT:
+- Do not stop after creating or matching a company, port authority, government body, operator, owner or other entity.
+- For every material entity discovered from a source/news item, continue outward and stage the verified connected records needed to make the entity useful in P&C: owned/operated assets, ports/terminals/facilities, parent/subsidiary/operator relationships, programmes/contracts, transactions/investments, routes/corridors, and material events.
+- A material news/development that caused an entity to be discovered should normally become a pc_events record and at least one pc_event_links record linking the event to the relevant entity/asset/mobile asset.
+- Treat pc_events + pc_event_links as the canonical news/activity layer; do not leave a source-backed development represented only by an entity shell.
+- Reuse canonical IDs supplied in context and do not create duplicate entities/assets solely because wording differs.
+"""
+
+
+def _entity_completion_targets(result, limit=18):
+    """Return material entity names from the first research pass for a second enrichment pass."""
+    if not isinstance(result, dict):
+        return []
+    rows=result.get("records")
+    if not isinstance(rows, list):
+        return []
+    found=[]
+    seen=set()
+    for rec in rows:
+        if not isinstance(rec, dict):
+            continue
+        table=str(rec.get("target_table") or "")
+        payload=rec.get("payload") if isinstance(rec.get("payload"), dict) else {}
+        names=[]
+        if table=="pc_entities":
+            names.append(payload.get("name"))
+        elif table=="pc_relationships":
+            names.extend([payload.get("source_name"),payload.get("target_name")])
+        elif table=="pc_events":
+            for k in ("company_entities","government_entities"):
+                v=payload.get(k)
+                if isinstance(v,list): names.extend(v)
+        for name in names:
+            name=str(name or "").strip()
+            key=name.casefold()
+            if name and key not in seen:
+                seen.add(key); found.append(name)
+            if len(found)>=limit:
+                return found
+    return found
+
+
+def _entity_completion_prompt(original_prompt, first_result, targets):
+    compact=json.dumps(first_result,ensure_ascii=False,default=str)[:60000]
+    target_text="\n".join(f"- {x}" for x in targets)
+    return f"""
+ENTITY COMPLETION / GRAPH EXPANSION PASS
+
+The first research pass identified these material entities:
+{target_text}
+
+Do a second source-backed research pass. Do NOT merely repeat the entity records. For each material entity, complete the P&C graph where evidence supports it:
+1. ownership/operator/parent/subsidiary/contractor/customer relationships;
+2. ports, terminals, berths, logistics facilities, shipyards, industrial/energy assets and other owned/operated assets;
+3. programmes, contracts, investments/transactions and announced CAPEX;
+4. routes/corridors and connectivity where material;
+5. recent source-backed events/developments, each as pc_events plus pc_event_links to all relevant entities/assets/mobile assets;
+6. mobile assets only where directly material and verifiable.
+
+CRITICAL: if the original source/news item is about an activity, award, investment, construction project, operational disruption, security incident, policy action or other development, stage the event/activity and its links. Do not leave the database with only an entity shell.
+
+Use canonical IDs from supplied context when deterministic. Deduplicate against the first-pass records. Do not invent facts. Preserve source URLs under metadata.research_sources.
+
+ORIGINAL RESEARCH REQUEST:
+{original_prompt[:12000]}
+
+FIRST-PASS STRUCTURED RESULT (for gap analysis, not blind repetition):
+{compact}
 """
 
 
@@ -2729,6 +2798,11 @@ elif page=="AI Research Workflow":
                     help="Pass likely matching companies/assets/vessels and existing graph links from Supabase to the researcher before web research.",
                     key="aiwf_canonical"
                 )
+                complete_entities=st.checkbox(
+                    "Complete discovered entities",True,
+                    help="Run a second source-backed pass so newly found companies/port authorities are connected to assets, relationships, events, transactions and routes instead of remaining empty entity shells.",
+                    key="aiwf_complete_entities"
+                )
             with c3:
                 st.metric("Pending staged",count_rows(sb,"pc_staged_records",{"review_status":"pending"}))
 
@@ -2846,6 +2920,7 @@ elif page=="AI Research Workflow":
                             "campaign":campaign,
                             "canonical_context":bool(use_canonical_context),
                             "canonical_candidate_counts":(canonical_context or {}).get("candidate_counts",{}),
+                            "entity_completion":bool(complete_entities),
                             "documents":document_manifest,
                             "document_count":len(document_manifest),
                         },
@@ -2865,6 +2940,28 @@ elif page=="AI Research Workflow":
                             )
                             st.write("Research returned. Validating and staging structured proposals...")
                             staged,rejected,resolution=stage_ai_result(sb,job_id,result)
+
+                            completion_stats={}
+                            if complete_entities and result:
+                                targets=_entity_completion_targets(result)
+                                if targets:
+                                    st.write(f"Completing {len(targets)} discovered entities into assets, relationships, events and commercial activity...")
+                                    completion_prompt=_entity_completion_prompt(prompt,result,targets)
+                                    completion_result=ai_research(
+                                        completion_prompt,
+                                        context,
+                                        use_web,
+                                        output_contract=AI_OUTPUT_CONTRACT
+                                    )
+                                    staged2,rejected2,resolution2=stage_ai_result(sb,job_id,completion_result)
+                                    staged += staged2
+                                    rejected += rejected2
+                                    completion_stats={
+                                        "targets":targets,
+                                        "staged_records":staged2,
+                                        "discarded_invalid_records":rejected2,
+                                        "resolution":resolution2,
+                                    }
 
                             if staged==0 and result:
                                 sb.table("pc_staged_records").insert({
@@ -2890,6 +2987,7 @@ elif page=="AI Research Workflow":
                                 "campaign":campaign,
                                 "product":context,
                                 "resolution":resolution,
+                                "entity_completion":completion_stats,
                                 "auto_reconcile":auto_result,
                                 "documents":document_manifest,
                             }
