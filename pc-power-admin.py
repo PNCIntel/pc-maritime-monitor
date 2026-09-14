@@ -3508,11 +3508,26 @@ elif page=="AI Research Workflow":
                 st.markdown("## Workflow")
                 st.caption("Run the steps in order. Completed steps turn green with a check mark; amber means analyst review is still required.")
 
+                # Load the workflow-run state for this selected ingestion job.
+                # Earlier builds referenced `wf` before it had been defined, which caused
+                # the NameError seen in Streamlit.
+                wf={}
+                try:
+                    wf_rows=(sb.table("pc_workflow_runs")
+                             .select("workflow_run_id,workflow_type,current_stage,stage_order,status,updated_at,completed_at,stats,metadata")
+                             .eq("ingestion_job_id",jid)
+                             .order("updated_at",desc=True)
+                             .limit(1).execute().data or [])
+                    if wf_rows:
+                        wf=wf_rows[0]
+                except Exception:
+                    wf={}
+
                 # Visual progress summary
                 stage_rank={"UPLOAD":1,"MAP_TABLES":1,"MAP_FIELDS":1,"FILL_KEYS":1,"STAGE":1,
                             "PREPARE_IDS":2,"RECONCILE":3,"RELATIONSHIPS":4,"REVIEW":4,
                             "APPLY":5,"QA":6,"COMPLETE":6}
-                current_rank=stage_rank.get(str((wf or {}).get("current_stage") or "").upper(),1) if isinstance(wf,dict) else 1
+                current_rank=stage_rank.get(str((wf or {}).get("current_stage") or "").upper(),1)
                 pct=min(100,max(0,int((current_rank/6)*100)))
                 st.progress(pct/100.0,text=f"Workflow progress: step {current_rank} of 6")
 
