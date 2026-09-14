@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.45-trade-activity-board"
+APP_VERSION = "v3.3.47-fleet-graph-browser"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2885,6 +2885,34 @@ def _live_canonical_company_rollup(entity_id, entity_name):
             if t=="mobile_asset": return str((mobiles_by_id.get(oid) or {}).get("name") or oid)
             return oid
 
+        def _infer_endpoint_type(raw_type, obj_id):
+            t=_norm_type(raw_type); oid=str(obj_id or "").strip()
+            if t in {"entity","asset","mobile_asset"}:
+                return t
+            if oid in entities: return "entity"
+            if oid in assets_by_id: return "asset"
+            if oid in mobiles_by_id: return "mobile_asset"
+            up=oid.upper()
+            if up.startswith("ENTITY_") or up.startswith("COMP"): return "entity"
+            if up.startswith("MOBILE_") or up.startswith("VESSEL") or up.startswith("VSL"): return "mobile_asset"
+            if up.startswith("ASSET_") or up.startswith("PORT") or up.startswith("TERM"): return "asset"
+            return t
+
+        def _meta_text_values(meta):
+            vals=[]
+            if not isinstance(meta,dict): return vals
+            keys={"owner","operator","manager","company","company_name","carrier","group","brand",
+                  "organisation","organization","service","fleet","customer","charterer","lessee"}
+            for k,v in meta.items():
+                if str(k).casefold() in keys and v not in (None,""):
+                    if isinstance(v,(list,tuple,set)):
+                        vals.extend(str(x) for x in v if x not in (None,""))
+                    elif not isinstance(v,(dict,list)):
+                        vals.append(str(v))
+            ra=meta.get("research_attributes")
+            if isinstance(ra,dict): vals.extend(_meta_text_values(ra))
+            return vals
+
         # Exact selected canonical entity plus obvious branded canonical variants.
         scope={str(entity_id).strip()}
         root=_company_name_key(entity_name)
@@ -2929,14 +2957,23 @@ def _live_canonical_company_rollup(entity_id, entity_name):
         # therefore hiding assets/ports/vessels for Port of Long Beach, DP World, Matson, etc.
         for rr in relationships:
             sid=str(rr.get("source_id") or "").strip(); tid=str(rr.get("target_id") or "").strip()
-            st=_norm_type(rr.get("source_type")); tt=_norm_type(rr.get("target_type"))
-            source_touches=(st=="entity" and sid in scope)
-            target_touches=(tt=="entity" and tid in scope)
+            st=_infer_endpoint_type(rr.get("source_type"),sid); tt=_infer_endpoint_type(rr.get("target_type"),tid)
+            rmeta=rr.get("metadata") if isinstance(rr.get("metadata"),dict) else {}
+            src_name=_obj_name(st,sid); tgt_name=_obj_name(tt,tid)
+            if not src_name or src_name==sid:
+                src_name=str(rmeta.get("source_name") or rmeta.get("source_entity_name") or sid).strip()
+            if not tgt_name or tgt_name==tid:
+                tgt_name=str(rmeta.get("target_name") or rmeta.get("target_entity_name") or tid).strip()
+            scope_name_keys={_company_name_key(entity_name)}
+            scope_name_keys.update(_company_name_key(entities.get(eid,"")) for eid in scope)
+            scope_name_keys.discard("")
+            src_key=_company_name_key(src_name); tgt_key=_company_name_key(tgt_name)
+            source_touches=(st=="entity" and (sid in scope or src_key in scope_name_keys))
+            target_touches=(tt=="entity" and (tid in scope or tgt_key in scope_name_keys))
             if not (source_touches or target_touches):
                 continue
 
             rel=str(rr.get("relationship_type") or "").strip()
-            src_name=_obj_name(st,sid); tgt_name=_obj_name(tt,tid)
 
             # Pull operational endpoints in either direction, regardless of the exact
             # relationship vocabulary.  The relationship itself remains visible to users.
@@ -3004,17 +3041,27 @@ def _live_canonical_company_rollup(entity_id, entity_name):
                     "Latitude":base["Latitude"],"Longitude":base["Longitude"],"Metadata":meta})
 
         live_vessels=[]
+        scope_name_keys={_company_name_key(entity_name)}
+        scope_name_keys.update(_company_name_key(entities.get(eid,"")) for eid in scope)
+        scope_name_keys.discard("")
         for m in mrows:
             vid=str(m.get("mobile_asset_id") or "").strip(); owner=str(m.get("owner_entity_id") or "").strip(); operator=str(m.get("operator_entity_id") or "").strip(); manager=str(m.get("manager_entity_id") or "").strip()
-            if vid not in graph_vessels and owner not in scope and operator not in scope and manager not in scope: continue
             meta=m.get("metadata") if isinstance(m.get("metadata"),dict) else {}; research=meta.get("research_attributes") if isinstance(meta.get("research_attributes"),dict) else {}
+            meta_company_keys={_company_name_key(x) for x in _meta_text_values(meta)}
+            meta_company_keys.discard("")
+            metadata_matches=bool(scope_name_keys & meta_company_keys)
+            if vid not in graph_vessels and owner not in scope and operator not in scope and manager not in scope and not metadata_matches:
+                continue
             cap=m.get("capacity_value") if m.get("capacity_value") not in (None,"") else research.get("capacity")
+            meta_names=_meta_text_values(meta)
+            meta_company=" · ".join(dict.fromkeys(x for x in meta_names if str(x).strip()))
             live_vessels.append({"Vessel ID":vid,"Vessel Name":str(m.get("name") or "").strip(),"IMO":str(m.get("imo") or "").strip(),
                 "MMSI":str(m.get("mmsi") or "").strip(),"Call Sign":str(m.get("call_sign") or "").strip(),"Flag":str(m.get("flag") or "").strip(),
                 "Vessel Type":str(m.get("asset_type") or "").strip(),"Subtype / Class":str(m.get("subtype") or "").strip(),"Year Built":m.get("year_built"),
                 "DWT":m.get("dwt"),"Capacity":cap,"Capacity Unit":str(m.get("capacity_unit") or "").strip(),"Owner Company ID":owner,
                 "Operator Company ID":operator,"Manager Company ID":manager,"Owner":entities.get(owner,owner),"Operator":entities.get(operator,operator),
-                "Manager":entities.get(manager,manager),"Owner / Operator Text":" / ".join(x for x in [entities.get(owner,owner),entities.get(operator,operator)] if x),
+                "Manager":entities.get(manager,manager),"Owner / Operator Text":" / ".join(x for x in [entities.get(owner,owner),entities.get(operator,operator)] if x) or meta_company,
+                "Linked Company / Group":meta_company,
                 "Status":str(m.get("status") or m.get("record_status") or "").strip(),"Record Status":str(m.get("record_status") or "").strip(),
                 "Data Quality":str(m.get("data_quality") or "").strip(),"Source ID":str(m.get("source_id") or "").strip(),
                 "Notes":str(meta.get("notes") or "").strip(),"Metadata":meta})
@@ -8215,7 +8262,7 @@ def _trade_activity_board():
             'Market':clean(r.get('country_region')),
             'Status':clean(r.get('status')),
             'Source':source_label(meta),
-            '_dt':pd.to_datetime(r.get('announced_date') or r.get('effective_date'),errors='coerce')
+            '_dt':pd.to_datetime(r.get('announced_date') or r.get('effective_date'),errors='coerce',utc=True)
         })
     deals=pd.DataFrame(deal_rows)
     if not deals.empty: deals=deals.sort_values('_dt',ascending=False,na_position='last')
@@ -8237,7 +8284,7 @@ def _trade_activity_board():
             'Severity':clean(r.get('severity')),
             'Status':clean(r.get('status')),
             'Source':source_label(r.get('metadata')),
-            '_dt':pd.to_datetime(r.get('start_date') or r.get('created_at'),errors='coerce')
+            '_dt':pd.to_datetime(r.get('start_date') or r.get('created_at'),errors='coerce',utc=True)
         }
         if incident_pat.search(blob): incident_rows.append(row)
         elif infra_pat.search(blob): infra_rows.append(row)
@@ -8259,7 +8306,7 @@ def _trade_activity_board():
             'Type':pretty_relationship(r.get('relationship_type')),
             'Status':clean(r.get('record_status')),
             'Source':source_label(r.get('metadata')),
-            '_dt':pd.to_datetime(r.get('created_at') or r.get('updated_at'),errors='coerce')
+            '_dt':pd.to_datetime(r.get('created_at') or r.get('updated_at'),errors='coerce',utc=True)
         })
     relationships=pd.DataFrame(rel_rows)
     if not relationships.empty: relationships=relationships.sort_values('_dt',ascending=False,na_position='last')
@@ -8268,7 +8315,7 @@ def _trade_activity_board():
     all_dates=[]
     for df in [deals,infra,incidents,relationships]:
         if not df.empty and '_dt' in df.columns: all_dates.extend(df['_dt'].dropna().tolist())
-    latest_dt=max(all_dates) if all_dates else pd.Timestamp.utcnow()
+    latest_dt=max(all_dates) if all_dates else pd.Timestamp.now(tz='UTC')
     cutoff=latest_dt-pd.Timedelta(days=7)
     def recent_count(df):
         return int((df['_dt']>=cutoff).sum()) if not df.empty and '_dt' in df.columns else 0
@@ -8555,6 +8602,39 @@ def render_regional_business_security_maps():
         display_df(y[[c for c in cols if c in y.columns]],500) if not y.empty else st.info("No security-relevant events in this selection.")
     with tabs[2]:
         display_df(x[[c for c in cols if c in x.columns]],550)
+
+def _fleet_browser_company_matches(query):
+    """Resolve a fleet search term to company/group entities and their live canonical vessels."""
+    q=str(query or "").strip()
+    if not q:
+        return pd.DataFrame(), []
+    companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame()).copy()
+    if companies.empty:
+        return pd.DataFrame(), []
+    name_col="Company" if "Company" in companies.columns else ("Name" if "Name" in companies.columns else None)
+    id_col="Company ID" if "Company ID" in companies.columns else ("Entity ID" if "Entity ID" in companies.columns else None)
+    if not name_col or not id_col:
+        return pd.DataFrame(), []
+    qk=_company_name_key(q)
+    keys=companies[name_col].fillna("").astype(str).map(_company_name_key)
+    mask=keys.str.contains(qk,na=False) if qk else pd.Series(False,index=companies.index)
+    matched=companies[mask].head(12).copy()
+    frames=[]; labels=[]
+    for _,row in matched.iterrows():
+        eid=str(row.get(id_col) or "").strip(); nm=str(row.get(name_col) or "").strip()
+        if not eid: continue
+        live=_live_canonical_company_rollup(eid,nm)
+        v=live.get("vessels",pd.DataFrame())
+        if v is not None and not v.empty:
+            x=v.copy(); x["Matched Company / Group"]=nm
+            frames.append(x); labels.append(nm)
+    if not frames:
+        return pd.DataFrame(), labels
+    out=pd.concat(frames,ignore_index=True,sort=False)
+    dk=[c for c in ["Vessel ID","IMO","Vessel Name"] if c in out.columns]
+    if dk: out=out.drop_duplicates(subset=dk,keep="first")
+    return out, labels
+
 
 if page=="Overview":
     header("Trade System","Live news, markets, port activity, companies, infrastructure, fleets, contracts, investment and corridors across the global trade network.")
@@ -9797,17 +9877,45 @@ elif page=="Vessels":
     )
 
     q=st.text_input(
-        "Find vessel / IMO / owner / customer / class / programme",
-        placeholder="HMCS Harry DeWolf, ALTAF, Bani Yas, P51MR, LADY MARIIA...",
+        "Find vessel / IMO / company or group / owner / operator / class",
+        placeholder="MSC, CMA CGM, P&O Ferries, Maersk, vessel name, IMO...",
         key="vessel_search_text"
     )
 
     if domain=="Commercial":
         c=commercial.copy()
-        if q: c=_contains_any(c,[q])
+        fleet_live=pd.DataFrame(); fleet_labels=[]
+        if q:
+            direct=_contains_any(c,[q])
+            fleet_live,fleet_labels=_fleet_browser_company_matches(q)
+            if not fleet_live.empty:
+                direct_ids=set(direct.get("Vessel ID",pd.Series(dtype=str)).fillna("").astype(str)) if not direct.empty else set()
+                add_ids=set(fleet_live.get("Vessel ID",pd.Series(dtype=str)).fillna("").astype(str))
+                ids={x for x in direct_ids|add_ids if x}
+                c=c[c.get("Vessel ID",pd.Series(index=c.index,dtype=str)).fillna("").astype(str).isin(ids)].copy()
+                existing_ids=set(c.get("Vessel ID",pd.Series(dtype=str)).fillna("").astype(str))
+                missing=fleet_live[~fleet_live.get("Vessel ID",pd.Series(dtype=str)).fillna("").astype(str).isin(existing_ids)]
+                if not missing.empty:
+                    c=pd.concat([c,missing],ignore_index=True,sort=False)
+            else:
+                c=direct
         c=c.reset_index(drop=True)
+
+        if q and fleet_labels:
+            st.caption("Company / group matches: " + " · ".join(dict.fromkeys(fleet_labels)))
+        if not c.empty:
+            r1,r2,r3,r4=st.columns(4)
+            r1.metric("Vessels in view",len(c))
+            r2.metric("With IMO",int(c.get("IMO",pd.Series(index=c.index,dtype=str)).fillna("").astype(str).str.strip().ne("").sum()))
+            r3.metric("Vessel types",int(c.get("Vessel Type",pd.Series(index=c.index,dtype=str)).fillna("").astype(str).replace("",pd.NA).nunique()))
+            role_series=c.get("Owner / Operator Text",pd.Series(index=c.index,dtype=str)).fillna("").astype(str)
+            r4.metric("Company-linked",int(role_series.str.strip().ne("").sum()))
+            showcols=[x for x in ["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Owner","Operator","Manager","Owner / Operator Text","Matched Company / Group","Status"] if x in c.columns]
+            if showcols:
+                display_df(c[showcols].head(250),320)
+
         if c.empty:
-            st.info("No matching canonical commercial vessel.")
+            st.info("No matching canonical commercial vessel or company-linked fleet.")
         else:
             requested_index=0
             if requested_vessel and "Vessel ID" in c.columns:
