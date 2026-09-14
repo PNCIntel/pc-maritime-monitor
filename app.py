@@ -31,7 +31,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.38-terminal-discovery"
+APP_VERSION = "v3.3.37-live-canonical-commercial-dashboard"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -426,21 +426,65 @@ NEWSDATA_LATEST_URL = "https://newsdata.io/api/1/latest"
 
 @st.cache_data(show_spinner=False, ttl=600)
 def load_newsdata_articles(query, api_key, language="en", size=10):
-    """NewsData.io discovery feed. Results remain open-source signals until corroborated."""
+    """NewsData.io discovery feed with a resilient 422 fallback.
+
+    NewsData can reject a syntactically valid-looking advanced query with HTTP 422.
+    The overview should not disappear just because a broad Boolean query is rejected,
+    so retry once with a compact query and retain the API error text for diagnostics.
+    """
     if not api_key:
         return pd.DataFrame(), "NewsData.io API key not configured"
-    params={"apikey":api_key,"q":query,"language":language,"size":min(int(size),10)}
-    try:
-        req=Request(NEWSDATA_LATEST_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.9"})
-        with urlopen(req,timeout=12) as response:
-            payload=json.loads(response.read().decode("utf-8"))
-        if str(payload.get("status","")).lower() not in {"success",""}:
-            return pd.DataFrame(), str(payload.get("message") or "NewsData request failed")
-        return pd.DataFrame(payload.get("results") or []), ""
-    except HTTPError as exc:
-        return pd.DataFrame(), f"HTTP {exc.code}"
-    except (URLError,TimeoutError,ValueError,OSError) as exc:
-        return pd.DataFrame(), str(exc)
+
+    def _request(q):
+        params={"apikey":api_key,"language":language,"size":min(max(int(size),1),10)}
+        if str(q or "").strip():
+            params["q"]=str(q).strip()
+        req=Request(
+            NEWSDATA_LATEST_URL+"?"+urlencode(params),
+            headers={"User-Agent":"PC-Trade-System/3.3"}
+        )
+        try:
+            with urlopen(req,timeout=12) as response:
+                payload=json.loads(response.read().decode("utf-8"))
+            if str(payload.get("status","")).lower() not in {"success",""}:
+                return pd.DataFrame(), str(payload.get("message") or "NewsData request failed"), None
+            return pd.DataFrame(payload.get("results") or []), "", payload
+        except HTTPError as exc:
+            detail=""
+            try:
+                raw=exc.read().decode("utf-8","replace")
+                if raw:
+                    try:
+                        ep=json.loads(raw)
+                        detail=str(ep.get("message") or ep.get("results") or ep.get("status") or raw)
+                    except Exception:
+                        detail=raw[:500]
+            except Exception:
+                pass
+            msg=f"HTTP {exc.code}" + (f" · {detail}" if detail else "")
+            return pd.DataFrame(), msg, None
+        except (URLError,TimeoutError,ValueError,OSError) as exc:
+            return pd.DataFrame(), str(exc), None
+
+    df,err,_=_request(query)
+    if not err:
+        return df,""
+
+    # NewsData's q/qInTitle limit is 512 characters, but the API can also reject
+    # complex Boolean expressions. Retry only for semantic/unprocessable-query errors.
+    if "HTTP 422" in err:
+        compact='shipping OR port OR logistics OR trade OR energy OR defence OR security'
+        df2,err2,_=_request(compact)
+        if not err2:
+            return df2,""
+        # Final lightweight attempt: latest English feed; local relevance gate below
+        # will remove unrelated stories.
+        df3,err3,_=_request("")
+        if not err3:
+            return df3,""
+        return pd.DataFrame(), f"{err3} (initial query: {err})"
+
+    return pd.DataFrame(),err
 
 # ---------- optional live transport feeds ----------
 def _secret(name, default=""):
@@ -629,11 +673,9 @@ def render_overview_news():
         return
 
     # Query is deliberately narrow; a second local gate below rejects irrelevant syndication.
-    query=(
-        'shipping OR maritime OR port OR logistics OR freight OR "supply chain" OR trade OR tariff OR sanctions '
-        'OR energy OR oil OR gas OR LNG OR rail OR aviation OR infrastructure OR investment OR defence '
-        'OR conflict OR geopolitics OR military OR security'
-    )
+    # Keep the upstream search compact. Wider relevance is handled by
+    # _news_trade_relevant() after retrieval, which avoids NewsData HTTP 422 responses.
+    query='shipping OR port OR logistics OR trade OR energy OR defence OR security'
     df,err=load_newsdata_articles(query,api_key,"en",10)
     if err:
         st.caption(f"NewsData.io unavailable: {err}")
@@ -1452,7 +1494,7 @@ def _canonical_db_core_trade_frames():
         )
         arows = pc_safe_rows(
             sb, "pc_assets",
-            "asset_id,name,asset_type,subtype,country,region_city,latitude,longitude,operator_entity_id,status,record_status,metadata",
+            "asset_id,name,asset_type,subtype,country,region_city,latitude,longitude,status,record_status,metadata",
             10000, order="name"
         )
         rrows = pc_safe_rows(
@@ -1571,9 +1613,7 @@ def _canonical_db_core_trade_frames():
             meta = r.get("metadata") if isinstance(r.get("metadata"), dict) else {}
             research = meta.get("research_attributes") if isinstance(meta.get("research_attributes"), dict) else {}
 
-            # Prefer normalized relationship graph, but fall back to the direct canonical
-            # pc_assets.operator_entity_id field used by bulk terminal imports.
-            operator_id = op_map.get(aid, "") or str(r.get("operator_entity_id") or "").strip()
+            operator_id = op_map.get(aid, "")
             owner_id = owner_map.get(aid, "")
             company_id = operator_id or owner_id
             company_name = entity_names.get(company_id, company_id)
@@ -8478,7 +8518,7 @@ elif page=="Network Map":
         render_named_port_map(geo,height=610,radius=22000)
 
 elif page in ["Ports","Ports & Terminals"]:
-    header("Ports & Terminals","Direct port and marine-terminal explorer with operators, facilities, geography and linked events.")
+    header("Ports","Port / terminal explorer with operators, facilities, geography and linked events.")
     ports=unified_ports_with_reference(TABLES.get(("Maritime","Ports"),pd.DataFrame()))
     terms=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame())
     if ports.empty:
@@ -8509,49 +8549,6 @@ elif page in ["Ports","Ports & Terminals"]:
         # relationship link can land directly on the requested port/terminal.
         if requested_port or requested_terminal:
             st.session_state["port_search_text"]=""
-
-        # Direct terminal search. Previously the page only searched the parent-port
-        # dataframe, which made canonical marine_terminal assets effectively invisible
-        # unless they already had a parent_port_id / terminal_of relationship.
-        st.markdown("### Find a port or terminal")
-        terminal_q=st.text_input(
-            "Find terminal",
-            placeholder="Pier 400, TraPac Oakland, Matson Terminal Oakland, WBCCT, Stockton Berth...",
-            key="terminal_search_text"
-        )
-        if terminal_q.strip():
-            tv=terms.copy()
-            tv=_contains_any(
-                tv,[terminal_q],
-                ["Terminal / Facility","Parent Port","Country","City / Area","Operator / Network","Primary Operator"]
-            ) if not tv.empty else tv
-            if tv.empty:
-                st.warning("No matching terminal in the canonical terminal view.")
-            else:
-                tv=tv.sort_values("Terminal / Facility").reset_index(drop=True)
-                st.caption(f"{len(tv):,} matching terminal record(s). Select one to inspect it directly; a parent-port link is not required.")
-                t_pick=st.selectbox(
-                    "Terminal",
-                    range(len(tv)),
-                    format_func=lambda i: f"{tv.iloc[i].get('Terminal / Facility','')} — {tv.iloc[i].get('City / Area','') or tv.iloc[i].get('Country','')}",
-                    key="direct_terminal_select_idx"
-                )
-                tr=tv.iloc[t_pick]
-                tid=str(tr.get("Terminal ID","") or "")
-                st.markdown(f"## {tr.get('Terminal / Facility','Terminal')}")
-                a,b,c,d=st.columns(4)
-                a.metric("Asset type",str(tr.get("Facility Type","") or "marine terminal"))
-                b.metric("City / area",str(tr.get("City / Area","") or "—"))
-                c.metric("Country",str(tr.get("Country","") or "—"))
-                d.metric("Operator",str(tr.get("Primary Operator","") or tr.get("Operator / Network","") or "—"))
-                render_port_terminal_cards(str(tr.get("Port ID","") or "UNLINKED"),pd.DataFrame([tr]))
-                parent_id=str(tr.get("Port ID","") or "").strip()
-                parent_name=str(tr.get("Parent Port","") or "").strip()
-                if parent_id or parent_name:
-                    st.caption(f"Parent port: {parent_name or parent_id}")
-                else:
-                    st.info("This terminal is present in pc_assets but has no parent-port link in the projected data yet. It remains directly searchable here.")
-                st.markdown("---")
 
         q=st.text_input("Find port",placeholder="Rotterdam, Shanghai, Odesa, Vancouver, Constanța...",key="port_search_text")
         p=ports.copy()
