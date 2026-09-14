@@ -1007,16 +1007,30 @@ def _workflow_upsert(job_id, workflow_type, title, stage, order, status="running
         return None
 
 def _workflow_job_rows(job_type=None,limit=100):
+    """Return ingestion jobs used by the workflow UI.
+
+    pc_ingestion_jobs does not have an updated_at column in the current schema.
+    The previous projection requested updated_at, causing PostgREST to reject the
+    whole query and making Run & reconcile / Workflow Center appear permanently empty.
+    Keep this projection to columns that actually exist on pc_ingestion_jobs.
+    """
     if not sb:
         return []
-    q=sb.table("pc_ingestion_jobs").select(
-        "ingestion_job_id,job_type,title,status,stats,error_text,created_at,updated_at,completed_at,source_scope"
-    ).order("created_at",desc=True).limit(limit)
+    cols=(
+        "ingestion_job_id,job_type,title,query_text,status,stats,error_text,"
+        "created_at,started_at,completed_at,source_scope"
+    )
+    q=sb.table("pc_ingestion_jobs").select(cols).order("created_at",desc=True).limit(limit)
     if job_type:
         q=q.eq("job_type",job_type)
     try:
         return q.execute().data or []
-    except Exception:
+    except Exception as exc:
+        # Do not silently turn a schema/query error into an apparently empty workflow.
+        try:
+            st.warning(f"Could not load workflow jobs from pc_ingestion_jobs: {exc}")
+        except Exception:
+            pass
         return []
 
 def _staging_summary(job_id):
@@ -1039,6 +1053,111 @@ def _staging_summary(job_id):
         p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
         if r.get("target_table") in {"pc_entities","pc_assets","pc_mobile_assets"} and not p.get("name"):
             out["missing_name"]+=1
+    return out
+
+
+def _audit_bulk_jobs(limit=250):
+    """Cross-check bulk/research ingestion jobs against pc_staged_records.
+
+    This catches the failure mode where pc_ingestion_jobs.stats reports imported
+    rows but the staging rows are missing, only partially staged, or attached to
+    a different ingestion_job_id.
+    """
+    if not sb:
+        return []
+    jobs = _workflow_job_rows(None, limit) or []
+
+    # Optional workflow-state lookup. This is diagnostic only.
+    workflow_map = {}
+    try:
+        wrs = (sb.table("pc_workflow_runs")
+               .select("ingestion_job_id,workflow_type,current_stage,status,updated_at,completed_at")
+               .order("updated_at", desc=True)
+               .limit(limit * 3).execute().data or [])
+        for w in wrs:
+            jid = str(w.get("ingestion_job_id") or "").strip()
+            if jid and jid not in workflow_map:
+                workflow_map[jid] = w
+    except Exception:
+        workflow_map = {}
+
+    out = []
+    for j in jobs:
+        jt = str(j.get("job_type") or "").upper()
+        if jt not in {"BATCH_IMPORT","AI_RESEARCH"}:
+            continue
+        jid = str(j.get("ingestion_job_id") or "").strip()
+        if not jid:
+            continue
+
+        stats = j.get("stats") if isinstance(j.get("stats"), dict) else {}
+        reported_rows = stats.get("rows")
+        if reported_rows is None:
+            reported_rows = stats.get("staged")
+        try:
+            reported_rows = int(reported_rows or 0)
+        except Exception:
+            reported_rows = 0
+
+        table_stats = stats.get("tables") if isinstance(stats.get("tables"), dict) else {}
+        if not reported_rows and table_stats:
+            try:
+                reported_rows = sum(int(v or 0) for v in table_stats.values())
+            except Exception:
+                reported_rows = 0
+
+        summ = _staging_summary(jid)
+        staged = int(summ.get("total",0) or 0)
+        applied = int(summ.get("applied",0) or 0)
+        pending = int(summ.get("pending",0) or 0)
+        approved = int(summ.get("approved",0) or 0)
+        unresolved = int(summ.get("unresolved",0) or 0)
+        ambiguous = int(summ.get("ambiguous",0) or 0)
+        partial = int(summ.get("partial",0) or 0)
+        ready = int(summ.get("ready",0) or 0)
+
+        if reported_rows > 0 and staged == 0:
+            health = "CHECK — stats rows but no staging rows"
+        elif reported_rows > 0 and staged < reported_rows:
+            health = "CHECK — partial staging"
+        elif reported_rows > 0 and staged > reported_rows:
+            health = "CHECK — staging exceeds job stats"
+        elif staged and (unresolved or ambiguous or partial):
+            health = "REVIEW — reconciliation exceptions"
+        elif staged and applied == staged:
+            health = "APPLIED"
+        elif staged:
+            health = "STAGED / IN WORKFLOW"
+        elif str(j.get("status") or "").lower() == "failed":
+            health = "FAILED"
+        else:
+            health = "NO DATA"
+
+        wf = workflow_map.get(jid,{})
+        out.append({
+            "ingestion_job_id": jid,
+            "job_type": jt,
+            "title": j.get("title"),
+            "job_status": j.get("status"),
+            "reported_rows": reported_rows,
+            "staged_rows": staged,
+            "difference": staged - reported_rows if reported_rows else staged,
+            "pending": pending,
+            "approved": approved,
+            "applied": applied,
+            "ready": ready,
+            "unresolved": unresolved,
+            "ambiguous": ambiguous,
+            "partial": partial,
+            "workflow_stage": wf.get("current_stage"),
+            "workflow_status": wf.get("status"),
+            "workflow_updated_at": wf.get("updated_at"),
+            "created_at": j.get("created_at"),
+            "completed_at": j.get("completed_at"),
+            "health": health,
+            "error_text": j.get("error_text"),
+            "reported_tables": table_stats,
+        })
     return out
 
 def _run_reconciliation(job_id):
@@ -2152,6 +2271,102 @@ def apply_staged_record(sb, row, edited_payload=None):
 
     return result,write_mode
 
+
+def _job_control_panel(job, key_prefix="jobctl"):
+    """Compact recovery controls for an ingestion job."""
+    if not job:
+        return
+    jid=str(job.get("ingestion_job_id") or "").strip()
+    if not jid:
+        return
+
+    summ=_staging_summary(jid)
+    stats=job.get("stats") if isinstance(job.get("stats"),dict) else {}
+    reported=stats.get("rows")
+    if reported is None and isinstance(stats.get("tables"),dict):
+        try:
+            reported=sum(int(v or 0) for v in stats["tables"].values())
+        except Exception:
+            reported="—"
+
+    st.markdown(f"#### {job.get('title') or jid}")
+    c1,c2,c3,c4,c5=st.columns(5)
+    c1.metric("Reported",reported if reported is not None else "—")
+    c2.metric("Staged",summ.get("total",0))
+    c3.metric("Ready",summ.get("ready",0))
+    c4.metric("Applied",summ.get("applied",0))
+    c5.metric("Exceptions",(summ.get("unresolved",0) or 0)+(summ.get("ambiguous",0) or 0)+(summ.get("partial",0) or 0))
+
+    b1,b2,b3,b4,b5=st.columns(5)
+
+    if b1.button("Open job",key=f"{key_prefix}_open_{jid}"):
+        st.session_state["selected_ingestion_job_id"]=jid
+        st.session_state["selected_ingestion_job_title"]=job.get("title")
+        st.success(f"Selected job {jid}. Open AI Research → Run & reconcile.")
+
+    if b2.button("Open staging rows",key=f"{key_prefix}_stage_{jid}"):
+        try:
+            rows=(sb.table("pc_staged_records")
+                  .select("*")
+                  .eq("ingestion_job_id",jid)
+                  .order("created_at",desc=False)
+                  .limit(5000).execute().data or [])
+            st.session_state[f"{key_prefix}_staging_rows_{jid}"]=rows
+        except Exception as exc:
+            st.error(f"Could not load staging rows: {exc}")
+
+    if b3.button("Run reconciliation",key=f"{key_prefix}_recon_{jid}"):
+        try:
+            result=_run_reconciliation(jid)
+            st.success("Reconciliation completed.")
+            if result is not None:
+                st.write(result)
+        except Exception as exc:
+            st.error(f"Reconciliation failed: {exc}")
+
+    if b4.button("Retry staging",key=f"{key_prefix}_retry_{jid}"):
+        st.session_state["retry_staging_job_id"]=jid
+        st.warning(
+            "Retry staging selected. Power Admin will only restage if the original import "
+            "payload/source is still available. No staging rows are fabricated."
+        )
+        st.json({
+            "ingestion_job_id":jid,
+            "source_scope":job.get("source_scope"),
+            "stats":stats,
+        })
+
+    if b5.button("Mark failed",key=f"{key_prefix}_fail_{jid}"):
+        st.session_state[f"{key_prefix}_confirm_fail_{jid}"]=True
+
+    if st.session_state.get(f"{key_prefix}_confirm_fail_{jid}"):
+        st.warning("Mark this job failed? This does not delete staged or applied records.")
+        y,n=st.columns(2)
+        if y.button("Yes, mark failed",key=f"{key_prefix}_fail_yes_{jid}"):
+            try:
+                sb.table("pc_ingestion_jobs").update({
+                    "status":"failed",
+                    "error_text":"Marked failed manually from Power Admin recovery console"
+                }).eq("ingestion_job_id",jid).execute()
+                try:
+                    sb.table("pc_workflow_runs").update({
+                        "status":"failed"
+                    }).eq("ingestion_job_id",jid).execute()
+                except Exception:
+                    pass
+                st.session_state[f"{key_prefix}_confirm_fail_{jid}"]=False
+                st.success("Job marked failed.")
+            except Exception as exc:
+                st.error(f"Could not mark job failed: {exc}")
+        if n.button("Cancel",key=f"{key_prefix}_fail_no_{jid}"):
+            st.session_state[f"{key_prefix}_confirm_fail_{jid}"]=False
+
+    sk=f"{key_prefix}_staging_rows_{jid}"
+    if sk in st.session_state:
+        rows=st.session_state[sk]
+        st.caption(f"Showing {len(rows)} staged row(s).")
+        dataframe(rows)
+
 if page=="Dashboard":
     title("Platform control","One canonical data model; Trade, Intelligence and NERAI product entitlements; tenant workspaces; AI staging and review.")
     tables=[("Organizations","pc_organizations"),("Users","pc_profiles"),("Entities","pc_entities"),("Assets","pc_assets"),("Vessels / mobile","pc_mobile_assets"),("Events","pc_events"),("Staged changes","pc_staged_records"),("Open DQ issues","pc_data_quality_issues")]
@@ -2930,6 +3145,13 @@ elif page=="AI Research Workflow":
                         st.error(str(exc))
 
         with manage_tab:
+            selected_job_id=st.session_state.get("selected_ingestion_job_id")
+            if selected_job_id:
+                st.info(
+                    f"Selected from recovery console: "
+                    f"{st.session_state.get('selected_ingestion_job_title') or selected_job_id} "
+                    f"({selected_job_id})"
+                )
             all_jobs=_workflow_job_rows(None,200)
             jobs=[j for j in all_jobs if str(j.get("job_type") or "").upper() in {"AI_RESEARCH","BATCH_IMPORT"}]
             if not jobs:
@@ -2954,6 +3176,11 @@ elif page=="AI Research Workflow":
                 summ=_staging_summary(jid)
                 stages=WORKFLOW_STAGES[workflow_type]
                 st.caption(" → ".join(stages))
+                st.caption(
+                    f"Job status: {job.get('status') or '—'} · "
+                    f"Created: {job.get('created_at') or '—'} · "
+                    f"Job ID: {jid}"
+                )
                 c1,c2,c3,c4,c5=st.columns(5)
                 c1.metric("Staged",summ.get("total",0)); c2.metric("Ready",summ.get("ready",0))
                 c3.metric("Unresolved",summ.get("unresolved",0)); c4.metric("Partial",summ.get("partial",0)); c5.metric("Applied",summ.get("applied",0))
@@ -2986,7 +3213,18 @@ elif page=="AI Research Workflow":
                 elif summ.get("total",0):
                     st.success("Resolution looks clean. Continue to Reconcile & Review for approval/apply and QA.")
                 else:
-                    st.info("No staged rows were found for this job.")
+                    stats=job.get("stats") if isinstance(job.get("stats"),dict) else {}
+                    table_stats=stats.get("tables") if isinstance(stats.get("tables"),dict) else {}
+                    if table_stats:
+                        st.warning(
+                            "This ingestion job reports imported table rows but no pc_staged_records are "
+                            "currently attached to the job. If the records were not already applied, open "
+                            "Recent jobs / diagnostics and verify that the bulk loader staged rows with this "
+                            "same ingestion_job_id."
+                        )
+                        st.json({"reported_tables":table_stats,"job_stats":stats})
+                    else:
+                        st.info("No staged rows were found for this job.")
 
         with history_tab:
             jobs=safe_rows(
@@ -2999,6 +3237,38 @@ elif page=="AI Research Workflow":
                 if str(j.get("job_type") or "").upper() in {"AI_RESEARCH","BATCH_IMPORT"}
             ]
             dataframe(workflow_jobs)
+
+            st.markdown("### Bulk / research load audit")
+            st.caption(
+                "Cross-checks each completed import's reported row counts against the rows actually "
+                "attached to that ingestion_job_id in pc_staged_records."
+            )
+            audit_rows=_audit_bulk_jobs(250)
+            if audit_rows:
+                problems=[r for r in audit_rows if str(r.get("health") or "").startswith(("CHECK","FAILED","REVIEW"))]
+                c1,c2,c3,c4=st.columns(4)
+                c1.metric("Audited jobs",len(audit_rows))
+                c2.metric("Needs checking",len([r for r in audit_rows if str(r.get("health") or "").startswith("CHECK")]))
+                c3.metric("Reconciliation review",len([r for r in audit_rows if str(r.get("health") or "").startswith("REVIEW")]))
+                c4.metric("Applied",len([r for r in audit_rows if r.get("health")=="APPLIED"]))
+                if problems:
+                    st.warning(
+                        "Some jobs need checking. A completed job with reported rows but zero staged rows "
+                        "is the same failure pattern that previously made the workflow appear empty."
+                    )
+                    dataframe(problems)
+                    st.markdown("#### Recovery controls")
+                    job_lookup={str(j.get("ingestion_job_id") or ""):j for j in workflow_jobs}
+                    for p in problems[:20]:
+                        jid=str(p.get("ingestion_job_id") or "")
+                        job=job_lookup.get(jid)
+                        if job:
+                            with st.expander(f"{p.get('health')} · {job.get('title') or jid}",expanded=False):
+                                _job_control_panel(job,key_prefix="audit")
+                with st.expander("Show all audited bulk / research jobs",expanded=False):
+                    dataframe(audit_rows)
+            else:
+                st.info("No BATCH_IMPORT or AI_RESEARCH jobs were available to audit.")
 
 elif page=="Bulk Import Workflow":
     title("Bulk import workflow","Ordered bulk path: upload → map tables → map fields → fill IDs → stage → reconcile → review → apply → QA.")
@@ -3030,6 +3300,34 @@ elif page=="Bulk Import Workflow":
             st.json(out); st.rerun()
         if b3.button("Refresh status"):
             st.json(_staging_summary(jid))
+
+
+    st.markdown("---")
+    st.markdown("### All bulk-load integrity audit")
+    st.caption(
+        "Use this before relying on Trade. It compares each import job's stats with the rows "
+        "actually present under the same ingestion_job_id in staging."
+    )
+    audit_rows=_audit_bulk_jobs(250)
+    bulk_audit_rows=[r for r in audit_rows if r.get("job_type")=="BATCH_IMPORT"]
+    if bulk_audit_rows:
+        problems=[r for r in bulk_audit_rows if str(r.get("health") or "").startswith(("CHECK","FAILED","REVIEW"))]
+        if problems:
+            st.warning(f"{len(problems)} bulk-load job(s) require checking.")
+            dataframe(problems)
+            st.markdown("#### Bulk-load recovery controls")
+            jobs_now=_workflow_job_rows(None,250)
+            job_lookup={str(j.get("ingestion_job_id") or ""):j for j in jobs_now}
+            for p in problems[:20]:
+                jid=str(p.get("ingestion_job_id") or "")
+                job=job_lookup.get(jid)
+                if job:
+                    with st.expander(f"{p.get('health')} · {job.get('title') or jid}",expanded=False):
+                        _job_control_panel(job,key_prefix="bulk")
+        else:
+            st.success("No bulk-load integrity mismatches detected.")
+        with st.expander("Show all bulk-load jobs",expanded=False):
+            dataframe(bulk_audit_rows)
 
 elif page=="Multi-Table Bulk Loader":
     title("Multi-table bulk loader","Load one workbook/file into several canonical tables. Map sections and fields, fill staging keys, then resolve everything as one controlled job.")
