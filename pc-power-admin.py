@@ -153,6 +153,9 @@ def _source_count(payload):
 
     count=0
     meta=payload.get("metadata") or {}
+    if isinstance(meta,str):
+        parsed=_jsonish(meta)
+        meta=parsed if isinstance(parsed,dict) else {}
     if isinstance(meta,dict):
         count += _count_seq(meta.get("research_sources") or [])
         count += _count_seq(meta.get("sources") or [])
@@ -2587,6 +2590,178 @@ def _approve_and_apply_job_safe(job_id):
     }
 
 
+
+def _finalize_already_exists_rows(job_id):
+    """Treat ALREADY_EXISTS as a successful no-op rather than a blocked record."""
+    if not sb or not job_id:
+        return 0
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,resolution_status,review_status")
+              .eq("ingestion_job_id",job_id)
+              .eq("resolution_status","ALREADY_EXISTS")
+              .limit(10000).execute().data or [])
+        count=0
+        for r in rows:
+            if str(r.get("review_status") or "").lower()=="applied":
+                continue
+            sb.table("pc_staged_records").update({
+                "review_status":"applied",
+                "validation_status":"reviewed",
+            }).eq("staged_record_id",r["staged_record_id"]).execute()
+            count+=1
+        return count
+    except Exception:
+        return 0
+
+
+def _apply_safe_candidates_priority(job_id):
+    """Apply safe rows in dependency order: parents before relationships/event-links."""
+    candidates,blocked=_job_apply_candidates(job_id)
+    priority={
+        "pc_entities":10,
+        "pc_assets":20,
+        "pc_mobile_assets":20,
+        "pc_events":30,
+        "pc_transactions":40,
+        "pc_transport_routes":45,
+        "pc_relationships":80,
+        "pc_event_links":90,
+    }
+    candidates=sorted(candidates,key=lambda rv:(priority.get(str(rv[0].get("target_table") or ""),60),str(rv[0].get("natural_key") or "")))
+    applied=approved=0
+    failed=[]
+    for r,v in candidates:
+        try:
+            if str(r.get("review_status") or "pending").lower()!="approved":
+                sb.table("pc_staged_records").update({
+                    "review_status":"approved",
+                    "validation_status":"reviewed",
+                }).eq("staged_record_id",r["staged_record_id"]).execute()
+                r["review_status"]="approved"
+                approved+=1
+            apply_staged_record(sb,r,r.get("payload") or {})
+            applied+=1
+        except Exception as exc:
+            failed.append({
+                "record":r.get("natural_key"),
+                "table":r.get("target_table"),
+                "error":str(exc),
+            })
+    return {
+        "safe_candidates":len(candidates),
+        "approved_now":approved,
+        "applied":applied,
+        "failed":len(failed),
+        "failures":failed,
+        "blocked_before_apply":len(blocked),
+    }
+
+
+def _try_sql_ingestion_repairs(job_id):
+    """Use migration 037 helpers when installed; gracefully fall back otherwise."""
+    out={}
+    for name in (
+        "pc_repair_staged_payload_v2",
+        "pc_finalize_already_exists_v2",
+        "pc_requeue_resolved_event_links_v2",
+    ):
+        try:
+            out[name]=sb.rpc(name,{"p_job_id":str(job_id)}).execute().data
+        except Exception as exc:
+            out[name+"_unavailable"]=str(exc)
+    return out
+
+
+def _process_job_automatically(job_id,max_passes=8):
+    """Run the normal ingestion path automatically until no further safe progress is possible.
+
+    The operator should normally use this instead of manually sequencing repair/reconcile/apply/refresh.
+    Genuine ambiguity/unsupported rows remain for Manual matching.
+    """
+    report={"job_id":str(job_id),"passes":[],"total_applied_this_run":0}
+    last_signature=None
+
+    for pass_no in range(1,max_passes+1):
+        step={"pass":pass_no}
+
+        # Repair mapping/provenance and finalize canonical no-op duplicates.
+        try:
+            step["sql_repairs"]=_try_sql_ingestion_repairs(job_id)
+        except Exception as exc:
+            step["sql_repairs_error"]=str(exc)
+        try:
+            step["python_repair"]=_repair_obvious_job_blockers(job_id)
+        except Exception as exc:
+            step["python_repair_error"]=str(exc)
+        step["already_exists_finalized"]=_finalize_already_exists_rows(job_id)
+
+        # Prepare IDs and reconcile identities/dependencies.
+        try:
+            step["prepare_ids"]=_prepare_canonical_candidates(sb,job_id)
+        except Exception as exc:
+            step["prepare_ids_error"]=str(exc)
+        try:
+            step["reconcile_before"]=_run_reconciliation(job_id)
+        except Exception as exc:
+            step["reconcile_before_error"]=str(exc)
+
+        # Apply everything currently safe, parent tables first.
+        apply_result=_apply_safe_candidates_priority(job_id)
+        step["apply"]=apply_result
+        report["total_applied_this_run"]+=int(apply_result.get("applied",0) or 0)
+
+        # Newly-created parents may unlock relationships/event links.
+        try:
+            step["event_links"]=_process_relationship_backlog(sb,job_id)
+        except Exception as exc:
+            step["event_links_error"]=str(exc)
+        try:
+            step["relationships"]=_process_generic_relationship_backlog(sb,job_id)
+        except Exception as exc:
+            step["relationships_error"]=str(exc)
+        try:
+            step["reconcile_after"]=_run_reconciliation(job_id)
+        except Exception as exc:
+            step["reconcile_after_error"]=str(exc)
+
+        safe_after,blocked_after=_job_apply_candidates(job_id)
+        summ=_staging_summary(job_id)
+        step["summary"]={
+            "staged":summ.get("total",0),
+            "applied":summ.get("wf_applied",summ.get("applied",0)),
+            "safe_now":len(safe_after),
+            "blocked_now":len(blocked_after),
+            "exceptions":summ.get("wf_exceptions",(summ.get("partial",0) or 0)+(summ.get("unresolved",0) or 0)+(summ.get("ambiguous",0) or 0)),
+        }
+        report["passes"].append(step)
+
+        signature=(
+            int(step["summary"]["applied"] or 0),
+            int(step["summary"]["safe_now"] or 0),
+            int(step["summary"]["blocked_now"] or 0),
+            int(step["summary"]["exceptions"] or 0),
+        )
+
+        # Stop if finished or if this pass made no state progress.
+        if step["summary"]["safe_now"]==0 and step["summary"]["blocked_now"]==0 and step["summary"]["exceptions"]==0:
+            report["outcome"]="complete"
+            break
+        if signature==last_signature and int(apply_result.get("applied",0) or 0)==0 and int(step.get("already_exists_finalized",0) or 0)==0:
+            report["outcome"]="manual_review_required"
+            break
+        last_signature=signature
+    else:
+        report["outcome"]="max_passes_reached"
+
+    report["final_summary"]=_staging_summary(job_id)
+    safe_final,blocked_final=_job_apply_candidates(job_id)
+    report["safe_remaining"]=len(safe_final)
+    report["blocked_remaining"]=len(blocked_final)
+    report["blocked_rows"]=blocked_final[:500]
+    return report
+
+
 def _qa_applied_job(job_id):
     """Check that applied staging rows can be found in their canonical tables."""
     if not sb or not job_id:
@@ -4297,6 +4472,53 @@ elif page=="Reconciliation Center":
                 c3.metric("Blocked",len(blocked_rows))
                 c4.metric("Exceptions",summ.get("wf_exceptions",summ.get("partial",0)+summ.get("unresolved",0)+summ.get("ambiguous",0)))
                 c5.metric("Applied",summ.get("wf_applied",summ.get("applied",0)))
+
+                st.markdown("### Normal workflow")
+                st.caption(
+                    "For routine imports, use one button. Power Admin will repair obvious mapping/provenance issues, "
+                    "resolve identities, apply safe parent records first, retry dependent relationships, apply newly-safe "
+                    "children, and stop only when the job is complete or genuine analyst review is required."
+                )
+                if st.button(
+                    "▶ Process this job automatically",
+                    type="primary",
+                    key=f"diag_auto_process_{jid}",
+                    use_container_width=True
+                ):
+                    with st.status("Processing ingestion job end-to-end...",expanded=True) as status:
+                        auto=_process_job_automatically(jid)
+                        st.session_state[f"auto_process_result_{jid}"]=auto
+                        for p in auto.get("passes",[]):
+                            s=p.get("summary") or {}
+                            st.write(
+                                f"Pass {p.get('pass')}: applied {p.get('apply',{}).get('applied',0)} · "
+                                f"total applied {s.get('applied',0)} · safe {s.get('safe_now',0)} · "
+                                f"blocked {s.get('blocked_now',0)} · exceptions {s.get('exceptions',0)}"
+                            )
+                        outcome=auto.get("outcome")
+                        if outcome=="complete":
+                            status.update(label="Job processed completely",state="complete",expanded=False)
+                        elif outcome=="manual_review_required":
+                            status.update(label="Automatic processing finished — genuine review remains",state="complete",expanded=True)
+                        else:
+                            status.update(label=f"Automatic processing stopped: {outcome}",state="complete",expanded=True)
+                    st.rerun()
+
+                auto_result=st.session_state.get(f"auto_process_result_{jid}")
+                if auto_result:
+                    if auto_result.get("outcome")=="complete":
+                        st.success(
+                            f"Automatic processing completed. {auto_result.get('total_applied_this_run',0)} record(s) "
+                            "were applied during this run."
+                        )
+                    elif auto_result.get("outcome")=="manual_review_required":
+                        st.warning(
+                            f"Automatic processing applied {auto_result.get('total_applied_this_run',0)} record(s). "
+                            f"Only {auto_result.get('blocked_remaining',0)} blocked row(s) now need attention. "
+                            "Use Manual matching only for genuine ambiguity; dependency/schema reasons remain listed below."
+                        )
+
+                st.markdown("### Advanced / manual controls")
 
                 if safe_candidates:
                     st.success(
