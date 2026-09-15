@@ -1,3 +1,4 @@
+from datetime import datetime, date, timedelta
 from __future__ import annotations
 from pathlib import Path
 import os, sys, json, uuid, hashlib, re, io, zipfile, mimetypes
@@ -3374,6 +3375,45 @@ def _canonical_create_job(title, source_scope):
     }
     return sb.table("pc_ingestion_jobs").insert(payload).execute().data[0]
 
+
+def _normalize_excel_serial_date_value(value):
+    """Convert Excel serial dates to ISO YYYY-MM-DD for canonical date fields."""
+    if value is None or value == "":
+        return value
+    if isinstance(value, pd.Timestamp):
+        return value.date().isoformat()
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value,(int,float)) and not isinstance(value,bool):
+        try:
+            n=float(value)
+            if 20000 <= n <= 60000:
+                return (date(1899,12,30)+timedelta(days=int(n))).isoformat()
+        except Exception:
+            pass
+    s=str(value).strip()
+    try:
+        n=float(s)
+        if 20000 <= n <= 60000:
+            return (date(1899,12,30)+timedelta(days=int(n))).isoformat()
+    except Exception:
+        pass
+    return value
+
+def _normalize_canonical_payload_dates(payload,target_table):
+    payload=dict(payload or {})
+    if target_table=="pc_events":
+        for fld in ("start_date","end_date","event_date","latest_update_time"):
+            if fld in payload:
+                payload[fld]=_normalize_excel_serial_date_value(payload.get(fld))
+    elif target_table=="pc_relationships":
+        for fld in ("valid_from","valid_to"):
+            if fld in payload:
+                payload[fld]=_normalize_excel_serial_date_value(payload.get(fld))
+    return payload
+
 def _canonical_stage_records(job_id, sections_config):
     """Stage a whole workbook as one package.
 
@@ -3403,6 +3443,7 @@ def _canonical_stage_records(job_id, sections_config):
 
         for row_no,row in enumerate(df.to_dict("records"),1):
             payload=_payload_from_mapping(row,mapping,target)
+            payload=_normalize_canonical_payload_dates(payload,target)
 
             # Skip effectively blank rows after mapping.
             meaningful={
