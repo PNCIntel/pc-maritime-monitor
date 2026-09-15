@@ -15,6 +15,7 @@ if str(SHARED_DIR) not in sys.path:
 from pc_data_bridge import load_sheet as bridge_load_sheet, backend_status
 from pc_workspace import save_query as save_workspace_query
 from pc_db import client as pc_db_client, safe_rows as pc_safe_rows
+from pc_drilldown import render_sidebar_search as pc_render_drilldown_search, render_active_drilldown as pc_render_active_drilldown, drilldown_button as pc_drilldown_button, set_drilldown as pc_set_drilldown
 try:
     from pc_auth import require_login
 except Exception:
@@ -330,6 +331,17 @@ def event_card(row):
     )
 
 
+    eid = str(row.get("Event ID", row.get("event_id", "")) or "").strip()
+    if eid:
+        pc_drilldown_button(
+            "event",
+            eid,
+            "Open full event context",
+            key=f"event_card_dd_{eid}",
+            use_container_width=True,
+        )
+
+
 def canonical_port_id(link_id, link_name):
     lid=str(link_id or "").strip(); name=str(link_name or "").strip()
     if not ports.empty and "Port ID" in ports.columns:
@@ -362,6 +374,10 @@ def render_connected_context(event_id):
             if rel:
                 st.caption(rel)
 
+            aid = clean_display_text(r.get("Asset ID", ""))
+            if aid:
+                pc_drilldown_button("asset", aid, "Open asset", key=f"intel_asset_dd_{eid}_{aid}", use_container_width=True)
+
             pid = canonical_port_id(r.get("Asset ID", ""), name)
             if pid:
                 pr = ports[text_col(ports, "Port ID").eq(pid)]
@@ -385,6 +401,9 @@ def render_connected_context(event_id):
             st.markdown(f"**{name}**")
             if rel:
                 st.caption(rel)
+
+            if cid:
+                pc_drilldown_button("entity", cid, "Open company", key=f"intel_company_dd_{eid}_{cid}", use_container_width=True)
 
             if cid and not companies.empty and "Company ID" in companies.columns:
                 cr = companies[text_col(companies, "Company ID").eq(cid)]
@@ -665,6 +684,8 @@ with st.sidebar.expander("Data status", expanded=False):
     if st.button("Refresh database", key="refresh_excel_data"):
         st.cache_data.clear()
         st.rerun()
+
+pc_render_drilldown_search()
 
 # Header
 st.markdown('<div class="pc-kicker">Power & Corridors Intelligence</div>', unsafe_allow_html=True)
@@ -2077,3 +2098,7 @@ elif page == "Source Monitor":
 # Footer
 st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
 st.markdown('<div class="small-note">P&C Intelligence · Shared P&C data model · Dedicated security and operational intelligence interface.</div>', unsafe_allow_html=True)
+
+
+# Shared canonical drill-down available from every Intelligence workspace.
+pc_render_active_drilldown(location="main",expanded=True)
