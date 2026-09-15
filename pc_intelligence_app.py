@@ -503,6 +503,110 @@ def _canonical_db_event_frames():
     except Exception:
         return pd.DataFrame(), pd.DataFrame()
 
+
+# Canonical Actors & Networks layer from Supabase.
+@st.cache_data(show_spinner=False, ttl=60)
+def _canonical_db_actor_frames():
+    actors = pd.DataFrame()
+    links = pd.DataFrame()
+    relationships = pd.DataFrame()
+    designations = pd.DataFrame()
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return actors, links, relationships, designations
+
+        arows = pc_safe_rows(
+            sb, "v_pc_actor_directory",
+            "actor_id,legacy_actor_id,canonical_name,short_name,actor_class,actor_subtype,status,primary_country,countries,description,confidence,designation_count,designations,linked_events,latest_event_date,high_critical_events,distinct_roles,roles_seen",
+            5000, order="canonical_name",
+        )
+        if not arows:
+            arows = pc_safe_rows(
+                sb, "pc_actors",
+                "actor_id,legacy_actor_id,canonical_name,short_name,actor_class,actor_subtype,status,primary_country,countries,description,confidence,designation_summary,metadata",
+                5000, order="canonical_name",
+            )
+        if arows:
+            actors = pd.DataFrame(arows)
+
+        lrows = pc_safe_rows(
+            sb, "pc_event_actor_links",
+            "event_actor_link_id,event_id,actor_id,actor_role,attribution_status,confidence,link_basis,source_id,analyst_reviewed,metadata,created_at,updated_at",
+            10000,
+        )
+        if lrows:
+            links = pd.DataFrame(lrows)
+
+        rrows = pc_safe_rows(
+            sb, "pc_actor_relationships",
+            "actor_relationship_id,from_actor_id,to_actor_id,relationship_type,relationship_class,status,confidence,basis,source_id,start_date,end_date,metadata",
+            10000,
+        )
+        if rrows:
+            relationships = pd.DataFrame(rrows)
+
+        drows = pc_safe_rows(
+            sb, "pc_actor_designations",
+            "actor_designation_id,actor_id,authority,designation_name,designation_type,programme,effective_date,end_date,status,source_id,source_url,notes,confidence,metadata",
+            10000,
+        )
+        if drows:
+            designations = pd.DataFrame(drows)
+
+        return actors, links, relationships, designations
+    except Exception:
+        return actors, links, relationships, designations
+
+
+actor_directory, event_actor_links, actor_relationships, actor_designations = _canonical_db_actor_frames()
+
+
+def _actor_list_text(v):
+    if isinstance(v, (list, tuple, set)):
+        return ", ".join([clean_display_text(x) for x in v if clean_display_text(x)])
+    return clean_display_text(v)
+
+
+def _actor_event_frame(actor_id):
+    if event_actor_links.empty or hazard_events_raw.empty:
+        return pd.DataFrame()
+    links = event_actor_links[event_actor_links["actor_id"].astype(str).eq(str(actor_id))].copy()
+    if links.empty or "Event ID" not in hazard_events_raw.columns:
+        return pd.DataFrame()
+    ev = hazard_events_raw.copy()
+    ev["_event_id_join"] = ev["Event ID"].astype(str)
+    links["_event_id_join"] = links["event_id"].astype(str)
+    return links.merge(ev, on="_event_id_join", how="left", suffixes=("_link",""))
+
+
+def _actor_relationship_frame(actor_id):
+    if actor_relationships.empty or actor_directory.empty:
+        return pd.DataFrame()
+    aid = str(actor_id)
+    rel = actor_relationships[
+        actor_relationships["from_actor_id"].astype(str).eq(aid)
+        | actor_relationships["to_actor_id"].astype(str).eq(aid)
+    ].copy()
+    if rel.empty:
+        return rel
+    names = dict(zip(actor_directory["actor_id"].astype(str), actor_directory["canonical_name"].astype(str)))
+    rel["From Actor"] = rel["from_actor_id"].astype(str).map(names)
+    rel["To Actor"] = rel["to_actor_id"].astype(str).map(names)
+    rel["Relationship"] = rel["relationship_type"].map(humanize_relationship)
+    rel["Class"] = rel.get("relationship_class", pd.Series(index=rel.index, dtype=object)).map(humanize_relationship)
+    rel["Status"] = rel.get("status", pd.Series(index=rel.index, dtype=object))
+    rel["Confidence"] = rel.get("confidence", pd.Series(index=rel.index, dtype=object))
+    rel["Basis"] = rel.get("basis", pd.Series(index=rel.index, dtype=object))
+    return rel
+
+
+def _actor_designation_frame(actor_id):
+    if actor_designations.empty:
+        return pd.DataFrame()
+    return actor_designations[actor_designations["actor_id"].astype(str).eq(str(actor_id))].copy()
+
+
 # Canonical vessel registry from Supabase.
 @st.cache_data(show_spinner=False, ttl=60)
 def _canonical_db_vessels():
@@ -639,6 +743,7 @@ st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 
 NAV = {
     "INTELLIGENCE DESK": ["Operating Picture", "Intelligence Analytics", "Regional Maps", "Alerts & Incidents"],
+    "ACTORS & NETWORKS": ["Actors & Networks"],
     "FORWARD MONITORING": ["Watch Areas", "Monitoring & Indicators"],
     "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
     "DISCOVERY": ["Intelligence Search", "Source Monitor"],
@@ -654,7 +759,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v3.2 analytics · {_bst.get('mode','excel').title()} backend · shared canonical model")
+st.sidebar.caption(f"v3.3 actors · {_bst.get('mode','excel').title()} backend · shared canonical model")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -1647,6 +1752,14 @@ def _analytics_breakdown(df, level):
     if level in {"Region","Country"}:
         x=_analytics_explode_geo(df,"region" if level == "Region" else "country")
         grp_col="Breakdown"
+    elif level == "Actor":
+        x=df.explode("_actors").copy()
+        x["Breakdown"]=x["_actors"].fillna("Unspecified").astype(str).replace("","Unspecified")
+        grp_col="Breakdown"
+    elif level == "Actor Role":
+        x=df.explode("_actor_roles").copy()
+        x["Breakdown"]=x["_actor_roles"].fillna("Unspecified").astype(str).replace("","Unspecified")
+        grp_col="Breakdown"
     else:
         field={
             "Event Type":"Event Type","Event Family":"Event Family","Severity":"Severity",
@@ -1705,6 +1818,12 @@ def _analytics_render_chart(df, chart_type, group_by, time_grain="Daily", top_n=
             x=_analytics_explode_geo(x,"region").rename(columns={"Breakdown":"Series"})
         elif group_by == "Country":
             x=_analytics_explode_geo(x,"country").rename(columns={"Breakdown":"Series"})
+        elif group_by == "Actor":
+            x=x.explode("_actors").copy()
+            x["Series"]=x["_actors"].fillna("Unspecified").astype(str).replace("","Unspecified")
+        elif group_by == "Actor Role":
+            x=x.explode("_actor_roles").copy()
+            x["Series"]=x["_actor_roles"].fillna("Unspecified").astype(str).replace("","Unspecified")
         else:
             field={"Event Type":"Event Type","Event Family":"Event Family","Severity":"Severity","Domain":"Event Domain","Mode":"Mode","Status":"Status"}.get(group_by,group_by)
             x["Series"]=x[field].fillna("Unspecified").astype(str) if field in x.columns else "All events"
@@ -1912,6 +2031,22 @@ elif page == "Intelligence Analytics":
     )
 
     adf=_analytics_prepare_events(hazard_events)
+    if not adf.empty and not event_actor_links.empty and not actor_directory.empty and "Event ID" in adf.columns:
+        _al = event_actor_links.copy()
+        _an = actor_directory[["actor_id","canonical_name"]].copy()
+        _al = _al.merge(_an, on="actor_id", how="left")
+        _al["_event_id_join"] = _al["event_id"].astype(str)
+        _actor_names = _al.groupby("_event_id_join")["canonical_name"].apply(
+            lambda s: sorted({clean_display_text(x) for x in s if clean_display_text(x)})
+        ).to_dict()
+        _actor_roles = _al.groupby("_event_id_join")["actor_role"].apply(
+            lambda s: sorted({clean_display_text(x) for x in s if clean_display_text(x)})
+        ).to_dict()
+        adf["_actors"] = adf["Event ID"].astype(str).map(_actor_names).map(lambda x: x if isinstance(x,list) else [])
+        adf["_actor_roles"] = adf["Event ID"].astype(str).map(_actor_roles).map(lambda x: x if isinstance(x,list) else [])
+    else:
+        adf["_actors"] = [[] for _ in range(len(adf))]
+        adf["_actor_roles"] = [[] for _ in range(len(adf))]
     if adf.empty:
         st.info("No intelligence-routed events are currently available for analysis.")
     else:
@@ -1968,6 +2103,16 @@ elif page == "Intelligence Analytics":
         if domain != "All": df=df[text_col(df,"Event Domain").eq(domain)].copy()
         if family != "All": df=df[text_col(df,"Event Family").eq(family)].copy()
 
+        af1,af2=st.columns(2)
+        actor_options=["All"]+sorted({a for xs in df.get("_actors",pd.Series(dtype=object)) for a in (xs if isinstance(xs,list) else []) if a})
+        role_options=["All"]+sorted({r for xs in df.get("_actor_roles",pd.Series(dtype=object)) for r in (xs if isinstance(xs,list) else []) if r})
+        actor_filter=af1.selectbox("Actor",actor_options,key="intel_analytics_actor")
+        role_filter=af2.selectbox("Actor role",role_options,key="intel_analytics_actor_role")
+        if actor_filter != "All":
+            df=df[df["_actors"].map(lambda xs: actor_filter in xs if isinstance(xs,list) else False)].copy()
+        if role_filter != "All":
+            df=df[df["_actor_roles"].map(lambda xs: role_filter in xs if isinstance(xs,list) else False)].copy()
+
         # Headline metrics.
         event_count=(df["Event ID"].nunique() if "Event ID" in df.columns else len(df))
         sev_series=text_col(df,"Severity")
@@ -2013,7 +2158,7 @@ elif page == "Intelligence Analytics":
         st.markdown("### Visual analysis")
         c1,c2,c3,c4=st.columns([1,1.15,1,1])
         chart_type=c1.selectbox("Chart",["Line","Bar","Pie"],key="intel_analytics_chart")
-        group_options=["Event Type","Region","Country","Severity","Event Family","Domain","Mode","Status"]
+        group_options=["Event Type","Region","Country","Severity","Event Family","Domain","Mode","Status","Actor","Actor Role"]
         default_group=1 if geo_mode == "Global" else (2 if geo_mode == "Region" else 0)
         group_by=c2.selectbox("Group by",group_options,index=default_group,key="intel_analytics_group")
         time_grain=c3.selectbox("Time grain",["Daily","Weekly","Monthly"],index=1,key="intel_analytics_grain",disabled=(chart_type != "Line"))
@@ -2085,6 +2230,214 @@ elif page == "Intelligence Analytics":
                 use_container_width=True,
                 key="intel_analytics_download"
             )
+
+
+# -----------------------------------------------------------------------------
+# 3. ACTORS & NETWORKS
+# -----------------------------------------------------------------------------
+elif page == "Actors & Networks":
+    section(
+        "Actor intelligence",
+        "Actors & Networks",
+        "Canonical organisations, armed groups, state-security actors and networks connected to the P&C event layer. Actor identity, operational role and attribution are kept separate."
+    )
+
+    if actor_directory.empty:
+        st.warning("The canonical actor registry is not currently available from Supabase.")
+    else:
+        ad = actor_directory.copy()
+        for c in ["canonical_name","short_name","actor_class","actor_subtype","status","primary_country","confidence","roles_seen"]:
+            if c in ad.columns:
+                ad[c] = ad[c].map(clean_display_text)
+        for c in ["linked_events","high_critical_events","distinct_roles","designation_count"]:
+            if c in ad.columns:
+                ad[c] = pd.to_numeric(ad[c], errors="coerce").fillna(0).astype(int)
+
+        total_actors=len(ad)
+        active_with_events=int((ad["linked_events"]>0).sum()) if "linked_events" in ad.columns else 0
+        linked_events_total=int(event_actor_links["event_id"].astype(str).nunique()) if not event_actor_links.empty else 0
+        high_critical_total=int(ad["high_critical_events"].sum()) if "high_critical_events" in ad.columns else 0
+
+        m1,m2,m3,m4=st.columns(4)
+        m1.metric("Canonical actors",f"{total_actors:,}")
+        m2.metric("Actors with linked events",f"{active_with_events:,}")
+        m3.metric("Linked intelligence events",f"{linked_events_total:,}")
+        m4.metric("High / critical actor-events",f"{high_critical_total:,}")
+
+        st.markdown("### Actor directory")
+        f1,f2,f3,f4=st.columns([1.3,1,1,1])
+        search_actor=f1.text_input("Search",placeholder="Actor, short name, country or subtype",key="actor_directory_search")
+        classes=["All"]+sorted([x for x in ad.get("actor_class",pd.Series(dtype=str)).unique() if clean_display_text(x)])
+        countries=["All"]+sorted([x for x in ad.get("primary_country",pd.Series(dtype=str)).unique() if clean_display_text(x)])
+        actor_class=f2.selectbox("Actor class",classes,key="actor_class_filter")
+        actor_country=f3.selectbox("Primary country",countries,key="actor_country_filter")
+        activity_mode=f4.selectbox("Activity",["All actors","Linked events only","No linked events"],key="actor_activity_mode")
+
+        filtered=ad.copy()
+        if actor_class!="All":
+            filtered=filtered[filtered["actor_class"].eq(actor_class)]
+        if actor_country!="All":
+            filtered=filtered[filtered["primary_country"].eq(actor_country)]
+        if activity_mode=="Linked events only" and "linked_events" in filtered.columns:
+            filtered=filtered[filtered["linked_events"]>0]
+        elif activity_mode=="No linked events" and "linked_events" in filtered.columns:
+            filtered=filtered[filtered["linked_events"]==0]
+        if search_actor.strip():
+            q=search_actor.strip().lower()
+            blob=(
+                filtered.get("canonical_name",pd.Series("",index=filtered.index)).astype(str)+" "+
+                filtered.get("short_name",pd.Series("",index=filtered.index)).astype(str)+" "+
+                filtered.get("actor_subtype",pd.Series("",index=filtered.index)).astype(str)+" "+
+                filtered.get("primary_country",pd.Series("",index=filtered.index)).astype(str)+" "+
+                filtered.get("countries",pd.Series("",index=filtered.index)).map(_actor_list_text)
+            ).str.lower()
+            filtered=filtered[blob.str.contains(re.escape(q),regex=True,na=False)]
+
+        dv=filtered.rename(columns={
+            "canonical_name":"Actor","short_name":"Short Name","actor_class":"Class",
+            "actor_subtype":"Subtype","status":"Status","primary_country":"Primary Country",
+            "linked_events":"Linked Events","high_critical_events":"High / Critical","roles_seen":"Roles Seen"
+        })
+        show_df(dv,["Actor","Short Name","Class","Subtype","Status","Primary Country","Linked Events","High / Critical","Roles Seen"],
+                min(520,120+max(1,len(dv))*32))
+
+        if filtered.empty:
+            st.info("No actors match the current filters.")
+        else:
+            st.markdown("### Actor profile")
+            choices=filtered.sort_values(
+                ["linked_events","canonical_name"] if "linked_events" in filtered.columns else ["canonical_name"],
+                ascending=[False,True] if "linked_events" in filtered.columns else [True]
+            ).reset_index(drop=True)
+            selected_idx=st.selectbox(
+                "Select actor",range(len(choices)),
+                format_func=lambda i: (
+                    f"{clean_display_text(choices.iloc[i].get('canonical_name',''))}"
+                    + (f" ({clean_display_text(choices.iloc[i].get('short_name',''))})"
+                       if clean_display_text(choices.iloc[i].get('short_name',''))
+                       and clean_display_text(choices.iloc[i].get('short_name','')) != clean_display_text(choices.iloc[i].get('canonical_name',''))
+                       else "")
+                ),
+                key="actor_profile_select"
+            )
+            actor=choices.iloc[selected_idx]
+            actor_id=clean_display_text(actor.get("actor_id",""))
+            actor_name=clean_display_text(actor.get("canonical_name",""))
+
+            st.markdown(f"## {actor_name}")
+            subtitle=[
+                humanize_relationship(actor.get("actor_class","")),
+                clean_display_text(actor.get("actor_subtype","")),
+                clean_display_text(actor.get("primary_country","")),
+                clean_display_text(actor.get("status","")),
+            ]
+            st.caption(" · ".join([x for x in subtitle if x]))
+
+            p1,p2,p3,p4=st.columns(4)
+            p1.metric("Linked events",f"{int(actor.get('linked_events',0) or 0):,}")
+            p2.metric("High / critical",f"{int(actor.get('high_critical_events',0) or 0):,}")
+            p3.metric("Distinct roles",f"{int(actor.get('distinct_roles',0) or 0):,}")
+            latest=clean_display_text(actor.get("latest_event_date",""))
+            p4.metric("Latest event",latest[:10] if latest else "—")
+
+            desc=clean_display_text(actor.get("description",""))
+            if desc:
+                st.markdown(desc)
+
+            c1,c2=st.columns([1,1])
+            with c1:
+                st.markdown("**Actor details**")
+                details=pd.DataFrame([
+                    ["Short name",clean_display_text(actor.get("short_name",""))],
+                    ["Class",humanize_relationship(actor.get("actor_class",""))],
+                    ["Subtype",clean_display_text(actor.get("actor_subtype",""))],
+                    ["Status",clean_display_text(actor.get("status",""))],
+                    ["Primary country",clean_display_text(actor.get("primary_country",""))],
+                    ["Countries",_actor_list_text(actor.get("countries",""))],
+                    ["Confidence",clean_display_text(actor.get("confidence",""))],
+                ],columns=["Field","Value"])
+                show_df(details,["Field","Value"],295)
+            with c2:
+                st.markdown("**Observed roles**")
+                roles=clean_display_text(actor.get("roles_seen",""))
+                st.markdown(
+                    f"<div class='pc-card'><div class='pc-card-title'>{roles or 'No event roles yet'}</div>"
+                    f"<div class='pc-card-meta'>Derived from event-actor links; role is not the same as actor identity.</div></div>",
+                    unsafe_allow_html=True
+                )
+                st.markdown("**Designations**")
+                ddf=_actor_designation_frame(actor_id)
+                if ddf.empty:
+                    st.caption("No structured designation records have been added yet.")
+                else:
+                    show_df(ddf,["authority","designation_name","designation_type","programme","effective_date","status","confidence"],210)
+
+            st.markdown("### Event activity")
+            ev=_actor_event_frame(actor_id)
+            if ev.empty:
+                st.caption("No linked intelligence events for this actor.")
+            else:
+                if "Start Date" in ev.columns:
+                    ev["_date"]=pd.to_datetime(ev["Start Date"],errors="coerce")
+                    ev=ev.sort_values("_date",ascending=False,na_position="last")
+                role_counts=ev["actor_role"].fillna("Unspecified").astype(str).value_counts().reset_index()
+                role_counts.columns=["Actor Role","Count"]
+
+                a1,a2=st.columns([1.35,1])
+                with a1:
+                    if alt is not None and "_date" in ev.columns:
+                        chart_df=ev.dropna(subset=["_date"]).copy()
+                        if not chart_df.empty:
+                            chart_df["Month"]=chart_df["_date"].dt.to_period("M").dt.to_timestamp()
+                            month_role=chart_df.groupby(["Month","actor_role"],dropna=False).size().reset_index(name="Events")
+                            month_role["actor_role"]=month_role["actor_role"].fillna("Unspecified")
+                            chart=alt.Chart(month_role).mark_bar().encode(
+                                x=alt.X("Month:T",title="Month"),
+                                y=alt.Y("Events:Q",title="Linked events"),
+                                color=alt.Color("actor_role:N",title="Actor role"),
+                                tooltip=["Month:T","actor_role:N","Events:Q"]
+                            ).properties(height=300)
+                            st.altair_chart(chart,use_container_width=True)
+                        else:
+                            st.caption("No dated events available for trend analysis.")
+                    else:
+                        st.caption("Charting unavailable.")
+                with a2:
+                    show_df(role_counts,["Actor Role","Count"],300)
+
+                show_df(ev,["Start Date","Event Type","Severity","actor_role","attribution_status","confidence","Title","Operational Impact"],430)
+                event_choices=ev.reset_index(drop=True)
+                open_idx=st.selectbox(
+                    "Open linked event",range(len(event_choices)),
+                    format_func=lambda i: (
+                        f"{clean_display_text(event_choices.iloc[i].get('Start Date',''))} · "
+                        f"{clean_display_text(event_choices.iloc[i].get('Title','Untitled event'))}"
+                    ),
+                    key=f"actor_open_event_{actor_id}"
+                )
+                event_id=clean_display_text(event_choices.iloc[open_idx].get("event_id",""))
+                if not event_id:
+                    event_id=clean_display_text(event_choices.iloc[open_idx].get("Event ID",""))
+                if event_id:
+                    pc_drilldown_button("event",event_id,"Open full event context",
+                                        key=f"actor_event_dd_{actor_id}_{event_id}",use_container_width=True)
+
+            st.markdown("### Network relationships")
+            rdf=_actor_relationship_frame(actor_id)
+            if rdf.empty:
+                st.caption("No structured actor relationships are currently recorded for this actor.")
+            else:
+                show_df(rdf,["From Actor","Relationship","To Actor","Class","Status","Confidence","Basis"],330)
+
+            with st.expander("Analyst / data-quality status",expanded=False):
+                pending=event_actor_links[event_actor_links["actor_id"].astype(str).eq(str(actor_id))].copy() if not event_actor_links.empty else pd.DataFrame()
+                if pending.empty:
+                    st.caption("No event-actor links.")
+                else:
+                    reviewed=int(pending.get("analyst_reviewed",pd.Series(False,index=pending.index)).fillna(False).astype(bool).sum())
+                    st.caption(f"{reviewed:,} of {len(pending):,} event-actor links marked analyst reviewed.")
+                    show_df(pending,["event_id","actor_role","attribution_status","confidence","analyst_reviewed","link_basis"],260)
+
 
 # -----------------------------------------------------------------------------
 # 3. ALERTS & INCIDENTS
