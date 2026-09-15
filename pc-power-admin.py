@@ -3265,6 +3265,29 @@ CANONICAL_LOGICAL_TYPE = {
     "pc_observations":"observation",
 }
 
+
+def _canonical_registered_table_map():
+    """Return target_table -> pc_meta_entity_types row.
+
+    pc_staged_records.target_entity_type is FK-constrained to
+    pc_meta_entity_types(entity_type), so the loader must use this registry.
+    """
+    rows=_meta_entity_types(sb) if sb else []
+    return {
+        str(r.get("table_name")):r
+        for r in rows
+        if r.get("table_name") and r.get("entity_type")
+    }
+
+def _canonical_registered_tables():
+    reg=_canonical_registered_table_map()
+    return [t for t in CANONICAL_LOAD_TABLES if t in reg]
+
+def _canonical_target_entity_type(target_table):
+    row=_canonical_registered_table_map().get(target_table)
+    return (row or {}).get("entity_type")
+
+
 def _canonical_processor_available():
     if not sb:
         return False
@@ -3349,7 +3372,15 @@ def _canonical_stage_records(job_id, sections_config):
         target=cfg["target"]
         df=cfg["df"]
         mapping=cfg["mapping"]
-        logical=CANONICAL_LOGICAL_TYPE.get(target,target)
+
+        # target_entity_type is FK-constrained to pc_meta_entity_types.
+        # Never invent it from the table/sheet name.
+        logical=_canonical_target_entity_type(target)
+        if not logical:
+            raise ValueError(
+                f"{target} is not registered in pc_meta_entity_types. "
+                "Register it in System metadata or exclude that sheet."
+            )
 
         for row_no,row in enumerate(df.to_dict("records"),1):
             payload=_payload_from_mapping(row,mapping,target)
@@ -3438,7 +3469,9 @@ def _merge_canonical_object(object_type,survivor_id,duplicate_id,notes=""):
 def _canonical_section_target(section,df):
     """Return (target_table, include_by_default, reason).
 
-    Unknown/reference/instruction sheets must NEVER silently fall back to pc_entities.
+    Unknown/reference sheets never fall back to pc_entities.
+    Recognized sheets are auto-included only if their table is registered in
+    pc_meta_entity_types.
     """
     s=_norm_field(section)
 
@@ -3465,10 +3498,7 @@ def _canonical_section_target(section,df):
         "supply_series":"pc_supply_series",
         "observations":"pc_observations",
     }
-    if s in explicit:
-        return explicit[s],True,"recognized data sheet"
 
-    # Reference/template/research-control sheets are deliberately ignored.
     ignore_tokens=(
         "readme","instruction","research_query","incident_categories",
         "priority_geographies","source_hierarchy","database_mapping",
@@ -3478,13 +3508,29 @@ def _canonical_section_target(section,df):
     if any(tok in s for tok in ignore_tokens):
         return None,False,"reference/control sheet"
 
-    # For other unknown sheets, allow manual opt-in, but never infer pc_entities.
+    registered=_canonical_registered_table_map()
+
+    if s in explicit:
+        target=explicit[s]
+        if target in registered:
+            et=registered[target].get("entity_type")
+            return target,True,f"recognized data sheet · registered type: {et}"
+        return target,False,(
+            f"recognized data sheet, but {target} is not registered in pc_meta_entity_types; "
+            "excluded until metadata is registered"
+        )
+
     guessed=_suggest_target_table(section,df)
+    if guessed in CANONICAL_LOAD_TABLES and guessed in registered:
+        et=registered[guessed].get("entity_type")
+        return guessed,False,f"unrecognized sheet — verify before including · registered type: {et}"
+
     if guessed in CANONICAL_LOAD_TABLES:
-        return guessed,False,"unrecognized sheet — verify before including"
+        return guessed,False,(
+            f"unrecognized sheet and {guessed} is not registered in pc_meta_entity_types — excluded"
+        )
 
     return None,False,"unrecognized sheet — excluded"
-
 
 
 if page=="Canonical Home":
@@ -3583,6 +3629,14 @@ elif page=="Canonical Loader":
                     with st.expander("Excluded/reference sheets",expanded=False):
                         dataframe(ignored)
 
+                registered_tables=_canonical_registered_tables()
+                if not registered_tables:
+                    st.error(
+                        "No canonical loader target tables are registered in pc_meta_entity_types. "
+                        "Check System metadata before loading."
+                    )
+                    st.stop()
+
                 configs={}
                 for idx,(section,df) in enumerate(sections.items()):
                     suggested,include_default,reason=_canonical_section_target(section,df)
@@ -3590,21 +3644,29 @@ elif page=="Canonical Loader":
                         f"{section} · {len(df):,} rows · {'DATA' if include_default else 'EXCLUDED'}",
                         expanded=include_default
                     ):
+                        if suggested not in registered_tables:
+                            include_default=False
+
                         include=st.checkbox(
                             "Include this section",
                             value=include_default,
                             key=f"canon_include_{idx}"
                         )
-                        if suggested is None:
-                            suggested=CANONICAL_LOAD_TABLES[0]
+
+                        default_target=suggested if suggested in registered_tables else registered_tables[0]
                         target=st.selectbox(
                             "Canonical target",
-                            CANONICAL_LOAD_TABLES,
-                            index=CANONICAL_LOAD_TABLES.index(suggested),
+                            registered_tables,
+                            index=registered_tables.index(default_target),
                             key=f"canon_target_{idx}",
                             disabled=not include,
                         )
-                        st.caption(reason)
+
+                        registered_type=_canonical_target_entity_type(target)
+                        st.caption(
+                            f"{reason} · staging type: {registered_type}"
+                            if include else reason
+                        )
                         cols=_table_write_columns_live(sb,target)
                         mapping=_auto_column_mapping(list(df.columns),cols)
                         edited=st.data_editor(
@@ -3632,9 +3694,9 @@ elif page=="Canonical Loader":
                     "and writes relationships/event links second. There is no manual reconcile/apply sequence."
                 )
                 st.info(
-                    "Only recognized data sheets are included by default. Research queries, source hierarchies, "
-                    "severity rules, checklists and other reference sheets are excluded and will never silently "
-                    "fall back to pc_entities."
+                    "Only recognized, metadata-registered data sheets are included by default. "
+                    "Research/reference sheets are excluded, and target_entity_type is always taken from "
+                    "pc_meta_entity_types — the loader no longer invents staging types such as 'transaction'."
                 )
 
                 if st.button(
