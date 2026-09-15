@@ -8372,6 +8372,106 @@ def _render_operational_brief():
         st.rerun()
 
 
+
+@st.cache_data(show_spinner=False,ttl=300)
+def canonical_pgsa_vessels_trade():
+    """Find the canonical PGSA compliance event carrying the largest linked-vessel set."""
+    try:
+        sb=pc_db_client(service=True)
+    except Exception:
+        return {},pd.DataFrame()
+
+    candidates=[]
+    try:
+        candidates=(sb.table("pc_events")
+                    .select("event_id,title,start_date,event_type,severity,status,location,description,operational_impact,commercial_impact")
+                    .eq("event_type","VESSEL_COMPLIANCE_LIST_UPDATE")
+                    .order("start_date",desc=True)
+                    .limit(20)
+                    .execute().data or [])
+    except Exception:
+        candidates=[]
+
+    if not candidates:
+        for term in ["%PGSA%","%non-compliant%","%77 vessels%"]:
+            try:
+                candidates=(sb.table("pc_events")
+                            .select("event_id,title,start_date,event_type,severity,status,location,description,operational_impact,commercial_impact")
+                            .ilike("title",term)
+                            .order("start_date",desc=True)
+                            .limit(20)
+                            .execute().data or [])
+            except Exception:
+                candidates=[]
+            if candidates:
+                break
+
+    best_event={}
+    best_links=[]
+    for event in candidates:
+        eid=event.get("event_id")
+        if not eid:
+            continue
+        try:
+            links=(sb.table("pc_event_links")
+                   .select("linked_id,linked_type,relationship")
+                   .eq("event_id",eid)
+                   .eq("linked_type","mobile_asset")
+                   .limit(500)
+                   .execute().data or [])
+        except Exception:
+            links=[]
+        if len(links)>len(best_links):
+            best_event=event
+            best_links=links
+
+    if not best_event or not best_links:
+        return best_event,pd.DataFrame()
+
+    ids=[str(x.get("linked_id")) for x in best_links if x.get("linked_id")]
+    assets=[]
+    for i in range(0,len(ids),100):
+        batch=ids[i:i+100]
+        try:
+            assets.extend(
+                sb.table("pc_mobile_assets")
+                  .select("mobile_asset_id,name,imo,mmsi,flag,asset_type,subtype,status,owner_entity_id,operator_entity_id")
+                  .in_("mobile_asset_id",batch)
+                  .execute().data or []
+            )
+        except Exception:
+            for oid in batch:
+                try:
+                    assets.extend(
+                        sb.table("pc_mobile_assets")
+                          .select("mobile_asset_id,name,imo,mmsi,flag,asset_type,subtype,status,owner_entity_id,operator_entity_id")
+                          .eq("mobile_asset_id",oid)
+                          .limit(1)
+                          .execute().data or []
+                    )
+                except Exception:
+                    pass
+
+    rel_by_id={str(x.get("linked_id")):x.get("relationship") for x in best_links}
+    rows=[]
+    for r in assets:
+        oid=str(r.get("mobile_asset_id") or "")
+        rows.append({
+            "Vessel":r.get("name"),
+            "IMO":r.get("imo"),
+            "MMSI":r.get("mmsi"),
+            "Flag":r.get("flag"),
+            "Vessel Type":r.get("subtype") or r.get("asset_type"),
+            "Status":r.get("status"),
+            "Relationship":rel_by_id.get(oid),
+            "Canonical ID":oid,
+        })
+    df=pd.DataFrame(rows)
+    if not df.empty:
+        df=df.sort_values(["Vessel","IMO"],na_position="last").reset_index(drop=True)
+    return best_event,df
+
+
 if page=="Overview":
     header("Trade System","Live news, markets, port activity, companies, infrastructure, fleets, contracts, investment and corridors across the global trade network.")
 
@@ -9864,13 +9964,68 @@ elif page=="Sanctions & Compliance":
         with tabs[1]:
             st.markdown("### Operational compliance regimes")
             st.caption("PGSA and other operational regimes remain analytically distinct from OFAC, EU, UK, UN and other government sanctions authorities.")
+
+            pgsa_event,pgsa_vessels=canonical_pgsa_vessels_trade()
+            if pgsa_event:
+                st.markdown("#### PGSA vessel list")
+                p1,p2,p3=st.columns(3)
+                p1.metric("Canonical listed vessels",len(pgsa_vessels))
+                p2.metric("Event date",str(pgsa_event.get("start_date") or "")[:10])
+                p3.metric("Status",str(pgsa_event.get("status") or ""))
+                st.markdown(f"**{pgsa_event.get('title','PGSA compliance-list update')}**")
+                if pgsa_event.get("operational_impact"):
+                    st.write(pgsa_event.get("operational_impact"))
+
+                if not pgsa_vessels.empty:
+                    qpg=st.text_input(
+                        "Filter PGSA vessels",
+                        placeholder="vessel name, IMO, flag, type…",
+                        key="trade_pgsa_vessel_filter"
+                    )
+                    view=pgsa_vessels.copy()
+                    if qpg.strip():
+                        mask=view.astype(str).apply(
+                            lambda c:c.str.contains(qpg.strip(),case=False,na=False,regex=False)
+                        ).any(axis=1)
+                        view=view[mask].copy()
+
+                    display_df(
+                        view[[c for c in ["Vessel","IMO","MMSI","Flag","Vessel Type","Status","Relationship"] if c in view.columns]],
+                        520
+                    )
+
+                    if not view.empty:
+                        choices=view.to_dict("records")
+                        pick=st.selectbox(
+                            "Open vessel profile",
+                            range(len(choices)),
+                            format_func=lambda i:
+                                f"{choices[i].get('Vessel','')}"
+                                + (f" · IMO {choices[i].get('IMO')}" if choices[i].get("IMO") else "")
+                                + (f" · {choices[i].get('Flag')}" if choices[i].get("Flag") else ""),
+                            key="trade_pgsa_open_vessel_pick"
+                        )
+                        vessel=choices[pick]
+                        if st.button(
+                            f"Open {vessel.get('Vessel','vessel')} in canonical drill-down",
+                            type="primary",
+                            use_container_width=True,
+                            key=f"trade_pgsa_open_vessel_{vessel.get('Canonical ID')}"
+                        ):
+                            pc_set_drilldown("mobile_asset",vessel.get("Canonical ID"),vessel.get("Vessel"))
+                else:
+                    st.warning("A PGSA canonical event was found, but no linked mobile assets were returned.")
+            else:
+                st.info("No canonical PGSA vessel-list event is currently available.")
+
+            st.markdown("#### Other operational compliance records")
             if compliance_regimes.empty and compliance_designations.empty:
-                st.info("No operational compliance records loaded.")
+                st.caption("No additional operational compliance records loaded.")
             else:
                 if not compliance_regimes.empty:
                     display_df(compliance_regimes,100)
                 if not compliance_designations.empty:
-                    st.markdown("#### Designations / restrictions")
+                    st.markdown("##### Designations / restrictions")
                     display_df(compliance_designations,200)
 
         with tabs[2]:
