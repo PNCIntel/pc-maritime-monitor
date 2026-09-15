@@ -7857,81 +7857,84 @@ def _compact_trade_table(df, preferred_cols, height=260):
     display_df(df[cols],height)
 
 def _recent_commercial_records():
-    """Commercial/deal/investment records for the trade homepage, independent of security events."""
+    """Commercial/deal/contract/investment records for the Trade homepage."""
     frames=[]
+
+    # Current canonical / app-facing locations first.
     sources=[
-        (("Commercial","Infra Deals"),"Infrastructure deal"),
+        (("Transactions","Transactions V125"),"Transaction"),
+        (("Transactions","Infra Deals"),"Infrastructure deal"),
+        (("Defence & Shipbuilding","Contracts"),"Contract"),
+        (("Corporate & Markets","Investments"),"Investment"),
         (("Commercial","Transactions V125"),"Transaction"),
+        (("Commercial","Infra Deals"),"Infrastructure deal"),
         (("Commercial","Contracts"),"Contract"),
-        (("Core Entities","Relationships"),"Corporate relationship"),
-        (("Events & Hazards","Events"),"Commercial event"),
-    ]
-    # Also support legacy sheet keys actually used in the app.
-    alt_keys=[
-        (("Trade & Commercial","Infra Deals"),"Infrastructure deal"),
         (("Trade & Commercial","Transactions V125"),"Transaction"),
+        (("Trade & Commercial","Infra Deals"),"Infrastructure deal"),
         (("Trade & Commercial","Contracts"),"Contract"),
         (("Commercial Activity","Infra Deals"),"Infrastructure deal"),
         (("Commercial Activity","Contracts"),"Contract"),
     ]
-    for key,label in sources+alt_keys:
+
+    seen_keys=set()
+    for key,label_name in sources:
         df=TABLES.get(key,pd.DataFrame())
         if df is None or df.empty:
             continue
+        sig=(key[0],key[1])
+        if sig in seen_keys:
+            continue
+        seen_keys.add(sig)
         x=df.copy()
-        x["_source_type"]=label
+        x["_source_type"]=label_name
+        x["_source_group"]=key[0]
+        x["_source_sheet"]=key[1]
         frames.append(x)
 
-    # Fallback to globally visible contract/deal tables where available.
+    # Fallback: capture any loaded sheet whose name is clearly commercial.
+    wanted={"Infra Deals","Transactions V125","Contracts","Investments","Vessel Transactions"}
     for key,df in TABLES.items():
         if df is None or df.empty:
             continue
         sheet=str(key[1]) if isinstance(key,tuple) and len(key)>1 else str(key)
-        if sheet in {"Infra Deals","Transactions V125","Contracts"}:
-            x=df.copy()
-            x["_source_type"]=sheet
-            frames.append(x)
+        group=str(key[0]) if isinstance(key,tuple) and len(key)>0 else ""
+        if sheet not in wanted:
+            continue
+        sig=(group,sheet)
+        if sig in seen_keys:
+            continue
+        x=df.copy()
+        x["_source_type"]=sheet.rstrip("s")
+        x["_source_group"]=group
+        x["_source_sheet"]=sheet
+        frames.append(x)
+        seen_keys.add(sig)
 
     if not frames:
         return pd.DataFrame()
 
     allc=pd.concat(frames,ignore_index=True,sort=False)
 
+    # Sort using all date spellings used by canonical transaction/contract adapters.
     date_col=_first_existing_col(allc,[
-        "Date","Announcement Date","Transaction Date","Contract Date",
-        "Start Date","Effective Date","as_of","As Of"
+        "Date","Announcement Date","Announced Date","Transaction Date","Contract Date",
+        "Start Date","Effective Date","Completed / Effective Date","as_of","As Of"
     ])
     if date_col:
         allc["_trade_date"]=pd.to_datetime(allc[date_col],errors="coerce")
         allc=allc.sort_values("_trade_date",ascending=False,na_position="last")
 
-    # Suppress clearly security-only event rows from the commercial feed.
-    title_col=_first_existing_col(allc,["Title","Deal","Transaction","Contract","Name","Event"])
-    family_col=_first_existing_col(allc,["Event Family","Category","Type"])
-    if title_col:
-        blob=allc[title_col].astype(str)
-        if family_col:
-            blob=blob+" "+allc[family_col].astype(str)
-        sec=blob.str.contains(
-            "attack|strike|drone|missile|piracy|hijack|seizure|military|war|security incident",
-            case=False,regex=True,na=False
-        )
-        commercial=blob.str.contains(
-            "invest|acqui|terminal|port|contract|concession|expansion|capex|logistics|"
-            "shipping|rail|airport|warehouse|refinery|pipeline|energy|freight|trade",
-            case=False,regex=True,na=False
-        )
-        allc=allc[~sec | commercial]
-
-    dedupe=[]
-    for c in ["Title","Deal","Transaction","Contract","Name","Date","Announcement Date"]:
-        if c in allc.columns:
-            dedupe.append(c)
-    if dedupe:
+    # Remove obvious duplicate projections of the same canonical transaction.
+    dedupe_cols=[c for c in [
+        "Transaction ID","Deal ID","Contract ID","Title","Target / Asset",
+        "Target Company","Customer","Announced Date","Announcement Date"
+    ] if c in allc.columns]
+    if dedupe_cols:
         try:
-            allc=allc.drop_duplicates(subset=dedupe,keep="first")
+            allc=allc.drop_duplicates(subset=dedupe_cols,keep="first")
         except Exception:
             pass
+
     return allc
 
 def _trade_network_snapshot():
@@ -7954,103 +7957,108 @@ def _trade_network_snapshot():
 def _render_trade_pulse():
     records=_recent_commercial_records()
     st.markdown("### Commercial pulse")
-    st.caption("Identified deals, contracts and investment only — no value-only rows without a named company, counterparty or asset.")
+    st.caption("Named contracts, transactions and investment — company/asset first, value second.")
 
     if records.empty:
-        st.info("No recent commercial activity records available.")
+        st.info("No commercial contracts, transactions or investment records are available in the current data layer.")
         return
 
-    def first_col(names):
-        return _first_existing_col(records,names)
-
-    def clean_value(v):
+    def clean(v):
         return _display_text(v)
 
-    def party_from_row(r, direct_names, id_names):
-        # Prefer an actual display name.
-        for c in direct_names:
+    def resolve_id(raw):
+        raw=clean(raw)
+        if not raw:
+            return ""
+        try:
+            resolved=clean(label(raw))
+            return resolved or raw
+        except Exception:
+            return raw
+
+    def first_value(row,names,resolve=False):
+        for c in names:
             if c in records.columns:
-                v=clean_value(r.get(c))
+                v=clean(row.get(c))
                 if v:
-                    return v
-        # Then resolve canonical IDs through the app label index.
-        for c in id_names:
-            if c in records.columns:
-                raw=clean_value(r.get(c))
-                if raw:
-                    resolved=clean_value(label(raw))
-                    if resolved and resolved != raw:
-                        return resolved
+                    return resolve_id(v) if resolve else v
         return ""
 
-    dc=first_col(["Date","Announcement Date","Transaction Date","Contract Date","Start Date","Effective Date","As Of"])
-    tc=first_col(["Title","Deal","Transaction","Contract","Activity","Name","Event"])
-    gc=first_col(["Country","Geography","Region","Location","Market"])
-    vc=first_col(["Value","Deal Value","Transaction Value","Contract Value","CAPEX","Capex","Investment"])
-    sc=first_col(["Status","Deal Status","Contract Status","Transaction Status"])
-    yc=first_col(["Type","Deal Type","Transaction Type","Contract Type","Category"])
-
-    primary_names=[
-        "Buyer","Customer","Client","Awarding Authority","Contracting Authority",
-        "Investor","Acquirer","Company","Company Name","Entity","Operator","Owner"
-    ]
-    primary_ids=[
-        "Buyer ID","Customer ID","Client ID","Investor ID","Acquirer ID",
-        "Company ID","Entity ID","Owner Entity ID","Operator Entity ID","Source Entity ID"
-    ]
-    secondary_names=[
-        "Seller","Supplier","Contractor","Counterparty","Target","Partner",
-        "Awardee","Vendor","Developer","Operator / Network","Target Company"
-    ]
-    secondary_ids=[
-        "Seller ID","Supplier ID","Contractor ID","Counterparty ID","Target ID",
-        "Partner ID","Awardee ID","Target Entity ID","Target Company ID"
-    ]
-    asset_names=[
-        "Asset","Asset Name","Port / Facility","Terminal / Facility","Project",
-        "Programme","Route","Corridor"
-    ]
-
     rows=[]
-    skipped=0
+    hidden=0
 
-    for _,r in records.head(100).iterrows():
-        a=party_from_row(r,primary_names,primary_ids)
-        b=party_from_row(r,secondary_names,secondary_ids)
+    for _,r in records.head(250).iterrows():
+        date=_display_date(first_value(r,[
+            "Date","Announcement Date","Announced Date","Transaction Date",
+            "Contract Date","Start Date","Effective Date","Completed / Effective Date","As Of"
+        ]))
 
-        asset=""
-        for c in asset_names:
-            if c in records.columns:
-                asset=clean_value(r.get(c))
-                if asset:
-                    break
+        activity=first_value(r,[
+            "Title","Deal","Transaction","Contract","Activity","Project",
+            "Programme","Transaction Type","Deal Type","Contract Type","Investment Class",
+            "Name","Event"
+        ])
 
-        activity=clean_value(r.get(tc)) if tc else ""
-        activity_type=clean_value(r.get(yc)) if yc else clean_value(r.get("_source_type"))
-        value=clean_value(r.get(vc)) if vc else ""
-        market=clean_value(r.get(gc)) if gc else ""
-        status=clean_value(r.get(sc)) if sc else ""
-        date=_display_date(r.get(dc)) if dc else ""
+        # Named parties from canonical transaction/deal/contract adapters.
+        primary=first_value(r,[
+            "Buyer","Investor / Buyer","Customer","Client","Awarding Authority",
+            "Contracting Authority","Company","Company Name","Contractor",
+            "Prime / Lead","Investor","Acquirer"
+        ])
+        if not primary:
+            primary=first_value(r,[
+                "Buyer Company ID","Investor / Buyer IDs","Company ID",
+                "Contractor Entity ID","Prime / Lead Entity ID"
+            ],resolve=True)
 
-        # A commercial pulse row must identify WHO/WHAT the money or transaction
-        # belongs to. A bare value/date is not decision-useful.
-        has_identity=bool(a or b or asset)
-        has_activity=bool(activity or activity_type)
+        secondary=first_value(r,[
+            "Seller","Supplier","Awardee","Target Company","Target / Asset",
+            "Counterparty","Partner","Vendor","Developer","Platform / Vessel"
+        ])
+        if not secondary:
+            secondary=first_value(r,[
+                "Target Company ID","Target Asset ID","Seller / Owner IDs",
+                "Counterparty ID","Target Entity ID"
+            ],resolve=True)
 
-        if not has_identity or not has_activity:
-            skipped+=1
+        asset=first_value(r,[
+            "Target / Asset","Asset / Location","Port / Facility","Terminal / Facility",
+            "Project","Programme","Platform / Vessel","Route","Corridor"
+        ])
+
+        value=first_value(r,[
+            "Value","Deal Value","Transaction Value","Contract Value","Enterprise Value",
+            "Reported Value","CAPEX","Capex","Investment","USD Value if Reported"
+        ])
+        currency=first_value(r,["Currency","Contract Currency"])
+        if value and currency and currency.casefold() not in value.casefold():
+            value=f"{currency} {value}"
+
+        market=first_value(r,[
+            "Market","Country / Region","Country","Geography","Region","Location"
+        ])
+        status=first_value(r,[
+            "Status","Deal Status","Contract Status","Transaction Status",
+            "Regulatory Status","Investment Stage"
+        ])
+        typ=first_value(r,[
+            "Transaction Type","Deal Type","Contract Type","Investment Class","_source_type"
+        ])
+
+        # A commercial item is only useful if we can say who/what it concerns.
+        who_parts=[]
+        for x in [primary,secondary]:
+            if x and x not in who_parts:
+                who_parts.append(x)
+        who=" ↔ ".join(who_parts)
+        subject=who or asset
+
+        if not subject:
+            hidden+=1
             continue
 
-        parties=" ↔ ".join(x for x in [a,b] if x)
-        subject=parties or asset
-
         if not activity:
-            if asset and parties:
-                activity=f"{activity_type}: {asset}"
-            elif asset:
-                activity=f"{activity_type}: {asset}"
-            else:
-                activity=activity_type
+            activity=typ or "Commercial activity"
 
         rows.append({
             "Date":date,
@@ -8061,35 +8069,30 @@ def _render_trade_pulse():
             "Status":status,
         })
 
-        if len(rows)>=12:
-            break
-
     if not rows:
         st.info(
-            "No sufficiently identified commercial records are available yet. "
-            "Value-only or date-only rows are intentionally hidden until a company, counterparty or asset is resolved."
+            "Commercial records exist, but none currently resolve to a named company, counterparty or asset. "
+            "The pulse is intentionally hiding value-only rows."
         )
         return
 
     pulse=pd.DataFrame(rows)
-
-    # Prefer the most information-rich records when dates are equal.
+    pulse["_date"]=pd.to_datetime(pulse["Date"],errors="coerce")
     pulse["_quality"]=(
-        pulse["Who / Asset"].ne("").astype(int)*3
+        pulse["Who / Asset"].ne("").astype(int)*4
         + pulse["Activity"].ne("").astype(int)*2
         + pulse["Value / CAPEX"].ne("").astype(int)
         + pulse["Market"].ne("").astype(int)
     )
-    pulse["_date"]=pd.to_datetime(pulse["Date"],errors="coerce")
     pulse=pulse.sort_values(["_date","_quality"],ascending=[False,False],na_position="last")
-    pulse=pulse.drop(columns=["_quality","_date"])
+    pulse=pulse.drop(columns=["_date","_quality"]).drop_duplicates().head(15)
 
-    display_df(pulse,360)
+    display_df(pulse,380)
 
-    if skipped:
+    if hidden:
         st.caption(
-            f"{skipped} incomplete commercial record{'s were' if skipped != 1 else ' was'} hidden "
-            "because no named company/counterparty/asset could be resolved."
+            f"{hidden} incomplete commercial record{'s' if hidden != 1 else ''} hidden because "
+            "no company, counterparty or asset could be resolved."
         )
 
 def _render_recent_additions():

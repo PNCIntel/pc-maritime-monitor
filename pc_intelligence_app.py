@@ -1637,12 +1637,12 @@ elif page == "Alerts & Incidents":
         if options:
             chosen = st.selectbox("Open event", options)
             row = df[df["Title"].astype(str).eq(chosen)].iloc[0]
+            eid = str(row.get("Event ID", row.get("event_id", "")) or "").strip()
             a,b = st.columns([1.2,1])
             with a:
-                event_card(row,key_prefix=f"alerts_detail_{eid}")
+                event_card(row,key_prefix=f"alerts_detail_{eid or 'selected'}")
             with b:
-                eid = str(row.get("Event ID", ""))
-                links = event_asset_links[text_col(event_asset_links,"Event ID").eq(eid)] if not event_asset_links.empty else event_asset_links
+                links = event_asset_links[text_col(event_asset_links,"Event ID").eq(eid)] if (eid and not event_asset_links.empty) else event_asset_links.iloc[0:0] if not event_asset_links.empty else event_asset_links
                 clinks = event_company_links[text_col(event_company_links,"Event ID").eq(eid)] if not event_company_links.empty else event_company_links
                 chains = impact_chains[text_col(impact_chains,"Event ID").eq(eid)] if not impact_chains.empty else impact_chains
                 section("Connected coverage", "Linked entities & impact chain")
