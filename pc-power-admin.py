@@ -3354,6 +3354,14 @@ def _canonical_stage_records(job_id, sections_config):
         for row_no,row in enumerate(df.to_dict("records"),1):
             payload=_payload_from_mapping(row,mapping,target)
 
+            # Skip effectively blank rows after mapping.
+            meaningful={
+                k:v for k,v in (payload or {}).items()
+                if v not in (None,"",[],{})
+            }
+            if not meaningful:
+                continue
+
             # DO NOT manufacture a canonical object ID here.
             # Existing workbook IDs are source/package keys only.
             nk=_natural_key_global(payload,target,row_no)
@@ -3427,9 +3435,55 @@ def _merge_canonical_object(object_type,survivor_id,duplicate_id,notes=""):
         }
     ).execute().data or {})
 
-def _suggest_canonical_table(section,df):
-    target=_suggest_target_table(section,df)
-    return target if target in CANONICAL_LOAD_TABLES else "pc_entities"
+def _canonical_section_target(section,df):
+    """Return (target_table, include_by_default, reason).
+
+    Unknown/reference/instruction sheets must NEVER silently fall back to pc_entities.
+    """
+    s=_norm_field(section)
+
+    explicit={
+        "entities":"pc_entities",
+        "new_entities":"pc_entities",
+        "entity":"pc_entities",
+        "assets":"pc_assets",
+        "new_assets":"pc_assets",
+        "fixed_assets":"pc_assets",
+        "mobile_assets":"pc_mobile_assets",
+        "new_mobile_assets":"pc_mobile_assets",
+        "vessels":"pc_mobile_assets",
+        "events":"pc_events",
+        "event_output_template":"pc_events",
+        "event_links":"pc_event_links",
+        "relationships":"pc_relationships",
+        "transactions":"pc_transactions",
+        "routes":"pc_transport_routes",
+        "transport_routes":"pc_transport_routes",
+        "chokepoints":"pc_chokepoints",
+        "market_instruments":"pc_market_instruments",
+        "trade_flows":"pc_trade_flows",
+        "supply_series":"pc_supply_series",
+        "observations":"pc_observations",
+    }
+    if s in explicit:
+        return explicit[s],True,"recognized data sheet"
+
+    # Reference/template/research-control sheets are deliberately ignored.
+    ignore_tokens=(
+        "readme","instruction","research_query","incident_categories",
+        "priority_geographies","source_hierarchy","database_mapping",
+        "severity_rules","comparison_checklist","unresolved_review",
+        "research_run_summary","lookup","reference","definitions"
+    )
+    if any(tok in s for tok in ignore_tokens):
+        return None,False,"reference/control sheet"
+
+    # For other unknown sheets, allow manual opt-in, but never infer pc_entities.
+    guessed=_suggest_target_table(section,df)
+    if guessed in CANONICAL_LOAD_TABLES:
+        return guessed,False,"unrecognized sheet — verify before including"
+
+    return None,False,"unrecognized sheet — excluded"
 
 
 
@@ -3510,29 +3564,47 @@ elif page=="Canonical Loader":
         if up:
             try:
                 sections,file_hash=_parse_multitable_upload(up)
-                # README/instruction sheets are not data.
-                sections={
-                    k:v for k,v in sections.items()
-                    if _norm_field(k) not in {"readme","instructions","instruction","notes"}
-                    and not v.empty
-                }
-                st.caption(f"{len(sections)} data section(s) · SHA-256 {file_hash[:16]}…")
+                sections={k:v for k,v in sections.items() if not v.empty}
+
+                recognized=[]
+                ignored=[]
+                for section,df in sections.items():
+                    target,include_default,reason=_canonical_section_target(section,df)
+                    if include_default:
+                        recognized.append(section)
+                    else:
+                        ignored.append({"sheet":section,"rows":len(df),"reason":reason})
+
+                st.caption(
+                    f"{len(recognized)} recognized data section(s) · "
+                    f"{len(ignored)} excluded/reference section(s) · SHA-256 {file_hash[:16]}…"
+                )
+                if ignored:
+                    with st.expander("Excluded/reference sheets",expanded=False):
+                        dataframe(ignored)
 
                 configs={}
                 for idx,(section,df) in enumerate(sections.items()):
-                    with st.expander(f"{section} · {len(df):,} rows",expanded=True):
-                        suggested=_suggest_canonical_table(section,df)
+                    suggested,include_default,reason=_canonical_section_target(section,df)
+                    with st.expander(
+                        f"{section} · {len(df):,} rows · {'DATA' if include_default else 'EXCLUDED'}",
+                        expanded=include_default
+                    ):
                         include=st.checkbox(
                             "Include this section",
-                            value=True,
+                            value=include_default,
                             key=f"canon_include_{idx}"
                         )
+                        if suggested is None:
+                            suggested=CANONICAL_LOAD_TABLES[0]
                         target=st.selectbox(
                             "Canonical target",
                             CANONICAL_LOAD_TABLES,
                             index=CANONICAL_LOAD_TABLES.index(suggested),
-                            key=f"canon_target_{idx}"
+                            key=f"canon_target_{idx}",
+                            disabled=not include,
                         )
+                        st.caption(reason)
                         cols=_table_write_columns_live(sb,target)
                         mapping=_auto_column_mapping(list(df.columns),cols)
                         edited=st.data_editor(
@@ -3558,6 +3630,11 @@ elif page=="Canonical Loader":
                 st.caption(
                     "The whole package is staged, then one canonical processor resolves/upserts objects first "
                     "and writes relationships/event links second. There is no manual reconcile/apply sequence."
+                )
+                st.info(
+                    "Only recognized data sheets are included by default. Research queries, source hierarchies, "
+                    "severity rules, checklists and other reference sheets are excluded and will never silently "
+                    "fall back to pc_entities."
                 )
 
                 if st.button(
