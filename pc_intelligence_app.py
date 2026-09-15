@@ -1146,6 +1146,145 @@ def render_regional_event_workspace(region_name):
             show_df(unmapped,["Start Date","Severity","Country / Countries","Location","Title","Operational Impact"],240)
 
 
+
+@st.cache_data(show_spinner=False,ttl=300)
+def canonical_pgsa_vessels():
+    """Return the latest canonical PGSA/compliance event and its linked vessels."""
+    try:
+        sb=pc_db_client(service=True)
+    except Exception:
+        return {},pd.DataFrame()
+
+    event={}
+    candidates=[]
+    # Prefer explicit event type created by the canonical Hormuz package.
+    try:
+        candidates=(sb.table("pc_events")
+                    .select("event_id,title,start_date,event_type,severity,status,location,description,operational_impact,commercial_impact")
+                    .eq("event_type","VESSEL_COMPLIANCE_LIST_UPDATE")
+                    .order("start_date",desc=True)
+                    .limit(5)
+                    .execute().data or [])
+    except Exception:
+        candidates=[]
+
+    if not candidates:
+        for term in ["%PGSA%","%non-compliant%","%77 vessels%"]:
+            try:
+                candidates=(sb.table("pc_events")
+                            .select("event_id,title,start_date,event_type,severity,status,location,description,operational_impact,commercial_impact")
+                            .ilike("title",term)
+                            .order("start_date",desc=True)
+                            .limit(5)
+                            .execute().data or [])
+            except Exception:
+                candidates=[]
+            if candidates:
+                break
+
+    if not candidates:
+        return {},pd.DataFrame()
+
+    event=candidates[0]
+    eid=event.get("event_id")
+    try:
+        links=(sb.table("pc_event_links")
+               .select("linked_id,linked_type,relationship")
+               .eq("event_id",eid)
+               .eq("linked_type","mobile_asset")
+               .limit(500)
+               .execute().data or [])
+    except Exception:
+        links=[]
+
+    ids=[str(x.get("linked_id")) for x in links if x.get("linked_id")]
+    if not ids:
+        return event,pd.DataFrame()
+
+    assets=[]
+    # Query in manageable batches.
+    for i in range(0,len(ids),100):
+        batch=ids[i:i+100]
+        try:
+            assets.extend(
+                sb.table("pc_mobile_assets")
+                  .select("mobile_asset_id,name,imo,mmsi,flag,asset_type,subtype,status,owner_entity_id,operator_entity_id")
+                  .in_("mobile_asset_id",batch)
+                  .execute().data or []
+            )
+        except Exception:
+            for oid in batch:
+                try:
+                    assets.extend(
+                        sb.table("pc_mobile_assets")
+                          .select("mobile_asset_id,name,imo,mmsi,flag,asset_type,subtype,status,owner_entity_id,operator_entity_id")
+                          .eq("mobile_asset_id",oid)
+                          .limit(1)
+                          .execute().data or []
+                    )
+                except Exception:
+                    pass
+
+    rel_by_id={str(x.get("linked_id")):x.get("relationship") for x in links}
+    rows=[]
+    for r in assets:
+        oid=str(r.get("mobile_asset_id") or "")
+        rows.append({
+            "Vessel":r.get("name"),
+            "IMO":r.get("imo"),
+            "MMSI":r.get("mmsi"),
+            "Flag":r.get("flag"),
+            "Vessel Type":r.get("subtype") or r.get("asset_type"),
+            "Status":r.get("status"),
+            "Relationship":rel_by_id.get(oid),
+            "Canonical ID":oid,
+        })
+    df=pd.DataFrame(rows)
+    if not df.empty:
+        df=df.sort_values(["Vessel","IMO"],na_position="last").reset_index(drop=True)
+    return event,df
+
+def _is_compliance_watchlist_event(df):
+    """Events that belong in compliance/watchlists rather than the lead operating picture."""
+    if df is None or df.empty:
+        return pd.Series(dtype=bool)
+    combined=pd.Series("",index=df.index,dtype=str)
+    for c in ["Event Type","Event Family","Title","Description"]:
+        if c in df.columns:
+            combined=combined.str.cat(df[c].fillna("").astype(str),sep=" ")
+    return combined.str.contains(
+        r"PGSA|COMPLIANCE_LIST|WATCHLIST|DESIGNATION|NON[- ]?COMPLIANT|SANCTION",
+        case=False,regex=True,na=False
+    )
+
+def ranked_operating_picture(df,limit=5):
+    """Rank current operational intelligence without allowing bulk watchlists to dominate."""
+    if df is None or df.empty:
+        return df
+    x=df.copy()
+    x["_date"]=pd.to_datetime(x.get("Start Date"),errors="coerce")
+    severity=text_col(x,"Severity").str.casefold()
+    sev_score=severity.map({
+        "critical":40,"severe":35,"high":30,"medium":18,"moderate":15,"low":5
+    }).fillna(10)
+
+    # Recent first, but not merely newest.
+    now=pd.Timestamp.now(tz=None).normalize()
+    age=(now-x["_date"].dt.tz_localize(None)).dt.days
+    recency=(25-age.clip(lower=0,upper=25)).fillna(0)
+
+    impact=pd.Series(0,index=x.index,dtype=float)
+    for c in ["Operational Impact","Trade / Commercial Impact","Description"]:
+        if c in x.columns:
+            present=x[c].fillna("").astype(str).str.strip().ne("")
+            impact += present.astype(int)*3
+
+    compliance=_is_compliance_watchlist_event(x)
+    x["_priority_score"]=sev_score+recency+impact-(compliance.astype(int)*100)
+    x=x.sort_values(["_priority_score","_date"],ascending=[False,False])
+    return x.head(limit)
+
+
 # -----------------------------------------------------------------------------
 # 1. OPERATING PICTURE
 # -----------------------------------------------------------------------------
@@ -1169,13 +1308,19 @@ if page == "Operating Picture":
         section("01 · Immediate", "Priority operating picture", "Recent high-severity or security-relevant events from the shared event layer.")
         latest = hazard_events.copy()
         if not latest.empty and "Start Date" in latest.columns:
-            latest["_date"] = pd.to_datetime(latest["Start Date"], errors="coerce")
-            latest = latest.sort_values("_date", ascending=False)
-            priority = latest[text_col(latest,"Severity").str.contains("High|Severe|Critical", case=False, regex=True, na=False)].head(5)
+            priority=ranked_operating_picture(latest,5)
             if priority.empty:
-                priority = latest.head(5)
+                priority=latest.sort_values("Start Date",ascending=False).head(5)
             for _, r in priority.iterrows():
                 event_card(r)
+
+            # Compliance/watchlists remain visible but do not displace operational incidents.
+            compliance_now=latest[_is_compliance_watchlist_event(latest)].copy()
+            if not compliance_now.empty:
+                with st.expander(f"Compliance / watchlist updates ({len(compliance_now)})",expanded=False):
+                    cols=[c for c in ["Start Date","Severity","Title","Location","Status"] if c in compliance_now.columns]
+                    show_df(compliance_now[cols],260)
+                    st.caption("Full vessel lists and drill-through are under Sanctions & Compliance → PGSA / Compliance.")
         else:
             st.markdown('<div class="pc-empty">No event records available.</div>', unsafe_allow_html=True)
 
@@ -2040,6 +2185,54 @@ elif page == "Sanctions & Compliance":
         show_df(sanctions_designations, ["Designation Date","Target Type","Target Name","IMO / Identifier","Regime / Linkage","Status","Designation Basis / Link","Model Coverage Status"], 470)
     with t2:
         show_df(compliance_regimes, ["Regime","Authority / Sponsor","Jurisdiction / Geography","Regime Type","Status","Effective / Observed From","Enforcement Mechanisms","Legal / Analytical Note"], 230)
+
+        pgsa_event,pgsa_vessels=canonical_pgsa_vessels()
+        if pgsa_event:
+            st.markdown("### PGSA vessel list")
+            p1,p2,p3=st.columns(3)
+            p1.metric("Canonical listed vessels",len(pgsa_vessels))
+            p2.metric("Event date",str(pgsa_event.get("start_date") or "")[:10])
+            p3.metric("Status",str(pgsa_event.get("status") or ""))
+            st.markdown(f"**{pgsa_event.get('title','PGSA compliance-list update')}**")
+            if pgsa_event.get("operational_impact"):
+                st.write(pgsa_event.get("operational_impact"))
+
+            if not pgsa_vessels.empty:
+                q=st.text_input("Filter PGSA vessels",placeholder="vessel name, IMO, flag, type…",key="pgsa_vessel_filter")
+                view=pgsa_vessels.copy()
+                if q.strip():
+                    mask=view.astype(str).apply(
+                        lambda c:c.str.contains(q.strip(),case=False,na=False,regex=False)
+                    ).any(axis=1)
+                    view=view[mask].copy()
+
+                show_df(view,["Vessel","IMO","MMSI","Flag","Vessel Type","Status","Relationship"],560)
+
+                if not view.empty:
+                    choices=view.to_dict("records")
+                    pick=st.selectbox(
+                        "Open vessel profile",
+                        range(len(choices)),
+                        format_func=lambda i:
+                            f"{choices[i].get('Vessel','')}"
+                            + (f" · IMO {choices[i].get('IMO')}" if choices[i].get("IMO") else "")
+                            + (f" · {choices[i].get('Flag')}" if choices[i].get("Flag") else ""),
+                        key="pgsa_open_vessel_pick"
+                    )
+                    vessel=choices[pick]
+                    if st.button(
+                        f"Open {vessel.get('Vessel','vessel')} in canonical drill-down",
+                        type="primary",
+                        use_container_width=True,
+                        key=f"pgsa_open_vessel_{vessel.get('Canonical ID')}"
+                    ):
+                        pc_set_drilldown("mobile_asset",vessel.get("Canonical ID"),vessel.get("Vessel"))
+            else:
+                st.warning("The PGSA canonical event was found, but no linked mobile assets were returned.")
+        else:
+            st.info("No canonical PGSA vessel-list event is currently available.")
+
+        st.markdown("### Compliance registry")
         show_df(compliance_designations, ["Date","Target Type","Target Name","IMO / Identifier","Status","Direct / Indirect","Reason / Basis","Verification","Notes"], 360)
     with t3:
         show_df(compliance_exposure, ["Source Vessel","Counterparty / Related Entity","Related Entity Type","Relationship","Event / Geography","Exposure Type","Status","Confidence","Analytical Note"], 500)

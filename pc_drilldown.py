@@ -204,86 +204,145 @@ def _render_event_linked_objects(event_id,key_prefix="top"):
         st.caption("No canonical event links recorded.")
         return
 
-    rows=[]
+    enriched=[]
     for r in links:
         lt=_type(r.get("linked_type"))
         lid=r.get("linked_id")
         rec=object_record(lt,lid) if lt in OBJECTS else None
-        name=object_label(lt,lid)
-        row={
-            "Type":OBJECTS.get(lt,{}).get("label",lt.replace("_"," ").title()),
-            "Name":name,
-            "Relationship":_clean(r.get("relationship")).replace("_"," ").title(),
-            "Canonical ID":lid,
-        }
-        if lt=="mobile_asset" and rec:
-            row["IMO"]=_clean(rec.get("imo"))
-            row["Flag"]=_clean(rec.get("flag"))
-            row["Vessel Type"]=_clean(rec.get("subtype") or rec.get("asset_type"))
-        elif lt=="entity" and rec:
-            row["Country"]=_clean(rec.get("hq_country") or rec.get("country"))
-            row["Entity Type"]=_clean(rec.get("entity_type"))
-        elif lt=="asset" and rec:
-            row["Country"]=_clean(rec.get("country"))
-            row["Asset Type"]=_clean(rec.get("asset_type"))
-        rows.append(row)
+        enriched.append({
+            "type":lt,
+            "id":lid,
+            "name":object_label(lt,lid),
+            "relationship":_clean(r.get("relationship")).replace("_"," ").title(),
+            "record":rec or {},
+        })
 
-    df=pd.DataFrame(rows)
-    vessel_count=int((df["Type"]=="Mobile Asset / Vessel").sum()) if "Type" in df.columns else 0
+    vessels=[x for x in enriched if x["type"]=="mobile_asset"]
+    others=[x for x in enriched if x["type"]!="mobile_asset"]
+
     c1,c2,c3=st.columns(3)
-    c1.metric("Linked objects",len(df))
-    c2.metric("Linked vessels",vessel_count)
-    c3.metric("Other objects",len(df)-vessel_count)
+    c1.metric("Linked objects",len(enriched))
+    c2.metric("Vessels",len(vessels))
+    c3.metric("Other objects",len(others))
 
-    if vessel_count >= 10:
-        st.info(
-            f"This event has a large linked-vessel set ({vessel_count} vessels). "
-            "The full list is shown below and each vessel can be opened without leaving the drill-down."
-        )
+    if vessels:
+        vessel_tab, other_tab = st.tabs([
+            f"Vessels ({len(vessels)})",
+            f"Other linked objects ({len(others)})",
+        ])
 
-    # Put mobile assets first for list/watchlist events such as the PGSA 77-vessel event.
-    if "Type" in df.columns:
-        df["_sort"]=df["Type"].map({"Mobile Asset / Vessel":0,"Entity / Company":1,"Asset / Infrastructure":2}).fillna(9)
-        df=df.sort_values(["_sort","Name"]).drop(columns=["_sort"])
+        with vessel_tab:
+            vessel_rows=[]
+            for x in vessels:
+                r=x["record"]
+                vessel_rows.append({
+                    "Vessel":x["name"],
+                    "IMO":_clean(r.get("imo")),
+                    "MMSI":_clean(r.get("mmsi")),
+                    "Flag":_clean(r.get("flag")),
+                    "Type":_clean(r.get("subtype") or r.get("asset_type")).replace("_"," ").title(),
+                    "Relationship":x["relationship"],
+                    "Canonical ID":x["id"],
+                })
+            vdf=pd.DataFrame(vessel_rows)
+            q=st.text_input(
+                "Filter vessels",
+                placeholder="name, IMO, flag, type…",
+                key=f"{key_prefix}_vessel_filter_{event_id}",
+            )
+            if q.strip():
+                mask=vdf.astype(str).apply(
+                    lambda col: col.str.contains(q.strip(),case=False,na=False,regex=False)
+                ).any(axis=1)
+                vdf=vdf[mask].copy()
 
-    st.dataframe(df,use_container_width=True,hide_index=True,height=min(620,90+35*min(len(df),15)))
+            st.dataframe(
+                vdf,
+                use_container_width=True,
+                hide_index=True,
+                height=min(650,120+35*min(len(vdf),15)),
+            )
 
-    selectable=[
-        r for r in rows
-        if _type(r.get("Type")) in OBJECTS or r.get("Canonical ID")
-    ]
-    # Build canonical selection from original links so types remain precise.
-    choices=[]
-    for r in links:
-        lt=_type(r.get("linked_type")); lid=r.get("linked_id")
-        if lt in OBJECTS and lid:
-            rec=object_record(lt,lid)
-            choices.append({
-                "type":lt,
-                "id":lid,
-                "name":object_label(lt,lid),
-                "imo":_clean((rec or {}).get("imo")) if lt=="mobile_asset" else "",
-                "relationship":_clean(r.get("relationship")).replace("_"," ").title(),
+            if not vdf.empty:
+                display_records=vdf.to_dict("records")
+                pick=st.selectbox(
+                    "Open vessel",
+                    list(range(len(display_records))),
+                    format_func=lambda i:
+                        f"{display_records[i]['Vessel']}"
+                        + (f" · IMO {display_records[i]['IMO']}" if display_records[i]["IMO"] else "")
+                        + (f" · {display_records[i]['Flag']}" if display_records[i]["Flag"] else ""),
+                    key=f"{key_prefix}_vessel_pick_{event_id}",
+                )
+                selected=display_records[pick]
+                if st.button(
+                    f"Open {selected['Vessel']} vessel profile",
+                    key=f"{key_prefix}_vessel_open_{event_id}_{selected['Canonical ID']}",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    set_drilldown("mobile_asset",selected["Canonical ID"],selected["Vessel"])
+
+        with other_tab:
+            if not others:
+                st.caption("No non-vessel objects linked to this event.")
+            else:
+                rows=[]
+                for x in others:
+                    r=x["record"]
+                    rows.append({
+                        "Type":OBJECTS.get(x["type"],{}).get("label",x["type"].replace("_"," ").title()),
+                        "Name":x["name"],
+                        "Relationship":x["relationship"],
+                        "Country":_clean(r.get("hq_country") or r.get("country")),
+                        "Canonical ID":x["id"],
+                    })
+                odf=pd.DataFrame(rows)
+                st.dataframe(odf,use_container_width=True,hide_index=True)
+                choices=[x for x in others if x["type"] in OBJECTS and x["id"]]
+                if choices:
+                    pick=st.selectbox(
+                        "Open other linked object",
+                        list(range(len(choices))),
+                        format_func=lambda i:f"{choices[i]['name']} · {choices[i]['relationship']}",
+                        key=f"{key_prefix}_other_pick_{event_id}",
+                    )
+                    selected=choices[pick]
+                    if st.button(
+                        f"Open {selected['name']}",
+                        key=f"{key_prefix}_other_open_{event_id}_{selected['id']}",
+                        use_container_width=True,
+                    ):
+                        set_drilldown(selected["type"],selected["id"],selected["name"])
+    else:
+        # No vessels: render the normal linked-object list.
+        rows=[]
+        for x in others:
+            r=x["record"]
+            rows.append({
+                "Type":OBJECTS.get(x["type"],{}).get("label",x["type"].replace("_"," ").title()),
+                "Name":x["name"],
+                "Relationship":x["relationship"],
+                "Country":_clean(r.get("hq_country") or r.get("country")),
+                "Canonical ID":x["id"],
             })
+        st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+        choices=[x for x in others if x["type"] in OBJECTS and x["id"]]
+        if choices:
+            pick=st.selectbox(
+                "Open linked object",
+                list(range(len(choices))),
+                format_func=lambda i:f"{choices[i]['name']} · {choices[i]['relationship']}",
+                key=f"{key_prefix}_linked_object_pick_{event_id}",
+            )
+            selected=choices[pick]
+            if st.button(
+                f"Open {selected['name']}",
+                key=f"{key_prefix}_linked_object_open_{event_id}_{selected['id']}",
+                use_container_width=True,
+            ):
+                set_drilldown(selected["type"],selected["id"],selected["name"])
 
-    if choices:
-        def _choice_label(i):
-            x=choices[i]
-            extra=f" · IMO {x['imo']}" if x.get("imo") else ""
-            return f"{x['name']}{extra} · {x['relationship']}"
-        pick=st.selectbox(
-            "Open a linked object",
-            list(range(len(choices))),
-            format_func=_choice_label,
-            key=f"{key_prefix}_linked_object_pick_{event_id}",
-        )
-        picked=choices[pick]
-        if st.button(
-            f"Open {picked['name']}",
-            key=f"{key_prefix}_linked_object_open_{event_id}_{picked['type']}_{picked['id']}",
-            use_container_width=True,
-        ):
-            set_drilldown(picked["type"],picked["id"],picked["name"])
 
 def _render_events(typ,oid,key_prefix="top"):
     if typ=="event":
@@ -333,7 +392,7 @@ def render_drilldown(object_type,object_id,key_prefix="top"):
         st.warning(f"No canonical {typ} record found for {object_id}.")
         return
 
-    third_label="Linked Objects" if typ=="event" else "Events & Intelligence"
+    third_label="Linked Vessels & Objects" if typ=="event" else "Events & Intelligence"
     tabs=st.tabs(["Overview","Relationships",third_label,"Raw / Provenance"])
     with tabs[0]:
         _render_overview(rec,typ)
