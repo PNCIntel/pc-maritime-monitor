@@ -312,14 +312,14 @@ def section(kicker, title, copy=None):
         st.markdown(f'<div class="pc-section-copy">{copy}</div>', unsafe_allow_html=True)
 
 
-def event_card(row):
+def event_card(row,key_prefix="event"):
     title = clean_display_text(row.get("Title", "Untitled event"))
-    date = row.get("Start Date", row.get("Date", ""))
-    etype = row.get("Event Type", row.get("Event Family", "Event"))
+    date = clean_display_text(row.get("Start Date", row.get("Date", "")))
+    etype = clean_display_text(row.get("Event Type", row.get("Event Family", "Event")))
     sev = clean_display_text(row.get("Severity", ""))
-    loc = row.get("Location", row.get("Country / Countries", ""))
-    body = row.get("Description", "")
-    impact = row.get("Operational Impact", "")
+    loc = clean_display_text(row.get("Location", row.get("Country / Countries", "")))
+    body = clean_display_text(row.get("Description", ""))
+    impact = clean_display_text(row.get("Operational Impact", ""))
     st.markdown(
         f'''<div class="pc-card pc-card-priority">
         <div class="pc-card-meta">{date} · {etype} · {sev} · {loc}</div>
@@ -330,14 +330,13 @@ def event_card(row):
         unsafe_allow_html=True,
     )
 
-
     eid = str(row.get("Event ID", row.get("event_id", "")) or "").strip()
     if eid:
         pc_drilldown_button(
             "event",
             eid,
             "Open full event context",
-            key=f"event_card_dd_{eid}",
+            key=f"{key_prefix}_event_card_dd_{eid}",
             use_container_width=True,
         )
 
@@ -1299,7 +1298,7 @@ def render_regional_event_workspace(region_name):
 
     left,right=st.columns([1.15,1])
     with left:
-        event_card(row)
+        event_card(row,key_prefix=f"event_detail_{eid}")
         locs=event_locations[text_col(event_locations,"Event ID").eq(eid)] if not event_locations.empty else event_locations
         if not locs.empty:
             st.markdown("**Mapped location detail**")
@@ -1484,13 +1483,20 @@ if page == "Operating Picture":
         cols=st.columns(3)
         for i,(_,r) in enumerate(latest_non_compliance.head(3).iterrows()):
             with cols[i]:
-                event_card(r)
+                event_card(r,key_prefix=f"latest_{i}")
         if len(latest_non_compliance)>3:
             with st.expander(f"More latest intelligence ({min(len(latest_non_compliance)-3,12)})",expanded=False):
-                for _,r in latest_non_compliance.iloc[3:15].iterrows():
-                    event_card(r)
+                for j,(_,r) in enumerate(latest_non_compliance.iloc[3:15].iterrows(),start=3):
+                    event_card(r,key_prefix=f"latest_more_{j}")
     else:
         st.markdown('<div class="pc-empty">No event records available.</div>', unsafe_allow_html=True)
+
+    # When the user explicitly opens an event/object, show the complete canonical
+    # context immediately here. The close control in the drill-down returns to
+    # the operating picture without hiding the rest of the page.
+    if st.session_state.get("pc_drilldown_id"):
+        st.markdown("### Selected intelligence context")
+        pc_render_active_drilldown(location="top",expanded=True)
 
     c1,c2,c3,c4,c5 = st.columns(5)
     c1.metric("Active Monitors", len(active_mon))
@@ -1504,8 +1510,8 @@ if page == "Operating Picture":
         section("01 · Immediate", "Priority operating picture", "What matters now — ranked by severity, recency and operational consequence.")
         priority=ranked_operating_picture(hazard_events.copy(),5) if not hazard_events.empty else pd.DataFrame()
         if not priority.empty:
-            for _,r in priority.iterrows():
-                event_card(r)
+            for j,(_,r) in enumerate(priority.iterrows()):
+                event_card(r,key_prefix=f"priority_{j}")
         else:
             st.markdown('<div class="pc-empty">No priority events available.</div>', unsafe_allow_html=True)
 
@@ -1525,6 +1531,45 @@ if page == "Operating Picture":
         else:
             st.markdown('<div class="pc-empty">No active monitoring records.</div>', unsafe_allow_html=True)
 
+    section("03 · Theatre picture", "Key theatres & corridors", "Where current security pressure is concentrating across the trade network.")
+    theatre_defs=[
+        ("Strait of Hormuz",["hormuz","gulf of oman","musandam","khasab"]),
+        ("Red Sea / Bab el-Mandeb",["red sea","bab el-mandeb","hodeidah","hudaydah","yemen"]),
+        ("Black Sea",["black sea","odesa","odessa","novorossiysk","crimea","kerch"]),
+        ("Panama Canal",["panama canal","panama"]),
+        ("Baltic",["baltic","gulf of finland","gdansk","klaipeda"]),
+        ("Asia-Pacific",["south china sea","taiwan strait","malacca","singapore","philippines"]),
+    ]
+    theatre_rows=[]
+    for theatre,terms in theatre_defs:
+        if hazard_events.empty:
+            hits=pd.DataFrame()
+        else:
+            hits=hazard_events[contains_any(
+                hazard_events,
+                ["Country / Countries","Location","Title","Description","Operational Impact","Trade / Commercial Impact"],
+                terms
+            )].copy()
+        high=0
+        latest_title=""
+        latest_date=""
+        if not hits.empty:
+            sev=text_col(hits,"Severity")
+            high=int(sev.str.contains("High|Severe|Critical",case=False,regex=True,na=False).sum())
+            if "Start Date" in hits.columns:
+                hits["_d"]=pd.to_datetime(hits["Start Date"],errors="coerce")
+                hits=hits.sort_values("_d",ascending=False,na_position="last")
+            latest_title=clean_display_text(hits.iloc[0].get("Title",""))
+            latest_date=clean_display_text(hits.iloc[0].get("Start Date",""))
+        theatre_rows.append({
+            "Theatre / corridor":theatre,
+            "Current events":len(hits),
+            "Critical / high":high,
+            "Latest":latest_date,
+            "Latest development":latest_title,
+        })
+    show_df(pd.DataFrame(theatre_rows),["Theatre / corridor","Current events","Critical / high","Latest","Latest development"],300)
+
     section("02 · Situational", "What changed", "Recent developments that materially alter the operating environment.")
     if not latest.empty:
         changed=latest[~_is_compliance_watchlist_event(latest)].head(8).copy()
@@ -1540,9 +1585,12 @@ if page == "Operating Picture":
             show_df(compliance_now,cols,260)
             st.caption("Full vessel lists and drill-through are under Sanctions & Compliance → PGSA / Compliance.")
 
-    if st.session_state.get("pc_drilldown_id"):
-        with st.expander("Selected canonical context",expanded=False):
-            pc_render_active_drilldown(location="top",expanded=False)
+    section("05 · Judgement", "What would change the picture?", "Explicit triggers from active monitoring that would materially alter current assessments.")
+    if not active_mon.empty:
+        trig_cols=[c for c in ["Geography","Title","Time Horizon","Trigger / Threshold","Next Review / Milestone","Confidence"] if c in active_mon.columns]
+        show_df(active_mon.head(10),trig_cols,320)
+    else:
+        st.caption("No active monitoring triggers are currently structured.")
 
     section("Coverage", "Security domains in the current model")
     st.markdown(
@@ -1591,7 +1639,7 @@ elif page == "Alerts & Incidents":
             row = df[df["Title"].astype(str).eq(chosen)].iloc[0]
             a,b = st.columns([1.2,1])
             with a:
-                event_card(row)
+                event_card(row,key_prefix=f"alerts_detail_{eid}")
             with b:
                 eid = str(row.get("Event ID", ""))
                 links = event_asset_links[text_col(event_asset_links,"Event ID").eq(eid)] if not event_asset_links.empty else event_asset_links
@@ -1954,7 +2002,7 @@ elif page == "Maritime Security":
             eid = str(row.get("Event ID","") or "")
             left,right = st.columns([1.15,1])
             with left:
-                event_card(row)
+                event_card(row,key_prefix=f"marsec_detail_{eid}")
             with right:
                 section("Connected coverage","Vessels, assets, companies & systems")
                 render_connected_context(eid)
@@ -2257,7 +2305,7 @@ elif page == "Ports & Infrastructure":
 
             left,right = st.columns([1.15,1])
             with left:
-                event_card(row)
+                event_card(row,key_prefix=f"ports_detail_{eid}")
             with right:
                 section("Connected coverage","Ports, terminals, companies, systems & impact chain")
                 render_connected_context(eid)
