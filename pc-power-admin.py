@@ -18,7 +18,7 @@ except Exception:
     ai_research=None
     ai_configured=lambda: False
 
-st.set_page_config(page_title="P&C Workflow Console",page_icon="◈",layout="wide",initial_sidebar_state="expanded")
+st.set_page_config(page_title="P&C Canonical Admin",page_icon="◈",layout="wide",initial_sidebar_state="expanded")
 
 # Match the Trade/Intelligence apps: dark by default, with a persistent light/dark toggle.
 appearance = st.session_state.get("pc_admin_appearance", "Dark")
@@ -69,8 +69,8 @@ else:
 
 sb=service_client()
 st.sidebar.markdown("<div class='pc-k'>Power & Corridors</div>",unsafe_allow_html=True)
-st.sidebar.markdown("## Workflow Console")
-st.sidebar.caption("Seven focused workflows. Create, ingest, reconcile and review without the old maintenance clutter.")
+st.sidebar.markdown("## Canonical Admin")
+st.sidebar.caption("Resolve or create canonical objects first. Then write relationships and event links. Review only genuine ambiguity.")
 st.sidebar.radio(
     "Appearance",
     ["Dark","Light"],
@@ -78,12 +78,13 @@ st.sidebar.radio(
     key="pc_admin_appearance",
 )
 NAV = {
-    "Home": "Workflow Center",
+    "Home": "Canonical Home",
+    "Canonical Loader": "Canonical Loader",
+    "Identity Hygiene": "Identity Hygiene",
+    "Review Queue": "Canonical Review",
     "AI Research": "AI Research Workflow",
-    "Bulk Load": "Multi-Table Bulk Loader",
     "Documents": "Document Loader",
     "Email & Distribution": "Distribution Lists",
-    "Reconcile & Review": "Reconciliation Center",
     "System": "Governance & Quality",
 }
 PAGES=list(NAV.keys())
@@ -1416,7 +1417,7 @@ def _table_exists(name):
 
 selected_page=st.sidebar.radio("",PAGES,label_visibility="collapsed")
 page=NAV[selected_page]
-st.sidebar.caption("Research → stage → auto-resolve → review exceptions → apply")
+st.sidebar.caption("Ingest → resolve/upsert objects → link graph → QA")
 
 if sb is None:
     st.warning("Supabase service connection is not configured yet. The app is valid and can be deployed now; add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to secrets before using database actions.")
@@ -3220,7 +3221,564 @@ def _resolve_missing_parent_dependencies(job_id):
     result["child_apply"]=child_apply
     return result
 
-if page=="Dashboard":
+
+# ===========================================================================
+# Canonical ingestion v2 helpers
+# ===========================================================================
+
+CANONICAL_OBJECT_TABLES = {
+    "pc_entities",
+    "pc_assets",
+    "pc_mobile_assets",
+    "pc_events",
+}
+CANONICAL_EDGE_TABLES = {
+    "pc_relationships",
+    "pc_event_links",
+}
+CANONICAL_DIRECT_TABLES = {
+    "pc_transactions",
+    "pc_transport_routes",
+    "pc_chokepoints",
+    "pc_market_instruments",
+    "pc_trade_flows",
+    "pc_supply_series",
+    "pc_observations",
+}
+CANONICAL_LOAD_TABLES = sorted(
+    CANONICAL_OBJECT_TABLES | CANONICAL_EDGE_TABLES | CANONICAL_DIRECT_TABLES
+)
+
+CANONICAL_LOGICAL_TYPE = {
+    "pc_entities":"entity",
+    "pc_assets":"asset",
+    "pc_mobile_assets":"mobile_asset",
+    "pc_events":"event",
+    "pc_relationships":"relationship",
+    "pc_event_links":"event_link",
+    "pc_transactions":"transaction",
+    "pc_transport_routes":"route",
+    "pc_chokepoints":"chokepoint",
+    "pc_market_instruments":"market_instrument",
+    "pc_trade_flows":"trade_flow",
+    "pc_supply_series":"supply_series",
+    "pc_observations":"observation",
+}
+
+def _canonical_processor_available():
+    if not sb:
+        return False
+    try:
+        # Calling with a random UUID is not safe because it mutates the job if present;
+        # use pg function presence indirectly through a harmless RPC failure check only
+        # when needed in the UI. The loader itself reports a clear RPC error.
+        sb.table("pc_ingestion_jobs").select("ingestion_job_id").limit(1).execute()
+        return True
+    except Exception:
+        return False
+
+def _canonical_job_summary(job_id):
+    rows=[]
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,resolution_status,review_status,resolution_method,resolved_entity_id,validation_status")
+              .eq("ingestion_job_id",str(job_id))
+              .limit(5000)
+              .execute().data or [])
+    except Exception:
+        return {"total":0,"applied":0,"review":0,"invalid":0,"broken":0,"by_table":[]}, []
+
+    total=len(rows)
+    applied=sum(1 for r in rows if str(r.get("review_status") or "").lower()=="applied")
+    review=sum(1 for r in rows if str(r.get("review_status") or "").lower()!="applied")
+    invalid=sum(1 for r in rows if str(r.get("resolution_status") or "").upper()=="INVALID")
+    broken=sum(1 for r in rows if str(r.get("resolution_status") or "").upper()=="BROKEN_REFERENCE")
+
+    counts={}
+    for r in rows:
+        key=(r.get("target_table") or "unknown",
+             r.get("resolution_status") or "PENDING",
+             r.get("review_status") or "pending")
+        counts[key]=counts.get(key,0)+1
+    by_table=[
+        {"target_table":k[0],"resolution_status":k[1],"review_status":k[2],"count":v}
+        for k,v in sorted(counts.items())
+    ]
+    return {
+        "total":total,
+        "applied":applied,
+        "review":review,
+        "invalid":invalid,
+        "broken":broken,
+        "complete": total>0 and applied==total,
+    }, by_table
+
+def _canonical_process_job(job_id):
+    """Single database entry point for the new ingestion architecture."""
+    result=(sb.rpc(
+        "pc_process_ingestion_job_v5",
+        {"p_ingestion_job_id":str(job_id)}
+    ).execute().data or {})
+    return result
+
+def _canonical_create_job(title, source_scope):
+    payload={
+        "job_type":"BATCH_IMPORT",
+        "title":title,
+        "source_scope":_jsonable(source_scope),
+        "status":"running",
+        "started_at":pd.Timestamp.utcnow().isoformat(),
+        "stats":{"architecture":"canonical_upsert_v2"},
+    }
+    return sb.table("pc_ingestion_jobs").insert(payload).execute().data[0]
+
+def _canonical_stage_records(job_id, sections_config):
+    """Stage a whole workbook as one package.
+
+    Workbook IDs remain package-local source keys. The database resolver decides
+    whether each object maps to an existing canonical ID or requires creation.
+    """
+    staged=[]
+    table_counts={}
+    skipped_sections=[]
+
+    for section,cfg in sections_config.items():
+        if not cfg.get("include",True):
+            skipped_sections.append(section)
+            continue
+        target=cfg["target"]
+        df=cfg["df"]
+        mapping=cfg["mapping"]
+        logical=CANONICAL_LOGICAL_TYPE.get(target,target)
+
+        for row_no,row in enumerate(df.to_dict("records"),1):
+            payload=_payload_from_mapping(row,mapping,target)
+
+            # DO NOT manufacture a canonical object ID here.
+            # Existing workbook IDs are source/package keys only.
+            nk=_natural_key_global(payload,target,row_no)
+
+            staged.append({
+                "ingestion_job_id":str(job_id),
+                "target_entity_type":logical,
+                "target_table":target,
+                "source_record_key":f"{section}:{nk}",
+                "natural_key":str(nk),
+                "action":"UPSERT",
+                "payload":_jsonable(payload),
+                "resolution_status":"PENDING",
+                "validation_status":"pending",
+                "review_status":"pending",
+            })
+            table_counts[target]=table_counts.get(target,0)+1
+
+    for i in range(0,len(staged),250):
+        sb.table("pc_staged_records").insert(_jsonable(staged[i:i+250])).execute()
+
+    return {
+        "rows":len(staged),
+        "tables":table_counts,
+        "skipped_sections":skipped_sections,
+    }
+
+def _canonical_jobs(limit=100):
+    try:
+        return (sb.table("pc_ingestion_jobs")
+                .select("ingestion_job_id,job_type,title,status,stats,error_text,source_scope,created_at,started_at,completed_at")
+                .order("created_at",desc=True)
+                .limit(limit)
+                .execute().data or [])
+    except Exception:
+        return []
+
+def _identity_hygiene_view(view_name,limit=500):
+    try:
+        return sb.table(view_name).select("*").limit(limit).execute().data or []
+    except Exception as exc:
+        return [{"error":str(exc),"view":view_name}]
+
+def _pre_reload_gate():
+    try:
+        return sb.table("pc_v_pre_reload_gate").select("*").execute().data or []
+    except Exception:
+        return []
+
+def _canonical_review_rows(job_id=None,limit=1000):
+    try:
+        q=(sb.table("pc_staged_records")
+           .select("staged_record_id,ingestion_job_id,target_table,natural_key,resolution_status,resolution_method,candidate_count,resolved_entity_id,review_status,validation_status,payload,created_at")
+           .neq("review_status","applied")
+           .limit(limit))
+        if job_id:
+            q=q.eq("ingestion_job_id",str(job_id))
+        return q.execute().data or []
+    except Exception:
+        return []
+
+def _merge_canonical_object(object_type,survivor_id,duplicate_id,notes=""):
+    return (sb.rpc(
+        "pc_merge_canonical_object",
+        {
+            "p_object_type":object_type,
+            "p_survivor_id":str(survivor_id).strip(),
+            "p_duplicate_id":str(duplicate_id).strip(),
+            "p_delete_duplicate":True,
+            "p_notes":notes or "Confirmed duplicate merged in Power Admin",
+        }
+    ).execute().data or {})
+
+def _suggest_canonical_table(section,df):
+    target=_suggest_target_table(section,df)
+    return target if target in CANONICAL_LOAD_TABLES else "pc_entities"
+
+
+
+if page=="Canonical Home":
+    title(
+        "Canonical admin",
+        "The normal path is now simple: ingest package → resolve/upsert canonical objects → write relationships/event links → QA."
+    )
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        gate=_pre_reload_gate()
+        blocking=sum(int(x.get("issue_count") or 0) for x in gate if x.get("severity")=="BLOCK")
+        jobs=_canonical_jobs(100)
+        review_jobs=[j for j in jobs if str(j.get("status") or "").lower()=="review"]
+
+        c1,c2,c3,c4=st.columns(4)
+        try: c1.metric("Entities",count_rows(sb,"pc_entities"))
+        except Exception: c1.metric("Entities","—")
+        try: c2.metric("Assets",count_rows(sb,"pc_assets"))
+        except Exception: c2.metric("Assets","—")
+        try: c3.metric("Mobile assets",count_rows(sb,"pc_mobile_assets"))
+        except Exception: c3.metric("Mobile assets","—")
+        c4.metric("Jobs needing review",len(review_jobs))
+
+        if gate:
+            if blocking:
+                st.warning(
+                    f"Canonical hygiene gate currently has {blocking} blocking issue(s). "
+                    "Clean duplicate strong identifiers/fixed assets before the large workbook reload."
+                )
+            else:
+                st.success("No blocking canonical-hygiene checks are currently reported.")
+            dataframe(gate)
+        else:
+            st.info(
+                "Pre-reload gate is not installed yet. Run migrations 043 v2, 044, 041 v2 and 045."
+            )
+
+        st.markdown("### Normal operating model")
+        st.markdown(
+            """
+            **1. Objects first.** Companies, fixed assets, vessels/mobile assets and events are resolved against the canonical registry.
+
+            **2. Existing means upsert.** Existing canonical objects are enriched; they are not recreated.
+
+            **3. New means create once.** A new canonical ID is generated only when the object is genuinely absent and has enough identity evidence.
+
+            **4. Graph second.** `pc_relationships` and `pc_event_links` are written only after their endpoints exist canonically.
+
+            **5. Review is exceptional.** Only real ambiguity, insufficient identity, or an unsupported endpoint should remain for an analyst.
+            """
+        )
+
+elif page=="Canonical Loader":
+    title(
+        "Canonical loader",
+        "Load a workbook as one package. Workbook IDs are package-local keys; the database decides the canonical identity."
+    )
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        gate=_pre_reload_gate()
+        blockers=[x for x in gate if x.get("severity")=="BLOCK" and int(x.get("issue_count") or 0)>0]
+        if blockers:
+            st.warning(
+                "The canonical registry currently has blocking hygiene issues. "
+                "Small test packages can still be run, but clean these before large reloads."
+            )
+            dataframe(blockers)
+
+        up=st.file_uploader(
+            "Workbook / CSV / JSON",
+            type=["xlsx","xls","csv","json"],
+            key="canonical_loader_upload"
+        )
+
+        if up:
+            try:
+                sections,file_hash=_parse_multitable_upload(up)
+                # README/instruction sheets are not data.
+                sections={
+                    k:v for k,v in sections.items()
+                    if _norm_field(k) not in {"readme","instructions","instruction","notes"}
+                    and not v.empty
+                }
+                st.caption(f"{len(sections)} data section(s) · SHA-256 {file_hash[:16]}…")
+
+                configs={}
+                for idx,(section,df) in enumerate(sections.items()):
+                    with st.expander(f"{section} · {len(df):,} rows",expanded=True):
+                        suggested=_suggest_canonical_table(section,df)
+                        include=st.checkbox(
+                            "Include this section",
+                            value=True,
+                            key=f"canon_include_{idx}"
+                        )
+                        target=st.selectbox(
+                            "Canonical target",
+                            CANONICAL_LOAD_TABLES,
+                            index=CANONICAL_LOAD_TABLES.index(suggested),
+                            key=f"canon_target_{idx}"
+                        )
+                        cols=_table_write_columns_live(sb,target)
+                        mapping=_auto_column_mapping(list(df.columns),cols)
+                        edited=st.data_editor(
+                            mapping,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Include":st.column_config.CheckboxColumn(),
+                                "Canonical Field":st.column_config.SelectboxColumn(options=[""]+cols),
+                            },
+                            key=f"canon_map_{idx}"
+                        )
+                        st.caption("Preview")
+                        dataframe(df.head(6).to_dict("records"))
+                        configs[section]={
+                            "include":include,
+                            "target":target,
+                            "df":df,
+                            "mapping":edited,
+                        }
+
+                st.markdown("### What happens when you load")
+                st.caption(
+                    "The whole package is staged, then one canonical processor resolves/upserts objects first "
+                    "and writes relationships/event links second. There is no manual reconcile/apply sequence."
+                )
+
+                if st.button(
+                    "▶ Load and process canonical package",
+                    type="primary",
+                    use_container_width=True,
+                    key="canonical_load_process"
+                ):
+                    with st.status("Loading package into the canonical ingestion engine…",expanded=True) as status:
+                        job=_canonical_create_job(
+                            up.name,
+                            {
+                                "architecture":"canonical_upsert_v2",
+                                "file_sha256":file_hash,
+                                "sections":{
+                                    k:{
+                                        "included":bool(v["include"]),
+                                        "target_table":v["target"],
+                                        "rows":len(v["df"]),
+                                    }
+                                    for k,v in configs.items()
+                                },
+                            }
+                        )
+                        jid=job["ingestion_job_id"]
+                        staged=_canonical_stage_records(jid,configs)
+                        st.write("Staged package",staged)
+
+                        try:
+                            result=_canonical_process_job(jid)
+                            st.write("Canonical processor",result)
+                            summary,by_table=_canonical_job_summary(jid)
+
+                            if summary.get("complete"):
+                                status.update(
+                                    label=f"Package complete — {summary['applied']}/{summary['total']} records applied",
+                                    state="complete",
+                                    expanded=False
+                                )
+                            else:
+                                status.update(
+                                    label=(
+                                        f"Package processed — {summary['applied']}/{summary['total']} applied; "
+                                        f"{summary['review']} require review"
+                                    ),
+                                    state="complete",
+                                    expanded=True
+                                )
+                            st.session_state["canonical_last_job"]=str(jid)
+                            st.session_state[f"canonical_result_{jid}"]=result
+                        except Exception as exc:
+                            sb.table("pc_ingestion_jobs").update({
+                                "status":"failed",
+                                "completed_at":pd.Timestamp.utcnow().isoformat(),
+                                "error_text":str(exc),
+                            }).eq("ingestion_job_id",str(jid)).execute()
+                            status.update(label="Canonical processor failed",state="error",expanded=True)
+                            st.exception(exc)
+
+                last=st.session_state.get("canonical_last_job")
+                if last:
+                    st.markdown("### Last package")
+                    summ,by_table=_canonical_job_summary(last)
+                    m1,m2,m3,m4=st.columns(4)
+                    m1.metric("Total",summ.get("total",0))
+                    m2.metric("Applied",summ.get("applied",0))
+                    m3.metric("Review",summ.get("review",0))
+                    m4.metric("Broken refs",summ.get("broken",0))
+                    dataframe(by_table)
+
+            except Exception as exc:
+                st.exception(exc)
+
+elif page=="Identity Hygiene":
+    title(
+        "Identity hygiene",
+        "Audit canonical identity before high-volume reloads. Merge confirmed duplicates; keep spelling variants as aliases."
+    )
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        gate=_pre_reload_gate()
+        if gate:
+            st.markdown("### Pre-reload gate")
+            dataframe(gate)
+        else:
+            st.warning("Migration 045 is not installed or the gate view is unavailable.")
+
+        tabs=st.tabs([
+            "Fixed assets / ports",
+            "Entities",
+            "Vessels / mobile assets",
+            "Merge confirmed duplicate",
+            "Merge audit",
+        ])
+
+        with tabs[0]:
+            st.markdown("#### Exact duplicate asset groups")
+            dataframe(_identity_hygiene_view("pc_v_duplicate_asset_candidates",500))
+            st.markdown("#### Fuzzy asset-name candidates")
+            st.caption("Use this to find spelling variants such as Zayed / Zayad Port. Fuzzy matches are never auto-merged.")
+            fuzzy=_identity_hygiene_view("pc_v_fuzzy_asset_name_candidates",1000)
+            search=st.text_input("Filter asset-name candidates",value="zay",key="hygiene_asset_filter")
+            if search.strip() and fuzzy and "error" not in fuzzy[0]:
+                q=search.casefold()
+                fuzzy=[
+                    r for r in fuzzy
+                    if q in str(r.get("name_a") or "").casefold()
+                    or q in str(r.get("name_b") or "").casefold()
+                ]
+            dataframe(fuzzy)
+
+        with tabs[1]:
+            dataframe(_identity_hygiene_view("pc_v_duplicate_entity_candidates",500))
+
+        with tabs[2]:
+            st.markdown("#### Duplicate strong identifiers")
+            dataframe(_identity_hygiene_view("pc_v_duplicate_mobile_asset_identifiers",500))
+            st.markdown("#### Duplicate normalized mobile-asset names")
+            dataframe(_identity_hygiene_view("pc_v_duplicate_mobile_asset_candidates",500))
+            st.caption("Canonical maritime vessel display names are uppercase; aliases preserve incoming/source variants.")
+
+        with tabs[3]:
+            st.warning(
+                "Merge only after confirming both IDs represent the same real-world object. "
+                "The duplicate ID will be deleted after graph references are rewritten."
+            )
+            obj_type=st.selectbox(
+                "Object type",
+                ["asset","entity","mobile_asset","event"],
+                key="merge_object_type"
+            )
+            survivor=st.text_input("Survivor canonical ID",key="merge_survivor")
+            duplicate=st.text_input("Duplicate canonical ID",key="merge_duplicate")
+            notes=st.text_area("Merge note",key="merge_note")
+            confirm=st.checkbox(
+                "I have confirmed these are the same real-world object",
+                key="merge_confirm"
+            )
+            if st.button(
+                "Merge duplicate into survivor",
+                type="primary",
+                disabled=not(confirm and survivor.strip() and duplicate.strip()),
+                use_container_width=True
+            ):
+                try:
+                    result=_merge_canonical_object(obj_type,survivor,duplicate,notes)
+                    st.success("Canonical merge completed.")
+                    st.json(result)
+                except Exception as exc:
+                    st.exception(exc)
+
+        with tabs[4]:
+            try:
+                rows=(sb.table("pc_canonical_merge_audit")
+                      .select("*")
+                      .order("merged_at",desc=True)
+                      .limit(500)
+                      .execute().data or [])
+            except Exception as exc:
+                rows=[{"error":str(exc)}]
+            dataframe(rows)
+
+elif page=="Canonical Review":
+    title(
+        "Canonical review queue",
+        "Only records the canonical processor could not resolve safely should appear here."
+    )
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        jobs=_canonical_jobs(200)
+        review_jobs=[
+            j for j in jobs
+            if str(j.get("status") or "").lower() in {"review","failed","running"}
+        ]
+        labels=["All review jobs"]+[
+            f"{j.get('title') or j.get('job_type')} | {j.get('status')} | {j.get('ingestion_job_id')}"
+            for j in review_jobs
+        ]
+        choice=st.selectbox("Job",labels,key="canonical_review_job")
+        jid=None
+        if choice!="All review jobs":
+            jid=review_jobs[labels.index(choice)-1]["ingestion_job_id"]
+
+        rows=_canonical_review_rows(jid,1500)
+        if rows:
+            reason_counts={}
+            for r in rows:
+                reason=str(r.get("resolution_method") or r.get("resolution_status") or "UNKNOWN")
+                reason_counts[reason]=reason_counts.get(reason,0)+1
+
+            c1,c2=st.columns([1,2])
+            c1.metric("Records requiring review",len(rows))
+            c2.caption(
+                "Expected reasons are genuine ambiguity, insufficient identity, or a missing canonical endpoint."
+            )
+            dataframe([
+                {"reason":k,"count":v}
+                for k,v in sorted(reason_counts.items(),key=lambda x:(-x[1],x[0]))
+            ])
+            with st.expander("Show review records",expanded=True):
+                dataframe(rows)
+
+            if jid and st.button(
+                "↻ Retry this job after corrections",
+                type="primary",
+                use_container_width=True,
+                key=f"retry_canonical_{jid}"
+            ):
+                try:
+                    result=_canonical_process_job(jid)
+                    st.json(result)
+                    st.rerun()
+                except Exception as exc:
+                    st.exception(exc)
+        else:
+            st.success("No unresolved canonical-ingestion records in the selected scope.")
+
+
+elif page=="Dashboard":
     title("Platform control","One canonical data model; Trade, Intelligence and NERAI product entitlements; tenant workspaces; AI staging and review.")
     tables=[("Organizations","pc_organizations"),("Users","pc_profiles"),("Entities","pc_entities"),("Assets","pc_assets"),("Vessels / mobile","pc_mobile_assets"),("Events","pc_events"),("Staged changes","pc_staged_records"),("Open DQ issues","pc_data_quality_issues")]
     cols=st.columns(4)
@@ -4605,7 +5163,7 @@ elif page=="Reconciliation Center":
                         for p in auto.get("passes",[]):
                             s=p.get("summary") or {}
                             st.write(
-                                f"Pass {p.get('pass')}: applied {p.get('apply',{}).get('applied',0)} · "
+                                f"Pass {p.get('pass')}: applied {((p.get('parent_apply') or {}).get('applied',0) + (p.get('child_apply') or {}).get('applied',0))} · "
                                 f"total applied {s.get('applied',0)} · safe {s.get('safe_now',0)} · "
                                 f"blocked {s.get('blocked_now',0)} · exceptions {s.get('exceptions',0)}"
                             )
