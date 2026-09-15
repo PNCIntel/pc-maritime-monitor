@@ -693,10 +693,6 @@ st.markdown(f'<div class="pc-title">{page}</div>', unsafe_allow_html=True)
 st.markdown('<div class="pc-deck">Decision-useful intelligence on geopolitical disruption, maritime security, trade corridors, aviation, sanctions, critical infrastructure and operational risk.</div>', unsafe_allow_html=True)
 st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
 
-# Canonical context opens here, immediately below the workspace header.
-pc_render_active_drilldown(location="top",expanded=True)
-
-
 def _watch_tokens(v):
     s=str(v or "").casefold()
     words=re.findall(r"[a-z0-9]+",s)
@@ -1467,6 +1463,7 @@ def ranked_operating_picture(df,limit=5):
 # -----------------------------------------------------------------------------
 # 1. OPERATING PICTURE
 # -----------------------------------------------------------------------------
+
 if page == "Operating Picture":
     active_mon = monitoring[text_col(monitoring, "Status").str.contains("Active", case=False, na=False)] if not monitoring.empty else monitoring
     security_terms = ["Security", "Conflict", "Maritime", "Piracy", "Attack", "Ground", "Explosion", "SAR", "Pollution", "Drone", "Missile", "Seizure", "Boarding"]
@@ -1475,55 +1472,90 @@ if page == "Operating Picture":
     pgsa = compliance_designations[text_col(compliance_designations, "Regime ID").eq("REGIME_PGSA")] if not compliance_designations.empty else compliance_designations
     marsec_feeds = source_feeds[text_col(source_feeds, "Default Event Families").str.contains("ground|collision|sar|pollution|casualty|maritime|fire|rescue", case=False, regex=True, na=False)] if not source_feeds.empty else source_feeds
 
+    section("Latest intelligence", "Latest intelligence", "Newest reporting and assessed incidents in the intelligence base — surfaced first, not buried in a register.")
+    latest = hazard_events.copy()
+    if not latest.empty:
+        if "Start Date" in latest.columns:
+            latest["_date"]=pd.to_datetime(latest["Start Date"],errors="coerce")
+            latest=latest.sort_values("_date",ascending=False,na_position="last")
+        latest_non_compliance=latest[~_is_compliance_watchlist_event(latest)].copy()
+        if latest_non_compliance.empty:
+            latest_non_compliance=latest
+        cols=st.columns(3)
+        for i,(_,r) in enumerate(latest_non_compliance.head(3).iterrows()):
+            with cols[i]:
+                event_card(r)
+        if len(latest_non_compliance)>3:
+            with st.expander(f"More latest intelligence ({min(len(latest_non_compliance)-3,12)})",expanded=False):
+                for _,r in latest_non_compliance.iloc[3:15].iterrows():
+                    event_card(r)
+    else:
+        st.markdown('<div class="pc-empty">No event records available.</div>', unsafe_allow_html=True)
+
     c1,c2,c3,c4,c5 = st.columns(5)
     c1.metric("Active Monitors", len(active_mon))
     c2.metric("High / Severe Events", len(high_events))
     c3.metric("Security / MARSEC Events", len(sec_events))
-    c4.metric("PGSA Designations", len(pgsa))
+    c4.metric("PGSA / Compliance", len(pgsa))
     c5.metric("Official MARSEC Feeds", len(marsec_feeds))
 
-    left, right = st.columns([1.5,1])
+    left, right = st.columns([1.55,1.0],gap="large")
     with left:
-        section("01 · Immediate", "Priority operating picture", "Recent high-severity or security-relevant events from the shared event layer.")
-        latest = hazard_events.copy()
-        if not latest.empty and "Start Date" in latest.columns:
-            priority=ranked_operating_picture(latest,5)
-            if priority.empty:
-                priority=latest.sort_values("Start Date",ascending=False).head(5)
-            for _, r in priority.iterrows():
+        section("01 · Immediate", "Priority operating picture", "What matters now — ranked by severity, recency and operational consequence.")
+        priority=ranked_operating_picture(hazard_events.copy(),5) if not hazard_events.empty else pd.DataFrame()
+        if not priority.empty:
+            for _,r in priority.iterrows():
                 event_card(r)
-
-            # Compliance/watchlists remain visible but do not displace operational incidents.
-            compliance_now=latest[_is_compliance_watchlist_event(latest)].copy()
-            if not compliance_now.empty:
-                with st.expander(f"Compliance / watchlist updates ({len(compliance_now)})",expanded=False):
-                    cols=[c for c in ["Start Date","Severity","Title","Location","Status"] if c in compliance_now.columns]
-                    show_df(compliance_now[cols],260)
-                    st.caption("Full vessel lists and drill-through are under Sanctions & Compliance → PGSA / Compliance.")
         else:
-            st.markdown('<div class="pc-empty">No event records available.</div>', unsafe_allow_html=True)
+            st.markdown('<div class="pc-empty">No priority events available.</div>', unsafe_allow_html=True)
 
     with right:
-        section("04 · Forward", "Active monitoring", "What could change next: monitors, triggers and time horizons.")
+        section("04 · Forward", "Active monitoring", "What could change next: monitors, triggers, time horizons and decision points.")
         if not active_mon.empty:
             for _, r in active_mon.head(6).iterrows():
                 st.markdown(
-                    f'''<div class="pc-card">
-                    <div class="pc-card-meta">{r.get('Family','')} · {r.get('Geography','')}</div>
-                    <div class="pc-card-title">{r.get('Title','')}</div>
-                    <div class="pc-card-body"><b>Monitoring:</b> {r.get('What Is Being Monitored','')}</div>
-                    <div class="pc-card-impact"><b>Trigger:</b> {r.get('Trigger / Threshold','')}</div>
-                    </div>''', unsafe_allow_html=True)
+                    "<div class='pc-card'>"
+                    f"<div class='pc-card-meta'>{r.get('Family','')} · {r.get('Geography','')}</div>"
+                    f"<div class='pc-card-title'>{r.get('Title','')}</div>"
+                    f"<div class='pc-card-body'><b>Monitoring:</b> {r.get('What Is Being Monitored','')}</div>"
+                    f"<div class='pc-card-impact'><b>Trigger:</b> {r.get('Trigger / Threshold','')}</div>"
+                    "</div>",
+                    unsafe_allow_html=True
+                )
         else:
             st.markdown('<div class="pc-empty">No active monitoring records.</div>', unsafe_allow_html=True)
 
+    section("02 · Situational", "What changed", "Recent developments that materially alter the operating environment.")
+    if not latest.empty:
+        changed=latest[~_is_compliance_watchlist_event(latest)].head(8).copy()
+        cols=[c for c in ["Start Date","Severity","Event Type","Title","Location","Operational Impact","Trade / Commercial Impact"] if c in changed.columns]
+        show_df(changed,cols,360)
+    else:
+        st.caption("No recent developments available.")
+
+    compliance_now=hazard_events[_is_compliance_watchlist_event(hazard_events)].copy() if not hazard_events.empty else pd.DataFrame()
+    if not compliance_now.empty:
+        with st.expander(f"Compliance / watchlist updates ({len(compliance_now)})",expanded=False):
+            cols=[c for c in ["Start Date","Severity","Title","Location","Status"] if c in compliance_now.columns]
+            show_df(compliance_now,cols,260)
+            st.caption("Full vessel lists and drill-through are under Sanctions & Compliance → PGSA / Compliance.")
+
+    if st.session_state.get("pc_drilldown_id"):
+        with st.expander("Selected canonical context",expanded=False):
+            pc_render_active_drilldown(location="top",expanded=False)
+
     section("Coverage", "Security domains in the current model")
-    st.markdown("""
-    <span class='pc-badge'>Maritime Security</span><span class='pc-badge'>Ports & Chokepoints</span>
-    <span class='pc-badge'>Aviation & Movement</span><span class='pc-badge'>Sanctions & Compliance</span>
-    <span class='pc-badge'>Weather & Natural Hazards</span><span class='pc-badge'>Labour & Civil Disruption</span>
-    <span class='pc-badge'>Conflict Escalation</span><span class='pc-badge'>Critical Infrastructure</span>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        "<span class='pc-badge'>Maritime Security</span>"
+        "<span class='pc-badge'>Ports & Chokepoints</span>"
+        "<span class='pc-badge'>Aviation & Movement</span>"
+        "<span class='pc-badge'>Sanctions & Compliance</span>"
+        "<span class='pc-badge'>Weather & Natural Hazards</span>"
+        "<span class='pc-badge'>Labour & Civil Disruption</span>"
+        "<span class='pc-badge'>Conflict Escalation</span>"
+        "<span class='pc-badge'>Critical Infrastructure</span>",
+        unsafe_allow_html=True
+    )
 
 # -----------------------------------------------------------------------------
 # 2. ALERTS & INCIDENTS
