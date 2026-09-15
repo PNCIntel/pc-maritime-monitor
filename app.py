@@ -32,7 +32,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.37-live-canonical-commercial-dashboard"
+APP_VERSION = "v3.3.38-regression-cleanup"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -7562,79 +7562,9 @@ def _trade_network_snapshot():
         "Corridors / systems":max(len(systems),len(routes)),
     }
 
-def _render_trade_pulse():
-    records=_recent_commercial_records()
-    st.markdown("### Commercial pulse")
-    st.caption("Recent deals, contracts and investment — showing who, when, what and value where the source model provides it.")
-    if records.empty:
-        st.info("No recent commercial activity records available.")
-        return
-    def c(names):
-        return _first_existing_col(records,names)
-    dc=c(["Date","Announcement Date","Transaction Date","Contract Date","Start Date","Effective Date","As Of"])
-    tc=c(["Title","Deal","Transaction","Contract","Name","Event"])
-    ac=c(["Buyer","Customer","Client","Awarding Authority","Contracting Authority","Investor","Acquirer","Company","Company Name"])
-    bc=c(["Seller","Supplier","Contractor","Counterparty","Target","Partner","Awardee"])
-    gc=c(["Country","Geography","Region","Location","Market"])
-    vc=c(["Value","Deal Value","Transaction Value","Contract Value","CAPEX","Capex","Investment"])
-    sc=c(["Status","Deal Status","Contract Status","Transaction Status"])
-    yc=c(["Type","Deal Type","Transaction Type","Contract Type","Category"])
-    rows=[]
-    for _,r in records.head(20).iterrows():
-        a=str(r.get(ac,'') if ac else '').strip(); b=str(r.get(bc,'') if bc else '').strip()
-        rows.append({
-            "Date":r.get(dc,'') if dc else '',
-            "Activity":r.get(tc,'') if tc else '',
-            "Who":" ↔ ".join(x for x in [a,b] if x),
-            "Type":r.get(yc,'') if yc else r.get('_source_type',''),
-            "Value / CAPEX":r.get(vc,'') if vc else '',
-            "Market":r.get(gc,'') if gc else '',
-            "Status":r.get(sc,'') if sc else '',
-        })
-    display_df(pd.DataFrame(rows),360)
-
-def _render_recent_additions():
-    st.markdown("### Latest additions")
-    st.caption("Newest or recently refreshed records across companies, infrastructure, vessels, defence and corridors.")
-    blocks=[]
-    candidates=[
-        ("Companies",TABLES.get(("Core Entities","Companies"),pd.DataFrame()),["Company","Company Name","Name"],["updated_at","created_at","As Of","as_of"]),
-        ("Infrastructure",TABLES.get(("Infrastructure","Assets"),pd.DataFrame()),["Asset","Name","Port / Facility","Terminal / Facility"],["updated_at","created_at","As Of","as_of"]),
-        ("Vessels",TABLES.get(("Maritime","Vessels"),pd.DataFrame()),["Vessel Name","Name"],["updated_at","created_at","As Of","as_of"]),
-        ("Defence",TABLES.get(("Defence & Shipbuilding","Defence Vessels"),pd.DataFrame()),["Vessel","Programme","Contract"],["updated_at","created_at","Date","As Of"]),
-        ("Corridors",TABLES.get(("Infrastructure","Transport Routes"),pd.DataFrame()),["Route","Corridor","Name"],["updated_at","created_at","As Of","as_of"]),
-    ]
-    for label,df,ncands,dcands in candidates:
-        if df is None or df.empty: continue
-        nc=_first_existing_col(df,ncands); dc=_first_existing_col(df,dcands); x=df.copy()
-        if dc:
-            x['_d']=pd.to_datetime(x[dc],errors='coerce'); x=x.sort_values('_d',ascending=False,na_position='last')
-        for _,r in x.head(4).iterrows():
-            blocks.append({"Area":label,"Added / updated":r.get(dc,'') if dc else '',"Record":r.get(nc,'') if nc else ''})
-    if not blocks:
-        st.info("No recent-addition metadata is available in the current data layer.")
-        return
-    recent=pd.DataFrame(blocks); recent['_d']=pd.to_datetime(recent['Added / updated'],errors='coerce')
-    recent=recent.sort_values('_d',ascending=False,na_position='last').drop(columns=['_d'])
-    display_df(recent.head(18),330)
-
-def _render_business_infrastructure():
-    st.markdown("### Business & infrastructure")
-    st.caption("Core trade-network coverage with current companies, infrastructure, fleets, defence and corridors.")
-    tabs=st.tabs(["Companies","Ports & terminals","Vessels","Defence","Corridors"])
-    with tabs[0]:
-        _compact_trade_table(TABLES.get(("Core Entities","Companies"),pd.DataFrame()),["Company","Company Name","Name","Country","HQ Country","Sector","Business Segments","Status","As Of"],280)
-    with tabs[1]:
-        terms=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame()); ports=TABLES.get(("Maritime","Ports"),pd.DataFrame()); df=terms if not terms.empty else ports
-        _compact_trade_table(df,["Terminal / Facility","Port / Facility","Port","Country","City / Area","Operator / Network","Operator","Facility Type","Status"],280)
-    with tabs[2]:
-        _compact_trade_table(TABLES.get(("Maritime","Vessels"),pd.DataFrame()),["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Owner","Operator","Status"],280)
-    with tabs[3]:
-        df=TABLES.get(("Defence & Shipbuilding","Defence Vessels"),pd.DataFrame())
-        _compact_trade_table(df,["Vessel","Programme","Class / Type","Customer / Operator","Contract","Builder","Status","Delivery"],280)
-    with tabs[4]:
-        routes=TABLES.get(("Infrastructure","Transport Routes"),pd.DataFrame()); systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame()); df=routes if not routes.empty else systems
-        _compact_trade_table(df,["Route","Corridor","System","Name","Mode","Region","Origin","Destination","Status"],280)
+# Obsolete generic Overview table renderers removed in v3.3.38.
+# Commercial activity is handled by the canonical Investments / Contracts workspaces;
+# companies, ports, vessels and corridors use their dedicated entity workspaces.
 
 def _render_quick_access():
     st.markdown("### Quick access")
@@ -7759,16 +7689,13 @@ if page=="Overview":
             for _,h in hits.head(10).iterrows(): readable_search_card(h)
 
     st.markdown("---")
-    main,right=st.columns([3.0,1.15],gap="large")
-    with main:
-        _render_trade_pulse()
-        st.markdown("---")
-        _render_recent_additions()
-        st.markdown("---")
-        _render_business_infrastructure()
-    with right:
+    # v3.3.38: do not reintroduce the retired generic Commercial pulse,
+    # Latest additions or Business & infrastructure dataframe blocks here.
+    # The canonical workspaces already provide richer, entity-linked views.
+    left,right=st.columns([1.0,1.0],gap="large")
+    with left:
         _render_quick_access()
-        st.markdown("---")
+    with right:
         render_security_business_rail(4)
 
     with st.expander("Detailed recent operational events",expanded=False):
