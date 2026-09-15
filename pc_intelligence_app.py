@@ -1597,11 +1597,14 @@ def _analytics_explode_geo(df, level="country"):
         x["Breakdown"] = x["_regions"]
     else:
         x["Breakdown"] = x["_countries"]
-    x=x.explode("Breakdown")
+    x=x.explode("Breakdown", ignore_index=True)
     x["Breakdown"]=x["Breakdown"].fillna("Unspecified").astype(str).replace("","Unspecified")
     if "Event ID" in x.columns:
         x=x.drop_duplicates(subset=["Event ID","Breakdown"])
-    return x
+    # Geo explosion can create repeated source indexes.  Always return a clean
+    # RangeIndex because pandas.crosstab aligns Series on their index and newer
+    # pandas versions reject duplicate labels during that alignment.
+    return x.reset_index(drop=True)
 
 
 def _analytics_severity_bucket(v):
@@ -1655,7 +1658,14 @@ def _analytics_breakdown(df, level):
         x["Breakdown"]=x[field].fillna("Unspecified").astype(str).replace("","Unspecified")
         grp_col="Breakdown"
 
-    x["_severity_bucket"]=x.get("Severity",pd.Series("",index=x.index)).map(_analytics_severity_bucket)
+    # Crosstab aligns its input Series by index.  Normalise the index here as
+    # well so all grouping modes (including exploded geography) are safe on
+    # pandas 2.x/3.x.
+    x=x.reset_index(drop=True)
+    if "Severity" in x.columns:
+        x["_severity_bucket"]=x["Severity"].fillna("").map(_analytics_severity_bucket)
+    else:
+        x["_severity_bucket"]="Unspecified"
     if "Event ID" in x.columns:
         counts=x.groupby(grp_col)["Event ID"].nunique().rename("Count")
     else:
