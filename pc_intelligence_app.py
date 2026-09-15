@@ -890,6 +890,182 @@ REGIONAL_SECURITY_AREAS = {
     },
 }
 
+
+# Extend the Intelligence map selector beyond the original six theatres so
+# Regional Maps provides the same all-region navigation concept as Trade.
+REGIONAL_SECURITY_AREAS.update({
+    "Global": {
+        "center": (18.0, 12.0), "zoom": 1.1,
+        "phrases": [],
+    },
+    "Africa": {
+        "center": (2.0, 20.0), "zoom": 2.1,
+        "phrases": ["africa","somalia","djibouti","gulf of guinea","nigeria","south africa","mozambique","egypt","libya","morocco"],
+    },
+    "Europe": {
+        "center": (52.0, 12.0), "zoom": 2.7,
+        "phrases": ["europe","united kingdom","france","germany","netherlands","belgium","spain","italy","poland","romania","bulgaria"],
+    },
+    "North America": {
+        "center": (42.0, -101.0), "zoom": 2.5,
+        "phrases": ["united states","usa","canada","mexico","great lakes","st lawrence","gulf coast","los angeles","long beach"],
+    },
+    "Central America & Caribbean": {
+        "center": (18.0, -78.0), "zoom": 3.0,
+        "phrases": ["panama","panama canal","haiti","jamaica","dominican republic","caribbean","cuba","bahamas"],
+    },
+    "South America": {
+        "center": (-18.0, -60.0), "zoom": 2.5,
+        "phrases": ["brazil","argentina","chile","colombia","peru","ecuador","venezuela","guyana","suriname"],
+    },
+    "South Asia": {
+        "center": (21.0, 78.0), "zoom": 3.0,
+        "phrases": ["india","pakistan","bangladesh","sri lanka","arabian sea","bay of bengal"],
+    },
+    "Central Asia": {
+        "center": (43.0, 66.0), "zoom": 3.2,
+        "phrases": ["kazakhstan","uzbekistan","turkmenistan","kyrgyzstan","tajikistan","caspian","middle corridor"],
+    },
+    "Arctic": {
+        "center": (70.0, 10.0), "zoom": 2.1,
+        "phrases": ["arctic","northern sea route","murmansk","arkhangelsk","churchill","svalbard","barents"],
+    },
+})
+
+
+MAP_FOCUS_AREAS = {
+    "Global": {
+        "All activity": {"phrases": [], "center": (18.0, 12.0), "zoom": 1.1},
+        "Strait of Hormuz": {"phrases": ["hormuz","khasab","musandam","fujairah","gulf of oman"], "center": (26.2, 56.3), "zoom": 5.0},
+        "Red Sea / Bab el-Mandeb": {"phrases": ["red sea","bab el-mandeb","hodeidah","hudaydah","mocha","jeddah","yanbu"], "center": (17.0, 41.8), "zoom": 3.7},
+        "Black Sea": {"phrases": ["black sea","odesa","odessa","novorossiysk","crimea","kerch","chornomorsk","samsun","şile","sile"], "center": (43.2, 34.0), "zoom": 4.0},
+        "Panama Canal": {"phrases": ["panama canal","panama","balboa","colon","colón"], "center": (9.1, -79.7), "zoom": 6.0},
+        "Malacca / Singapore": {"phrases": ["malacca","singapore strait","singapore","batam","johor"], "center": (1.6, 103.6), "zoom": 5.0},
+        "South China Sea": {"phrases": ["south china sea","spratly","paracel","philippines","vietnam"], "center": (13.0, 114.0), "zoom": 3.7},
+        "Baltic / Gulf of Finland": {"phrases": ["baltic","gulf of finland","tallinn","helsinki","klaipeda","gdansk","gotland"], "center": (58.0, 21.0), "zoom": 4.0},
+        "Arctic / Northern Sea Route": {"phrases": ["arctic","northern sea route","murmansk","arkhangelsk","churchill","svalbard"], "center": (70.0, 35.0), "zoom": 2.4},
+    },
+    "Middle East": {
+        "All regional activity": {"phrases": [], "center": (25.0, 47.0), "zoom": 3.2},
+        "Strait of Hormuz": {"phrases": ["hormuz","khasab","musandam","fujairah","gulf of oman"], "center": (26.2, 56.3), "zoom": 5.0},
+        "Northern Gulf / Iraq": {"phrases": ["basra","umm qasr","al-faw","iraq","kuwait","kharg"], "center": (29.5, 48.6), "zoom": 4.6},
+        "UAE / Oman logistics": {"phrases": ["dubai","abu dhabi","jebel ali","khalifa port","fujairah","sohar","salalah","muscat"], "center": (24.0, 55.5), "zoom": 4.3},
+        "Saudi Red Sea / Jazan": {"phrases": ["jazan","jizan","jeddah","yanbu","saudi red sea"], "center": (20.0, 40.0), "zoom": 4.0},
+        "Red Sea / Bab el-Mandeb": {"phrases": ["red sea","bab el-mandeb","hodeidah","hudaydah","mocha"], "center": (15.0, 42.7), "zoom": 4.2},
+    },
+    "Middle East / Gulf": {
+        "All regional activity": {"phrases": [], "center": (25.2, 51.5), "zoom": 4.0},
+        "Strait of Hormuz": {"phrases": ["hormuz","khasab","musandam","fujairah","gulf of oman"], "center": (26.2, 56.3), "zoom": 5.0},
+        "Northern Gulf / Iraq": {"phrases": ["basra","umm qasr","al-faw","iraq","kuwait","kharg"], "center": (29.5, 48.6), "zoom": 4.6},
+        "UAE / Oman": {"phrases": ["dubai","abu dhabi","fujairah","sohar","salalah","muscat"], "center": (24.0, 55.5), "zoom": 4.3},
+        "Saudi / Jazan": {"phrases": ["jazan","jizan","jeddah","yanbu","saudi"], "center": (22.5, 43.5), "zoom": 3.8},
+        "Red Sea / Bab el-Mandeb": {"phrases": ["red sea","bab el-mandeb","hodeidah","hudaydah","mocha"], "center": (15.0, 42.7), "zoom": 4.2},
+    },
+    "Black Sea": {
+        "All regional activity": {"phrases": [], "center": (43.1, 34.0), "zoom": 4.1},
+        "Odesa / Chornomorsk": {"phrases": ["odesa","odessa","chornomorsk","ukraine maritime corridor"], "center": (46.3, 30.7), "zoom": 5.4},
+        "Novorossiysk / CPC": {"phrases": ["novorossiysk","cpc","caspian pipeline consortium"], "center": (44.7, 37.8), "zoom": 5.2},
+        "Sea of Azov / Kerch": {"phrases": ["sea of azov","azov","kerch","taganrog","mariupol","berdyansk"], "center": (46.0, 37.0), "zoom": 4.5},
+        "Turkish Black Sea coast": {"phrases": ["samsun","sinop","şile","sile","turkish coast","türkiye"], "center": (41.4, 35.0), "zoom": 4.6},
+        "Danube approaches": {"phrases": ["danube","constanta","constanța","sulina","izmail","reni"], "center": (45.2, 29.3), "zoom": 5.0},
+    },
+    "Mediterranean": {
+        "All regional activity": {"phrases": [], "center": (35.5, 18.0), "zoom": 3.4},
+        "Eastern Mediterranean": {"phrases": ["crete","cyprus","levant","israel","lebanon","syria","libya"], "center": (34.5, 27.5), "zoom": 4.0},
+        "Suez approaches": {"phrases": ["suez","port said","alexandria","eastern mediterranean"], "center": (31.0, 31.5), "zoom": 4.6},
+        "Adriatic / Aegean": {"phrases": ["adriatic","aegean","trieste","taranto","greece"], "center": (39.5, 20.0), "zoom": 4.0},
+        "Gibraltar / Western Med": {"phrases": ["gibraltar","algeciras","tangier","tanger med","western mediterranean"], "center": (36.0, -4.0), "zoom": 4.4},
+    },
+    "Baltic": {
+        "All regional activity": {"phrases": [], "center": (57.0, 19.0), "zoom": 4.0},
+        "Gulf of Finland": {"phrases": ["gulf of finland","helsinki","tallinn","st petersburg","primorsk","ust-luga"], "center": (59.5, 25.0), "zoom": 5.0},
+        "Poland / Baltic gateways": {"phrases": ["gdansk","gdańsk","gdynia","poland"], "center": (54.5, 18.7), "zoom": 5.2},
+        "Danish Straits": {"phrases": ["danish straits","kattegat","oresund","øresund","great belt"], "center": (56.3, 11.5), "zoom": 5.0},
+        "Gotland / central Baltic": {"phrases": ["gotland","central baltic","sweden"], "center": (57.5, 19.0), "zoom": 5.0},
+    },
+    "Caribbean": {
+        "All regional activity": {"phrases": [], "center": (18.0, -72.0), "zoom": 3.8},
+        "Panama Canal": {"phrases": ["panama canal","panama","balboa","colon","colón"], "center": (9.1, -79.7), "zoom": 6.0},
+        "Haiti / Windward Passage": {"phrases": ["haiti","port-au-prince","windward passage"], "center": (19.0, -72.8), "zoom": 5.0},
+        "Caribbean transshipment": {"phrases": ["kingston","freeport","caucedo","cartagena","caribbean"], "center": (18.0, -76.0), "zoom": 3.8},
+    },
+    "Central America & Caribbean": {
+        "All regional activity": {"phrases": [], "center": (18.0, -78.0), "zoom": 3.0},
+        "Panama Canal": {"phrases": ["panama canal","panama","balboa","colon","colón"], "center": (9.1, -79.7), "zoom": 6.0},
+        "Haiti / Windward Passage": {"phrases": ["haiti","port-au-prince","windward passage"], "center": (19.0, -72.8), "zoom": 5.0},
+        "Caribbean transshipment": {"phrases": ["kingston","freeport","caucedo","cartagena","caribbean"], "center": (18.0, -76.0), "zoom": 3.8},
+    },
+    "Asia-Pacific": {
+        "All regional activity": {"phrases": [], "center": (16.0, 116.0), "zoom": 2.6},
+        "Malacca / Singapore": {"phrases": ["malacca","singapore strait","singapore","batam","johor"], "center": (1.6, 103.6), "zoom": 5.0},
+        "South China Sea": {"phrases": ["south china sea","spratly","paracel","philippines","vietnam"], "center": (13.0, 114.0), "zoom": 3.7},
+        "Taiwan Strait": {"phrases": ["taiwan strait","taiwan","fujian"], "center": (24.2, 120.0), "zoom": 4.4},
+        "East China Sea": {"phrases": ["east china sea","okinawa","zhejiang","japan"], "center": (28.0, 127.0), "zoom": 3.7},
+        "Philippine Sea": {"phrases": ["philippine sea","manila","luzon","philippines"], "center": (15.0, 126.0), "zoom": 3.5},
+    },
+    "Africa": {
+        "All regional activity": {"phrases": [], "center": (2.0, 20.0), "zoom": 2.1},
+        "Horn of Africa / Somali Basin": {"phrases": ["somalia","somali basin","djibouti","gulf of aden"], "center": (8.0, 48.0), "zoom": 4.0},
+        "Gulf of Guinea": {"phrases": ["gulf of guinea","nigeria","ghana","togo","benin","cameroon"], "center": (2.0, 5.0), "zoom": 4.0},
+        "Southern Africa corridors": {"phrases": ["south africa","durban","cape town","maputo","walvis bay"], "center": (-26.0, 24.0), "zoom": 3.5},
+        "North Africa / Suez": {"phrases": ["egypt","suez","libya","tunisia","algeria","morocco"], "center": (28.0, 15.0), "zoom": 3.3},
+    },
+    "Europe": {
+        "All regional activity": {"phrases": [], "center": (52.0, 12.0), "zoom": 2.7},
+        "Black Sea / Danube": {"phrases": ["black sea","odesa","danube","romania","bulgaria","ukraine"], "center": (45.0, 30.0), "zoom": 4.0},
+        "North Sea gateways": {"phrases": ["rotterdam","antwerp","hamburg","bremerhaven","north sea"], "center": (53.0, 5.0), "zoom": 4.3},
+        "Baltic gateways": {"phrases": ["baltic","gdansk","klaipeda","riga","tallinn"], "center": (57.0, 20.0), "zoom": 4.0},
+        "UK / English Channel": {"phrases": ["united kingdom","uk","english channel","dover","felixstowe","southampton"], "center": (51.0, 0.0), "zoom": 4.2},
+    },
+    "North America": {
+        "All regional activity": {"phrases": [], "center": (42.0, -101.0), "zoom": 2.5},
+        "Great Lakes / St Lawrence": {"phrases": ["great lakes","st lawrence","detroit","duluth","montreal","thunder bay"], "center": (44.5, -82.0), "zoom": 3.6},
+        "US Gulf": {"phrases": ["houston","new orleans","gulf coast","port arthur","mobile"], "center": (28.5, -91.0), "zoom": 4.0},
+        "US West Coast": {"phrases": ["los angeles","long beach","oakland","seattle","tacoma","west coast"], "center": (37.0, -122.0), "zoom": 3.2},
+        "Atlantic Canada": {"phrases": ["halifax","saint john","atlantic canada"], "center": (45.0, -63.0), "zoom": 4.3},
+    },
+    "South America": {
+        "All regional activity": {"phrases": [], "center": (-18.0, -60.0), "zoom": 2.5},
+        "Brazil ports": {"phrases": ["brazil","santos","paranagua","rio de janeiro"], "center": (-23.0, -46.0), "zoom": 3.8},
+        "Pacific coast": {"phrases": ["chile","peru","callao","valparaiso","guayaquil"], "center": (-15.0, -76.0), "zoom": 3.2},
+        "Caribbean north coast": {"phrases": ["colombia","venezuela","cartagena","barranquilla"], "center": (8.0, -72.0), "zoom": 3.8},
+    },
+    "South Asia": {
+        "All regional activity": {"phrases": [], "center": (21.0, 78.0), "zoom": 3.0},
+        "India west coast": {"phrases": ["mumbai","mundra","jnpt","nhava sheva","kochi"], "center": (18.0, 73.0), "zoom": 4.0},
+        "Bay of Bengal": {"phrases": ["bay of bengal","chennai","kolkata","bangladesh","chittagong"], "center": (17.0, 87.0), "zoom": 3.8},
+        "Sri Lanka": {"phrases": ["sri lanka","colombo","hambantota","trincomalee"], "center": (7.5, 80.7), "zoom": 5.0},
+        "Arabian Sea": {"phrases": ["arabian sea","karachi","gwadar","mumbai"], "center": (20.0, 65.0), "zoom": 3.6},
+    },
+    "Central Asia": {
+        "All regional activity": {"phrases": [], "center": (43.0, 66.0), "zoom": 3.2},
+        "Caspian / Middle Corridor": {"phrases": ["caspian","aktau","baku","middle corridor","trans-caspian"], "center": (42.0, 51.0), "zoom": 4.0},
+        "Kazakhstan export routes": {"phrases": ["kazakhstan","aktau","atyrau","cpc"], "center": (46.0, 58.0), "zoom": 3.8},
+    },
+    "Arctic": {
+        "All regional activity": {"phrases": [], "center": (70.0, 10.0), "zoom": 2.1},
+        "Northern Sea Route": {"phrases": ["northern sea route","murmansk","arkhangelsk","nsr"], "center": (72.0, 60.0), "zoom": 2.4},
+        "Canadian Arctic / Churchill": {"phrases": ["churchill","hudson bay","nunavut","canadian arctic"], "center": (63.0, -85.0), "zoom": 3.0},
+        "Nordic Arctic": {"phrases": ["svalbard","norway","barents","tromso","tromsø"], "center": (72.0, 20.0), "zoom": 3.0},
+    },
+}
+
+
+def _intel_focus_config(region,focus):
+    areas=MAP_FOCUS_AREAS.get(region) or MAP_FOCUS_AREAS.get("Global",{})
+    return areas.get(focus) or next(iter(areas.values()))
+
+def _intel_focus_filter(df,focus_cfg):
+    if df is None or df.empty:
+        return df.copy() if df is not None else pd.DataFrame()
+    phrases=focus_cfg.get("phrases") or []
+    if not phrases:
+        return df.copy()
+    blob=_regional_blob(df)
+    pattern="|".join(re.escape(x.casefold()) for x in phrases)
+    return df[blob.str.contains(pattern,regex=True,na=False)].copy()
+
+
 REGIONAL_OPERATIONAL_TERMS = [
     "security","conflict","attack","strike","drone","missile","mine","piracy",
     "armed robbery","seizure","boarding","interdiction","detention","explosion",
@@ -919,8 +1095,11 @@ def regional_events(region_name, operational_only=True):
     df=hazard_events.copy()
     blob=_regional_blob(df)
     phrases=REGIONAL_SECURITY_AREAS[region_name]["phrases"]
-    region_pattern="|".join(re.escape(p.casefold()) for p in phrases)
-    mask=blob.str.contains(region_pattern,regex=True,na=False)
+    if phrases:
+        region_pattern="|".join(re.escape(p.casefold()) for p in phrases)
+        mask=blob.str.contains(region_pattern,regex=True,na=False)
+    else:
+        mask=pd.Series(True,index=df.index)
 
     if operational_only:
         op_pattern="|".join(re.escape(t.casefold()) for t in REGIONAL_OPERATIONAL_TERMS)
@@ -962,7 +1141,7 @@ def regional_event_map_points(events):
     pts["Map Accuracy"]=pts.get("Accuracy","").map(clean_display_text)
     return pts
 
-def render_regional_incident_map(region_name, events):
+def render_regional_incident_map(region_name, events, focus_cfg=None):
     """Interactive incident map with hover details and a safe fallback."""
     pts=regional_event_map_points(events)
 
@@ -971,7 +1150,7 @@ def render_regional_incident_map(region_name, events):
         st.caption("No mapped coordinates are currently available for events in this regional view.")
         return pts
 
-    cfg=REGIONAL_SECURITY_AREAS[region_name]
+    cfg=focus_cfg or REGIONAL_SECURITY_AREAS[region_name]
 
     # Fit the regional map to the actual plotted incidents rather than relying
     # on a fixed theatre centre. This prevents western Saudi / Red Sea points
@@ -1399,45 +1578,96 @@ elif page == "Regional Maps":
     section(
         "Operating picture",
         "Regional Maps",
-        "Map-first theatre views using the shared canonical event and event-location layers."
+        "Map-first theatre views across all regions, with a second selector for P&C key focus areas."
     )
     st.caption(
-        "Only events with supported coordinates are plotted. Unmapped incidents remain available "
-        "in Regional Security rather than being assigned invented coordinates."
+        "Choose the wider region first, then narrow to a key focus area such as Hormuz, "
+        "Odesa/Chornomorsk, Panama Canal, Malacca/Singapore or the Northern Sea Route. "
+        "Only events with supported coordinates are plotted."
     )
 
-    _region_names=list(REGIONAL_SECURITY_AREAS.keys())
-    _map_tabs=st.tabs(_region_names)
+    _r1,_r2=st.columns(2)
+    with _r1:
+        _region_name=st.selectbox(
+            "Region",
+            list(REGIONAL_SECURITY_AREAS.keys()),
+            key="intel_regional_map_region"
+        )
+    _focus_options=list((MAP_FOCUS_AREAS.get(_region_name) or {"All regional activity":{}}).keys())
+    with _r2:
+        _focus_name=st.selectbox(
+            "Key focus area",
+            _focus_options,
+            key="intel_regional_map_focus"
+        )
 
-    for _tab,_region_name in zip(_map_tabs,_region_names):
-        with _tab:
-            _events=regional_events(_region_name,operational_only=True)
-            _mapped=regional_event_map_points(_events)
+    _focus_cfg=_intel_focus_config(_region_name,_focus_name)
 
-            _m1,_m2,_m3=st.columns(3)
-            _m1.metric("Regional events",len(_events))
-            _m2.metric("Mapped points",len(_mapped))
-            if not _events.empty and not _mapped.empty and "Event ID" in _mapped.columns:
-                _mapped_events=_mapped["Event ID"].fillna("").astype(str).nunique()
+    _events=regional_events(_region_name,operational_only=True)
+    _events=_intel_focus_filter(_events,_focus_cfg)
+    _mapped=regional_event_map_points(_events)
+
+    _m1,_m2,_m3,_m4=st.columns(4)
+    _m1.metric("Regional events",len(_events))
+    _m2.metric("Mapped points",len(_mapped))
+    if not _events.empty and not _mapped.empty and "Event ID" in _mapped.columns:
+        _mapped_events=_mapped["Event ID"].fillna("").astype(str).nunique()
+    else:
+        _mapped_events=0
+    _m3.metric("Events without map point",max(len(_events)-_mapped_events,0))
+    _m4.metric("Focus",_focus_name)
+
+    st.caption(f"Region: {_region_name} · Key focus: {_focus_name}")
+
+    render_regional_incident_map(_region_name,_events,focus_cfg=_focus_cfg)
+
+    tabs=st.tabs(["Incident register","Key focus summary","Unmapped events"])
+    with tabs[0]:
+        if not _mapped.empty:
+            _cols=[c for c in [
+                "Start Date","Date","Title","Incident","Mapped Location",
+                "Severity","Severity Label","Status","Operational",
+                "Commercial","Map Accuracy"
+            ] if c in _mapped.columns]
+            if _cols:
+                show_df(_mapped,_cols,400)
+        elif not _events.empty:
+            st.info("Regional incidents are loaded, but none currently have supported coordinates.")
+        else:
+            st.info("No qualifying operational incidents are currently loaded for this selection.")
+
+    with tabs[1]:
+        st.markdown(f"### {_focus_name}")
+        if _focus_cfg.get("phrases"):
+            st.caption("Focus terms: " + " · ".join(_focus_cfg["phrases"][:10]))
+        if _events.empty:
+            st.caption("No matching operational events.")
+        else:
+            ev=_events.copy()
+            if "Start Date" in ev.columns:
+                ev["_d"]=pd.to_datetime(ev["Start Date"],errors="coerce")
+                ev=ev.sort_values("_d",ascending=False)
+            _cols=[c for c in [
+                "Start Date","Severity","Status","Event Type","Title",
+                "Location","Operational Impact","Trade / Commercial Impact"
+            ] if c in ev.columns]
+            show_df(ev,_cols,420)
+
+    with tabs[2]:
+        if _events.empty:
+            st.caption("No events in this selection.")
+        else:
+            mapped_ids=set(_mapped["Event ID"].fillna("").astype(str)) if not _mapped.empty and "Event ID" in _mapped.columns else set()
+            if "Event ID" in _events.columns:
+                unmapped=_events[~_events["Event ID"].fillna("").astype(str).isin(mapped_ids)].copy()
             else:
-                _mapped_events=0
-            _m3.metric("Events without map point",max(len(_events)-_mapped_events,0))
+                unmapped=_events.copy()
+            _cols=[c for c in [
+                "Start Date","Severity","Title","Country / Countries",
+                "Location","Operational Impact"
+            ] if c in unmapped.columns]
+            show_df(unmapped,_cols,360)
 
-            render_regional_incident_map(_region_name,_events)
-
-            if not _mapped.empty:
-                st.markdown("### Mapped incident register")
-                _cols=[c for c in [
-                    "Start Date","Date","Title","Incident","Mapped Location",
-                    "Severity","Severity Label","Status","Operational",
-                    "Commercial","Map Accuracy"
-                ] if c in _mapped.columns]
-                if _cols:
-                    show_df(_mapped,_cols,380)
-            elif not _events.empty:
-                st.info("Regional incidents are loaded, but none currently have supported coordinates.")
-            else:
-                st.info("No qualifying operational incidents are currently loaded for this theatre.")
 
 # -----------------------------------------------------------------------------
 # REGIONAL SECURITY

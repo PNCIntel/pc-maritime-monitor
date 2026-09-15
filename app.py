@@ -32,7 +32,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.38-regression-cleanup"
+APP_VERSION = "v3.3.37-live-canonical-commercial-dashboard"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -6868,6 +6868,143 @@ TRADE_REGIONS = {
     "Arctic": {"center": (70.0, 10.0), "zoom": 2.1, "countries": ["Canada","United States","Russia","Norway","Finland","Sweden","Denmark","Iceland"]},
 }
 
+
+MAP_FOCUS_AREAS = {
+    "Global": {
+        "All activity": {"phrases": [], "center": (18.0, 12.0), "zoom": 1.1},
+        "Strait of Hormuz": {"phrases": ["hormuz","khasab","musandam","fujairah","gulf of oman"], "center": (26.2, 56.3), "zoom": 5.0},
+        "Red Sea / Bab el-Mandeb": {"phrases": ["red sea","bab el-mandeb","hodeidah","hudaydah","mocha","jeddah","yanbu"], "center": (17.0, 41.8), "zoom": 3.7},
+        "Black Sea": {"phrases": ["black sea","odesa","odessa","novorossiysk","crimea","kerch","chornomorsk","samsun","şile","sile"], "center": (43.2, 34.0), "zoom": 4.0},
+        "Panama Canal": {"phrases": ["panama canal","panama","balboa","colon","colón"], "center": (9.1, -79.7), "zoom": 6.0},
+        "Malacca / Singapore": {"phrases": ["malacca","singapore strait","singapore","batam","johor"], "center": (1.6, 103.6), "zoom": 5.0},
+        "South China Sea": {"phrases": ["south china sea","spratly","paracel","philippines","vietnam"], "center": (13.0, 114.0), "zoom": 3.7},
+        "Baltic / Gulf of Finland": {"phrases": ["baltic","gulf of finland","tallinn","helsinki","klaipeda","gdansk","gotland"], "center": (58.0, 21.0), "zoom": 4.0},
+        "Arctic / Northern Sea Route": {"phrases": ["arctic","northern sea route","murmansk","arkhangelsk","churchill","svalbard"], "center": (70.0, 35.0), "zoom": 2.4},
+    },
+    "Middle East": {
+        "All regional activity": {"phrases": [], "center": (25.0, 47.0), "zoom": 3.2},
+        "Strait of Hormuz": {"phrases": ["hormuz","khasab","musandam","fujairah","gulf of oman"], "center": (26.2, 56.3), "zoom": 5.0},
+        "Northern Gulf / Iraq": {"phrases": ["basra","umm qasr","al-faw","iraq","kuwait","kharg"], "center": (29.5, 48.6), "zoom": 4.6},
+        "UAE / Oman logistics": {"phrases": ["dubai","abu dhabi","jebel ali","khalifa port","fujairah","sohar","salalah","muscat"], "center": (24.0, 55.5), "zoom": 4.3},
+        "Saudi Red Sea / Jazan": {"phrases": ["jazan","jizan","jeddah","yanbu","saudi red sea"], "center": (20.0, 40.0), "zoom": 4.0},
+        "Red Sea / Bab el-Mandeb": {"phrases": ["red sea","bab el-mandeb","hodeidah","hudaydah","mocha"], "center": (15.0, 42.7), "zoom": 4.2},
+    },
+    "Middle East / Gulf": {
+        "All regional activity": {"phrases": [], "center": (25.2, 51.5), "zoom": 4.0},
+        "Strait of Hormuz": {"phrases": ["hormuz","khasab","musandam","fujairah","gulf of oman"], "center": (26.2, 56.3), "zoom": 5.0},
+        "Northern Gulf / Iraq": {"phrases": ["basra","umm qasr","al-faw","iraq","kuwait","kharg"], "center": (29.5, 48.6), "zoom": 4.6},
+        "UAE / Oman": {"phrases": ["dubai","abu dhabi","fujairah","sohar","salalah","muscat"], "center": (24.0, 55.5), "zoom": 4.3},
+        "Saudi / Jazan": {"phrases": ["jazan","jizan","jeddah","yanbu","saudi"], "center": (22.5, 43.5), "zoom": 3.8},
+        "Red Sea / Bab el-Mandeb": {"phrases": ["red sea","bab el-mandeb","hodeidah","hudaydah","mocha"], "center": (15.0, 42.7), "zoom": 4.2},
+    },
+    "Black Sea": {
+        "All regional activity": {"phrases": [], "center": (43.1, 34.0), "zoom": 4.1},
+        "Odesa / Chornomorsk": {"phrases": ["odesa","odessa","chornomorsk","ukraine maritime corridor"], "center": (46.3, 30.7), "zoom": 5.4},
+        "Novorossiysk / CPC": {"phrases": ["novorossiysk","cpc","caspian pipeline consortium"], "center": (44.7, 37.8), "zoom": 5.2},
+        "Sea of Azov / Kerch": {"phrases": ["sea of azov","azov","kerch","taganrog","mariupol","berdyansk"], "center": (46.0, 37.0), "zoom": 4.5},
+        "Turkish Black Sea coast": {"phrases": ["samsun","sinop","şile","sile","turkish coast","türkiye"], "center": (41.4, 35.0), "zoom": 4.6},
+        "Danube approaches": {"phrases": ["danube","constanta","constanța","sulina","izmail","reni"], "center": (45.2, 29.3), "zoom": 5.0},
+    },
+    "Mediterranean": {
+        "All regional activity": {"phrases": [], "center": (35.5, 18.0), "zoom": 3.4},
+        "Eastern Mediterranean": {"phrases": ["crete","cyprus","levant","israel","lebanon","syria","libya"], "center": (34.5, 27.5), "zoom": 4.0},
+        "Suez approaches": {"phrases": ["suez","port said","alexandria","eastern mediterranean"], "center": (31.0, 31.5), "zoom": 4.6},
+        "Adriatic / Aegean": {"phrases": ["adriatic","aegean","trieste","taranto","greece"], "center": (39.5, 20.0), "zoom": 4.0},
+        "Gibraltar / Western Med": {"phrases": ["gibraltar","algeciras","tangier","tanger med","western mediterranean"], "center": (36.0, -4.0), "zoom": 4.4},
+    },
+    "Baltic": {
+        "All regional activity": {"phrases": [], "center": (57.0, 19.0), "zoom": 4.0},
+        "Gulf of Finland": {"phrases": ["gulf of finland","helsinki","tallinn","st petersburg","primorsk","ust-luga"], "center": (59.5, 25.0), "zoom": 5.0},
+        "Poland / Baltic gateways": {"phrases": ["gdansk","gdańsk","gdynia","poland"], "center": (54.5, 18.7), "zoom": 5.2},
+        "Danish Straits": {"phrases": ["danish straits","kattegat","oresund","øresund","great belt"], "center": (56.3, 11.5), "zoom": 5.0},
+        "Gotland / central Baltic": {"phrases": ["gotland","central baltic","sweden"], "center": (57.5, 19.0), "zoom": 5.0},
+    },
+    "Caribbean": {
+        "All regional activity": {"phrases": [], "center": (18.0, -72.0), "zoom": 3.8},
+        "Panama Canal": {"phrases": ["panama canal","panama","balboa","colon","colón"], "center": (9.1, -79.7), "zoom": 6.0},
+        "Haiti / Windward Passage": {"phrases": ["haiti","port-au-prince","windward passage"], "center": (19.0, -72.8), "zoom": 5.0},
+        "Caribbean transshipment": {"phrases": ["kingston","freeport","caucedo","cartagena","caribbean"], "center": (18.0, -76.0), "zoom": 3.8},
+    },
+    "Central America & Caribbean": {
+        "All regional activity": {"phrases": [], "center": (18.0, -78.0), "zoom": 3.0},
+        "Panama Canal": {"phrases": ["panama canal","panama","balboa","colon","colón"], "center": (9.1, -79.7), "zoom": 6.0},
+        "Haiti / Windward Passage": {"phrases": ["haiti","port-au-prince","windward passage"], "center": (19.0, -72.8), "zoom": 5.0},
+        "Caribbean transshipment": {"phrases": ["kingston","freeport","caucedo","cartagena","caribbean"], "center": (18.0, -76.0), "zoom": 3.8},
+    },
+    "Asia-Pacific": {
+        "All regional activity": {"phrases": [], "center": (16.0, 116.0), "zoom": 2.6},
+        "Malacca / Singapore": {"phrases": ["malacca","singapore strait","singapore","batam","johor"], "center": (1.6, 103.6), "zoom": 5.0},
+        "South China Sea": {"phrases": ["south china sea","spratly","paracel","philippines","vietnam"], "center": (13.0, 114.0), "zoom": 3.7},
+        "Taiwan Strait": {"phrases": ["taiwan strait","taiwan","fujian"], "center": (24.2, 120.0), "zoom": 4.4},
+        "East China Sea": {"phrases": ["east china sea","okinawa","zhejiang","japan"], "center": (28.0, 127.0), "zoom": 3.7},
+        "Philippine Sea": {"phrases": ["philippine sea","manila","luzon","philippines"], "center": (15.0, 126.0), "zoom": 3.5},
+    },
+    "Africa": {
+        "All regional activity": {"phrases": [], "center": (2.0, 20.0), "zoom": 2.1},
+        "Horn of Africa / Somali Basin": {"phrases": ["somalia","somali basin","djibouti","gulf of aden"], "center": (8.0, 48.0), "zoom": 4.0},
+        "Gulf of Guinea": {"phrases": ["gulf of guinea","nigeria","ghana","togo","benin","cameroon"], "center": (2.0, 5.0), "zoom": 4.0},
+        "Southern Africa corridors": {"phrases": ["south africa","durban","cape town","maputo","walvis bay"], "center": (-26.0, 24.0), "zoom": 3.5},
+        "North Africa / Suez": {"phrases": ["egypt","suez","libya","tunisia","algeria","morocco"], "center": (28.0, 15.0), "zoom": 3.3},
+    },
+    "Europe": {
+        "All regional activity": {"phrases": [], "center": (52.0, 12.0), "zoom": 2.7},
+        "Black Sea / Danube": {"phrases": ["black sea","odesa","danube","romania","bulgaria","ukraine"], "center": (45.0, 30.0), "zoom": 4.0},
+        "North Sea gateways": {"phrases": ["rotterdam","antwerp","hamburg","bremerhaven","north sea"], "center": (53.0, 5.0), "zoom": 4.3},
+        "Baltic gateways": {"phrases": ["baltic","gdansk","klaipeda","riga","tallinn"], "center": (57.0, 20.0), "zoom": 4.0},
+        "UK / English Channel": {"phrases": ["united kingdom","uk","english channel","dover","felixstowe","southampton"], "center": (51.0, 0.0), "zoom": 4.2},
+    },
+    "North America": {
+        "All regional activity": {"phrases": [], "center": (42.0, -101.0), "zoom": 2.5},
+        "Great Lakes / St Lawrence": {"phrases": ["great lakes","st lawrence","detroit","duluth","montreal","thunder bay"], "center": (44.5, -82.0), "zoom": 3.6},
+        "US Gulf": {"phrases": ["houston","new orleans","gulf coast","port arthur","mobile"], "center": (28.5, -91.0), "zoom": 4.0},
+        "US West Coast": {"phrases": ["los angeles","long beach","oakland","seattle","tacoma","west coast"], "center": (37.0, -122.0), "zoom": 3.2},
+        "Atlantic Canada": {"phrases": ["halifax","saint john","atlantic canada"], "center": (45.0, -63.0), "zoom": 4.3},
+    },
+    "South America": {
+        "All regional activity": {"phrases": [], "center": (-18.0, -60.0), "zoom": 2.5},
+        "Brazil ports": {"phrases": ["brazil","santos","paranagua","rio de janeiro"], "center": (-23.0, -46.0), "zoom": 3.8},
+        "Pacific coast": {"phrases": ["chile","peru","callao","valparaiso","guayaquil"], "center": (-15.0, -76.0), "zoom": 3.2},
+        "Caribbean north coast": {"phrases": ["colombia","venezuela","cartagena","barranquilla"], "center": (8.0, -72.0), "zoom": 3.8},
+    },
+    "South Asia": {
+        "All regional activity": {"phrases": [], "center": (21.0, 78.0), "zoom": 3.0},
+        "India west coast": {"phrases": ["mumbai","mundra","jnpt","nhava sheva","kochi"], "center": (18.0, 73.0), "zoom": 4.0},
+        "Bay of Bengal": {"phrases": ["bay of bengal","chennai","kolkata","bangladesh","chittagong"], "center": (17.0, 87.0), "zoom": 3.8},
+        "Sri Lanka": {"phrases": ["sri lanka","colombo","hambantota","trincomalee"], "center": (7.5, 80.7), "zoom": 5.0},
+        "Arabian Sea": {"phrases": ["arabian sea","karachi","gwadar","mumbai"], "center": (20.0, 65.0), "zoom": 3.6},
+    },
+    "Central Asia": {
+        "All regional activity": {"phrases": [], "center": (43.0, 66.0), "zoom": 3.2},
+        "Caspian / Middle Corridor": {"phrases": ["caspian","aktau","baku","middle corridor","trans-caspian"], "center": (42.0, 51.0), "zoom": 4.0},
+        "Kazakhstan export routes": {"phrases": ["kazakhstan","aktau","atyrau","cpc"], "center": (46.0, 58.0), "zoom": 3.8},
+    },
+    "Arctic": {
+        "All regional activity": {"phrases": [], "center": (70.0, 10.0), "zoom": 2.1},
+        "Northern Sea Route": {"phrases": ["northern sea route","murmansk","arkhangelsk","nsr"], "center": (72.0, 60.0), "zoom": 2.4},
+        "Canadian Arctic / Churchill": {"phrases": ["churchill","hudson bay","nunavut","canadian arctic"], "center": (63.0, -85.0), "zoom": 3.0},
+        "Nordic Arctic": {"phrases": ["svalbard","norway","barents","tromso","tromsø"], "center": (72.0, 20.0), "zoom": 3.0},
+    },
+}
+
+
+def _map_focus_config(region, focus):
+    areas=MAP_FOCUS_AREAS.get(region) or MAP_FOCUS_AREAS.get("Global",{})
+    return areas.get(focus) or next(iter(areas.values()))
+
+def _focus_filter(df, focus_cfg, cols):
+    if df is None or df.empty:
+        return df.copy() if df is not None else pd.DataFrame()
+    phrases=focus_cfg.get("phrases") or []
+    if not phrases:
+        return df.copy()
+    blob=pd.Series("",index=df.index,dtype="string")
+    for c in cols:
+        if c in df.columns:
+            blob=blob.str.cat(df[c].fillna("").astype(str),sep=" ")
+    pattern="|".join(re.escape(x) for x in phrases)
+    return df[blob.str.contains(pattern,case=False,regex=True,na=False)].copy()
+
+
 def _trade_region_filter(df, region, country_cols):
     if df is None or df.empty or region=="Global":
         return df.copy() if df is not None else pd.DataFrame()
@@ -6936,8 +7073,28 @@ def _trade_recaap_projection():
     return pd.DataFrame(erows),pd.DataFrame(lrows)
 
 def render_trade_regional_maps():
-    header("Regional Maps","A shared regional operating picture across ports, disruptions and trade exposure. Use the filters to move from geography to mode and event impact.")
-    region=st.selectbox("Region",list(TRADE_REGIONS),key="trade_region_map")
+    header(
+        "Regional Maps",
+        "Map-first views across the global trade network. Choose a region, then narrow to a key focus area without losing the wider regional picture."
+    )
+
+    top1,top2=st.columns([1,1])
+    with top1:
+        region=st.selectbox(
+            "Region",
+            list(TRADE_REGIONS.keys()),
+            key="trade_region_map"
+        )
+    focus_options=list((MAP_FOCUS_AREAS.get(region) or {"All regional activity":{}}).keys())
+    with top2:
+        focus=st.selectbox(
+            "Key focus area",
+            focus_options,
+            key="trade_region_focus"
+        )
+
+    focus_cfg=_map_focus_config(region,focus)
+
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     locs=TABLES.get(("Events & Hazards","Event Locations"),pd.DataFrame()).copy()
     recaap_events,recaap_locs=_trade_recaap_projection()
@@ -6945,50 +7102,170 @@ def render_trade_regional_maps():
         events=pd.concat([events,recaap_events],ignore_index=True,sort=False)
     if not recaap_locs.empty:
         locs=pd.concat([locs,recaap_locs],ignore_index=True,sort=False)
-    ports_df=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
-    events=_trade_region_filter(events,region,["Country / Countries","Location","Title"])
-    ports_view=_trade_region_filter(ports_df,region,["Country","Port / Facility"])
 
-    mode=st.radio("Layer",["All","Incidents & disruptions","Ports"],horizontal=True,key="trade_region_layer")
-    severity=st.multiselect("Severity",["Critical","Severe","High","Medium","Moderate","Low"],default=[],key="trade_region_severity")
+    ports_df=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
+
+    events=_trade_region_filter(events,region,["Country / Countries","Location","Title","Description","Event Family","Event Type"])
+    ports_view=_trade_region_filter(ports_df,region,["Country","Port / Facility","Operator","Key Role","Coverage Note"])
+
+    events=_focus_filter(
+        events,focus_cfg,
+        ["Country / Countries","Location","Title","Description","Event Family","Event Type","Operational Impact","Trade / Commercial Impact"]
+    )
+    ports_view=_focus_filter(
+        ports_view,focus_cfg,
+        ["Country","Port / Facility","Operator","Key Role","Coverage Note","City / Region"]
+    )
+
+    ctl1,ctl2=st.columns([1.2,1.8])
+    with ctl1:
+        mode=st.radio(
+            "Layer",
+            ["All","Incidents & disruptions","Ports"],
+            horizontal=True,
+            key="trade_region_layer"
+        )
+    with ctl2:
+        severity=st.multiselect(
+            "Severity",
+            ["Critical","Severe","High","Medium","Moderate","Low"],
+            default=[],
+            key="trade_region_severity"
+        )
+
     if severity and not events.empty and "Severity" in events.columns:
         events=events[events["Severity"].fillna("").astype(str).isin(severity)]
 
     points=[]
     if mode in ["All","Incidents & disruptions"] and not events.empty and not locs.empty and "Event ID" in events and "Event ID" in locs:
-        lp=locs.copy(); lp["Latitude"]=pd.to_numeric(lp.get("Latitude"),errors="coerce"); lp["Longitude"]=pd.to_numeric(lp.get("Longitude"),errors="coerce")
+        lp=locs.copy()
+        lp["Latitude"]=pd.to_numeric(lp.get("Latitude"),errors="coerce")
+        lp["Longitude"]=pd.to_numeric(lp.get("Longitude"),errors="coerce")
         lp=lp.dropna(subset=["Latitude","Longitude"])
-        evcols=[c for c in ["Event ID","Start Date","Title","Severity","Mode","Trade / Commercial Impact"] if c in events.columns]
+        evcols=[c for c in [
+            "Event ID","Start Date","Title","Severity","Mode",
+            "Operational Impact","Trade / Commercial Impact"
+        ] if c in events.columns]
         ep=lp.merge(events[evcols],on="Event ID",how="inner")
         for _,r in ep.iterrows():
-            points.append({"lat":r["Latitude"],"lon":r["Longitude"],"name":str(r.get("Title","Event")),"kind":"Event","detail":str(r.get("Trade / Commercial Impact","")),"severity":str(r.get("Severity",""))})
+            detail=str(r.get("Trade / Commercial Impact","") or r.get("Operational Impact","") or "")
+            points.append({
+                "lat":r["Latitude"],"lon":r["Longitude"],
+                "name":str(r.get("Title","Event")),
+                "kind":"Event","detail":detail,
+                "severity":str(r.get("Severity",""))
+            })
+
     if mode in ["All","Ports"] and not ports_view.empty:
-        p=ports_view.copy(); p["Latitude"]=pd.to_numeric(p.get("Latitude"),errors="coerce"); p["Longitude"]=pd.to_numeric(p.get("Longitude"),errors="coerce"); p=p.dropna(subset=["Latitude","Longitude"])
+        p=ports_view.copy()
+        p["Latitude"]=pd.to_numeric(p.get("Latitude"),errors="coerce")
+        p["Longitude"]=pd.to_numeric(p.get("Longitude"),errors="coerce")
+        p=p.dropna(subset=["Latitude","Longitude"])
         for _,r in p.iterrows():
-            points.append({"lat":r["Latitude"],"lon":r["Longitude"],"name":str(r.get("Port / Facility","Port")),"kind":"Port","detail":str(r.get("Key Role","")),"severity":""})
+            points.append({
+                "lat":r["Latitude"],"lon":r["Longitude"],
+                "name":str(r.get("Port / Facility","Port")),
+                "kind":"Port","detail":str(r.get("Key Role","") or ""),
+                "severity":""
+            })
+
     mp=pd.DataFrame(points)
-    c1,c2,c3=st.columns(3); c1.metric("Mapped points",len(mp)); c2.metric("Regional events",len(events)); c3.metric("Ports",len(ports_view))
+
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Mapped points",len(mp))
+    m2.metric("Regional events",len(events))
+    m3.metric("Ports",len(ports_view))
+    m4.metric("Focus",focus)
+
+    st.caption(
+        f"Region: {region} · Key focus: {focus}. "
+        "Only supported coordinates are plotted; unmapped records remain in the registers below."
+    )
+
     if mp.empty:
-        st.info("No mapped records are available for the current regional/layer selection.")
+        st.info("No mapped records are available for the current region / focus / layer selection.")
     elif pdk is not None:
-        cfg=TRADE_REGIONS[region]
         layers=[]
         evp=mp[mp["kind"].eq("Event")]
         pp=mp[mp["kind"].eq("Port")]
         if not pp.empty:
-            layers.append(pdk.Layer("ScatterplotLayer",pp,get_position="[lon, lat]",get_radius=25000,radius_min_pixels=3,radius_max_pixels=9,get_fill_color=[79,145,205,170],pickable=True))
+            layers.append(
+                pdk.Layer(
+                    "ScatterplotLayer",pp,
+                    get_position="[lon, lat]",
+                    get_radius=25000,
+                    radius_min_pixels=3,
+                    radius_max_pixels=9,
+                    get_fill_color=[79,145,205,170],
+                    pickable=True
+                )
+            )
         if not evp.empty:
-            layers.append(pdk.Layer("ScatterplotLayer",evp,get_position="[lon, lat]",get_radius=40000,radius_min_pixels=5,radius_max_pixels=14,get_fill_color=[230,93,93,210],pickable=True))
-        st.pydeck_chart(pdk.Deck(layers=layers,initial_view_state=pdk.ViewState(latitude=cfg["center"][0],longitude=cfg["center"][1],zoom=cfg["zoom"]),tooltip={"html":"<b>{name}</b><br>{kind}<br>{detail}"},map_style=None),use_container_width=True,height=520)
+            layers.append(
+                pdk.Layer(
+                    "ScatterplotLayer",evp,
+                    get_position="[lon, lat]",
+                    get_radius=40000,
+                    radius_min_pixels=5,
+                    radius_max_pixels=14,
+                    get_fill_color=[230,93,93,210],
+                    pickable=True
+                )
+            )
+        st.pydeck_chart(
+            pdk.Deck(
+                layers=layers,
+                initial_view_state=pdk.ViewState(
+                    latitude=focus_cfg["center"][0],
+                    longitude=focus_cfg["center"][1],
+                    zoom=focus_cfg["zoom"]
+                ),
+                tooltip={"html":"<b>{name}</b><br>{kind}<br>{detail}"},
+                map_style=None
+            ),
+            use_container_width=True,
+            height=540
+        )
     else:
         st.map(mp,latitude="lat",longitude="lon",use_container_width=True)
-    tabs=st.tabs(["Events & impact","Ports"])
+
+    tabs=st.tabs(["Events & impact","Ports","Key focus summary"])
     with tabs[0]:
-        cols=[c for c in ["Start Date","Event Family","Event Type","Severity","Status","Mode","Country / Countries","Location","Title","Trade / Commercial Impact"] if c in events.columns]
-        display_df(events[cols] if cols else events,360)
+        cols=[c for c in [
+            "Start Date","Event Family","Event Type","Severity","Status","Mode",
+            "Country / Countries","Location","Title","Operational Impact",
+            "Trade / Commercial Impact"
+        ] if c in events.columns]
+        display_df(events[cols] if cols else events,380)
+
     with tabs[1]:
-        cols=[c for c in ["Port / Facility","Country","Operator","Facility Type","Key Role","Coverage Note"] if c in ports_view.columns]
-        display_df(ports_view[cols] if cols else ports_view,360)
+        cols=[c for c in [
+            "Port / Facility","Country","Operator","Facility Type",
+            "Key Role","Coverage Note"
+        ] if c in ports_view.columns]
+        display_df(ports_view[cols] if cols else ports_view,380)
+
+    with tabs[2]:
+        st.markdown(f"### {focus}")
+        if focus_cfg.get("phrases"):
+            st.caption("Focus terms: " + " · ".join(focus_cfg["phrases"][:10]))
+        c1,c2=st.columns(2)
+        with c1:
+            st.markdown("**Recent / priority events**")
+            if not events.empty:
+                ev=events.copy()
+                if "Start Date" in ev.columns:
+                    ev["_d"]=pd.to_datetime(ev["Start Date"],errors="coerce")
+                    ev=ev.sort_values("_d",ascending=False)
+                cols=[c for c in ["Start Date","Severity","Title","Location"] if c in ev.columns]
+                display_df(ev[cols].head(12) if cols else ev.head(12),320)
+            else:
+                st.caption("No qualifying events.")
+        with c2:
+            st.markdown("**Exposed ports / gateways**")
+            cols=[c for c in ["Port / Facility","Country","Operator","Key Role"] if c in ports_view.columns]
+            display_df(ports_view[cols].head(12) if cols else ports_view.head(12),320)
+
 
 # ---------- workspace navigation ----------
 st.sidebar.markdown("<div class='pc-kicker'>Power & Corridors Intelligence</div>",unsafe_allow_html=True)
@@ -7562,9 +7839,79 @@ def _trade_network_snapshot():
         "Corridors / systems":max(len(systems),len(routes)),
     }
 
-# Obsolete generic Overview table renderers removed in v3.3.38.
-# Commercial activity is handled by the canonical Investments / Contracts workspaces;
-# companies, ports, vessels and corridors use their dedicated entity workspaces.
+def _render_trade_pulse():
+    records=_recent_commercial_records()
+    st.markdown("### Commercial pulse")
+    st.caption("Recent deals, contracts and investment — showing who, when, what and value where the source model provides it.")
+    if records.empty:
+        st.info("No recent commercial activity records available.")
+        return
+    def c(names):
+        return _first_existing_col(records,names)
+    dc=c(["Date","Announcement Date","Transaction Date","Contract Date","Start Date","Effective Date","As Of"])
+    tc=c(["Title","Deal","Transaction","Contract","Name","Event"])
+    ac=c(["Buyer","Customer","Client","Awarding Authority","Contracting Authority","Investor","Acquirer","Company","Company Name"])
+    bc=c(["Seller","Supplier","Contractor","Counterparty","Target","Partner","Awardee"])
+    gc=c(["Country","Geography","Region","Location","Market"])
+    vc=c(["Value","Deal Value","Transaction Value","Contract Value","CAPEX","Capex","Investment"])
+    sc=c(["Status","Deal Status","Contract Status","Transaction Status"])
+    yc=c(["Type","Deal Type","Transaction Type","Contract Type","Category"])
+    rows=[]
+    for _,r in records.head(20).iterrows():
+        a=str(r.get(ac,'') if ac else '').strip(); b=str(r.get(bc,'') if bc else '').strip()
+        rows.append({
+            "Date":r.get(dc,'') if dc else '',
+            "Activity":r.get(tc,'') if tc else '',
+            "Who":" ↔ ".join(x for x in [a,b] if x),
+            "Type":r.get(yc,'') if yc else r.get('_source_type',''),
+            "Value / CAPEX":r.get(vc,'') if vc else '',
+            "Market":r.get(gc,'') if gc else '',
+            "Status":r.get(sc,'') if sc else '',
+        })
+    display_df(pd.DataFrame(rows),360)
+
+def _render_recent_additions():
+    st.markdown("### Latest additions")
+    st.caption("Newest or recently refreshed records across companies, infrastructure, vessels, defence and corridors.")
+    blocks=[]
+    candidates=[
+        ("Companies",TABLES.get(("Core Entities","Companies"),pd.DataFrame()),["Company","Company Name","Name"],["updated_at","created_at","As Of","as_of"]),
+        ("Infrastructure",TABLES.get(("Infrastructure","Assets"),pd.DataFrame()),["Asset","Name","Port / Facility","Terminal / Facility"],["updated_at","created_at","As Of","as_of"]),
+        ("Vessels",TABLES.get(("Maritime","Vessels"),pd.DataFrame()),["Vessel Name","Name"],["updated_at","created_at","As Of","as_of"]),
+        ("Defence",TABLES.get(("Defence & Shipbuilding","Defence Vessels"),pd.DataFrame()),["Vessel","Programme","Contract"],["updated_at","created_at","Date","As Of"]),
+        ("Corridors",TABLES.get(("Infrastructure","Transport Routes"),pd.DataFrame()),["Route","Corridor","Name"],["updated_at","created_at","As Of","as_of"]),
+    ]
+    for label,df,ncands,dcands in candidates:
+        if df is None or df.empty: continue
+        nc=_first_existing_col(df,ncands); dc=_first_existing_col(df,dcands); x=df.copy()
+        if dc:
+            x['_d']=pd.to_datetime(x[dc],errors='coerce'); x=x.sort_values('_d',ascending=False,na_position='last')
+        for _,r in x.head(4).iterrows():
+            blocks.append({"Area":label,"Added / updated":r.get(dc,'') if dc else '',"Record":r.get(nc,'') if nc else ''})
+    if not blocks:
+        st.info("No recent-addition metadata is available in the current data layer.")
+        return
+    recent=pd.DataFrame(blocks); recent['_d']=pd.to_datetime(recent['Added / updated'],errors='coerce')
+    recent=recent.sort_values('_d',ascending=False,na_position='last').drop(columns=['_d'])
+    display_df(recent.head(18),330)
+
+def _render_business_infrastructure():
+    st.markdown("### Business & infrastructure")
+    st.caption("Core trade-network coverage with current companies, infrastructure, fleets, defence and corridors.")
+    tabs=st.tabs(["Companies","Ports & terminals","Vessels","Defence","Corridors"])
+    with tabs[0]:
+        _compact_trade_table(TABLES.get(("Core Entities","Companies"),pd.DataFrame()),["Company","Company Name","Name","Country","HQ Country","Sector","Business Segments","Status","As Of"],280)
+    with tabs[1]:
+        terms=TABLES.get(("Maritime","Port Terminals"),pd.DataFrame()); ports=TABLES.get(("Maritime","Ports"),pd.DataFrame()); df=terms if not terms.empty else ports
+        _compact_trade_table(df,["Terminal / Facility","Port / Facility","Port","Country","City / Area","Operator / Network","Operator","Facility Type","Status"],280)
+    with tabs[2]:
+        _compact_trade_table(TABLES.get(("Maritime","Vessels"),pd.DataFrame()),["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Owner","Operator","Status"],280)
+    with tabs[3]:
+        df=TABLES.get(("Defence & Shipbuilding","Defence Vessels"),pd.DataFrame())
+        _compact_trade_table(df,["Vessel","Programme","Class / Type","Customer / Operator","Contract","Builder","Status","Delivery"],280)
+    with tabs[4]:
+        routes=TABLES.get(("Infrastructure","Transport Routes"),pd.DataFrame()); systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame()); df=routes if not routes.empty else systems
+        _compact_trade_table(df,["Route","Corridor","System","Name","Mode","Region","Origin","Destination","Status"],280)
 
 def _render_quick_access():
     st.markdown("### Quick access")
@@ -7689,13 +8036,16 @@ if page=="Overview":
             for _,h in hits.head(10).iterrows(): readable_search_card(h)
 
     st.markdown("---")
-    # v3.3.38: do not reintroduce the retired generic Commercial pulse,
-    # Latest additions or Business & infrastructure dataframe blocks here.
-    # The canonical workspaces already provide richer, entity-linked views.
-    left,right=st.columns([1.0,1.0],gap="large")
-    with left:
-        _render_quick_access()
+    main,right=st.columns([3.0,1.15],gap="large")
+    with main:
+        _render_trade_pulse()
+        st.markdown("---")
+        _render_recent_additions()
+        st.markdown("---")
+        _render_business_infrastructure()
     with right:
+        _render_quick_access()
+        st.markdown("---")
         render_security_business_rail(4)
 
     with st.expander("Detailed recent operational events",expanded=False):
@@ -7755,7 +8105,7 @@ elif page=="Regional Maps":
         "Regional Maps",
         "Regional business, infrastructure, corridor and security exposure — with trade and commercial activity as the primary lens."
     )
-    render_regional_business_security_maps()
+    render_trade_regional_maps()
 
 elif page=="Alerts & Disruptions":
     render_trade_alerts_workspace()
