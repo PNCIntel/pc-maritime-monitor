@@ -3697,8 +3697,16 @@ elif page=="Canonical Loader":
                     st.stop()
 
                 configs={}
+                # IMPORTANT: widget keys include the uploaded file hash + sheet name.
+                # Reusing numeric keys across different workbooks caused Streamlit
+                # session state to retain the PREVIOUS workbook's target-table choice.
+                # That could shift sheets one position, e.g. assets -> mobile_assets,
+                # mobile_assets -> events, events -> event_links.
+                file_key=str(file_hash)[:16]
                 for idx,(section,df) in enumerate(sections.items()):
                     suggested,include_default,reason=_canonical_section_target(section,df)
+                    section_key=re.sub(r"[^a-zA-Z0-9_]+","_",str(section)).strip("_") or f"sheet_{idx}"
+                    widget_ns=f"{file_key}_{section_key}"
                     with st.expander(
                         f"{section} · {len(df):,} rows · {'DATA' if include_default else 'EXCLUDED'}",
                         expanded=include_default
@@ -3709,7 +3717,7 @@ elif page=="Canonical Loader":
                         include=st.checkbox(
                             "Include this section",
                             value=include_default,
-                            key=f"canon_include_{idx}"
+                            key=f"canon_include_{widget_ns}"
                         )
 
                         default_target=suggested if suggested in registered_tables else registered_tables[0]
@@ -3717,7 +3725,7 @@ elif page=="Canonical Loader":
                             "Canonical target",
                             registered_tables,
                             index=registered_tables.index(default_target),
-                            key=f"canon_target_{idx}",
+                            key=f"canon_target_{widget_ns}",
                             disabled=not include,
                         )
 
@@ -3736,7 +3744,7 @@ elif page=="Canonical Loader":
                                 "Include":st.column_config.CheckboxColumn(),
                                 "Canonical Field":st.column_config.SelectboxColumn(options=[""]+cols),
                             },
-                            key=f"canon_map_{idx}"
+                            key=f"canon_map_{widget_ns}"
                         )
                         st.caption("Preview")
                         dataframe(df.head(6).to_dict("records"))
@@ -3759,10 +3767,32 @@ elif page=="Canonical Loader":
                 if included_plan:
                     st.markdown("### Package plan")
                     dataframe(included_plan)
+                    planned_rows=sum(x["rows"] for x in included_plan)
                     st.caption(
-                        f"{sum(x['rows'] for x in included_plan):,} source rows selected across "
+                        f"{planned_rows:,} source rows selected across "
                         f"{len(included_plan)} sheet(s)."
                     )
+
+                    # Sanity check: the target should normally correspond to the
+                    # recognized sheet type. This catches accidental manual remapping.
+                    suspicious=[]
+                    for sheet_name,cfg in configs.items():
+                        if not cfg.get("include"):
+                            continue
+                        expected,_,_= _canonical_section_target(sheet_name,cfg["df"])
+                        if expected and expected != cfg.get("target"):
+                            suspicious.append({
+                                "sheet":sheet_name,
+                                "expected_target":expected,
+                                "selected_target":cfg.get("target"),
+                                "rows":len(cfg["df"]),
+                            })
+                    if suspicious:
+                        st.error(
+                            "One or more sheets are mapped to an unexpected canonical table. "
+                            "Correct these mappings before loading."
+                        )
+                        dataframe(suspicious)
                 else:
                     st.warning("No data sheets are selected for this package.")
 
@@ -3777,11 +3807,13 @@ elif page=="Canonical Loader":
                     "Optional tables such as transactions/routes still require explicit metadata registration."
                 )
 
+                has_suspicious=bool(locals().get("suspicious",[]))
                 if st.button(
                     "▶ Load and process canonical package",
                     type="primary",
                     use_container_width=True,
-                    key="canonical_load_process"
+                    key=f"canonical_load_process_{str(file_hash)[:16]}",
+                    disabled=has_suspicious
                 ):
                     with st.status("Loading package into the canonical ingestion engine…",expanded=True) as status:
                         job=_canonical_create_job(
