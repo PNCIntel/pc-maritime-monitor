@@ -3266,24 +3266,43 @@ CANONICAL_LOGICAL_TYPE = {
 }
 
 
-def _canonical_registered_table_map():
-    """Return target_table -> pc_meta_entity_types row.
+CORE_CANONICAL_STAGE_TYPES = {
+    "pc_entities":"entity",
+    "pc_assets":"asset",
+    "pc_mobile_assets":"mobile_asset",
+    "pc_events":"event",
+    "pc_relationships":"relationship",
+    "pc_event_links":"event_link",
+}
 
-    pc_staged_records.target_entity_type is FK-constrained to
-    pc_meta_entity_types(entity_type), so the loader must use this registry.
+def _canonical_registered_table_map():
+    """Return target_table -> metadata row where available.
+
+    Core canonical tables use the established FK-safe entity_type values above.
+    Optional tables still require explicit metadata registration.
     """
     rows=_meta_entity_types(sb) if sb else []
-    return {
+    reg={
         str(r.get("table_name")):r
         for r in rows
         if r.get("table_name") and r.get("entity_type")
     }
+    for table_name,entity_type in CORE_CANONICAL_STAGE_TYPES.items():
+        reg.setdefault(table_name,{
+            "table_name":table_name,
+            "entity_type":entity_type,
+            "_core_builtin":True,
+        })
+    return reg
 
 def _canonical_registered_tables():
     reg=_canonical_registered_table_map()
+    # Keep stable user-facing order and always include the six core graph tables.
     return [t for t in CANONICAL_LOAD_TABLES if t in reg]
 
 def _canonical_target_entity_type(target_table):
+    if target_table in CORE_CANONICAL_STAGE_TYPES:
+        return CORE_CANONICAL_STAGE_TYPES[target_table]
     row=_canonical_registered_table_map().get(target_table)
     return (row or {}).get("entity_type")
 
@@ -3470,8 +3489,7 @@ def _canonical_section_target(section,df):
     """Return (target_table, include_by_default, reason).
 
     Unknown/reference sheets never fall back to pc_entities.
-    Recognized sheets are auto-included only if their table is registered in
-    pc_meta_entity_types.
+    The six core canonical graph tables are always loadable using their established FK-safe staging types.\n    Optional tables require pc_meta_entity_types registration.
     """
     s=_norm_field(section)
 
@@ -3688,15 +3706,34 @@ elif page=="Canonical Loader":
                             "mapping":edited,
                         }
 
+                included_plan=[
+                    {
+                        "sheet":k,
+                        "target_table":v["target"],
+                        "rows":len(v["df"]),
+                    }
+                    for k,v in configs.items()
+                    if v.get("include")
+                ]
+                if included_plan:
+                    st.markdown("### Package plan")
+                    dataframe(included_plan)
+                    st.caption(
+                        f"{sum(x['rows'] for x in included_plan):,} source rows selected across "
+                        f"{len(included_plan)} sheet(s)."
+                    )
+                else:
+                    st.warning("No data sheets are selected for this package.")
+
                 st.markdown("### What happens when you load")
                 st.caption(
                     "The whole package is staged, then one canonical processor resolves/upserts objects first "
                     "and writes relationships/event links second. There is no manual reconcile/apply sequence."
                 )
                 st.info(
-                    "Only recognized, metadata-registered data sheets are included by default. "
-                    "Research/reference sheets are excluded, and target_entity_type is always taken from "
-                    "pc_meta_entity_types — the loader no longer invents staging types such as 'transaction'."
+                    "The six core canonical sheets — entities, assets, mobile assets, events, relationships and "
+                    "event links — are always supported with their established FK-safe staging types. "
+                    "Optional tables such as transactions/routes still require explicit metadata registration."
                 )
 
                 if st.button(
