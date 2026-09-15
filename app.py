@@ -3107,6 +3107,161 @@ def _overlay_live_company_rollup(prof, entity_id, entity_name):
     return prof
 
 
+@st.cache_data(show_spinner=False, ttl=30)
+def _live_entity_event_feed(entity_ids):
+    """Read canonical event relationships directly from pc_entity_event_feed_v.
+
+    This is the authoritative live bridge between a company/entity profile and
+    pc_events via pc_event_links. It intentionally bypasses the legacy workbook
+    Event Company Links projection so newly-linked events appear immediately.
+    """
+    ids = sorted({str(x).strip() for x in (entity_ids or []) if str(x).strip()})
+    if not ids:
+        return pd.DataFrame(), pd.DataFrame(), ""
+
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame(), pd.DataFrame(), "No Supabase client"
+
+        # Query the view in modest chunks to avoid URL/query limits for large groups.
+        rows = []
+        for i in range(0, len(ids), 50):
+            chunk = ids[i:i+50]
+            q = (
+                sb.table("pc_entity_event_feed_v")
+                .select("*")
+                .in_("entity_id", chunk)
+                .order("start_date", desc=True)
+                .limit(5000)
+            )
+            resp = q.execute()
+            rows.extend(getattr(resp, "data", None) or [])
+
+        if not rows:
+            return pd.DataFrame(), pd.DataFrame(), ""
+
+        raw = pd.DataFrame(rows)
+
+        # Project live canonical column names into the names already consumed by
+        # render_event_cards(), render_event_map(), and company profile metrics.
+        rename = {
+            "event_id": "Event ID",
+            "start_date": "Start Date",
+            "end_date": "End Date",
+            "event_nature": "Event Nature",
+            "event_domain": "Event Domain",
+            "event_family": "Event Family",
+            "event_type": "Event Type",
+            "severity": "Severity",
+            "status": "Status",
+            "mode": "Mode",
+            "countries": "Countries",
+            "location": "Location",
+            "title": "Title",
+            "description": "Description",
+            "operational_impact": "Operational Impact",
+            "relationship": "Relationship",
+            "link_confidence": "Link Confidence",
+            "entity_id": "Linked Entity ID",
+            "entity_name": "Linked Entity",
+            "entity_type": "Linked Entity Type",
+            "subtype": "Linked Entity Subtype",
+        }
+        events = raw.rename(columns=rename).copy()
+
+        # One event may be linked to several entities in the selected corporate
+        # group. Show the event once on the company page.
+        if "Event ID" in events.columns:
+            events = events.drop_duplicates(subset=["Event ID"], keep="first")
+
+        # Pull canonical locations for those same events so the existing event map
+        # also becomes live rather than remaining dependent on workbook projection.
+        locations = pd.DataFrame()
+        event_ids = [
+            str(x).strip()
+            for x in events.get("Event ID", pd.Series(dtype=str)).tolist()
+            if str(x).strip()
+        ]
+        if event_ids:
+            loc_rows = []
+            for i in range(0, len(event_ids), 100):
+                chunk = event_ids[i:i+100]
+                resp = (
+                    sb.table("pc_event_locations")
+                    .select("event_id,location_name,country,latitude,longitude,accuracy,notes")
+                    .in_("event_id", chunk)
+                    .limit(5000)
+                    .execute()
+                )
+                loc_rows.extend(getattr(resp, "data", None) or [])
+            if loc_rows:
+                locations = pd.DataFrame(loc_rows).rename(columns={
+                    "event_id": "Event ID",
+                    "location_name": "Location",
+                    "country": "Country",
+                    "latitude": "Latitude",
+                    "longitude": "Longitude",
+                    "accuracy": "Accuracy",
+                    "notes": "Notes",
+                })
+
+        return events, locations, ""
+
+    except Exception as exc:
+        return pd.DataFrame(), pd.DataFrame(), str(exc)
+
+
+def _overlay_live_company_events(prof, entity_id):
+    """Merge canonical live event feed into the company profile."""
+    scope = set(str(x) for x in prof.get("live_scope_ids", set()) if str(x))
+    scope.update(str(x) for x in prof.get("asset_scope_ids", set()) if str(x))
+    scope.add(str(entity_id))
+
+    live_events, live_locations, error = _live_entity_event_feed(tuple(sorted(scope)))
+    prof["live_event_feed_error"] = error
+
+    if not live_events.empty:
+        existing = prof.get("events", pd.DataFrame())
+        if existing is None or existing.empty:
+            prof["events"] = live_events.copy()
+        else:
+            combined = pd.concat([existing, live_events], ignore_index=True, sort=False)
+            if "Event ID" in combined.columns:
+                combined = combined.drop_duplicates(subset=["Event ID"], keep="last")
+            prof["events"] = combined
+
+        # The platform treats news/developments as events. Keep a news-shaped
+        # projection so the existing News tab and metric can expose the same
+        # canonical company-linked activity without a second relationship model.
+        event_news = live_events.copy()
+        event_news = event_news.rename(columns={
+            "Start Date": "Published Date",
+            "Title": "Headline",
+            "Description": "Summary",
+        })
+        event_news["Publisher"] = "P&C canonical event"
+        event_news["URL"] = ""
+        event_news["Region"] = event_news.get("Location", "")
+        event_news["Country"] = event_news.get("Countries", "")
+        event_news["Verification Status"] = "Canonical event-linked"
+        event_news["Notes"] = event_news.get("Operational Impact", "")
+        prof["canonical_event_news"] = event_news
+    else:
+        prof["canonical_event_news"] = pd.DataFrame()
+
+    if not live_locations.empty:
+        existing_loc = prof.get("event_locations", pd.DataFrame())
+        if existing_loc is None or existing_loc.empty:
+            prof["event_locations"] = live_locations.copy()
+        else:
+            combined = pd.concat([existing_loc, live_locations], ignore_index=True, sort=False)
+            keys = [c for c in ["Event ID", "Location", "Latitude", "Longitude"] if c in combined.columns]
+            prof["event_locations"] = combined.drop_duplicates(subset=keys, keep="last") if keys else combined
+
+    return prof
+
+
 def build_company_profile(entity_id, entity_name):
     prof={}
     prof["company_id"]=entity_id
@@ -3610,8 +3765,9 @@ def build_company_profile(entity_id, entity_name):
         prof["sanctions_links"]=pd.DataFrame()
     prof["sanctions_designations"]=des[des["Designation ID"].astype(str).isin(sanc_ids)].copy() if (sanc_ids and not des.empty and "Designation ID" in des.columns) else pd.DataFrame()
 
-    # Final authoritative live overlay: canonical DB wins over workbook/migration projections.
+    # Final authoritative live overlays: canonical DB wins over workbook/migration projections.
     prof=_overlay_live_company_rollup(prof,entity_id,entity_name)
+    prof=_overlay_live_company_events(prof,entity_id)
     return prof
 
 def profile_count(prof,key):
@@ -4183,7 +4339,14 @@ def render_company_profile(entity_id, entity_name):
     c4.metric("Linked vessels",total_v)
     c5.metric("Programmes",profile_count(prof,"programmes"))
     c6.metric("Events",profile_count(prof,"events"))
-    c7.metric("News",profile_count(prof,"news")+profile_count(prof,"announcements")+profile_count(prof,"port_news")+profile_count(prof,"strategic_news"))
+    c7.metric(
+        "News",
+        profile_count(prof,"news")
+        + profile_count(prof,"announcements")
+        + profile_count(prof,"port_news")
+        + profile_count(prof,"strategic_news")
+        + profile_count(prof,"canonical_event_news")
+    )
 
     company_view=st.selectbox(
         "Company section",
@@ -4244,6 +4407,10 @@ def render_company_profile(entity_id, entity_name):
         if not prof["strategic_news"].empty:
             x=prof["strategic_news"].copy()
             x["_source_kind"]="Strategic event"
+            latest_frames.append(x)
+        if not prof.get("canonical_event_news",pd.DataFrame()).empty:
+            x=prof["canonical_event_news"].copy()
+            x["_source_kind"]="Canonical event"
             latest_frames.append(x)
         if latest_frames:
             latest=pd.concat(latest_frames,ignore_index=True,sort=False)
@@ -4362,7 +4529,22 @@ def render_company_profile(entity_id, entity_name):
                 source_col="URL",
                 max_items=100
             )
-        if prof["announcements"].empty and prof["news"].empty and prof["port_news"].empty and prof["strategic_news"].empty:
+        if not prof.get("canonical_event_news",pd.DataFrame()).empty:
+            st.markdown("### Canonical event-linked reporting")
+            show_named_list(
+                prof["canonical_event_news"],
+                "Headline",
+                ["Published Date","Event Type","Event Family","Region","Relationship"],
+                source_col="URL",
+                max_items=100
+            )
+        if (
+            prof["announcements"].empty
+            and prof["news"].empty
+            and prof["port_news"].empty
+            and prof["strategic_news"].empty
+            and prof.get("canonical_event_news",pd.DataFrame()).empty
+        ):
             st.info("No linked news, announcements or canonical event coverage.")
 
     with tabs[8]:
