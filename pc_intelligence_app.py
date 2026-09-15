@@ -3,6 +3,10 @@ import os, sys
 import pandas as pd
 import re
 try:
+    import altair as alt
+except Exception:
+    alt = None
+try:
     import pydeck as pdk
 except Exception:
     pdk = None
@@ -634,7 +638,7 @@ st.sidebar.caption("Refresh after Power Admin applies new events, vessels, asset
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 
 NAV = {
-    "INTELLIGENCE DESK": ["Operating Picture", "Regional Maps", "Alerts & Incidents"],
+    "INTELLIGENCE DESK": ["Operating Picture", "Intelligence Analytics", "Regional Maps", "Alerts & Incidents"],
     "FORWARD MONITORING": ["Watch Areas", "Monitoring & Indicators"],
     "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
     "DISCOVERY": ["Intelligence Search", "Source Monitor"],
@@ -650,7 +654,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v3.1 migration · {_bst.get('mode','excel').title()} backend · shared canonical model")
+st.sidebar.caption(f"v3.2 analytics · {_bst.get('mode','excel').title()} backend · shared canonical model")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -1496,6 +1500,251 @@ def ranked_operating_picture(df,limit=5):
 
 
 # -----------------------------------------------------------------------------
+# Intelligence analytics helpers
+# -----------------------------------------------------------------------------
+
+COUNTRY_REGION_MAP = {
+    # Middle East / Gulf
+    "united arab emirates":"Middle East / Gulf","uae":"Middle East / Gulf","saudi arabia":"Middle East / Gulf",
+    "iran":"Middle East / Gulf","iraq":"Middle East / Gulf","oman":"Middle East / Gulf","qatar":"Middle East / Gulf",
+    "kuwait":"Middle East / Gulf","bahrain":"Middle East / Gulf","yemen":"Middle East / Gulf","israel":"Middle East / Gulf",
+    "jordan":"Middle East / Gulf","lebanon":"Middle East / Gulf","syria":"Middle East / Gulf","palestine":"Middle East / Gulf",
+    # Europe
+    "united kingdom":"Europe","uk":"Europe","ireland":"Europe","france":"Europe","germany":"Europe","netherlands":"Europe",
+    "belgium":"Europe","spain":"Europe","portugal":"Europe","italy":"Europe","greece":"Europe","turkey":"Europe","türkiye":"Europe",
+    "poland":"Europe","romania":"Europe","bulgaria":"Europe","ukraine":"Europe","russia":"Europe","estonia":"Europe","latvia":"Europe",
+    "lithuania":"Europe","finland":"Europe","sweden":"Europe","norway":"Europe","denmark":"Europe","iceland":"Europe","croatia":"Europe",
+    "slovenia":"Europe","albania":"Europe","montenegro":"Europe","georgia":"Europe","cyprus":"Europe","malta":"Europe",
+    # Asia-Pacific
+    "china":"Asia-Pacific","japan":"Asia-Pacific","south korea":"Asia-Pacific","north korea":"Asia-Pacific","taiwan":"Asia-Pacific",
+    "philippines":"Asia-Pacific","indonesia":"Asia-Pacific","malaysia":"Asia-Pacific","singapore":"Asia-Pacific","vietnam":"Asia-Pacific",
+    "thailand":"Asia-Pacific","cambodia":"Asia-Pacific","myanmar":"Asia-Pacific","australia":"Asia-Pacific","new zealand":"Asia-Pacific",
+    "papua new guinea":"Asia-Pacific","fiji":"Asia-Pacific","solomon islands":"Asia-Pacific","hong kong":"Asia-Pacific",
+    # South Asia
+    "india":"South Asia","pakistan":"South Asia","bangladesh":"South Asia","sri lanka":"South Asia","nepal":"South Asia","maldives":"South Asia",
+    # Africa
+    "egypt":"Africa","libya":"Africa","tunisia":"Africa","algeria":"Africa","morocco":"Africa","somalia":"Africa","djibouti":"Africa",
+    "eritrea":"Africa","ethiopia":"Africa","kenya":"Africa","tanzania":"Africa","mozambique":"Africa","south africa":"Africa","namibia":"Africa",
+    "angola":"Africa","nigeria":"Africa","ghana":"Africa","togo":"Africa","benin":"Africa","cameroon":"Africa","senegal":"Africa","sudan":"Africa",
+    # North America
+    "united states":"North America","usa":"North America","us":"North America","canada":"North America","mexico":"North America",
+    # Central America & Caribbean
+    "panama":"Central America & Caribbean","costa rica":"Central America & Caribbean","guatemala":"Central America & Caribbean",
+    "honduras":"Central America & Caribbean","nicaragua":"Central America & Caribbean","belize":"Central America & Caribbean",
+    "haiti":"Central America & Caribbean","jamaica":"Central America & Caribbean","cuba":"Central America & Caribbean",
+    "dominican republic":"Central America & Caribbean","bahamas":"Central America & Caribbean","trinidad and tobago":"Central America & Caribbean",
+    # South America
+    "brazil":"South America","argentina":"South America","chile":"South America","colombia":"South America","peru":"South America",
+    "ecuador":"South America","venezuela":"South America","guyana":"South America","suriname":"South America","uruguay":"South America",
+    # Central Asia
+    "kazakhstan":"Central Asia","uzbekistan":"Central Asia","turkmenistan":"Central Asia","kyrgyzstan":"Central Asia","tajikistan":"Central Asia",
+}
+
+
+def _analytics_country_tokens(v):
+    """Normalize country/countries into displayable country tokens without exposing IDs."""
+    s = clean_display_text(v)
+    if not s:
+        return []
+    s = re.sub(r"[\[\]{}()\"']", "", s)
+    parts = re.split(r"\s*[;,|]+\s*", s)
+    out=[]
+    for part in parts:
+        part=part.strip()
+        if not part:
+            continue
+        # Preserve country names containing spaces; slash is usually a geography separator.
+        subparts=[x.strip() for x in re.split(r"\s+/\s+",part) if x.strip()]
+        for x in subparts:
+            if x and x.casefold() not in {y.casefold() for y in out}:
+                out.append(x)
+    return out
+
+
+def _analytics_region_for_country(country):
+    c=clean_display_text(country).casefold()
+    if not c:
+        return "Unspecified"
+    if c in COUNTRY_REGION_MAP:
+        return COUNTRY_REGION_MAP[c]
+    # Conservative alias matching only after exact lookup.
+    for key,region in COUNTRY_REGION_MAP.items():
+        if len(key) >= 5 and (c == key or c.startswith(key+" ")):
+            return region
+    return "Other / Unclassified"
+
+
+def _analytics_prepare_events(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+    x=df.copy()
+    x["_date"]=pd.to_datetime(x.get("Start Date"),errors="coerce",utc=True).dt.tz_convert(None)
+    if "Country / Countries" in x.columns:
+        x["_countries"]=x["Country / Countries"].map(_analytics_country_tokens)
+    else:
+        x["_countries"]=[[] for _ in range(len(x))]
+    x["_primary_country"]=x["_countries"].map(lambda z: z[0] if z else "Unspecified")
+    x["_regions"]=x["_countries"].map(lambda z: sorted(set(_analytics_region_for_country(c) for c in z)) if z else ["Unspecified"])
+    x["_primary_region"]=x["_regions"].map(lambda z: z[0] if z else "Unspecified")
+    return x
+
+
+def _analytics_explode_geo(df, level="country"):
+    if df is None or df.empty:
+        return pd.DataFrame()
+    x=df.copy()
+    if level == "region":
+        x["Breakdown"] = x["_regions"]
+    else:
+        x["Breakdown"] = x["_countries"]
+    x=x.explode("Breakdown")
+    x["Breakdown"]=x["Breakdown"].fillna("Unspecified").astype(str).replace("","Unspecified")
+    if "Event ID" in x.columns:
+        x=x.drop_duplicates(subset=["Event ID","Breakdown"])
+    return x
+
+
+def _analytics_severity_bucket(v):
+    s=clean_display_text(v).casefold()
+    if "critical" in s or "severe" in s:
+        return "Critical / Severe"
+    if "high" in s:
+        return "High"
+    if "medium" in s or "moderate" in s:
+        return "Medium"
+    if "low" in s:
+        return "Low"
+    return "Unspecified"
+
+
+def _analytics_period_filter(df, period, custom_start=None, custom_end=None):
+    if df is None or df.empty or "_date" not in df.columns:
+        return df, None, None
+    now=pd.Timestamp.now().normalize()
+    if period == "24 hours":
+        start=pd.Timestamp.now()-pd.Timedelta(hours=24); end=pd.Timestamp.now()
+    elif period == "7 days":
+        start=now-pd.Timedelta(days=6); end=pd.Timestamp.now()
+    elif period == "30 days":
+        start=now-pd.Timedelta(days=29); end=pd.Timestamp.now()
+    elif period == "90 days":
+        start=now-pd.Timedelta(days=89); end=pd.Timestamp.now()
+    elif period == "Year to date":
+        start=pd.Timestamp(year=now.year,month=1,day=1); end=pd.Timestamp.now()
+    elif period == "Custom" and custom_start is not None and custom_end is not None:
+        start=pd.Timestamp(custom_start); end=pd.Timestamp(custom_end)+pd.Timedelta(days=1)-pd.Timedelta(microseconds=1)
+    else:
+        return df.copy(), None, None
+    return df[df["_date"].between(start,end,inclusive="both")].copy(),start,end
+
+
+def _analytics_breakdown(df, level):
+    if df is None or df.empty:
+        return pd.DataFrame()
+    if level in {"Region","Country"}:
+        x=_analytics_explode_geo(df,"region" if level == "Region" else "country")
+        grp_col="Breakdown"
+    else:
+        field={
+            "Event Type":"Event Type","Event Family":"Event Family","Severity":"Severity",
+            "Domain":"Event Domain","Mode":"Mode","Status":"Status"
+        }.get(level,level)
+        x=df.copy()
+        if field not in x.columns:
+            return pd.DataFrame()
+        x["Breakdown"]=x[field].fillna("Unspecified").astype(str).replace("","Unspecified")
+        grp_col="Breakdown"
+
+    x["_severity_bucket"]=x.get("Severity",pd.Series("",index=x.index)).map(_analytics_severity_bucket)
+    if "Event ID" in x.columns:
+        counts=x.groupby(grp_col)["Event ID"].nunique().rename("Count")
+    else:
+        counts=x.groupby(grp_col).size().rename("Count")
+    sev=pd.crosstab(x[grp_col],x["_severity_bucket"])
+    out=counts.to_frame().join(sev,how="left").reset_index().rename(columns={grp_col:level})
+    total=max(int(out["Count"].sum()),1)
+    out["% of breakdown"]=(out["Count"]/total*100).round(1)
+    for c in ["Critical / Severe","High","Medium","Low","Unspecified"]:
+        if c not in out.columns: out[c]=0
+    return out.sort_values(["Count",level],ascending=[False,True]).reset_index(drop=True)
+
+
+def _analytics_render_chart(df, chart_type, group_by, time_grain="Daily", top_n=15):
+    if df is None or df.empty:
+        st.info("No events match the current analytical filters.")
+        return
+    breakdown=_analytics_breakdown(df,group_by)
+    if breakdown.empty:
+        st.info("The selected grouping is not available in the current event model.")
+        return
+
+    if chart_type == "Line":
+        x=df.dropna(subset=["_date"]).copy()
+        if x.empty:
+            st.info("Matching events do not contain usable dates for a time-series chart.")
+            return
+        if time_grain == "Daily":
+            x["Period"]=x["_date"].dt.floor("D")
+        elif time_grain == "Weekly":
+            x["Period"]=x["_date"].dt.to_period("W").apply(lambda p:p.start_time)
+        else:
+            x["Period"]=x["_date"].dt.to_period("M").dt.to_timestamp()
+
+        # Build series categories using same analytical grouping.
+        if group_by == "Region":
+            x=_analytics_explode_geo(x,"region").rename(columns={"Breakdown":"Series"})
+        elif group_by == "Country":
+            x=_analytics_explode_geo(x,"country").rename(columns={"Breakdown":"Series"})
+        else:
+            field={"Event Type":"Event Type","Event Family":"Event Family","Severity":"Severity","Domain":"Event Domain","Mode":"Mode","Status":"Status"}.get(group_by,group_by)
+            x["Series"]=x[field].fillna("Unspecified").astype(str) if field in x.columns else "All events"
+        top=x["Series"].value_counts().head(max(1,top_n)).index
+        x=x[x["Series"].isin(top)]
+        if "Event ID" in x.columns:
+            chart_df=x.groupby(["Period","Series"])["Event ID"].nunique().reset_index(name="Count")
+        else:
+            chart_df=x.groupby(["Period","Series"]).size().reset_index(name="Count")
+        if alt is None:
+            pivot=chart_df.pivot(index="Period",columns="Series",values="Count").fillna(0)
+            st.line_chart(pivot,use_container_width=True)
+        else:
+            chart=(alt.Chart(chart_df).mark_line(point=True).encode(
+                x=alt.X("Period:T",title=None),y=alt.Y("Count:Q",title="Event count"),
+                color=alt.Color("Series:N",title=group_by),
+                tooltip=[alt.Tooltip("Period:T",title="Period"),alt.Tooltip("Series:N",title=group_by),alt.Tooltip("Count:Q",format=",d")]
+            ).properties(height=420).interactive())
+            st.altair_chart(chart,use_container_width=True)
+        return
+
+    plot_df=breakdown.head(max(1,top_n)).copy()
+    category=group_by
+    if chart_type == "Bar":
+        if alt is None:
+            st.bar_chart(plot_df.set_index(category)["Count"],use_container_width=True)
+        else:
+            chart=(alt.Chart(plot_df).mark_bar().encode(
+                x=alt.X("Count:Q",title="Event count"),
+                y=alt.Y(f"{category}:N",sort="-x",title=None),
+                tooltip=[alt.Tooltip(f"{category}:N",title=category),alt.Tooltip("Count:Q",format=",d"),alt.Tooltip("% of breakdown:Q",format=".1f")]
+            ).properties(height=max(320,min(620,45*len(plot_df)))))
+            st.altair_chart(chart,use_container_width=True)
+    else:  # Pie
+        pie_df=plot_df.copy()
+        if len(breakdown) > top_n:
+            other=int(breakdown.iloc[top_n:]["Count"].sum())
+            if other:
+                pie_df=pd.concat([pie_df,pd.DataFrame([{category:"Other", "Count":other, "% of breakdown":round(other/max(int(breakdown["Count"].sum()),1)*100,1)}])],ignore_index=True)
+        if alt is None:
+            st.dataframe(pie_df[[category,"Count","% of breakdown"]],use_container_width=True,hide_index=True)
+        else:
+            chart=(alt.Chart(pie_df).mark_arc(innerRadius=70).encode(
+                theta=alt.Theta("Count:Q"),color=alt.Color(f"{category}:N",title=group_by),
+                tooltip=[alt.Tooltip(f"{category}:N",title=group_by),alt.Tooltip("Count:Q",format=",d"),alt.Tooltip("% of breakdown:Q",format=".1f")]
+            ).properties(height=430))
+            st.altair_chart(chart,use_container_width=True)
+
+
+# -----------------------------------------------------------------------------
 # 1. OPERATING PICTURE
 # -----------------------------------------------------------------------------
 
@@ -1643,7 +1892,192 @@ if page == "Operating Picture":
     )
 
 # -----------------------------------------------------------------------------
-# 2. ALERTS & INCIDENTS
+# 2. INTELLIGENCE ANALYTICS
+# -----------------------------------------------------------------------------
+elif page == "Intelligence Analytics":
+    section(
+        "Analytical workspace",
+        "Intelligence Analytics",
+        "Interrogate the P&C intelligence event layer by geography, event type, severity, domain and time. Every visual resolves back to the underlying event records."
+    )
+
+    adf=_analytics_prepare_events(hazard_events)
+    if adf.empty:
+        st.info("No intelligence-routed events are currently available for analysis.")
+    else:
+        st.markdown("### Analytical filters")
+        f1,f2,f3,f4=st.columns(4)
+        period=f1.selectbox(
+            "Period",
+            ["24 hours","7 days","30 days","90 days","Year to date","All available","Custom"],
+            index=2,
+            key="intel_analytics_period"
+        )
+        geo_mode=f2.selectbox("Geography",["Global","Region","Country"],key="intel_analytics_geo_mode")
+
+        custom_start=custom_end=None
+        if period == "Custom":
+            valid_dates=adf["_date"].dropna()
+            min_d=(valid_dates.min().date() if not valid_dates.empty else pd.Timestamp.now().date())
+            max_d=(valid_dates.max().date() if not valid_dates.empty else pd.Timestamp.now().date())
+            custom_start=f3.date_input("From",value=min_d,key="intel_analytics_custom_start")
+            custom_end=f4.date_input("To",value=max_d,key="intel_analytics_custom_end")
+        else:
+            f3.caption("Scope")
+            f3.markdown("**Intelligence-routed events only**")
+            f4.caption("Source layer")
+            f4.markdown("**Canonical events**")
+
+        df,start_dt,end_dt=_analytics_period_filter(adf,period,custom_start,custom_end)
+
+        # Geographic filtering uses all countries attached to an event, not only the first.
+        selected_geo="Global"
+        if geo_mode == "Region":
+            regions=sorted({r for rs in df.get("_regions",pd.Series(dtype=object)) for r in (rs if isinstance(rs,list) else []) if r})
+            regions=[r for r in regions if r != "Unspecified"] or ["Unspecified"]
+            selected_geo=st.selectbox("Region",regions,key="intel_analytics_region")
+            df=df[df["_regions"].map(lambda rs:selected_geo in rs if isinstance(rs,list) else False)].copy()
+        elif geo_mode == "Country":
+            countries=sorted({c for cs in df.get("_countries",pd.Series(dtype=object)) for c in (cs if isinstance(cs,list) else []) if c})
+            countries=countries or ["Unspecified"]
+            selected_geo=st.selectbox("Country",countries,key="intel_analytics_country")
+            df=df[df["_countries"].map(lambda cs:selected_geo in cs if isinstance(cs,list) else False)].copy()
+
+        # Event dimensions.
+        d1,d2,d3,d4=st.columns(4)
+        type_options=["All"]+sorted([x for x in text_col(df,"Event Type").unique() if clean_display_text(x)])
+        severity_options=["All"]+sorted([x for x in text_col(df,"Severity").unique() if clean_display_text(x)])
+        domain_options=["All"]+sorted([x for x in text_col(df,"Event Domain").unique() if clean_display_text(x)])
+        family_options=["All"]+sorted([x for x in text_col(df,"Event Family").unique() if clean_display_text(x)])
+        event_type=d1.selectbox("Event type",type_options,key="intel_analytics_event_type")
+        severity=d2.selectbox("Severity",severity_options,key="intel_analytics_severity")
+        domain=d3.selectbox("Domain",domain_options,key="intel_analytics_domain")
+        family=d4.selectbox("Event family",family_options,key="intel_analytics_family")
+        if event_type != "All": df=df[text_col(df,"Event Type").eq(event_type)].copy()
+        if severity != "All": df=df[text_col(df,"Severity").eq(severity)].copy()
+        if domain != "All": df=df[text_col(df,"Event Domain").eq(domain)].copy()
+        if family != "All": df=df[text_col(df,"Event Family").eq(family)].copy()
+
+        # Headline metrics.
+        event_count=(df["Event ID"].nunique() if "Event ID" in df.columns else len(df))
+        sev_series=text_col(df,"Severity")
+        high_critical=int(sev_series.str.contains("High|Severe|Critical",case=False,regex=True,na=False).sum())
+        country_count=len({c for cs in df.get("_countries",pd.Series(dtype=object)) for c in (cs if isinstance(cs,list) else []) if c})
+        mapped_locations=0
+        if not event_locations.empty and "Event ID" in event_locations.columns and "Event ID" in df.columns:
+            ids=set(df["Event ID"].dropna().astype(str))
+            loc=event_locations[text_col(event_locations,"Event ID").isin(ids)].copy()
+            if "Latitude" in loc.columns and "Longitude" in loc.columns:
+                lat=pd.to_numeric(loc["Latitude"],errors="coerce")
+                lon=pd.to_numeric(loc["Longitude"],errors="coerce")
+                mapped_locations=int((lat.notna() & lon.notna()).sum())
+
+        # Period-on-period comparison only when the current window is bounded.
+        delta_text=None
+        if start_dt is not None and end_dt is not None and period != "Custom":
+            span=end_dt-start_dt
+            prev_end=start_dt-pd.Timedelta(microseconds=1)
+            prev_start=prev_end-span
+            prev=adf[adf["_date"].between(prev_start,prev_end,inclusive="both")].copy()
+            if geo_mode == "Region":
+                prev=prev[prev["_regions"].map(lambda rs:selected_geo in rs if isinstance(rs,list) else False)]
+            elif geo_mode == "Country":
+                prev=prev[prev["_countries"].map(lambda cs:selected_geo in cs if isinstance(cs,list) else False)]
+            if event_type != "All": prev=prev[text_col(prev,"Event Type").eq(event_type)]
+            if severity != "All": prev=prev[text_col(prev,"Severity").eq(severity)]
+            if domain != "All": prev=prev[text_col(prev,"Event Domain").eq(domain)]
+            if family != "All": prev=prev[text_col(prev,"Event Family").eq(family)]
+            prev_count=(prev["Event ID"].nunique() if "Event ID" in prev.columns else len(prev))
+            if prev_count > 0:
+                pct=(event_count-prev_count)/prev_count*100
+                delta_text=f"{pct:+.0f}% vs prior period"
+            elif event_count > 0:
+                delta_text="New vs prior period"
+
+        m1,m2,m3,m4=st.columns(4)
+        m1.metric("Matching events",f"{event_count:,}",delta_text)
+        m2.metric("High / critical",f"{high_critical:,}")
+        m3.metric("Countries affected",f"{country_count:,}")
+        m4.metric("Mapped locations",f"{mapped_locations:,}")
+
+        st.markdown("### Visual analysis")
+        c1,c2,c3,c4=st.columns([1,1.15,1,1])
+        chart_type=c1.selectbox("Chart",["Line","Bar","Pie"],key="intel_analytics_chart")
+        group_options=["Event Type","Region","Country","Severity","Event Family","Domain","Mode","Status"]
+        default_group=1 if geo_mode == "Global" else (2 if geo_mode == "Region" else 0)
+        group_by=c2.selectbox("Group by",group_options,index=default_group,key="intel_analytics_group")
+        time_grain=c3.selectbox("Time grain",["Daily","Weekly","Monthly"],index=1,key="intel_analytics_grain",disabled=(chart_type != "Line"))
+        top_n=c4.selectbox("Show",[5,10,15,20,25],index=2,key="intel_analytics_topn")
+
+        scope_label=("Global" if geo_mode == "Global" else selected_geo)
+        st.caption(f"{scope_label} · {period} · {event_count:,} matching intelligence events")
+        _analytics_render_chart(df,chart_type,group_by,time_grain,top_n)
+
+        # Geographic drill-down table changes with analytical scope.
+        st.markdown("### Geographic breakdown")
+        if geo_mode == "Global":
+            breakdown_level="Region"
+        elif geo_mode == "Region":
+            breakdown_level="Country"
+        else:
+            breakdown_level="Event Type"
+        breakdown=_analytics_breakdown(df,breakdown_level)
+        if breakdown.empty:
+            st.caption("No breakdown is available for the current selection.")
+        else:
+            display_cols=[breakdown_level,"Count","% of breakdown","Critical / Severe","High","Medium","Low"]
+            show_df(breakdown,display_cols,min(520,90+34*len(breakdown)))
+
+        if group_by != breakdown_level:
+            with st.expander(f"Breakdown by {group_by}",expanded=False):
+                secondary=_analytics_breakdown(df,group_by)
+                if not secondary.empty:
+                    show_df(secondary,[group_by,"Count","% of breakdown","Critical / Severe","High","Medium","Low"],min(480,90+34*len(secondary)))
+
+        st.markdown("### Supporting events")
+        st.caption("These are the event records producing the counts above. Open any event in the canonical drill-down for the full connected context.")
+        events_view=df.copy()
+        if "_date" in events_view.columns:
+            events_view=events_view.sort_values("_date",ascending=False,na_position="last")
+        show_df(
+            events_view,
+            ["Start Date","Event Type","Event Family","Severity","Event Domain","Country / Countries","Location","Title","Operational Impact","Confidence"],
+            430
+        )
+
+        if not events_view.empty and "Event ID" in events_view.columns:
+            choices=events_view.reset_index(drop=True)
+            pick=st.selectbox(
+                "Open matching event",
+                range(len(choices)),
+                format_func=lambda i: (
+                    f"{clean_display_text(choices.iloc[i].get('Start Date',''))} · "
+                    f"{clean_display_text(choices.iloc[i].get('Title','Untitled event'))}"
+                ),
+                key="intel_analytics_open_event"
+            )
+            erow=choices.iloc[pick]
+            eid=clean_display_text(erow.get("Event ID",""))
+            if eid:
+                pc_drilldown_button(
+                    "event",eid,"Open full event context",
+                    key=f"intel_analytics_dd_{eid}",use_container_width=True
+                )
+
+        csv_cols=[c for c in ["Event ID","Start Date","Event Type","Event Family","Severity","Event Domain","Country / Countries","Location","Title","Operational Impact","Confidence"] if c in events_view.columns]
+        if csv_cols:
+            csv_data=events_view[csv_cols].to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "Download filtered event set (CSV)",
+                data=csv_data,
+                file_name="pc_intelligence_analytics_filtered_events.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="intel_analytics_download"
+            )
+
+# -----------------------------------------------------------------------------
+# 3. ALERTS & INCIDENTS
 # -----------------------------------------------------------------------------
 elif page == "Alerts & Incidents":
     section("01 · Immediate", "Alerts & incidents", "Filter the event layer by severity, geography, mode and event family.")
