@@ -93,6 +93,89 @@ def _event_links_for_object(object_type,object_id):
 def _event_links_for_event(event_id):
     return _rows("pc_event_links",{"event_id":str(event_id)},500)
 
+def _event_links_with_fallback(event_id):
+    """Return event links, resolving duplicate/sibling canonical events when needed.
+
+    This is especially important for list/watchlist events such as PGSA where an
+    older canonical event may still be the one surfaced in the UI while the newer
+    canonical event carries the actual 77 vessel links.
+    """
+    direct=_event_links_for_event(event_id)
+    if direct:
+        return direct,str(event_id),None
+
+    rec=object_record("event",event_id)
+    if not rec:
+        return [],str(event_id),None
+
+    sb=_sb()
+    if not sb:
+        return [],str(event_id),None
+
+    title=_clean(rec.get("title"))
+    event_type=_clean(rec.get("event_type"))
+    start_date=_clean(rec.get("start_date"))
+
+    candidates=[]
+    seen=set()
+
+    def add(rows):
+        for r in rows or []:
+            rid=str(r.get("event_id") or "").strip()
+            if not rid or rid==str(event_id) or rid in seen:
+                continue
+            seen.add(rid)
+            candidates.append(r)
+
+    # First preference: same structured event type.
+    if event_type:
+        try:
+            add(sb.table("pc_events")
+                  .select("event_id,title,start_date,event_type,status,severity")
+                  .eq("event_type",event_type)
+                  .order("start_date",desc=True)
+                  .limit(20).execute().data or [])
+        except Exception:
+            pass
+
+    # PGSA / compliance list events historically existed under more than one title.
+    title_low=title.casefold()
+    if any(x in title_low for x in ["pgsa","non-compliant","non compliant","77 vessels","compliance list"]):
+        for term in ["%PGSA%","%non-compliant%","%77 vessels%","%compliance%"]:
+            try:
+                add(sb.table("pc_events")
+                      .select("event_id,title,start_date,event_type,status,severity")
+                      .ilike("title",term)
+                      .order("start_date",desc=True)
+                      .limit(20).execute().data or [])
+            except Exception:
+                pass
+
+    # Generic fallback: same date, if present.
+    if start_date:
+        date_only=start_date[:10]
+        try:
+            add(sb.table("pc_events")
+                  .select("event_id,title,start_date,event_type,status,severity")
+                  .gte("start_date",date_only+"T00:00:00")
+                  .lt("start_date",date_only+"T23:59:59.999999")
+                  .limit(50).execute().data or [])
+        except Exception:
+            pass
+
+    best_links=[]
+    best_id=str(event_id)
+    best_rec=None
+    for cand in candidates:
+        cid=str(cand.get("event_id") or "")
+        links=_event_links_for_event(cid)
+        if len(links)>len(best_links):
+            best_links=links
+            best_id=cid
+            best_rec=cand
+
+    return best_links,best_id,best_rec
+
 def _event_rows_for_object(object_type,object_id):
     out=[]
     for link in _event_links_for_object(object_type,object_id)[:100]:
@@ -199,10 +282,17 @@ def _render_relationships(typ,oid,key_prefix="main"):
             )
 
 def _render_event_linked_objects(event_id,key_prefix="top"):
-    links=_event_links_for_event(event_id)
+    links,resolved_event_id,resolved_event=_event_links_with_fallback(event_id)
     if not links:
         st.caption("No canonical event links recorded.")
         return
+
+    if resolved_event_id != str(event_id):
+        resolved_title=_clean((resolved_event or {}).get("title")) or resolved_event_id
+        st.info(
+            "Linked objects are attached to the canonical sibling event "
+            f"{resolved_title}. Showing that linked set here so duplicate event records do not hide the vessel list."
+        )
 
     enriched=[]
     for r in links:
@@ -248,7 +338,7 @@ def _render_event_linked_objects(event_id,key_prefix="top"):
             q=st.text_input(
                 "Filter vessels",
                 placeholder="name, IMO, flag, type…",
-                key=f"{key_prefix}_vessel_filter_{event_id}",
+                key=f"{key_prefix}_vessel_filter_{resolved_event_id}",
             )
             if q.strip():
                 mask=vdf.astype(str).apply(
@@ -272,12 +362,12 @@ def _render_event_linked_objects(event_id,key_prefix="top"):
                         f"{display_records[i]['Vessel']}"
                         + (f" · IMO {display_records[i]['IMO']}" if display_records[i]["IMO"] else "")
                         + (f" · {display_records[i]['Flag']}" if display_records[i]["Flag"] else ""),
-                    key=f"{key_prefix}_vessel_pick_{event_id}",
+                    key=f"{key_prefix}_vessel_pick_{resolved_event_id}",
                 )
                 selected=display_records[pick]
                 if st.button(
                     f"Open {selected['Vessel']} vessel profile",
-                    key=f"{key_prefix}_vessel_open_{event_id}_{selected['Canonical ID']}",
+                    key=f"{key_prefix}_vessel_open_{resolved_event_id}_{selected['Canonical ID']}",
                     type="primary",
                     use_container_width=True,
                 ):
@@ -305,12 +395,12 @@ def _render_event_linked_objects(event_id,key_prefix="top"):
                         "Open other linked object",
                         list(range(len(choices))),
                         format_func=lambda i:f"{choices[i]['name']} · {choices[i]['relationship']}",
-                        key=f"{key_prefix}_other_pick_{event_id}",
+                        key=f"{key_prefix}_other_pick_{resolved_event_id}",
                     )
                     selected=choices[pick]
                     if st.button(
                         f"Open {selected['name']}",
-                        key=f"{key_prefix}_other_open_{event_id}_{selected['id']}",
+                        key=f"{key_prefix}_other_open_{resolved_event_id}_{selected['id']}",
                         use_container_width=True,
                     ):
                         set_drilldown(selected["type"],selected["id"],selected["name"])
@@ -333,12 +423,12 @@ def _render_event_linked_objects(event_id,key_prefix="top"):
                 "Open linked object",
                 list(range(len(choices))),
                 format_func=lambda i:f"{choices[i]['name']} · {choices[i]['relationship']}",
-                key=f"{key_prefix}_linked_object_pick_{event_id}",
+                key=f"{key_prefix}_linked_object_pick_{resolved_event_id}",
             )
             selected=choices[pick]
             if st.button(
                 f"Open {selected['name']}",
-                key=f"{key_prefix}_linked_object_open_{event_id}_{selected['id']}",
+                key=f"{key_prefix}_linked_object_open_{resolved_event_id}_{selected['id']}",
                 use_container_width=True,
             ):
                 set_drilldown(selected["type"],selected["id"],selected["name"])

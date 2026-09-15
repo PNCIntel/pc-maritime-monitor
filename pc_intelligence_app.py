@@ -1323,60 +1323,94 @@ def render_regional_event_workspace(region_name):
 
 @st.cache_data(show_spinner=False,ttl=300)
 def canonical_pgsa_vessels():
-    """Return the latest canonical PGSA/compliance event and its linked vessels."""
+    """Return the PGSA canonical event that actually owns the linked-vessel set.
+
+    Older PGSA event records can coexist with the newer canonical list event. Do
+    not simply choose the newest/title match: choose the candidate with the
+    strongest mobile-asset linkage so the 77-vessel list remains visible.
+    """
     try:
         sb=pc_db_client(service=True)
     except Exception:
         return {},pd.DataFrame()
 
-    event={}
     candidates=[]
-    # Prefer explicit event type created by the canonical Hormuz package.
-    try:
-        candidates=(sb.table("pc_events")
-                    .select("event_id,title,start_date,event_type,severity,status,location,description,operational_impact,commercial_impact")
-                    .eq("event_type","VESSEL_COMPLIANCE_LIST_UPDATE")
-                    .order("start_date",desc=True)
-                    .limit(5)
-                    .execute().data or [])
-    except Exception:
-        candidates=[]
+    seen=set()
 
-    if not candidates:
-        for term in ["%PGSA%","%non-compliant%","%77 vessels%"]:
-            try:
-                candidates=(sb.table("pc_events")
-                            .select("event_id,title,start_date,event_type,severity,status,location,description,operational_impact,commercial_impact")
-                            .ilike("title",term)
-                            .order("start_date",desc=True)
-                            .limit(5)
-                            .execute().data or [])
-            except Exception:
-                candidates=[]
-            if candidates:
-                break
+    def add_candidates(rows):
+        for r in rows or []:
+            eid=str(r.get("event_id") or "").strip()
+            if not eid or eid in seen:
+                continue
+            seen.add(eid)
+            candidates.append(r)
+
+    # Structured event type created by the canonical Hormuz package.
+    try:
+        add_candidates(
+            sb.table("pc_events")
+              .select("event_id,title,start_date,event_type,severity,status,location,description,operational_impact,commercial_impact")
+              .eq("event_type","VESSEL_COMPLIANCE_LIST_UPDATE")
+              .order("start_date",desc=True)
+              .limit(20)
+              .execute().data or []
+        )
+    except Exception:
+        pass
+
+    # Historical/duplicate PGSA titles may still exist, so gather all plausible
+    # siblings and then choose the one with actual vessel links.
+    for term in ["%PGSA%","%non-compliant%","%77 vessels%","%compliance list%"]:
+        try:
+            add_candidates(
+                sb.table("pc_events")
+                  .select("event_id,title,start_date,event_type,severity,status,location,description,operational_impact,commercial_impact")
+                  .ilike("title",term)
+                  .order("start_date",desc=True)
+                  .limit(20)
+                  .execute().data or []
+            )
+        except Exception:
+            pass
 
     if not candidates:
         return {},pd.DataFrame()
 
-    event=candidates[0]
-    eid=event.get("event_id")
-    try:
-        links=(sb.table("pc_event_links")
-               .select("linked_id,linked_type,relationship")
-               .eq("event_id",eid)
-               .eq("linked_type","mobile_asset")
-               .limit(500)
-               .execute().data or [])
-    except Exception:
-        links=[]
+    best_event={}
+    best_links=[]
+    for candidate in candidates:
+        eid=str(candidate.get("event_id") or "")
+        try:
+            links=(sb.table("pc_event_links")
+                   .select("linked_id,linked_type,relationship")
+                   .eq("event_id",eid)
+                   .eq("linked_type","mobile_asset")
+                   .limit(500)
+                   .execute().data or [])
+        except Exception:
+            links=[]
 
-    ids=[str(x.get("linked_id")) for x in links if x.get("linked_id")]
+        if len(links)>len(best_links):
+            best_event=candidate
+            best_links=links
+
+    # If none have links, return the newest candidate for visibility/debugging.
+    if not best_event:
+        best_event=candidates[0]
+        best_links=[]
+
+    ids=[]
+    seen_ids=set()
+    for link in best_links:
+        lid=str(link.get("linked_id") or "").strip()
+        if lid and lid not in seen_ids:
+            seen_ids.add(lid)
+            ids.append(lid)
+
     if not ids:
-        return event,pd.DataFrame()
+        return best_event,pd.DataFrame()
 
     assets=[]
-    # Query in manageable batches.
     for i in range(0,len(ids),100):
         batch=ids[i:i+100]
         try:
@@ -1387,6 +1421,7 @@ def canonical_pgsa_vessels():
                   .execute().data or []
             )
         except Exception:
+            # Fallback for backends/adapters that do not expose .in_ consistently.
             for oid in batch:
                 try:
                     assets.extend(
@@ -1399,7 +1434,7 @@ def canonical_pgsa_vessels():
                 except Exception:
                     pass
 
-    rel_by_id={str(x.get("linked_id")):x.get("relationship") for x in links}
+    rel_by_id={str(x.get("linked_id")):x.get("relationship") for x in best_links}
     rows=[]
     for r in assets:
         oid=str(r.get("mobile_asset_id") or "")
@@ -1413,10 +1448,11 @@ def canonical_pgsa_vessels():
             "Relationship":rel_by_id.get(oid),
             "Canonical ID":oid,
         })
+
     df=pd.DataFrame(rows)
     if not df.empty:
-        df=df.sort_values(["Vessel","IMO"],na_position="last").reset_index(drop=True)
-    return event,df
+        df=df.drop_duplicates(subset=["Canonical ID"]).sort_values(["Vessel","IMO"],na_position="last").reset_index(drop=True)
+    return best_event,df
 
 def _is_compliance_watchlist_event(df):
     """Events that belong in compliance/watchlists rather than the lead operating picture."""
@@ -1498,11 +1534,12 @@ if page == "Operating Picture":
         st.markdown("### Selected intelligence context")
         pc_render_active_drilldown(location="top",expanded=True)
 
+    pgsa_event_live,pgsa_vessels_live=canonical_pgsa_vessels()
     c1,c2,c3,c4,c5 = st.columns(5)
     c1.metric("Active Monitors", len(active_mon))
     c2.metric("High / Severe Events", len(high_events))
     c3.metric("Security / MARSEC Events", len(sec_events))
-    c4.metric("PGSA / Compliance", len(pgsa))
+    c4.metric("PGSA vessels", len(pgsa_vessels_live) if pgsa_event_live else len(pgsa))
     c5.metric("Official MARSEC Feeds", len(marsec_feeds))
 
     left, right = st.columns([1.55,1.0],gap="large")
