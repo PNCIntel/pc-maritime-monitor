@@ -425,23 +425,54 @@ def load_gdelt_articles(query, timespan="24h", maxrecords=50):
 # ---------- NewsData.io news & signal discovery ----------
 NEWSDATA_LATEST_URL = "https://newsdata.io/api/1/latest"
 
-@st.cache_data(show_spinner=False, ttl=600)
+@st.cache_data(show_spinner=False, ttl=900)
 def load_newsdata_articles(query, api_key, language="en", size=10):
-    """NewsData.io discovery feed. Results remain open-source signals until corroborated."""
+    """NewsData.io discovery feed with a compact-query retry for HTTP 422."""
     if not api_key:
         return pd.DataFrame(), "NewsData.io API key not configured"
-    params={"apikey":api_key,"q":query,"language":language,"size":min(int(size),10)}
-    try:
-        req=Request(NEWSDATA_LATEST_URL+"?"+urlencode(params),headers={"User-Agent":"PC-Trade-System/2.9"})
-        with urlopen(req,timeout=12) as response:
-            payload=json.loads(response.read().decode("utf-8"))
-        if str(payload.get("status","")).lower() not in {"success",""}:
-            return pd.DataFrame(), str(payload.get("message") or "NewsData request failed")
-        return pd.DataFrame(payload.get("results") or []), ""
-    except HTTPError as exc:
-        return pd.DataFrame(), f"HTTP {exc.code}"
-    except (URLError,TimeoutError,ValueError,OSError) as exc:
-        return pd.DataFrame(), str(exc)
+
+    requested_size=max(1,min(int(size or 10),10))
+    headers={"User-Agent":"Mozilla/5.0 Power-Corridors-Trade/3.4"}
+
+    # NewsData can reject long Boolean queries with HTTP 422. Try a compact
+    # high-value query first, then a general English latest feed.
+    attempts=[
+        str(query or "").strip()[:420],
+        "shipping maritime port logistics trade energy security",
+        "",
+    ]
+
+    last_error=""
+    for q in attempts:
+        params={"apikey":api_key,"language":language,"size":requested_size}
+        if q:
+            params["q"]=q
+        try:
+            req=Request(NEWSDATA_LATEST_URL+"?"+urlencode(params),headers=headers)
+            with urlopen(req,timeout=12) as response:
+                payload=json.loads(response.read().decode("utf-8",errors="replace"))
+            if str(payload.get("status","")).lower() not in {"success",""}:
+                last_error=str(payload.get("message") or "NewsData request failed")
+                continue
+            results=payload.get("results") or []
+            if results:
+                return pd.DataFrame(results), ""
+            last_error="No results returned"
+        except HTTPError as exc:
+            body=""
+            try:
+                body=exc.read().decode("utf-8",errors="replace")[:500]
+            except Exception:
+                pass
+            last_error=f"HTTP {exc.code}" + (f" · {body}" if body else "")
+            if exc.code != 422:
+                break
+        except (URLError,TimeoutError,ValueError,OSError) as exc:
+            last_error=str(exc)
+            break
+
+    return pd.DataFrame(), last_error or "NewsData request failed"
+
 
 # ---------- optional live transport feeds ----------
 def _secret(name, default=""):
@@ -7609,6 +7640,32 @@ def _render_quick_access():
             request_nav(target); st.rerun()
 
 
+
+def _display_text(value, default=""):
+    """Safe UI text: never render pandas NaN/NaT/None as literal text."""
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    s=str(value).strip()
+    if not s or s.casefold() in {"nan","nat","none","null","<na>"}:
+        return default
+    return s
+
+def _display_date(value):
+    if value is None:
+        return ""
+    try:
+        dt=pd.to_datetime(value,errors="coerce")
+        if pd.notna(dt):
+            return dt.strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    return _display_text(value)
+
 def _render_operational_brief():
     st.markdown("### Operational brief")
     st.caption("Four concise trade-impact items. Full incident detail stays in Intelligence.")
@@ -7631,17 +7688,18 @@ def _render_operational_brief():
 
     # Prefer rows that actually contain a business/commercial consequence.
     if impact_col:
-        impacted=events[events[impact_col].astype(str).str.strip().ne("")]
+        impact_series=events[impact_col].apply(_display_text)
+        impacted=events[impact_series.ne("")]
         if not impacted.empty:
             events=impacted
 
     for _,r in events.head(4).iterrows():
-        title=str(r.get(title_col,"") if title_col else "").strip() or "Operational issue"
-        impact=str(r.get(impact_col,"") if impact_col else "").strip()
-        location=str(r.get(location_col,"") if location_col else "").strip()
-        status=str(r.get(status_col,"") if status_col else "").strip()
-        severity=str(r.get(severity_col,"") if severity_col else "").strip()
-        date=str(r.get(date_col,"") if date_col else "").strip()
+        title=_display_text(r.get(title_col) if title_col else None,"Operational issue")
+        impact=_display_text(r.get(impact_col) if impact_col else None)
+        location=_display_text(r.get(location_col) if location_col else None)
+        status=_display_text(r.get(status_col) if status_col else None)
+        severity=_display_text(r.get(severity_col) if severity_col else None)
+        date=_display_date(r.get(date_col) if date_col else None)
 
         if len(title) > 92:
             title=title[:89].rstrip()+"…"
@@ -7650,15 +7708,21 @@ def _render_operational_brief():
 
         meta=" · ".join(x for x in [date,severity,status,location] if x)
 
+        body_html=(
+            f'<div class="pc-card-body" style="font-size:0.9rem;line-height:1.4;">'
+            f'{html_lib.escape(impact)}</div>'
+            if impact else
+            '<div class="pc-card-body" style="font-size:0.9rem;line-height:1.4;opacity:.72;">'
+            'No separate trade-impact note recorded.</div>'
+        )
+
         st.markdown(
             f"""<div class="pc-card" style="padding:12px 14px;margin-bottom:10px;">
             <div class="pc-label">{html_lib.escape(meta)}</div>
             <div style="font-weight:700;font-size:0.98rem;line-height:1.35;margin:5px 0 6px;">
                 {html_lib.escape(title)}
             </div>
-            <div class="pc-card-body" style="font-size:0.9rem;line-height:1.4;">
-                {html_lib.escape(impact)}
-            </div>
+            {body_html}
             </div>""",
             unsafe_allow_html=True
         )

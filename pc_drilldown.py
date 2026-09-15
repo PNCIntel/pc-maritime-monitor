@@ -134,10 +134,13 @@ def restore_drilldown_from_query():
     except Exception:
         pass
 
-def drilldown_button(object_type,object_id,label="Open details",key=None,use_container_width=False):
-    if not object_id: return False
+def drilldown_button(object_type,object_id,label="Open details",key=None,use_container_width=False,key_prefix=""):
+    if not object_id:
+        return False
     typ=_type(object_type)
-    if st.button(label,key=key or f"dd_{typ}_{object_id}",use_container_width=use_container_width):
+    prefix=f"{key_prefix}_" if key_prefix else ""
+    final_key=key or f"{prefix}dd_{typ}_{object_id}"
+    if st.button(label,key=final_key,use_container_width=use_container_width):
         set_drilldown(typ,object_id,rerun=True)
         return True
     return False
@@ -177,7 +180,7 @@ def _render_overview(rec,typ):
             seen.add(url)
             st.link_button(str(label).replace("_"," ").title(),url,use_container_width=True)
 
-def _render_relationships(typ,oid):
+def _render_relationships(typ,oid,key_prefix="main"):
     rows=_relationship_rows(typ,oid)
     if not rows:
         st.caption("No canonical relationships recorded."); return
@@ -188,9 +191,14 @@ def _render_relationships(typ,oid):
         rel=_clean(r.get("relationship_type")).replace("_"," ").title()
         st.markdown(f"**{'→' if is_source else '←'} {rel}** · {object_label(other_type,other_id)}")
         if other_id and other_type in OBJECTS:
-            drilldown_button(other_type,other_id,"Open linked object",key=f"ddrel_{oid}_{i}_{other_id}",use_container_width=True)
+            drilldown_button(
+                other_type,other_id,"Open linked object",
+                key=f"{key_prefix}_ddrel_{oid}_{i}_{other_id}",
+                use_container_width=True,
+                key_prefix=key_prefix
+            )
 
-def _render_events(typ,oid):
+def _render_events(typ,oid,key_prefix="main"):
     if typ=="event":
         rows=_event_links_for_event(oid)
         if not rows:
@@ -199,7 +207,12 @@ def _render_events(typ,oid):
             lt=_type(r.get("linked_type")); lid=r.get("linked_id")
             st.markdown(f"**{object_label(lt,lid)}** · {_clean(r.get('relationship')).replace('_',' ').title()}")
             if lt in OBJECTS and lid:
-                drilldown_button(lt,lid,"Open linked object",key=f"ddevobj_{oid}_{i}_{lid}",use_container_width=True)
+                drilldown_button(
+                    lt,lid,"Open linked object",
+                    key=f"{key_prefix}_ddevobj_{oid}_{i}_{lid}",
+                    use_container_width=True,
+                    key_prefix=key_prefix
+                )
         return
     events=_event_rows_for_object(typ,oid)
     if not events:
@@ -210,17 +223,22 @@ def _render_events(typ,oid):
         meta=" · ".join(x for x in [_clean(e.get("start_date")),_clean(e.get("severity")),_clean(e.get("event_type"))] if x)
         if meta: st.caption(meta)
         if e.get("operational_impact"): st.write(e.get("operational_impact"))
-        drilldown_button("event",e.get("event_id"),"Open event",key=f"ddevent_{oid}_{i}_{e.get('event_id')}",use_container_width=True)
+        drilldown_button(
+            "event",e.get("event_id"),"Open event",
+            key=f"{key_prefix}_ddevent_{oid}_{i}_{e.get('event_id')}",
+            use_container_width=True,
+            key_prefix=key_prefix
+        )
 
-def render_drilldown(object_type,object_id):
+def render_drilldown(object_type,object_id,key_prefix="main"):
     typ=_type(object_type)
     rec=object_record(typ,object_id)
     if not rec:
         st.warning(f"No canonical {typ} record found for {object_id}."); return
     tabs=st.tabs(["Overview","Relationships","Events & Intelligence","Raw / Provenance"])
     with tabs[0]: _render_overview(rec,typ)
-    with tabs[1]: _render_relationships(typ,object_id)
-    with tabs[2]: _render_events(typ,object_id)
+    with tabs[1]: _render_relationships(typ,object_id,key_prefix=key_prefix)
+    with tabs[2]: _render_events(typ,object_id,key_prefix=key_prefix)
     with tabs[3]: st.json(rec)
 
 def render_active_drilldown(location="main",expanded=True):
@@ -230,24 +248,26 @@ def render_active_drilldown(location="main",expanded=True):
     label=object_label(typ,oid)
     if location=="sidebar":
         with st.sidebar.expander(f"Drill-down · {label}",expanded=expanded):
+            st.caption(f"{OBJECTS.get(typ,{}).get('label',typ)} · {oid}")
             c1,c2=st.columns(2)
-            if c1.button("Trade",key=f"dd_trade_{oid}",use_container_width=True):
+            if c1.button("Trade",key=f"sidebar_dd_trade_{oid}",use_container_width=True):
                 try: st.query_params["product"]="trade"
                 except Exception: pass
                 st.rerun()
-            if c2.button("Intelligence",key=f"dd_intel_{oid}",use_container_width=True):
+            if c2.button("Intelligence",key=f"sidebar_dd_intel_{oid}",use_container_width=True):
                 try: st.query_params["product"]="intelligence"
                 except Exception: pass
                 st.rerun()
-            if st.button("Clear",key=f"dd_clear_{oid}",use_container_width=True): clear_drilldown()
-            render_drilldown(typ,oid)
+            if st.button("Clear",key=f"sidebar_dd_clear_{oid}",use_container_width=True):
+                clear_drilldown()
+            st.caption("Full canonical context is shown in the main workspace below.")
     else:
         st.markdown("---")
         st.markdown("## Canonical drill-down")
         c1,c2,c3=st.columns([1,1,1])
         c1.caption(OBJECTS.get(typ,{}).get("label",typ)); c2.caption(str(oid))
         if c3.button("Close drill-down",key=f"dd_close_{oid}",use_container_width=True): clear_drilldown()
-        render_drilldown(typ,oid)
+        render_drilldown(typ,oid,key_prefix="main")
     return True
 
 def render_sidebar_search():
@@ -270,7 +290,7 @@ def render_sidebar_search():
         if matches:
             idx=st.sidebar.selectbox("Matches",list(range(len(matches))),format_func=lambda i:f"{_clean(matches[i].get(cfg['name']))} · {_clean(matches[i].get(cfg['id']))}",key="pc_dd_match_pick")
             picked=matches[idx]
-            if st.sidebar.button("Open drill-down",key="pc_dd_open_search",use_container_width=True):
+            if st.sidebar.button("Open drill-down",key="sidebar_pc_dd_open_search",use_container_width=True):
                 set_drilldown(typ,picked.get(cfg["id"]),picked.get(cfg["name"]))
         else:
             st.sidebar.caption("No canonical match.")
