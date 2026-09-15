@@ -3804,6 +3804,56 @@ elif page=="Canonical Loader":
                     m4.metric("Broken refs",summ.get("broken",0))
                     dataframe(by_table)
 
+                    if summ.get("review",0):
+                        review_rows=_canonical_review_rows(last,2000)
+                        reason_counts={}
+                        for rr in review_rows:
+                            reason=str(
+                                rr.get("resolution_method")
+                                or rr.get("resolution_status")
+                                or "UNKNOWN"
+                            )
+                            key=(rr.get("target_table") or "unknown",reason)
+                            reason_counts[key]=reason_counts.get(key,0)+1
+
+                        st.markdown("#### Exact unresolved reasons")
+                        dataframe([
+                            {
+                                "target_table":k[0],
+                                "reason":k[1],
+                                "count":v,
+                            }
+                            for k,v in sorted(
+                                reason_counts.items(),
+                                key=lambda x:(x[0][0],-x[1],x[0][1])
+                            )
+                        ])
+
+                        with st.expander("Inspect unresolved records",expanded=False):
+                            dataframe(review_rows)
+
+                        if st.button(
+                            "↻ Retry unresolved rows in this package",
+                            type="primary",
+                            use_container_width=True,
+                            key=f"retry_last_canonical_{last}"
+                        ):
+                            try:
+                                with st.status(
+                                    "Retrying unresolved canonical objects and dependent graph edges…",
+                                    expanded=True
+                                ) as status:
+                                    result=_canonical_process_job(last)
+                                    st.write(result)
+                                    status.update(
+                                        label="Retry complete — refreshing",
+                                        state="complete",
+                                        expanded=False
+                                    )
+                                st.rerun()
+                            except Exception as exc:
+                                st.exception(exc)
+
             except Exception as exc:
                 st.exception(exc)
 
