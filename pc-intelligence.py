@@ -693,6 +693,9 @@ st.markdown(f'<div class="pc-title">{page}</div>', unsafe_allow_html=True)
 st.markdown('<div class="pc-deck">Decision-useful intelligence on geopolitical disruption, maritime security, trade corridors, aviation, sanctions, critical infrastructure and operational risk.</div>', unsafe_allow_html=True)
 st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
 
+# Canonical context opens here, immediately below the workspace header.
+pc_render_active_drilldown(location="top",expanded=True)
+
 
 def _watch_tokens(v):
     s=str(v or "").casefold()
@@ -2099,6 +2102,3 @@ elif page == "Source Monitor":
 st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
 st.markdown('<div class="small-note">P&C Intelligence · Shared P&C data model · Dedicated security and operational intelligence interface.</div>', unsafe_allow_html=True)
 
-
-# Shared canonical drill-down available from every Intelligence workspace.
-pc_render_active_drilldown(location="main",expanded=True)

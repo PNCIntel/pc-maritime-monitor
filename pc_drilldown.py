@@ -198,56 +198,164 @@ def _render_relationships(typ,oid,key_prefix="main"):
                 key_prefix=key_prefix
             )
 
-def _render_events(typ,oid,key_prefix="main"):
-    if typ=="event":
-        rows=_event_links_for_event(oid)
-        if not rows:
-            st.caption("No canonical event links recorded."); return
-        for i,r in enumerate(rows):
-            lt=_type(r.get("linked_type")); lid=r.get("linked_id")
-            st.markdown(f"**{object_label(lt,lid)}** · {_clean(r.get('relationship')).replace('_',' ').title()}")
-            if lt in OBJECTS and lid:
-                drilldown_button(
-                    lt,lid,"Open linked object",
-                    key=f"{key_prefix}_ddevobj_{oid}_{i}_{lid}",
-                    use_container_width=True,
-                    key_prefix=key_prefix
-                )
+def _render_event_linked_objects(event_id,key_prefix="top"):
+    links=_event_links_for_event(event_id)
+    if not links:
+        st.caption("No canonical event links recorded.")
         return
-    events=_event_rows_for_object(typ,oid)
-    if not events:
-        st.caption("No linked canonical events recorded."); return
-    events=sorted(events,key=lambda x:str(x.get("start_date") or ""),reverse=True)
-    for i,e in enumerate(events[:50]):
-        st.markdown(f"**{_clean(e.get('title')) or e.get('event_id')}**")
-        meta=" · ".join(x for x in [_clean(e.get("start_date")),_clean(e.get("severity")),_clean(e.get("event_type"))] if x)
-        if meta: st.caption(meta)
-        if e.get("operational_impact"): st.write(e.get("operational_impact"))
-        drilldown_button(
-            "event",e.get("event_id"),"Open event",
-            key=f"{key_prefix}_ddevent_{oid}_{i}_{e.get('event_id')}",
-            use_container_width=True,
-            key_prefix=key_prefix
+
+    rows=[]
+    for r in links:
+        lt=_type(r.get("linked_type"))
+        lid=r.get("linked_id")
+        rec=object_record(lt,lid) if lt in OBJECTS else None
+        name=object_label(lt,lid)
+        row={
+            "Type":OBJECTS.get(lt,{}).get("label",lt.replace("_"," ").title()),
+            "Name":name,
+            "Relationship":_clean(r.get("relationship")).replace("_"," ").title(),
+            "Canonical ID":lid,
+        }
+        if lt=="mobile_asset" and rec:
+            row["IMO"]=_clean(rec.get("imo"))
+            row["Flag"]=_clean(rec.get("flag"))
+            row["Vessel Type"]=_clean(rec.get("subtype") or rec.get("asset_type"))
+        elif lt=="entity" and rec:
+            row["Country"]=_clean(rec.get("hq_country") or rec.get("country"))
+            row["Entity Type"]=_clean(rec.get("entity_type"))
+        elif lt=="asset" and rec:
+            row["Country"]=_clean(rec.get("country"))
+            row["Asset Type"]=_clean(rec.get("asset_type"))
+        rows.append(row)
+
+    df=pd.DataFrame(rows)
+    vessel_count=int((df["Type"]=="Mobile Asset / Vessel").sum()) if "Type" in df.columns else 0
+    c1,c2,c3=st.columns(3)
+    c1.metric("Linked objects",len(df))
+    c2.metric("Linked vessels",vessel_count)
+    c3.metric("Other objects",len(df)-vessel_count)
+
+    if vessel_count >= 10:
+        st.info(
+            f"This event has a large linked-vessel set ({vessel_count} vessels). "
+            "The full list is shown below and each vessel can be opened without leaving the drill-down."
         )
 
-def render_drilldown(object_type,object_id,key_prefix="main"):
+    # Put mobile assets first for list/watchlist events such as the PGSA 77-vessel event.
+    if "Type" in df.columns:
+        df["_sort"]=df["Type"].map({"Mobile Asset / Vessel":0,"Entity / Company":1,"Asset / Infrastructure":2}).fillna(9)
+        df=df.sort_values(["_sort","Name"]).drop(columns=["_sort"])
+
+    st.dataframe(df,use_container_width=True,hide_index=True,height=min(620,90+35*min(len(df),15)))
+
+    selectable=[
+        r for r in rows
+        if _type(r.get("Type")) in OBJECTS or r.get("Canonical ID")
+    ]
+    # Build canonical selection from original links so types remain precise.
+    choices=[]
+    for r in links:
+        lt=_type(r.get("linked_type")); lid=r.get("linked_id")
+        if lt in OBJECTS and lid:
+            rec=object_record(lt,lid)
+            choices.append({
+                "type":lt,
+                "id":lid,
+                "name":object_label(lt,lid),
+                "imo":_clean((rec or {}).get("imo")) if lt=="mobile_asset" else "",
+                "relationship":_clean(r.get("relationship")).replace("_"," ").title(),
+            })
+
+    if choices:
+        def _choice_label(i):
+            x=choices[i]
+            extra=f" · IMO {x['imo']}" if x.get("imo") else ""
+            return f"{x['name']}{extra} · {x['relationship']}"
+        pick=st.selectbox(
+            "Open a linked object",
+            list(range(len(choices))),
+            format_func=_choice_label,
+            key=f"{key_prefix}_linked_object_pick_{event_id}",
+        )
+        picked=choices[pick]
+        if st.button(
+            f"Open {picked['name']}",
+            key=f"{key_prefix}_linked_object_open_{event_id}_{picked['type']}_{picked['id']}",
+            use_container_width=True,
+        ):
+            set_drilldown(picked["type"],picked["id"],picked["name"])
+
+def _render_events(typ,oid,key_prefix="top"):
+    if typ=="event":
+        _render_event_linked_objects(oid,key_prefix=key_prefix)
+        return
+
+    events=_event_rows_for_object(typ,oid)
+    if not events:
+        st.caption("No linked canonical events recorded.")
+        return
+    events=sorted(events,key=lambda x:str(x.get("start_date") or ""),reverse=True)
+
+    # Table gives fast scan; selector/button gives drill-through without dozens of controls.
+    table=[]
+    for e in events[:100]:
+        table.append({
+            "Date":_clean(e.get("start_date")),
+            "Severity":_clean(e.get("severity")),
+            "Type":_clean(e.get("event_type")).replace("_"," ").title(),
+            "Title":_clean(e.get("title")),
+            "Relationship":_clean(e.get("_relationship")).replace("_"," ").title(),
+            "Event ID":e.get("event_id"),
+        })
+    st.dataframe(pd.DataFrame(table),use_container_width=True,hide_index=True,height=min(520,90+35*min(len(table),12)))
+
+    choices=[e for e in events[:100] if e.get("event_id")]
+    if choices:
+        pick=st.selectbox(
+            "Open linked event",
+            list(range(len(choices))),
+            format_func=lambda i:f"{_clean(choices[i].get('start_date'))} · {_clean(choices[i].get('title'))}",
+            key=f"{key_prefix}_event_pick_{oid}",
+        )
+        ev=choices[pick]
+        if st.button(
+            "Open selected event",
+            key=f"{key_prefix}_event_open_{oid}_{ev.get('event_id')}",
+            use_container_width=True,
+        ):
+            set_drilldown("event",ev.get("event_id"),ev.get("title"))
+
+
+def render_drilldown(object_type,object_id,key_prefix="top"):
     typ=_type(object_type)
     rec=object_record(typ,object_id)
     if not rec:
-        st.warning(f"No canonical {typ} record found for {object_id}."); return
-    tabs=st.tabs(["Overview","Relationships","Events & Intelligence","Raw / Provenance"])
-    with tabs[0]: _render_overview(rec,typ)
-    with tabs[1]: _render_relationships(typ,object_id,key_prefix=key_prefix)
-    with tabs[2]: _render_events(typ,object_id,key_prefix=key_prefix)
-    with tabs[3]: st.json(rec)
+        st.warning(f"No canonical {typ} record found for {object_id}.")
+        return
 
-def render_active_drilldown(location="main",expanded=True):
+    third_label="Linked Objects" if typ=="event" else "Events & Intelligence"
+    tabs=st.tabs(["Overview","Relationships",third_label,"Raw / Provenance"])
+    with tabs[0]:
+        _render_overview(rec,typ)
+    with tabs[1]:
+        _render_relationships(typ,object_id,key_prefix=key_prefix)
+    with tabs[2]:
+        _render_events(typ,object_id,key_prefix=key_prefix)
+    with tabs[3]:
+        st.json(rec)
+
+
+def render_active_drilldown(location="top",expanded=True):
     restore_drilldown_from_query()
-    typ=st.session_state.get("pc_drilldown_type"); oid=st.session_state.get("pc_drilldown_id")
-    if not typ or not oid: return False
+    typ=st.session_state.get("pc_drilldown_type")
+    oid=st.session_state.get("pc_drilldown_id")
+    if not typ or not oid:
+        return False
+
     label=object_label(typ,oid)
+
     if location=="sidebar":
-        with st.sidebar.expander(f"Drill-down · {label}",expanded=expanded):
+        with st.sidebar.expander(f"Selected · {label}",expanded=expanded):
             st.caption(f"{OBJECTS.get(typ,{}).get('label',typ)} · {oid}")
             c1,c2=st.columns(2)
             if c1.button("Trade",key=f"sidebar_dd_trade_{oid}",use_container_width=True):
@@ -260,19 +368,32 @@ def render_active_drilldown(location="main",expanded=True):
                 st.rerun()
             if st.button("Clear",key=f"sidebar_dd_clear_{oid}",use_container_width=True):
                 clear_drilldown()
-            st.caption("Full canonical context is shown in the main workspace below.")
-    else:
-        st.markdown("---")
-        st.markdown("## Canonical drill-down")
-        c1,c2,c3=st.columns([1,1,1])
-        c1.caption(OBJECTS.get(typ,{}).get("label",typ)); c2.caption(str(oid))
-        if c3.button("Close drill-down",key=f"dd_close_{oid}",use_container_width=True): clear_drilldown()
-        render_drilldown(typ,oid,key_prefix="main")
+            st.caption("Full context opens at the top of the main workspace.")
+        return True
+
+    # Main/top workspace: this is deliberately rendered near the page header,
+    # not at the bottom after the page's normal content.
+    with st.container(border=True):
+        top1,top2,top3,top4=st.columns([5,1,1,1])
+        top1.markdown(f"### {html.escape(label)}")
+        top1.caption(f"{OBJECTS.get(typ,{}).get('label',typ)} · canonical drill-down")
+        if top2.button("Trade",key=f"top_dd_trade_{oid}",use_container_width=True):
+            try: st.query_params["product"]="trade"
+            except Exception: pass
+            st.rerun()
+        if top3.button("Intelligence",key=f"top_dd_intel_{oid}",use_container_width=True):
+            try: st.query_params["product"]="intelligence"
+            except Exception: pass
+            st.rerun()
+        if top4.button("✕ Close",key=f"top_dd_close_{oid}",use_container_width=True):
+            clear_drilldown()
+        render_drilldown(typ,oid,key_prefix="top")
     return True
+
 
 def render_sidebar_search():
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### Canonical drill-down")
+    st.sidebar.markdown("### Open canonical object")
     typ=st.sidebar.selectbox("Object type",["entity","asset","mobile_asset","event"],format_func=lambda x:OBJECTS[x]["label"],key="pc_dd_search_type")
     q=st.sidebar.text_input("Find by name / ID",key="pc_dd_search_text")
     if q.strip():

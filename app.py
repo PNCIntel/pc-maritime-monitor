@@ -7094,6 +7094,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# Canonical context opens at the top of every Trade workspace.
+pc_render_active_drilldown(location="top",expanded=True)
+
 def page_company_selector():
     companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
     if companies.empty: return None,None
@@ -9700,8 +9703,6 @@ elif page=="Data":
     if q: df=_contains_any(df,[q])
     show_debug_ids=st.toggle("Show internal database IDs",value=False)
     display_df(df,600,show_ids=show_debug_ids)
-
-pc_render_active_drilldown(location="main",expanded=True)
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"{len(TABLES):,} tables loaded · {RELEASE_NAME}")
