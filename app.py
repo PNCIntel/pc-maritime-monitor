@@ -5773,28 +5773,140 @@ def render_security_operating_picture():
         st.markdown("### Latest high-severity events")
         render_event_cards(severe,20)
 
+
+def _safe_filter_choices(df, column):
+    """Return stable string choices even when a column contains lists/dicts/NaN/mixed types."""
+    if df is None or df.empty or column not in df.columns:
+        return []
+    values=[]
+    series=df[column]
+    # Duplicate column names can return a DataFrame.
+    if isinstance(series,pd.DataFrame):
+        iterable=[]
+        for c in series.columns:
+            iterable.extend(series[c].tolist())
+    else:
+        iterable=series.tolist()
+
+    for raw in iterable:
+        if raw is None:
+            continue
+        try:
+            if pd.isna(raw):
+                continue
+        except Exception:
+            pass
+        if isinstance(raw,(list,tuple,set)):
+            parts=list(raw)
+        elif isinstance(raw,dict):
+            parts=list(raw.values())
+        else:
+            parts=[raw]
+        for part in parts:
+            if part is None:
+                continue
+            try:
+                if pd.isna(part):
+                    continue
+            except Exception:
+                pass
+            s=str(part).strip()
+            if not s or s.casefold() in {"nan","nat","none","null","<na>"}:
+                continue
+            values.append(s)
+    return sorted(set(values),key=lambda x:x.casefold())
+
+def _canonical_vessel_fallback():
+    """Direct canonical vessel fallback when workbook/merged Maritime→Vessels is empty."""
+    try:
+        sb=pc_db_client(service=True)
+        rows=(sb.table("pc_mobile_assets")
+              .select("mobile_asset_id,name,imo,mmsi,flag,asset_type,subtype,status,owner_entity_id,operator_entity_id")
+              .limit(5000)
+              .execute().data or [])
+    except Exception:
+        rows=[]
+    if not rows:
+        return pd.DataFrame()
+    df=pd.DataFrame(rows)
+    return pd.DataFrame({
+        "Vessel ID":df.get("mobile_asset_id"),
+        "Vessel Name":df.get("name"),
+        "IMO":df.get("imo"),
+        "MMSI":df.get("mmsi"),
+        "Flag":df.get("flag"),
+        "Vessel Type":df.get("asset_type"),
+        "Subtype / Class":df.get("subtype"),
+        "Status":df.get("status"),
+        "Owner Company ID":df.get("owner_entity_id"),
+        "Operator Company ID":df.get("operator_entity_id"),
+    })
+
 def render_marsec_workspace():
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     feeds=TABLES.get(("Sources","Source Feeds"),pd.DataFrame()).copy()
+
     if not feeds.empty:
-        sec=feeds[feeds.get("Feed ID",pd.Series(dtype=str)).astype(str).str.startswith("FEED_SEC")].copy()
+        feed_id=feeds.get("Feed ID")
+        if isinstance(feed_id,pd.Series):
+            sec=feeds[feed_id.fillna("").astype(str).str.startswith("FEED_SEC")].copy()
+        else:
+            sec=pd.DataFrame()
         if not sec.empty:
-            st.markdown("### Official MARSEC collection")
-            display_df(sec[[c for c in ["Source Name","Coverage","Default Event Families","Priority","Active","Last Checked","Notes"] if c in sec.columns]],100)
+            with st.expander("Official MARSEC collection",expanded=False):
+                display_df(sec[[c for c in ["Source Name","Coverage","Default Event Families","Priority","Active","Last Checked","Notes"] if c in sec.columns]],100)
+
     if events.empty:
-        st.info("No event data loaded."); return
-    mask=events.get("Event Family",pd.Series(index=events.index,dtype=str)).astype(str).str.contains("Maritime|Security|Conflict|Port",case=False,regex=True,na=False)
+        st.info("No event data loaded.")
+        return
+
+    fam=events.get("Event Family",pd.Series(index=events.index,dtype="string"))
+    if isinstance(fam,pd.DataFrame):
+        fam=fam.iloc[:,0]
+    fam=fam.fillna("").astype(str)
+
+    # Broader MARSEC capture so linked vessel/port incidents are not silently missed.
+    blob=pd.Series("",index=events.index,dtype="string")
+    for c in ["Event Family","Event Type","Mode","Title","Description","Operational Impact","Trade / Commercial Impact"]:
+        if c in events.columns:
+            col=events[c]
+            if isinstance(col,pd.DataFrame):
+                col=col.iloc[:,0]
+            blob=blob.str.cat(col.fillna("").astype(str),sep=" ")
+
+    mask=blob.str.contains(
+        r"maritime|security|conflict|port|vessel|ship|tanker|cargo|piracy|ground|collision|allision|fire|explosion|sar|pollution|drone|missile|seizure|boarding|interdiction|navigation",
+        case=False,regex=True,na=False
+    )
     marsec=events[mask].copy()
+
     c1,c2=st.columns(2)
     with c1:
-        families=sorted([x for x in marsec.get("Event Type",pd.Series(dtype=str)).astype(str).unique() if x])
+        families=_safe_filter_choices(marsec,"Event Type")
         et=st.selectbox("Incident type",["All"]+families,key="marsec_type_filter")
     with c2:
-        countries=sorted([x for x in marsec.get("Country / Countries",pd.Series(dtype=str)).astype(str).unique() if x])
+        countries=_safe_filter_choices(marsec,"Country / Countries")
         country=st.selectbox("Country / area",["All"]+countries,key="marsec_country_filter")
-    if et!="All": marsec=marsec[marsec["Event Type"].astype(str).eq(et)]
-    if country!="All": marsec=marsec[marsec["Country / Countries"].astype(str).eq(country)]
+
+    if et!="All" and "Event Type" in marsec.columns:
+        col=marsec["Event Type"]
+        if isinstance(col,pd.DataFrame):
+            col=col.iloc[:,0]
+        marsec=marsec[col.fillna("").astype(str).eq(et)]
+
+    if country!="All" and "Country / Countries" in marsec.columns:
+        col=marsec["Country / Countries"]
+        if isinstance(col,pd.DataFrame):
+            col=col.iloc[:,0]
+        # Country field can contain multi-country text; filter by containment.
+        marsec=marsec[col.fillna("").astype(str).str.contains(re.escape(country),case=False,regex=True,na=False)]
+
+    if "Start Date" in marsec.columns:
+        marsec["_d"]=pd.to_datetime(marsec["Start Date"],errors="coerce")
+        marsec=marsec.sort_values("_d",ascending=False,na_position="last")
+
     st.markdown("### Incident feed")
+    st.caption(f"{len(marsec):,} maritime/security-relevant records match the current filters.")
     render_event_cards(marsec,100)
 
 def render_compliance_exposure_workspace():
@@ -8260,6 +8372,8 @@ elif page=="Maritime":
     tabs=st.tabs(["Overview","Incidents","Disruptions","Vessels","Ports","Ferries","Cruise","Navigation & Compliance"])
     with tabs[0]:
         v=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
+        if v.empty:
+            v=_canonical_vessel_fallback()
         p=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
         ev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
         m1,m2,m3,m4=st.columns(4)
@@ -8280,7 +8394,12 @@ elif page=="Maritime":
         render_marsec_workspace()
     with tabs[3]:
         v=TABLES.get(("Maritime","Vessels"),pd.DataFrame()).copy()
-        display_df(v[[c for c in ["Vessel Name","IMO","Vessel Type","Subtype / Class","Flag","Status","Primary Service","Owner Company ID","Operator Company ID"] if c in v.columns]],420)
+        if v.empty:
+            v=_canonical_vessel_fallback()
+        if v.empty:
+            st.info("No canonical vessel records are available.")
+        else:
+            display_df(v[[c for c in ["Vessel Name","IMO","MMSI","Vessel Type","Subtype / Class","Flag","Status","Primary Service","Owner Company ID","Operator Company ID"] if c in v.columns]],420)
     with tabs[4]:
         p=TABLES.get(("Maritime","Ports"),pd.DataFrame()).copy()
         display_df(p[[c for c in ["Port / Facility","Country","Operator","Facility Type","Key Role","Coverage Note"] if c in p.columns]],420)
