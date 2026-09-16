@@ -8,7 +8,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "25-imo-direct-update-2026-09-16"
+LOADER_BUILD = "26-imo-finalize-after-v5-2026-09-16"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4461,6 +4461,11 @@ def _canonical_process_job(job_id, deferred_rows=None):
     except Exception as exc:
         processor={"error":str(exc)}
 
+    # V26: V5 may reclassify staged identity rows after the pre-pass.
+    # Exact IMO is authoritative for this cleanup, so finalize those rows AGAIN
+    # after V5 and before graph/deferred application.
+    imo_finalize_after_v5=_v25_apply_existing_imo_rows(job_id)
+
     # Finalize existing canonical objects as successful no-ops before graph phase.
     finalized_before=_canonical_finalize_existing_rows(job_id)
 
@@ -4480,9 +4485,10 @@ def _canonical_process_job(job_id, deferred_rows=None):
     return {
         "loader_build":LOADER_BUILD,
         "sources_first":sources_first,
-        "imo_fast_path":imo_fast_path,
+        "imo_fast_path_before_v5":imo_fast_path,
         "model_preapply":pre,
         "processor":processor,
+        "imo_finalize_after_v5":imo_finalize_after_v5,
         "idempotent_finalize_before_graph":finalized_before,
         "deferred_dependency_apply":deferred_result,
         "deferred_retry_rpc":retry_pending_rpc,
@@ -4864,11 +4870,11 @@ def _relationship_row(job_id, source_id, relationship_type, target_id,
         "target_id":target_id,
         "target_name":target_name,
         "confidence":confidence,
-        "source_id":primary_source_id,
         "record_status":"verified",
         "metadata":{
-            "auto_linked_by":"canonical_loader_v21",
+            "auto_linked_by":"canonical_loader_v26",
             "research_sources":research_sources or [],
+            "provenance_source_id":primary_source_id,
         }
     }
     return {
@@ -5352,7 +5358,7 @@ elif page=="Canonical Loader":
         "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
-    st.success("V25 fast path: exact IMO updates the existing vessel immediately and marks it applied; sources register first and company relationships then follow. Identity review is only for genuinely new or duplicate-IMO records.")
+    st.success("V26: exact IMO is finalized after V5 as well as before it, so existing vessels cannot fall back to PENDING. Relationship source_id now remains the company endpoint; research provenance stays in metadata.")
     if not sb:
         st.error("Supabase service connection required.")
     else:
