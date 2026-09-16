@@ -8,7 +8,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "17-model-aware-transaction-fix-2026-09-16"
+LOADER_BUILD = "18-model-driven-post-v5-child-apply-2026-09-16"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -3888,19 +3888,75 @@ def _canonical_apply_model_post_rows(job_id):
 
         eid=payload.get("event_id")
         txid=payload.get("linked_id")
+
+        # First try canonical parents.
         try:
             evs=(sb.table("pc_events").select("event_id,metadata")
                  .eq("event_id",eid).limit(1).execute().data or [])
             txs=(sb.table("pc_transactions").select("transaction_id,metadata")
                  .eq("transaction_id",txid).limit(1).execute().data or [])
         except Exception as exc:
-            mark_review(row,f"parent lookup failed: {exc}")
-            continue
+            evs=[]; txs=[]
+            report["errors"].append(f"parent lookup initial: {exc}")
+
+        # If either parent is not immediately visible, recover the exact parent payload
+        # from this ingestion package and idempotently seed it.
+        if not evs or not txs:
+            try:
+                pkg=(sb.table("pc_staged_records")
+                     .select("target_table,payload")
+                     .eq("ingestion_job_id",str(job_id))
+                     .limit(10000).execute().data or [])
+            except Exception:
+                pkg=[]
+
+            if not txs:
+                tx_payload=next((
+                    r.get("payload") for r in pkg
+                    if r.get("target_table")=="pc_transactions"
+                    and isinstance(r.get("payload"),dict)
+                    and str(r["payload"].get("transaction_id") or "")==str(txid or "")
+                ),None)
+                if isinstance(tx_payload,dict):
+                    try:
+                        tx_payload=_normalize_transaction_payload_to_model(
+                            tx_payload,_load_transaction_vocab()
+                        )
+                        sb.table("pc_transactions").upsert(
+                            tx_payload,on_conflict="transaction_id"
+                        ).execute()
+                    except Exception as exc:
+                        report["errors"].append(f"bridge transaction seed: {exc}")
+
+            if not evs:
+                ev_payload=next((
+                    r.get("payload") for r in pkg
+                    if r.get("target_table")=="pc_events"
+                    and isinstance(r.get("payload"),dict)
+                    and str(r["payload"].get("event_id") or "")==str(eid or "")
+                ),None)
+                if isinstance(ev_payload,dict):
+                    try:
+                        sb.table("pc_events").upsert(
+                            ev_payload,on_conflict="event_id"
+                        ).execute()
+                    except Exception as exc:
+                        report["errors"].append(f"bridge event seed: {exc}")
+
+            try:
+                evs=(sb.table("pc_events").select("event_id,metadata")
+                     .eq("event_id",eid).limit(1).execute().data or [])
+                txs=(sb.table("pc_transactions").select("transaction_id,metadata")
+                     .eq("transaction_id",txid).limit(1).execute().data or [])
+            except Exception as exc:
+                mark_review(row,f"parent lookup failed after package recovery: {exc}")
+                continue
+
         if not evs:
-            mark_review(row,f"event_id {eid!r} is not canonical")
+            mark_review(row,f"event_id {eid!r} is not canonical after package recovery")
             continue
         if not txs:
-            mark_review(row,f"transaction_id {txid!r} is not canonical")
+            mark_review(row,f"transaction_id {txid!r} is not canonical after package recovery")
             continue
 
         try:
@@ -3975,12 +4031,16 @@ def _canonical_finalize_existing_rows(job_id):
 def _canonical_process_job(job_id):
     """Model-driven package processor.
 
-    1. Apply direct transaction-family parents/children using live model vocab/FKs.
-    2. Run SQL V5 for canonical identities and supported graph edges.
-    3. Apply semantic post-links that SQL V5 does not yet represent.
-    4. Re-run standard relationship processors so newly-created parents unlock edges.
+    Critical ordering:
+      1. Pre-apply direct transaction rows so V5 can resolve dependent canonical data.
+      2. Run SQL V5 for supported canonical objects/graph edges.
+      3. RE-APPLY direct child/fact rows after V5, because V5 does not understand
+         loader-internal staging targets and may mark them BROKEN_REFERENCE.
+      4. Apply event↔transaction semantic bridge after both parents exist.
+      5. Re-run supported graph processors.
+      6. Finalize idempotent ALREADY_EXISTS outcomes.
 
-    This makes package processing dependency-aware instead of relying on worksheet order.
+    The second direct pass is intentional and idempotent.
     """
     pre=_canonical_apply_model_direct_rows(job_id)
 
@@ -3991,6 +4051,10 @@ def _canonical_process_job(job_id):
         ).execute().data or {})
     except Exception as exc:
         processor={"error":str(exc)}
+
+    # V5 can overwrite the staging state of internal child targets even after their
+    # canonical row has been inserted. Re-apply them now and restore READY/applied.
+    direct_after_v5=_canonical_apply_model_direct_rows(job_id)
 
     post=_canonical_apply_model_post_rows(job_id)
 
@@ -4004,14 +4068,21 @@ def _canonical_process_job(job_id):
     except Exception as exc:
         rel["relationships_error"]=str(exc)
 
+    # One last post pass because relationship processors can also update staged states.
+    post_final=_canonical_apply_model_post_rows(job_id)
+    direct_final=_canonical_apply_model_direct_rows(job_id)
+
     finalized=_canonical_finalize_existing_rows(job_id)
 
     return {
         "loader_build":LOADER_BUILD,
         "model_preapply":pre,
         "processor":processor,
+        "model_direct_after_v5":direct_after_v5,
         "model_postapply":post,
         "relationship_pass":rel,
+        "model_post_final":post_final,
+        "model_direct_final":direct_final,
         "idempotent_finalize":finalized,
     }
 
