@@ -8,7 +8,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "24-current-upload-job-state-2026-09-16"
+LOADER_BUILD = "25-imo-direct-update-2026-09-16"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4308,6 +4308,129 @@ def _collect_legacy_internal_deferred(job_id):
     return out
 
 
+
+def _v25_apply_existing_imo_rows(job_id):
+    """Apply existing vessel enrichments directly by exact IMO.
+
+    This is the fast path for fleet cleanup. If exactly one canonical mobile asset
+    already has the incoming IMO, update that row in place and mark staging applied.
+    V5 is left for genuinely new/ambiguous identities only.
+    """
+    report={"scanned":0,"matched_by_imo":0,"applied":0,"not_found":0,"ambiguous":0,"errors":[]}
+
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,payload,review_status,resolution_status")
+              .eq("ingestion_job_id",str(job_id))
+              .eq("target_table","pc_mobile_assets")
+              .limit(20000).execute().data or [])
+    except Exception as exc:
+        report["errors"].append(f"staging read: {exc}")
+        return report
+
+    writable=set(_table_write_columns_live(sb,"pc_mobile_assets"))
+
+    for r in rows:
+        if str(r.get("review_status") or "").lower()=="applied":
+            continue
+
+        report["scanned"]+=1
+        p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+        imo=str(p.get("imo") or "").strip()
+        if not imo:
+            report["not_found"]+=1
+            continue
+
+        try:
+            hits=(sb.table("pc_mobile_assets")
+                  .select("mobile_asset_id,name,imo")
+                  .eq("imo",imo)
+                  .limit(3).execute().data or [])
+        except Exception as exc:
+            report["errors"].append(f"IMO {imo}: lookup failed: {exc}")
+            continue
+
+        if len(hits)==0:
+            report["not_found"]+=1
+            continue
+        if len(hits)>1:
+            report["ambiguous"]+=1
+            try:
+                sb.table("pc_staged_records").update({
+                    "resolution_status":"AMBIGUOUS",
+                    "resolution_method":"imo_exact_duplicate_collision",
+                    "candidate_count":len(hits),
+                    "validation_status":"needs_review",
+                    "review_status":"pending",
+                    "resolution_details":{
+                        "imo":imo,
+                        "candidate_ids":[x.get("mobile_asset_id") for x in hits],
+                    }
+                }).eq("staged_record_id",r["staged_record_id"]).execute()
+            except Exception:
+                pass
+            continue
+
+        canonical_id=str(hits[0]["mobile_asset_id"])
+        report["matched_by_imo"]+=1
+
+        update=dict(p)
+        update["mobile_asset_id"]=canonical_id
+
+        # Helper/package-only fields must never hit canonical table.
+        for k in (
+            "company_name","company_relationship","owner_name","operator_name","manager_name",
+            "source_url","research_sources"
+        ):
+            if k not in writable:
+                update.pop(k,None)
+
+        update={k:v for k,v in update.items() if k in writable and v is not None}
+
+        # Do not erase existing canonical data with blanks.
+        update={k:v for k,v in update.items() if v not in ("",[],{}) or k=="metadata"}
+
+        try:
+            sb.table("pc_mobile_assets").upsert(
+                _jsonable(update),
+                on_conflict="mobile_asset_id"
+            ).execute()
+
+            details={
+                "imo":imo,
+                "canonical_mobile_asset_id":canonical_id,
+                "incoming_name":p.get("name"),
+                "previous_name":hits[0].get("name"),
+                "method":"exact IMO update-in-place",
+            }
+            sb.table("pc_staged_records").update({
+                "resolved_entity_id":canonical_id,
+                "resolution_status":"MATCHED",
+                "resolution_method":"exact_imo_direct_update",
+                "resolution_confidence":1.0,
+                "candidate_count":1,
+                "validation_status":"reviewed",
+                "review_status":"applied",
+                "resolution_details":details,
+            }).eq("staged_record_id",r["staged_record_id"]).execute()
+
+            report["applied"]+=1
+        except Exception as exc:
+            report["errors"].append(f"IMO {imo}: update failed: {exc}")
+            try:
+                sb.table("pc_staged_records").update({
+                    "resolution_status":"BROKEN_REFERENCE",
+                    "resolution_method":"exact_imo_direct_update_error",
+                    "validation_status":"needs_review",
+                    "review_status":"pending",
+                    "resolution_details":{"imo":imo,"reason":str(exc)[:1500]},
+                }).eq("staged_record_id",r["staged_record_id"]).execute()
+            except Exception:
+                pass
+
+    return report
+
+
 def _canonical_process_job(job_id, deferred_rows=None):
     """V19 model-first dependency engine.
 
@@ -4320,9 +4443,12 @@ def _canonical_process_job(job_id, deferred_rows=None):
     # Support Retry on jobs created by v16-v18.
     deferred.extend(_collect_legacy_internal_deferred(job_id))
 
-    # V22: provenance is a parent dependency too. Register/resolve pc_sources
-    # before canonical object or graph application. This also repairs V21 jobs on Retry.
+    # V22: provenance is a parent dependency too.
     sources_first=_v22_sources_first_for_job(job_id)
+
+    # V25: exact IMO means "update this vessel now", not "send it through
+    # another identity-resolution queue".
+    imo_fast_path=_v25_apply_existing_imo_rows(job_id)
 
     # Transactions are direct parent rows; normalize/apply them before V5.
     pre=_canonical_apply_model_direct_rows(job_id)
@@ -4354,6 +4480,7 @@ def _canonical_process_job(job_id, deferred_rows=None):
     return {
         "loader_build":LOADER_BUILD,
         "sources_first":sources_first,
+        "imo_fast_path":imo_fast_path,
         "model_preapply":pre,
         "processor":processor,
         "idempotent_finalize_before_graph":finalized_before,
@@ -5225,7 +5352,7 @@ elif page=="Canonical Loader":
         "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
-    st.success("V23: current upload is isolated from prior job state. Sources register first, IMO updates the existing vessel, company resolves/creates once, and graph links follow automatically.")
+    st.success("V25 fast path: exact IMO updates the existing vessel immediately and marks it applied; sources register first and company relationships then follow. Identity review is only for genuinely new or duplicate-IMO records.")
     if not sb:
         st.error("Supabase service connection required.")
     else:
