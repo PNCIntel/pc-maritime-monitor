@@ -3491,6 +3491,41 @@ def _canonical_apply_transaction_extensions(job_id):
         except Exception:
             return False
 
+    # V5 can mark a direct parent row MATCHED/applied in staging before the
+    # compatibility child pass can observe it through PostgREST. Build a package-local
+    # parent cache and, if necessary, idempotently upsert the exact staged parent
+    # payload before validating transaction participants / event→transaction bridges.
+    try:
+        package_parents=(sb.table("pc_staged_records")
+            .select("target_table,payload,review_status,resolution_status")
+            .eq("ingestion_job_id",str(job_id))
+            .in_("target_table",["pc_transactions","pc_events"])
+            .limit(10000).execute().data or [])
+    except Exception:
+        package_parents=[]
+
+    parent_payloads={"pc_transactions":{},"pc_events":{}}
+    for p in package_parents:
+        pp=p.get("payload") if isinstance(p.get("payload"),dict) else {}
+        if p.get("target_table")=="pc_transactions" and pp.get("transaction_id"):
+            parent_payloads["pc_transactions"][str(pp["transaction_id"])]=pp
+        elif p.get("target_table")=="pc_events" and pp.get("event_id"):
+            parent_payloads["pc_events"][str(pp["event_id"])]=pp
+
+    def ensure_parent(table,key_col,value):
+        if value in (None,""):
+            return False
+        if exists(table,key_col,value):
+            return True
+        payload=parent_payloads.get(table,{}).get(str(value))
+        if not isinstance(payload,dict):
+            return False
+        try:
+            sb.table(table).upsert(payload,on_conflict=key_col).execute()
+            return exists(table,key_col,value)
+        except Exception:
+            return False
+
     def mark_review(row, reason):
         report["review"]+=1
         try:
@@ -3513,7 +3548,7 @@ def _canonical_apply_transaction_extensions(job_id):
 
         if table=="pc_transaction_participants":
             txid=payload.get("transaction_id")
-            if not exists("pc_transactions","transaction_id",txid):
+            if not ensure_parent("pc_transactions","transaction_id",txid):
                 mark_review(row,f"transaction_id {txid!r} is not canonical yet")
                 continue
 
@@ -3552,10 +3587,10 @@ def _canonical_apply_transaction_extensions(job_id):
             # parent metadata instead of forcing an unsupported polymorphic object type.
             eid=payload.get("event_id")
             txid=payload.get("linked_id")
-            if not exists("pc_events","event_id",eid):
+            if not ensure_parent("pc_events","event_id",eid):
                 mark_review(row,f"event_id {eid!r} is not canonical yet")
                 continue
-            if not exists("pc_transactions","transaction_id",txid):
+            if not ensure_parent("pc_transactions","transaction_id",txid):
                 mark_review(row,f"transaction link target {txid!r} is not canonical yet")
                 continue
             try:
