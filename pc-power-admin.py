@@ -8,7 +8,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "20-model-first-rpc-deferred-2026-09-16"
+LOADER_BUILD = "21-imo-first-auto-company-link-2026-09-16"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4409,6 +4409,312 @@ def _normalize_canonical_payload_dates(payload,target_table):
                 payload[fld]=_normalize_excel_serial_date_value(payload.get(fld))
     return payload
 
+
+# ---------------------------------------------------------------------------
+# V21: IMO-first vessel enrichment + automatic company linking
+# ---------------------------------------------------------------------------
+
+def _canon_name_key(value):
+    """Stable comparison key for company/entity names; no fuzzy collapsing."""
+    s=str(value or "").strip().casefold()
+    s=re.sub(r"[^\w]+"," ",s,flags=re.UNICODE)
+    return re.sub(r"\s+"," ",s).strip()
+
+
+def _canonical_entity_index():
+    """Load exact canonical entity-name/alias index once per package.
+
+    Matching is deliberately exact after normalization. Similar-but-different legal
+    names are NOT collapsed; if no exact normalized canonical/alias match exists,
+    the loader creates a distinct canonical entity.
+    """
+    by_name={}
+    rows=[]
+    try:
+        rows=(sb.table("pc_entities")
+              .select("entity_id,name,entity_type,subtype,hq_country")
+              .limit(10000).execute().data or [])
+    except Exception:
+        rows=[]
+    for r in rows:
+        k=_canon_name_key(r.get("name"))
+        if k:
+            by_name.setdefault(k,[]).append(r)
+
+    try:
+        aliases=(sb.table("pc_entity_aliases")
+                 .select("entity_id,alias")
+                 .limit(10000).execute().data or [])
+    except Exception:
+        aliases=[]
+    row_by_id={str(r.get("entity_id")):r for r in rows if r.get("entity_id")}
+    for a in aliases:
+        k=_canon_name_key(a.get("alias"))
+        eid=str(a.get("entity_id") or "")
+        if k and eid and eid in row_by_id:
+            by_name.setdefault(k,[]).append(row_by_id[eid])
+
+    for k,vals in list(by_name.items()):
+        seen=set(); uniq=[]
+        for v in vals:
+            eid=str(v.get("entity_id") or "")
+            if eid and eid not in seen:
+                seen.add(eid); uniq.append(v)
+        by_name[k]=uniq
+    return by_name
+
+
+def _canonical_vessel_imo_index():
+    """Return unique IMO -> canonical vessel row."""
+    try:
+        rows=(sb.table("pc_mobile_assets")
+              .select("mobile_asset_id,name,imo")
+              .not_.is_("imo","null")
+              .limit(20000).execute().data or [])
+    except Exception:
+        rows=[]
+    tmp={}
+    for r in rows:
+        imo=str(r.get("imo") or "").strip()
+        if imo:
+            tmp.setdefault(imo,[]).append(r)
+    return {imo:vals[0] for imo,vals in tmp.items() if len(vals)==1}
+
+
+def _auto_entity_id(name):
+    digest=hashlib.sha1(_canon_name_key(name).encode("utf-8")).hexdigest()[:20].upper()
+    return f"ENTITY_AUTO_{digest}"
+
+
+def _ensure_exact_company_entity(name, entity_type="company", subtype=None, hq_country=None,
+                                 metadata=None, entity_index=None):
+    """Resolve exact normalized company/entity name or alias; otherwise create once."""
+    name=str(name or "").strip()
+    if not name:
+        return None
+    entity_index = entity_index if entity_index is not None else _canonical_entity_index()
+    k=_canon_name_key(name)
+    hits=entity_index.get(k,[])
+    if len(hits)==1:
+        return str(hits[0]["entity_id"])
+    if len(hits)>1:
+        return None
+
+    eid=_auto_entity_id(name)
+    row={
+        "entity_id":eid,
+        "name":name,
+        "entity_type":entity_type or "company",
+        "subtype":subtype,
+        "hq_country":hq_country,
+        "record_status":"verified",
+        "data_quality":"high",
+        "metadata":dict(metadata or {}),
+    }
+    row["metadata"].setdefault("created_by","canonical_loader_v21_exact_name")
+    row={k:v for k,v in row.items() if v not in (None,"")}
+    try:
+        writable=set(_table_write_columns_live(sb,"pc_entities"))
+        row={k:v for k,v in row.items() if k in writable}
+        sb.table("pc_entities").upsert(row,on_conflict="entity_id").execute()
+        entity_index.setdefault(k,[]).append(row)
+        return eid
+    except Exception:
+        return None
+
+
+def _relationship_row(job_id, source_id, relationship_type, target_id,
+                      source_name=None, target_name=None, confidence=0.99,
+                      research_sources=None, source_record_key=None):
+    rel_payload={
+        "relationship_id":_canonical_semantic_relationship_id({
+            "source_type":"entity","source_id":source_id,
+            "relationship_type":relationship_type,
+            "target_type":"mobile_asset","target_id":target_id,
+        }),
+        "source_type":"entity",
+        "source_id":source_id,
+        "source_name":source_name,
+        "relationship_type":relationship_type,
+        "target_type":"mobile_asset",
+        "target_id":target_id,
+        "target_name":target_name,
+        "confidence":confidence,
+        "record_status":"verified",
+        "metadata":{
+            "auto_linked_by":"canonical_loader_v21",
+            "research_sources":research_sources or [],
+        }
+    }
+    return {
+        "ingestion_job_id":str(job_id),
+        "target_table":"pc_relationships",
+        "source_record_key":source_record_key or rel_payload["relationship_id"],
+        "natural_key":rel_payload["relationship_id"],
+        "action":"UPSERT",
+        "payload":_jsonable({k:v for k,v in rel_payload.items() if v not in (None,"")}),
+        "confidence":confidence,
+        "resolution_status":"PENDING",
+        "validation_status":"pending",
+        "review_status":"pending",
+    }
+
+
+def _v21_prepare_native_package(job_id, sections_config):
+    """Normalize native packages before staging.
+
+    Existing IMO -> existing canonical vessel.
+    Exact company name/alias -> existing canonical company.
+    No exact company -> create once as a distinct canonical entity.
+    Relationship endpoints are rewritten automatically.
+    Vessel rows may include company_name/company_relationship or
+    owner_name/operator_name/manager_name to auto-create graph edges.
+    """
+    entity_index=_canonical_entity_index()
+    imo_index=_canonical_vessel_imo_index()
+    local_to_canonical={}
+    generated_relationships=[]
+
+    for section,cfg in sections_config.items():
+        if not cfg.get("include",True):
+            continue
+        df=cfg.get("df")
+        target=cfg.get("target")
+        native=bool(cfg.get("native")) or _loader_native_section(df)
+        if not native or df is None or df.empty:
+            continue
+
+        out=[]
+        for row in df.to_dict("records"):
+            row=dict(row)
+            payload=_jsonish(row.get("payload"))
+            if not isinstance(payload,dict):
+                out.append(row); continue
+            payload=dict(payload)
+
+            if target=="pc_entities":
+                local_id=str(payload.get("entity_id") or "").strip() or None
+                name=str(payload.get("name") or "").strip()
+                if name:
+                    eid=_ensure_exact_company_entity(
+                        name,
+                        entity_type=payload.get("entity_type") or "company",
+                        subtype=payload.get("subtype"),
+                        hq_country=payload.get("hq_country") or payload.get("country"),
+                        metadata=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {},
+                        entity_index=entity_index,
+                    )
+                    if eid:
+                        if local_id:
+                            local_to_canonical[local_id]=eid
+                        payload["entity_id"]=eid
+
+            elif target=="pc_mobile_assets":
+                local_id=str(payload.get("mobile_asset_id") or "").strip() or None
+                imo=str(payload.get("imo") or "").strip()
+                if imo and imo in imo_index:
+                    canonical=str(imo_index[imo]["mobile_asset_id"])
+                    if local_id:
+                        local_to_canonical[local_id]=canonical
+                    payload["mobile_asset_id"]=canonical
+                    md=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {}
+                    md=dict(md)
+                    if local_id and local_id != canonical:
+                        md.setdefault("package_local_mobile_asset_id",local_id)
+                    md["imo_first_existing_match"]=True
+                    payload["metadata"]=md
+
+                link_specs=[]
+                helper_company=str(payload.pop("company_name", "") or "").strip()
+                helper_rel=str(payload.pop("company_relationship", "") or "").strip()
+                if helper_company:
+                    link_specs.append((helper_company, helper_rel or "commercially_operates","company",None))
+                for field,rel,subtype in (
+                    ("owner_name","owns","shipowner"),
+                    ("operator_name","commercially_operates","shipping_company"),
+                    ("manager_name","technically_manages","ship_management_company"),
+                ):
+                    nm=str(payload.pop(field, "") or "").strip()
+                    if nm:
+                        link_specs.append((nm,rel,"company",subtype))
+
+                vessel_id=str(payload.get("mobile_asset_id") or local_id or "").strip()
+                research_sources=[]
+                md=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {}
+                if isinstance(md.get("research_sources"),list):
+                    research_sources=md.get("research_sources")
+                for company_name,rel,etype,subtype in link_specs:
+                    eid=_ensure_exact_company_entity(
+                        company_name,entity_type=etype,subtype=subtype,
+                        metadata={"research_sources":research_sources},
+                        entity_index=entity_index,
+                    )
+                    if eid and vessel_id:
+                        generated_relationships.append(
+                            _relationship_row(
+                                job_id,eid,rel,vessel_id,
+                                source_name=company_name,
+                                target_name=payload.get("name"),
+                                confidence=float(row.get("confidence") or 0.99),
+                                research_sources=research_sources,
+                                source_record_key=f"auto:{imo or vessel_id}:{rel}:{eid}",
+                            )
+                        )
+
+            row["payload"]=payload
+            out.append(row)
+        cfg["df"]=pd.DataFrame(out)
+
+    for section,cfg in sections_config.items():
+        if not cfg.get("include",True) or cfg.get("target")!="pc_relationships":
+            continue
+        df=cfg.get("df")
+        native=bool(cfg.get("native")) or _loader_native_section(df)
+        if not native or df is None or df.empty:
+            continue
+        out=[]
+        for row in df.to_dict("records"):
+            row=dict(row)
+            payload=_jsonish(row.get("payload"))
+            if not isinstance(payload,dict):
+                out.append(row); continue
+            payload=dict(payload)
+            sid=str(payload.get("source_id") or "")
+            tid=str(payload.get("target_id") or "")
+            if sid in local_to_canonical:
+                payload["source_id"]=local_to_canonical[sid]
+            if tid in local_to_canonical:
+                payload["target_id"]=local_to_canonical[tid]
+
+            if str(payload.get("source_type") or "").casefold()=="entity":
+                sname=str(payload.get("source_name") or "").strip()
+                if sname and (not payload.get("source_id") or str(payload.get("source_id")).startswith("PKG_")):
+                    eid=_ensure_exact_company_entity(
+                        sname,entity_type="company",
+                        metadata=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {},
+                        entity_index=entity_index,
+                    )
+                    if eid:
+                        payload["source_id"]=eid
+
+            if str(payload.get("target_type") or "").casefold() in {"mobile_asset","vessel"}:
+                meta=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {}
+                imo=str(meta.get("imo") or payload.get("imo") or "").strip()
+                if imo and imo in imo_index:
+                    payload["target_id"]=str(imo_index[imo]["mobile_asset_id"])
+
+            if all(payload.get(k) for k in ("source_type","source_id","relationship_type","target_type","target_id")):
+                payload["relationship_id"]=_canonical_semantic_relationship_id(payload)
+            row["payload"]=payload
+            out.append(row)
+        cfg["df"]=pd.DataFrame(out)
+
+    return {
+        "local_to_canonical":local_to_canonical,
+        "generated_relationships":generated_relationships,
+    }
+
+
 def _canonical_stage_records(job_id, sections_config):
     """Stage a whole package in dependency-safe phases.
 
@@ -4426,6 +4732,10 @@ def _canonical_stage_records(job_id, sections_config):
     table_counts={}
     skipped_sections=[]
     native_rows=0
+
+    # V21: automatic vessel/company canonicalization before normal staging.
+    v21=_v21_prepare_native_package(job_id,sections_config)
+    deferred.extend(v21.get("generated_relationships") or [])
 
     for section,cfg in sections_config.items():
         if not cfg.get("include",True):
@@ -4515,6 +4825,8 @@ def _canonical_stage_records(job_id, sections_config):
         "native_rows":native_rows,
         "tables":table_counts,
         "skipped_sections":skipped_sections,
+        "v21_canonical_rewrites":len(v21.get("local_to_canonical") or {}),
+        "v21_generated_relationships":len(v21.get("generated_relationships") or []),
         "_deferred_records":deferred,
     }
 
@@ -4703,9 +5015,10 @@ if page=="Canonical Home":
 elif page=="Canonical Loader":
     title(
         "Canonical loader",
-        "Load a workbook as one model-driven package. Parents are applied before children; canonical identities resolve first; graph edges follow automatically."
+        "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
+    st.success("V21 fast path: existing IMO → update vessel; exact company → reuse; missing company → create once; company relationship → auto-link. Review is reserved for true duplicate-name collisions.")
     if not sb:
         st.error("Supabase service connection required.")
     else:
