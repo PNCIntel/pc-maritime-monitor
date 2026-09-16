@@ -984,13 +984,22 @@ def _fill_staging_key(payload,target_table,natural_key):
     return payload
 
 def _parse_multitable_upload(upload):
+    """Parse flat workbooks/CSVs plus loader-native JSON/JSONL packages.
+
+    Loader-native records may use:
+      {"target_table": "pc_entities", "natural_key": "...", "payload": {...}}
+    They are grouped by target_table and the nested payload is preserved for the
+    canonical V5 processor rather than flattened or remapped by the UI.
+    """
     raw=upload.getvalue()
     name=upload.name.lower()
     sections={}
+
     if name.endswith((".xlsx",".xls")):
         xf=pd.ExcelFile(io.BytesIO(raw))
         for sheet in xf.sheet_names:
             sections[sheet]=pd.read_excel(io.BytesIO(raw),sheet_name=sheet,dtype=object)
+
     elif name.endswith(".csv"):
         df=pd.read_csv(io.BytesIO(raw),dtype=object)
         if "target_table" in df.columns:
@@ -998,16 +1007,62 @@ def _parse_multitable_upload(upload):
                 sections[str(table or "records")]=g.drop(columns=["target_table"]).reset_index(drop=True)
         else:
             sections[Path(upload.name).stem]=df
-    else:
-        obj=json.loads(raw.decode("utf-8-sig"))
-        records=obj if isinstance(obj,list) else obj.get("records",[obj])
+
+    elif name.endswith((".jsonl",".ndjson")):
+        records=[]
+        for line_no,line in enumerate(raw.decode("utf-8-sig").splitlines(),1):
+            line=line.strip()
+            if not line:
+                continue
+            try:
+                obj=json.loads(line)
+            except Exception as exc:
+                raise ValueError(f"Invalid JSONL on line {line_no}: {exc}") from exc
+            if not isinstance(obj,dict):
+                raise ValueError(f"JSONL line {line_no} must be an object")
+            records.append(obj)
         df=pd.DataFrame(records)
         if "target_table" in df.columns:
             for table,g in df.groupby("target_table",dropna=False):
                 sections[str(table or "records")]=g.drop(columns=["target_table"]).reset_index(drop=True)
         else:
             sections[Path(upload.name).stem]=df
+
+    else:
+        obj=json.loads(raw.decode("utf-8-sig"))
+        if isinstance(obj,list):
+            records=obj
+        elif isinstance(obj,dict) and isinstance(obj.get("records"),list):
+            records=obj.get("records")
+        elif isinstance(obj,dict) and isinstance(obj.get("package"),list):
+            records=obj.get("package")
+        else:
+            records=[obj]
+        df=pd.DataFrame(records)
+        if "target_table" in df.columns:
+            for table,g in df.groupby("target_table",dropna=False):
+                sections[str(table or "records")]=g.drop(columns=["target_table"]).reset_index(drop=True)
+        else:
+            sections[Path(upload.name).stem]=df
+
     return sections, hashlib.sha256(raw).hexdigest()
+
+
+def _loader_native_section(df):
+    """True when rows are already in pc_staged_records-style package shape."""
+    if df is None or df.empty or "payload" not in df.columns:
+        return False
+    sample=None
+    for v in df["payload"].tolist():
+        if v is None or (isinstance(v,float) and pd.isna(v)):
+            continue
+        sample=v
+        break
+    if sample is None:
+        return False
+    parsed=_jsonish(sample)
+    return isinstance(parsed,dict)
+
 
 def _suggest_target_table(section,df):
     n=_norm_field(section)
@@ -3415,14 +3470,17 @@ def _normalize_canonical_payload_dates(payload,target_table):
     return payload
 
 def _canonical_stage_records(job_id, sections_config):
-    """Stage a whole workbook as one package.
+    """Stage a whole package for the V5 canonical processor.
 
-    Workbook IDs remain package-local source keys. The database resolver decides
-    whether each object maps to an existing canonical ID or requires creation.
+    Supports both flat spreadsheet rows and loader-native rows shaped like
+    pc_staged_records (target_table + natural_key + payload). Package-local IDs
+    are preserved inside payload so pc_process_ingestion_job_v5 can map them to
+    canonical IDs before graph edges are written.
     """
     staged=[]
     table_counts={}
     skipped_sections=[]
+    native_rows=0
 
     for section,cfg in sections_config.items():
         if not cfg.get("include",True):
@@ -3430,10 +3488,9 @@ def _canonical_stage_records(job_id, sections_config):
             continue
         target=cfg["target"]
         df=cfg["df"]
-        mapping=cfg["mapping"]
+        mapping=cfg.get("mapping")
+        native=bool(cfg.get("native")) or _loader_native_section(df)
 
-        # target_entity_type is FK-constrained to pc_meta_entity_types.
-        # Never invent it from the table/sheet name.
         logical=_canonical_target_entity_type(target)
         if not logical:
             raise ValueError(
@@ -3442,33 +3499,46 @@ def _canonical_stage_records(job_id, sections_config):
             )
 
         for row_no,row in enumerate(df.to_dict("records"),1):
-            payload=_payload_from_mapping(row,mapping,target)
-            payload=_normalize_canonical_payload_dates(payload,target)
+            if native:
+                payload=_jsonish(row.get("payload"))
+                if not isinstance(payload,dict):
+                    raise ValueError(f"{section} row {row_no}: payload must be a JSON object")
+                payload=_normalize_canonical_payload_dates(payload,target)
+                native_rows += 1
+            else:
+                payload=_payload_from_mapping(row,mapping,target)
+                payload=_normalize_canonical_payload_dates(payload,target)
 
-            # Skip effectively blank rows after mapping.
-            meaningful={
-                k:v for k,v in (payload or {}).items()
-                if v not in (None,"",[],{})
-            }
+            meaningful={k:v for k,v in (payload or {}).items() if v not in (None,"",[],{})}
             if not meaningful:
                 continue
 
-            # DO NOT manufacture a canonical object ID here.
-            # Existing workbook IDs are source/package keys only.
-            nk=_natural_key_global(payload,target,row_no)
+            supplied_nk=_clean_upload_scalar(row.get("natural_key")) if isinstance(row,dict) else None
+            nk=str(supplied_nk or _natural_key_global(payload,target,row_no))
+            source_record_key=_clean_upload_scalar(row.get("source_record_key")) if isinstance(row,dict) else None
+            action=str(_clean_upload_scalar(row.get("action")) or "UPSERT").upper()
+            confidence=_clean_upload_scalar(row.get("confidence")) if isinstance(row,dict) else None
+            try:
+                confidence=float(confidence) if confidence is not None else 1.0
+            except Exception:
+                confidence=1.0
 
-            staged.append({
+            staged_row={
                 "ingestion_job_id":str(job_id),
                 "target_entity_type":logical,
                 "target_table":target,
-                "source_record_key":f"{section}:{nk}",
-                "natural_key":str(nk),
-                "action":"UPSERT",
+                "source_record_key":str(source_record_key or f"{section}:{nk}"),
+                "natural_key":nk,
+                "action":action,
                 "payload":_jsonable(payload),
+                "confidence":confidence,
                 "resolution_status":"PENDING",
                 "validation_status":"pending",
                 "review_status":"pending",
-            })
+            }
+            if isinstance(row,dict) and _clean_upload_scalar(row.get("source_id")) is not None:
+                staged_row["source_id"]=str(_clean_upload_scalar(row.get("source_id")))
+            staged.append(staged_row)
             table_counts[target]=table_counts.get(target,0)+1
 
     for i in range(0,len(staged),250):
@@ -3476,9 +3546,11 @@ def _canonical_stage_records(job_id, sections_config):
 
     return {
         "rows":len(staged),
+        "native_rows":native_rows,
         "tables":table_counts,
         "skipped_sections":skipped_sections,
     }
+
 
 def _canonical_jobs(limit=100):
     try:
@@ -3535,6 +3607,19 @@ def _canonical_section_target(section,df):
     s=_norm_field(section)
 
     explicit={
+        "pc_entities":"pc_entities",
+        "pc_assets":"pc_assets",
+        "pc_mobile_assets":"pc_mobile_assets",
+        "pc_events":"pc_events",
+        "pc_event_links":"pc_event_links",
+        "pc_relationships":"pc_relationships",
+        "pc_transactions":"pc_transactions",
+        "pc_transport_routes":"pc_transport_routes",
+        "pc_chokepoints":"pc_chokepoints",
+        "pc_market_instruments":"pc_market_instruments",
+        "pc_trade_flows":"pc_trade_flows",
+        "pc_supply_series":"pc_supply_series",
+        "pc_observations":"pc_observations",
         "entities":"pc_entities",
         "new_entities":"pc_entities",
         "entity":"pc_entities",
@@ -3661,8 +3746,8 @@ elif page=="Canonical Loader":
             dataframe(blockers)
 
         up=st.file_uploader(
-            "Workbook / CSV / JSON",
-            type=["xlsx","xls","csv","json"],
+            "Workbook / CSV / JSON / JSONL",
+            type=["xlsx","xls","csv","json","jsonl","ndjson"],
             key="canonical_loader_upload"
         )
 
@@ -3734,25 +3819,41 @@ elif page=="Canonical Loader":
                             f"{reason} · staging type: {registered_type}"
                             if include else reason
                         )
-                        cols=_table_write_columns_live(sb,target)
-                        mapping=_auto_column_mapping(list(df.columns),cols)
-                        edited=st.data_editor(
-                            mapping,
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={
-                                "Include":st.column_config.CheckboxColumn(),
-                                "Canonical Field":st.column_config.SelectboxColumn(options=[""]+cols),
-                            },
-                            key=f"canon_map_{widget_ns}"
-                        )
-                        st.caption("Preview")
-                        dataframe(df.head(6).to_dict("records"))
+                        native=_loader_native_section(df)
+                        if native:
+                            edited=None
+                            st.success(
+                                "Loader-native package detected. Nested payload objects will be staged exactly as supplied; "
+                                "natural_key/source_record_key/action/confidence are treated as staging controls."
+                            )
+                            preview=[]
+                            for rr in df.head(6).to_dict("records"):
+                                pv=dict(rr)
+                                pv["payload"]=_jsonish(pv.get("payload"))
+                                preview.append(pv)
+                            st.caption("Native package preview")
+                            dataframe(preview)
+                        else:
+                            cols=_table_write_columns_live(sb,target)
+                            mapping=_auto_column_mapping(list(df.columns),cols)
+                            edited=st.data_editor(
+                                mapping,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Include":st.column_config.CheckboxColumn(),
+                                    "Canonical Field":st.column_config.SelectboxColumn(options=[""]+cols),
+                                },
+                                key=f"canon_map_{widget_ns}"
+                            )
+                            st.caption("Preview")
+                            dataframe(df.head(6).to_dict("records"))
                         configs[section]={
                             "include":include,
                             "target":target,
                             "df":df,
                             "mapping":edited,
+                            "native":native,
                         }
 
                 included_plan=[
@@ -3760,6 +3861,7 @@ elif page=="Canonical Loader":
                         "sheet":k,
                         "target_table":v["target"],
                         "rows":len(v["df"]),
+                        "mode":"loader-native" if v.get("native") else "mapped-flat",
                     }
                     for k,v in configs.items()
                     if v.get("include")
@@ -3800,6 +3902,12 @@ elif page=="Canonical Loader":
                 st.caption(
                     "The whole package is staged, then one canonical processor resolves/upserts objects first "
                     "and writes relationships/event links second. There is no manual reconcile/apply sequence."
+                )
+                st.info(
+                    "AI/research packages can now be supplied directly as JSON/JSONL records with target_table, "
+                    "natural_key and payload. This is the preferred path for company/fleet packages such as NORDEN: "
+                    "entities and vessels resolve first, then owner/operator/manager/charter relationships use the "
+                    "same package-local IDs and are mapped by the V5 processor."
                 )
                 st.info(
                     "The six core canonical sheets — entities, assets, mobile assets, events, relationships and "
