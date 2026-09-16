@@ -2007,7 +2007,7 @@ def publication_region_events(region_name):
         pattern = "|".join(re.escape(str(p).casefold()) for p in phrases)
         df = df[blob.str.contains(pattern, regex=True, na=False)].copy()
     if "Start Date" in df.columns:
-        df["_publication_date"] = pd.to_datetime(df["Start Date"], errors="coerce")
+        df["_publication_date"] = pd.to_datetime(df["Start Date"], errors="coerce", utc=True).dt.tz_convert(None)
         df = df.sort_values("_publication_date", ascending=False)
     return df
 
@@ -2838,7 +2838,7 @@ elif page == "Intelligence Brief Builder":
     if not candidates.empty and lookback != "All loaded" and "Start Date" in candidates.columns:
         days = int(lookback.split()[0])
         cutoff = pd.Timestamp(pub_date) - pd.Timedelta(days=days)
-        dates = pd.to_datetime(candidates["Start Date"], errors="coerce")
+        dates = pd.to_datetime(candidates["Start Date"], errors="coerce", utc=True).dt.tz_convert(None)
         candidates = candidates[(dates >= cutoff) & (dates <= pd.Timestamp(pub_date) + pd.Timedelta(days=1))].copy()
 
     if candidates.empty:
