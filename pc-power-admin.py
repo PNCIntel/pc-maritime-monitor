@@ -19,6 +19,7 @@ except Exception:
     ai_research=None
     ai_configured=lambda: False
 
+# v11: FK-safe direct-table staging for transaction participants
 st.set_page_config(page_title="P&C Canonical Admin",page_icon="◈",layout="wide",initial_sidebar_state="expanded")
 
 # Match the Trade/Intelligence apps: dark by default, with a persistent light/dark toggle.
@@ -3358,7 +3359,6 @@ CORE_CANONICAL_STAGE_TYPES = {
     "pc_events":"event",
     "pc_relationships":"relationship",
     "pc_event_links":"event_link",
-    "pc_transaction_participants":"transaction_participant",
 }
 
 def _canonical_registered_table_map():
@@ -3383,8 +3383,14 @@ def _canonical_registered_table_map():
 
 def _canonical_registered_tables():
     reg=_canonical_registered_table_map()
-    # Keep stable user-facing order and always include the core canonical graph/direct tables.
-    return [t for t in CANONICAL_LOAD_TABLES if t in reg]
+    # Keep stable user-facing order. Core identity/edge tables require metadata-backed
+    # logical types, while direct child/fact tables may be staged with target_entity_type=NULL.
+    # pc_transaction_participants is deliberately direct: it FK-links to pc_transactions
+    # and pc_entities but is not itself a canonical entity type.
+    return [
+        t for t in CANONICAL_LOAD_TABLES
+        if t in reg or t in CANONICAL_DIRECT_TABLES
+    ]
 
 def _canonical_target_entity_type(target_table):
     if target_table in CORE_CANONICAL_STAGE_TYPES:
@@ -3651,11 +3657,13 @@ def _canonical_stage_records(job_id, sections_config):
         native=bool(cfg.get("native")) or _loader_native_section(df)
 
         logical=_canonical_target_entity_type(target)
-        if not logical:
+        if not logical and target not in CANONICAL_DIRECT_TABLES:
             raise ValueError(
                 f"{target} is not registered in pc_meta_entity_types. "
                 "Register it in System metadata or exclude that sheet."
             )
+        # Direct fact/child tables are not canonical identity types. Leaving this NULL
+        # is intentional and FK-safe because pc_staged_records.target_entity_type is nullable.
 
         for row_no,row in enumerate(df.to_dict("records"),1):
             if native:
@@ -3684,7 +3692,6 @@ def _canonical_stage_records(job_id, sections_config):
 
             staged_row={
                 "ingestion_job_id":str(job_id),
-                "target_entity_type":logical,
                 "target_table":target,
                 "source_record_key":str(source_record_key or f"{section}:{nk}"),
                 "natural_key":nk,
@@ -3695,6 +3702,8 @@ def _canonical_stage_records(job_id, sections_config):
                 "validation_status":"pending",
                 "review_status":"pending",
             }
+            if logical:
+                staged_row["target_entity_type"]=logical
             if isinstance(row,dict) and _clean_upload_scalar(row.get("source_id")) is not None:
                 staged_row["source_id"]=str(_clean_upload_scalar(row.get("source_id")))
             staged.append(staged_row)
