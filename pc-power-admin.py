@@ -102,6 +102,7 @@ REQUIRED_BY_TABLE = {
     "pc_events": ["event_id","event_type"],
     "pc_event_links": ["event_link_id","event_id","linked_type","linked_id","relationship"],
     "pc_transactions": ["transaction_id"],
+    "pc_transaction_participants": ["participant_id","transaction_id","role"],
     "pc_energy_assets": ["asset_id"],
     "pc_industrial_assets": ["asset_id"],
     "pc_logistics_facilities": ["asset_id"],
@@ -116,6 +117,12 @@ REQUIRED_BY_TABLE = {
 FK_RULES = {
     "pc_event_links": [
         ("event_id","pc_events","event_id"),
+    ],
+    "pc_transaction_participants": [
+        ("transaction_id","pc_transactions","transaction_id"),
+        ("entity_id","pc_entities","entity_id"),
+        ("role","pc_meta_transaction_participant_roles","role"),
+        ("source_id","pc_sources","source_id"),
     ],
     "pc_logistics_facilities": [
         ("owner_entity_id","pc_entities","entity_id"),
@@ -201,6 +208,20 @@ def _fk_valid(sb,table,payload):
                     problems.append("linked_id→pc_mobile_assets.mobile_asset_id missing")
             except Exception:
                 problems.append("linked_id vessel FK check failed")
+
+    # Corporate packages may link an event directly to its canonical transaction.
+    # pc_event_links.linked_id is polymorphic, so validate the transaction endpoint here.
+    if table=="pc_event_links" and str(payload.get("linked_type") or "").lower() in {"transaction","deal"}:
+        value=payload.get("linked_id")
+        if value not in (None,""):
+            try:
+                hit=(sb.table("pc_transactions").select("transaction_id").eq(
+                    "transaction_id",value
+                ).limit(1).execute().data or [])
+                if not hit:
+                    problems.append("linked_id→pc_transactions.transaction_id missing")
+            except Exception:
+                problems.append("linked_id transaction FK check failed")
     return len(problems)==0,problems
 
 def _duplicate_check(sb,table,payload):
@@ -813,6 +834,7 @@ ID_FIELDS = {
     "pc_events": ("event_id","EVENT_",20),
     "pc_event_links": ("event_link_id","EVLINK_",20),
     "pc_transactions": ("transaction_id","TXN_",20),
+    "pc_transaction_participants": ("participant_id","TXNP_",20),
     "pc_transport_routes": ("route_id","ROUTE_",20),
     "pc_chokepoints": ("chokepoint_id","CHOKE_",20),
     "pc_market_instruments": ("market_instrument_id","MKT_",20),
@@ -949,6 +971,7 @@ def _payload_from_mapping(row, mapping_df, target_table):
         "pc_events":["event_id","event_type","event_domain","event_family","title","severity","status"],
         "pc_event_links":["event_link_id","event_id","linked_type","linked_id","relationship"],
         "pc_relationships":["relationship_id","source_type","source_id","relationship_type","target_type","target_id"],
+        "pc_transaction_participants":["participant_id","transaction_id","entity_id","participant_name","role","ownership_percent","lead_participant","valid_from","valid_to","source_id"],
     }
     for field in critical_by_table.get(target_table,[]):
         if payload.get(field) in (None,""):
@@ -964,7 +987,7 @@ def _payload_from_mapping(row, mapping_df, target_table):
 def _natural_key_global(payload,target_table,index):
     for key in (
         "entity_id","asset_id","mobile_asset_id","relationship_id","event_id","event_link_id",
-        "transaction_id","route_id","chokepoint_id","market_instrument_id","trade_flow_id",
+        "transaction_id","participant_id","route_id","chokepoint_id","market_instrument_id","trade_flow_id",
         "supply_series_id","observation_id","imo","mmsi","name","title","route_name"
     ):
         if payload.get(key):
@@ -1073,6 +1096,7 @@ def _suggest_target_table(section,df):
         "relationships":"pc_relationships","relations":"pc_relationships",
         "events":"pc_events","incidents":"pc_events","event_links":"pc_event_links",
         "transactions":"pc_transactions","deals":"pc_transactions",
+        "transaction_participants":"pc_transaction_participants","deal_participants":"pc_transaction_participants",
         "routes":"pc_transport_routes","corridors":"pc_transport_routes",
         "chokepoints":"pc_chokepoints","observations":"pc_observations",
     }
@@ -1956,6 +1980,7 @@ AI_ALLOWED_TABLES = {
     "pc_events",
     "pc_event_links",
     "pc_transactions",
+    "pc_transaction_participants",
     "pc_security_compliance",
     "pc_energy_assets",
     "pc_energy_asset_connections",
@@ -1982,6 +2007,7 @@ APPLY_CONFLICT_KEYS = {
     "pc_events": "event_id",
     "pc_event_links": "event_link_id",
     "pc_transactions": "transaction_id",
+    "pc_transaction_participants": "participant_id",
     "pc_security_compliance": "security_compliance_id",
     "pc_energy_assets": "asset_id",
     "pc_energy_asset_connections": "connection_id",
@@ -2681,6 +2707,7 @@ def _apply_safe_candidates_priority(job_id):
         "pc_mobile_assets":20,
         "pc_events":30,
         "pc_transactions":40,
+        "pc_transaction_participants":50,
         "pc_transport_routes":45,
         "pc_relationships":80,
         "pc_event_links":90,
@@ -3294,6 +3321,7 @@ CANONICAL_EDGE_TABLES = {
 }
 CANONICAL_DIRECT_TABLES = {
     "pc_transactions",
+    "pc_transaction_participants",
     "pc_transport_routes",
     "pc_chokepoints",
     "pc_market_instruments",
@@ -3313,6 +3341,7 @@ CANONICAL_LOGICAL_TYPE = {
     "pc_relationships":"relationship",
     "pc_event_links":"event_link",
     "pc_transactions":"transaction",
+    "pc_transaction_participants":"transaction_participant",
     "pc_transport_routes":"route",
     "pc_chokepoints":"chokepoint",
     "pc_market_instruments":"market_instrument",
@@ -3329,6 +3358,7 @@ CORE_CANONICAL_STAGE_TYPES = {
     "pc_events":"event",
     "pc_relationships":"relationship",
     "pc_event_links":"event_link",
+    "pc_transaction_participants":"transaction_participant",
 }
 
 def _canonical_registered_table_map():
@@ -3353,7 +3383,7 @@ def _canonical_registered_table_map():
 
 def _canonical_registered_tables():
     reg=_canonical_registered_table_map()
-    # Keep stable user-facing order and always include the six core graph tables.
+    # Keep stable user-facing order and always include the core canonical graph/direct tables.
     return [t for t in CANONICAL_LOAD_TABLES if t in reg]
 
 def _canonical_target_entity_type(target_table):
@@ -3411,13 +3441,142 @@ def _canonical_job_summary(job_id):
         "complete": total>0 and applied==total,
     }, by_table
 
+def _canonical_apply_transaction_extensions(job_id):
+    """Apply transaction child rows and event→transaction links after V5 creates parents.
+
+    V5 predates pc_transaction_participants and historically treats transaction as an
+    unsupported pc_event_links endpoint. This compatibility pass is intentionally narrow:
+    it writes only rows whose transaction/event/entity/role dependencies already exist.
+    Ambiguous or invalid rows remain in review with an explicit reason.
+    """
+    report={"participants_applied":0,"transaction_links_applied":0,"review":0,"errors":[]}
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,payload,review_status,resolution_status,natural_key")
+              .eq("ingestion_job_id",str(job_id))
+              .in_("target_table",["pc_transaction_participants","pc_event_links"])
+              .limit(10000).execute().data or [])
+    except Exception as exc:
+        report["errors"].append(f"staging read: {exc}")
+        return report
+
+    # Load valid participant roles once. The FK is authoritative; do not invent roles.
+    try:
+        valid_roles={str(r.get("role")) for r in (sb.table("pc_meta_transaction_participant_roles")
+                    .select("role").limit(500).execute().data or []) if r.get("role")}
+    except Exception:
+        valid_roles=set()
+
+    role_aliases={
+        "buyer_offeror":"buyer",
+        "offeror":"buyer",
+        "acquirer":"buyer",
+        "seller_tendering_shareholders":"seller",
+        "tendering_shareholders":"seller",
+        "target_company":"target",
+        "ultimate_parent_sponsor":"sponsor",
+    }
+
+    def exists(table,col,value):
+        if value in (None,""):
+            return False
+        try:
+            return bool((sb.table(table).select(col).eq(col,value).limit(1).execute().data or []))
+        except Exception:
+            return False
+
+    def mark_review(row, reason):
+        report["review"]+=1
+        try:
+            sb.table("pc_staged_records").update({
+                "review_status":"pending",
+                "validation_status":"needs_review",
+                "resolution_status":"BROKEN_REFERENCE",
+                "resolution_method":"python_transaction_extension_guard",
+                "resolution_details":{"reason":str(reason)[:1000],"handler":"python_transaction_extension_guard"},
+            }).eq("staged_record_id",row["staged_record_id"]).execute()
+        except Exception:
+            pass
+        report["errors"].append(f"{row.get('natural_key')}: {reason}")
+
+    for row in rows:
+        if str(row.get("review_status") or "").lower()=="applied":
+            continue
+        payload=row.get("payload") if isinstance(row.get("payload"),dict) else {}
+        table=row.get("target_table")
+
+        if table=="pc_transaction_participants":
+            txid=payload.get("transaction_id")
+            if not exists("pc_transactions","transaction_id",txid):
+                mark_review(row,f"transaction_id {txid!r} is not canonical yet")
+                continue
+
+            eid=payload.get("entity_id")
+            if eid not in (None,"") and not exists("pc_entities","entity_id",eid):
+                mark_review(row,f"entity_id {eid!r} does not resolve to pc_entities")
+                continue
+
+            role=str(payload.get("role") or "").strip()
+            if valid_roles and role not in valid_roles:
+                mapped=role_aliases.get(role.casefold())
+                if mapped and mapped in valid_roles:
+                    payload=dict(payload); payload["role"]=mapped
+                else:
+                    mark_review(row,f"participant role {role!r} is not registered in pc_meta_transaction_participant_roles")
+                    continue
+
+            try:
+                sb.table("pc_transaction_participants").upsert(payload,on_conflict="participant_id").execute()
+                sb.table("pc_staged_records").update({
+                    "payload":payload,
+                    "review_status":"applied",
+                    "validation_status":"reviewed",
+                    "resolution_status":"READY",
+                    "resolution_method":"python_transaction_extension_apply",
+                    "resolution_confidence":1.0,
+                    "candidate_count":1,
+                }).eq("staged_record_id",row["staged_record_id"]).execute()
+                report["participants_applied"]+=1
+            except Exception as exc:
+                mark_review(row,f"participant apply failed: {exc}")
+
+        elif table=="pc_event_links" and str(payload.get("linked_type") or "").casefold() in {"transaction","deal"}:
+            eid=payload.get("event_id")
+            txid=payload.get("linked_id")
+            if not exists("pc_events","event_id",eid):
+                mark_review(row,f"event_id {eid!r} is not canonical yet")
+                continue
+            if not exists("pc_transactions","transaction_id",txid):
+                mark_review(row,f"transaction link target {txid!r} is not canonical yet")
+                continue
+            try:
+                sb.table("pc_event_links").upsert(payload,on_conflict="event_link_id").execute()
+                sb.table("pc_staged_records").update({
+                    "review_status":"applied",
+                    "validation_status":"reviewed",
+                    "resolution_status":"READY",
+                    "resolution_method":"python_event_transaction_link_apply",
+                    "resolution_confidence":1.0,
+                    "candidate_count":1,
+                }).eq("staged_record_id",row["staged_record_id"]).execute()
+                report["transaction_links_applied"]+=1
+            except Exception as exc:
+                mark_review(row,f"event→transaction link apply failed: {exc}")
+
+    return report
+
+
 def _canonical_process_job(job_id):
-    """Single database entry point for the new ingestion architecture."""
+    """Run V5, then apply the transaction/corporate compatibility extension pass."""
     result=(sb.rpc(
         "pc_process_ingestion_job_v5",
         {"p_ingestion_job_id":str(job_id)}
     ).execute().data or {})
-    return result
+    extension=_canonical_apply_transaction_extensions(job_id)
+    if isinstance(result,dict):
+        result["transaction_extensions"]=extension
+        return result
+    return {"processor_result":result,"transaction_extensions":extension}
 
 def _canonical_create_job(title, source_scope):
     payload={
@@ -3463,7 +3622,7 @@ def _normalize_canonical_payload_dates(payload,target_table):
         for fld in ("start_date","end_date","event_date","latest_update_time"):
             if fld in payload:
                 payload[fld]=_normalize_excel_serial_date_value(payload.get(fld))
-    elif target_table=="pc_relationships":
+    elif target_table in {"pc_relationships","pc_transaction_participants"}:
         for fld in ("valid_from","valid_to"):
             if fld in payload:
                 payload[fld]=_normalize_excel_serial_date_value(payload.get(fld))
@@ -3614,6 +3773,7 @@ def _canonical_section_target(section,df):
         "pc_event_links":"pc_event_links",
         "pc_relationships":"pc_relationships",
         "pc_transactions":"pc_transactions",
+        "pc_transaction_participants":"pc_transaction_participants",
         "pc_transport_routes":"pc_transport_routes",
         "pc_chokepoints":"pc_chokepoints",
         "pc_market_instruments":"pc_market_instruments",
@@ -3634,6 +3794,8 @@ def _canonical_section_target(section,df):
         "event_links":"pc_event_links",
         "relationships":"pc_relationships",
         "transactions":"pc_transactions",
+        "transaction_participants":"pc_transaction_participants",
+        "deal_participants":"pc_transaction_participants",
         "routes":"pc_transport_routes",
         "transport_routes":"pc_transport_routes",
         "chokepoints":"pc_chokepoints",
@@ -3910,7 +4072,7 @@ elif page=="Canonical Loader":
                     "same package-local IDs and are mapped by the V5 processor."
                 )
                 st.info(
-                    "The six core canonical sheets — entities, assets, mobile assets, events, relationships and "
+                    "The seven core canonical sheets — entities, assets, mobile assets, events, relationships, transaction participants and "
                     "event links — are always supported with their established FK-safe staging types. "
                     "Optional tables such as transactions/routes still require explicit metadata registration."
                 )
