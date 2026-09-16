@@ -3334,6 +3334,11 @@ CANONICAL_LOAD_TABLES = sorted(
     CANONICAL_OBJECT_TABLES | CANONICAL_EDGE_TABLES | CANONICAL_DIRECT_TABLES
 )
 
+# Internal staging-only targets. They deliberately bypass SQL V5 object resolution
+# because they are child/fact/semantic bridge rows, not canonical identity objects.
+MODEL_DIRECT_PARTICIPANT_TARGET = "pc__direct_transaction_participant"
+MODEL_EVENT_TRANSACTION_BRIDGE_TARGET = "pc__event_transaction_bridge"
+
 CANONICAL_LOGICAL_TYPE = {
     "pc_entities":"entity",
     "pc_assets":"asset",
@@ -3429,7 +3434,12 @@ def _canonical_job_summary(job_id):
 
     counts={}
     for r in rows:
-        key=(r.get("target_table") or "unknown",
+        display_table=r.get("target_table") or "unknown"
+        if display_table==MODEL_DIRECT_PARTICIPANT_TARGET:
+            display_table="pc_transaction_participants"
+        elif display_table==MODEL_EVENT_TRANSACTION_BRIDGE_TARGET:
+            display_table="pc_event_links"
+        key=(display_table,
              r.get("resolution_status") or "PENDING",
              r.get("review_status") or "pending")
         counts[key]=counts.get(key,0)+1
@@ -3451,12 +3461,41 @@ def _norm_vocab_token(value):
     return re.sub(r"[^a-z0-9]+","_",str(value or "").strip().casefold()).strip("_")
 
 
+def _ensure_transaction_role_vocab():
+    """Ensure the model has the basic transaction participant semantics.
+
+    pc_transaction_participants.role is NOT NULL and FK-controlled. These are
+    generic transaction roles, not business data, so the loader may safely ensure
+    the baseline vocabulary exists.
+    """
+    defaults=[
+        {"role":"buyer","display_name":"Buyer / Acquirer","role_group":"acquirer","description":"Purchasing or acquiring party","active":True},
+        {"role":"seller","display_name":"Seller / Disposing Party","role_group":"seller","description":"Selling or disposing party","active":True},
+        {"role":"target","display_name":"Target","role_group":"target","description":"Company, asset or business that is the subject of the transaction","active":True},
+        {"role":"offeror","display_name":"Offeror","role_group":"acquirer","description":"Party making a tender or takeover offer","active":True},
+        {"role":"shareholder","display_name":"Shareholder","role_group":"shareholder","description":"Shareholder participating in or affected by the transaction","active":True},
+        {"role":"sponsor","display_name":"Sponsor / Parent","role_group":"sponsor","description":"Parent, sponsor or controlling party backing the transaction","active":True},
+        {"role":"advisor","display_name":"Advisor","role_group":"advisor","description":"Financial, legal or other transaction advisor","active":True},
+        {"role":"financier","display_name":"Financier","role_group":"financier","description":"Debt or equity financing provider","active":True},
+    ]
+    try:
+        for row in defaults:
+            sb.table("pc_meta_transaction_participant_roles").upsert(
+                {**row,"metadata":{"system_baseline":True}},
+                on_conflict="role"
+            ).execute()
+    except Exception:
+        # Existing metadata remains authoritative if writes are restricted.
+        pass
+
+
 def _load_transaction_vocab():
     """Read the live transaction vocabularies from the model.
 
     The loader should conform incoming packages to the database model, not require
     spreadsheet authors to know internal enum keys.
     """
+    _ensure_transaction_role_vocab()
     vocab={"types":[],"stages":[],"roles":[],"categories":[]}
     try:
         vocab["types"]=(sb.table("pc_meta_transaction_types")
@@ -3607,6 +3646,7 @@ def _canonical_apply_model_direct_rows(job_id):
     vocab=_load_transaction_vocab()
 
     def mark_applied(row,payload,method):
+        details={"canonical_target_table":"pc_transaction_participants"} if row.get("target_table")==MODEL_DIRECT_PARTICIPANT_TARGET else {}
         sb.table("pc_staged_records").update({
             "payload":payload,
             "review_status":"applied",
@@ -3615,6 +3655,7 @@ def _canonical_apply_model_direct_rows(job_id):
             "resolution_method":method,
             "resolution_confidence":1.0,
             "candidate_count":1,
+            "resolution_details":details,
         }).eq("staged_record_id",row["staged_record_id"]).execute()
 
     def mark_review(row,reason,method):
@@ -3675,7 +3716,7 @@ def _canonical_apply_model_direct_rows(job_id):
 
     # 2. Child participants after parent transactions exist.
     for row in rows:
-        if row.get("target_table")!="pc_transaction_participants":
+        if row.get("target_table") not in {"pc_transaction_participants",MODEL_DIRECT_PARTICIPANT_TARGET}:
             continue
         payload=row.get("payload") if isinstance(row.get("payload"),dict) else {}
         p=dict(payload)
@@ -3762,7 +3803,6 @@ def _canonical_apply_model_post_rows(job_id):
         rows=(sb.table("pc_staged_records")
               .select("staged_record_id,target_table,payload,review_status,resolution_status,natural_key")
               .eq("ingestion_job_id",str(job_id))
-              .eq("target_table","pc_event_links")
               .limit(10000).execute().data or [])
     except Exception as exc:
         report["errors"].append(f"event-link read: {exc}")
@@ -3784,6 +3824,8 @@ def _canonical_apply_model_post_rows(job_id):
 
     for row in rows:
         payload=row.get("payload") if isinstance(row.get("payload"),dict) else {}
+        if row.get("target_table") not in {"pc_event_links",MODEL_EVENT_TRANSACTION_BRIDGE_TARGET}:
+            continue
         if str(payload.get("linked_type") or "").casefold() not in {"transaction","deal"}:
             continue
         if str(row.get("review_status") or "").lower()=="applied":
@@ -3831,7 +3873,8 @@ def _canonical_apply_model_post_rows(job_id):
                 "resolution_details":{
                     "event_id":eid,
                     "transaction_id":txid,
-                    "note":"semantic bridge stored in parent metadata; pc_event_links transaction endpoint unsupported"
+                    "note":"semantic bridge stored in parent metadata; pc_event_links transaction endpoint unsupported",
+                    "canonical_target_table":"pc_event_links"
                 },
             }).eq("staged_record_id",row["staged_record_id"]).execute()
             report["transaction_links_applied"]+=1
@@ -3987,9 +4030,15 @@ def _canonical_stage_records(job_id, sections_config):
             except Exception:
                 confidence=1.0
 
+            staged_target=target
+            if target=="pc_transaction_participants":
+                staged_target=MODEL_DIRECT_PARTICIPANT_TARGET
+            elif target=="pc_event_links" and str((payload or {}).get("linked_type") or "").casefold() in {"transaction","deal"}:
+                staged_target=MODEL_EVENT_TRANSACTION_BRIDGE_TARGET
+
             staged_row={
                 "ingestion_job_id":str(job_id),
-                "target_table":target,
+                "target_table":staged_target,
                 "source_record_key":str(source_record_key or f"{section}:{nk}"),
                 "natural_key":nk,
                 "action":action,
@@ -3999,7 +4048,7 @@ def _canonical_stage_records(job_id, sections_config):
                 "validation_status":"pending",
                 "review_status":"pending",
             }
-            if logical:
+            if logical and staged_target==target:
                 staged_row["target_entity_type"]=logical
             if isinstance(row,dict) and _clean_upload_scalar(row.get("source_id")) is not None:
                 staged_row["source_id"]=str(_clean_upload_scalar(row.get("source_id")))
