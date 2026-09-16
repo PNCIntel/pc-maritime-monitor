@@ -3342,7 +3342,6 @@ CANONICAL_LOGICAL_TYPE = {
     "pc_relationships":"relationship",
     "pc_event_links":"event_link",
     "pc_transactions":"transaction",
-    "pc_transaction_participants":"transaction_participant",
     "pc_transport_routes":"route",
     "pc_chokepoints":"chokepoint",
     "pc_market_instruments":"market_instrument",
@@ -3447,199 +3446,440 @@ def _canonical_job_summary(job_id):
         "complete": total>0 and applied==total,
     }, by_table
 
-def _canonical_apply_transaction_extensions(job_id):
-    """Apply transaction child rows and event→transaction links after V5 creates parents.
 
-    V5 predates pc_transaction_participants and historically treats transaction as an
-    unsupported pc_event_links endpoint. This compatibility pass is intentionally narrow:
-    it writes only rows whose transaction/event/entity/role dependencies already exist.
-    Ambiguous or invalid rows remain in review with an explicit reason.
+def _norm_vocab_token(value):
+    return re.sub(r"[^a-z0-9]+","_",str(value or "").strip().casefold()).strip("_")
+
+
+def _load_transaction_vocab():
+    """Read the live transaction vocabularies from the model.
+
+    The loader should conform incoming packages to the database model, not require
+    spreadsheet authors to know internal enum keys.
     """
-    report={"participants_applied":0,"transaction_links_applied":0,"review":0,"errors":[]}
+    vocab={"types":[],"stages":[],"roles":[],"categories":[]}
+    try:
+        vocab["types"]=(sb.table("pc_meta_transaction_types")
+            .select("transaction_type,transaction_category,display_name,active")
+            .eq("active",True).limit(1000).execute().data or [])
+    except Exception:
+        pass
+    try:
+        vocab["stages"]=(sb.table("pc_meta_transaction_stages")
+            .select("transaction_stage,display_name,stage_order,active")
+            .eq("active",True).limit(1000).execute().data or [])
+    except Exception:
+        pass
+    try:
+        vocab["roles"]=(sb.table("pc_meta_transaction_participant_roles")
+            .select("*").limit(1000).execute().data or [])
+    except Exception:
+        pass
+    try:
+        vocab["categories"]=(sb.table("pc_meta_transaction_categories")
+            .select("transaction_category,display_name,active")
+            .eq("active",True).limit(1000).execute().data or [])
+    except Exception:
+        pass
+    return vocab
+
+
+def _vocab_match(value, rows, key_field, display_field="display_name"):
+    if value in (None,""):
+        return None
+    wanted=_norm_vocab_token(value)
+    for r in rows or []:
+        key=r.get(key_field)
+        if key and _norm_vocab_token(key)==wanted:
+            return key
+        disp=r.get(display_field)
+        if disp and _norm_vocab_token(disp)==wanted:
+            return key
+    return None
+
+
+def _normalize_transaction_payload_to_model(payload, vocab):
+    """Normalize transaction controlled fields against live metadata.
+
+    Unsupported optional vocabulary values are preserved in metadata and omitted
+    from constrained columns rather than causing the entire canonical package to fail.
+    """
+    p=dict(payload or {})
+    meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+    meta=dict(meta)
+
+    raw_type=p.get("transaction_type")
+    raw_cat=p.get("transaction_category")
+    raw_stage=p.get("transaction_stage")
+
+    matched_type=_vocab_match(raw_type,vocab.get("types"),"transaction_type")
+    type_row=None
+    if matched_type:
+        type_row=next((r for r in vocab.get("types",[]) if r.get("transaction_type")==matched_type),None)
+        p["transaction_type"]=matched_type
+        if type_row and type_row.get("transaction_category"):
+            p["transaction_category"]=type_row["transaction_category"]
+    elif raw_type not in (None,""):
+        meta["source_transaction_type"]=raw_type
+        p.pop("transaction_type",None)
+
+    if not p.get("transaction_category") and raw_cat not in (None,""):
+        matched_cat=_vocab_match(raw_cat,vocab.get("categories"),"transaction_category")
+        if matched_cat:
+            p["transaction_category"]=matched_cat
+        else:
+            meta["source_transaction_category"]=raw_cat
+            p.pop("transaction_category",None)
+
+    if raw_stage not in (None,""):
+        matched_stage=_vocab_match(raw_stage,vocab.get("stages"),"transaction_stage")
+        if matched_stage:
+            p["transaction_stage"]=matched_stage
+        else:
+            meta["source_transaction_stage"]=raw_stage
+            p.pop("transaction_stage",None)
+
+    if meta:
+        p["metadata"]=meta
+    return p
+
+
+def _participant_role_to_model(role, vocab):
+    """Resolve a package role to a live pc_meta_transaction_participant_roles key."""
+    if role in (None,""):
+        return None
+    wanted=_norm_vocab_token(role)
+    rows=vocab.get("roles") or []
+
+    # First, exact key/display match against whatever columns the live role table exposes.
+    for r in rows:
+        key=r.get("role")
+        if key and _norm_vocab_token(key)==wanted:
+            return key
+        for fld in ("display_name","role_display","description"):
+            if r.get(fld) and _norm_vocab_token(r.get(fld))==wanted:
+                return key
+
+    # Common semantic aliases, but only return them when that key exists in live metadata.
+    aliases={
+        "buyer_offeror":["buyer","acquirer","offeror"],
+        "offeror":["buyer","offeror","acquirer"],
+        "acquirer":["buyer","acquirer"],
+        "seller_tendering_shareholders":["seller","shareholder","tendering_shareholder"],
+        "tendering_shareholders":["seller","shareholder","tendering_shareholder"],
+        "target_company":["target","target_company"],
+        "ultimate_parent_sponsor":["sponsor","parent","ultimate_parent"],
+    }
+    live={_norm_vocab_token(r.get("role")):r.get("role") for r in rows if r.get("role")}
+    for candidate in aliases.get(wanted,[]):
+        if _norm_vocab_token(candidate) in live:
+            return live[_norm_vocab_token(candidate)]
+    return None
+
+
+def _canonical_apply_model_direct_rows(job_id):
+    """Model-aware pre-apply for direct transaction-family tables.
+
+    This is deliberately based on the live schema/model:
+      * pc_transactions is a direct fact table with only transaction_id required.
+      * transaction type/category/stage are nullable FK-controlled vocabularies.
+      * pc_transaction_participants is a child table FK-linked to pc_transactions,
+        optional pc_entities, role metadata and pc_sources.
+
+    Parents are written before children. SQL V5 remains responsible for canonical
+    identity objects and supported graph edges.
+    """
+    report={
+        "transactions_applied":0,
+        "participants_applied":0,
+        "participants_review":0,
+        "errors":[]
+    }
     try:
         rows=(sb.table("pc_staged_records")
               .select("staged_record_id,target_table,payload,review_status,resolution_status,natural_key")
               .eq("ingestion_job_id",str(job_id))
-              .in_("target_table",["pc_transaction_participants","pc_event_links"])
               .limit(10000).execute().data or [])
     except Exception as exc:
         report["errors"].append(f"staging read: {exc}")
         return report
 
-    # Load valid participant roles once. The FK is authoritative; do not invent roles.
-    try:
-        valid_roles={str(r.get("role")) for r in (sb.table("pc_meta_transaction_participant_roles")
-                    .select("role").limit(500).execute().data or []) if r.get("role")}
-    except Exception:
-        valid_roles=set()
+    vocab=_load_transaction_vocab()
 
-    role_aliases={
-        "buyer_offeror":"buyer",
-        "offeror":"buyer",
-        "acquirer":"buyer",
-        "seller_tendering_shareholders":"seller",
-        "tendering_shareholders":"seller",
-        "target_company":"target",
-        "ultimate_parent_sponsor":"sponsor",
-    }
+    def mark_applied(row,payload,method):
+        sb.table("pc_staged_records").update({
+            "payload":payload,
+            "review_status":"applied",
+            "validation_status":"reviewed",
+            "resolution_status":"READY",
+            "resolution_method":method,
+            "resolution_confidence":1.0,
+            "candidate_count":1,
+        }).eq("staged_record_id",row["staged_record_id"]).execute()
 
-    def exists(table,col,value):
-        if value in (None,""):
-            return False
+    def mark_review(row,reason,method):
         try:
-            return bool((sb.table(table).select(col).eq(col,value).limit(1).execute().data or []))
+            sb.table("pc_staged_records").update({
+                "review_status":"pending",
+                "validation_status":"needs_review",
+                "resolution_status":"BROKEN_REFERENCE",
+                "resolution_method":method,
+                "resolution_details":{"reason":str(reason)[:1500],"handler":method},
+            }).eq("staged_record_id",row["staged_record_id"]).execute()
         except Exception:
-            return False
+            pass
+        report["errors"].append(f"{row.get('natural_key')}: {reason}")
 
-    # V5 can mark a direct parent row MATCHED/applied in staging before the
-    # compatibility child pass can observe it through PostgREST. Build a package-local
-    # parent cache and, if necessary, idempotently upsert the exact staged parent
-    # payload before validating transaction participants / event→transaction bridges.
-    try:
-        package_parents=(sb.table("pc_staged_records")
-            .select("target_table,payload,review_status,resolution_status")
-            .eq("ingestion_job_id",str(job_id))
-            .in_("target_table",["pc_transactions","pc_events"])
-            .limit(10000).execute().data or [])
-    except Exception:
-        package_parents=[]
+    # 1. Direct parent transactions first.
+    for row in rows:
+        if row.get("target_table")!="pc_transactions":
+            continue
+        payload=row.get("payload") if isinstance(row.get("payload"),dict) else {}
+        txid=payload.get("transaction_id")
+        if not txid:
+            mark_review(row,"transaction_id is required","model_direct_transaction_guard")
+            continue
 
-    parent_payloads={"pc_transactions":{},"pc_events":{}}
-    for p in package_parents:
-        pp=p.get("payload") if isinstance(p.get("payload"),dict) else {}
-        if p.get("target_table")=="pc_transactions" and pp.get("transaction_id"):
-            parent_payloads["pc_transactions"][str(pp["transaction_id"])]=pp
-        elif p.get("target_table")=="pc_events" and pp.get("event_id"):
-            parent_payloads["pc_events"][str(pp["event_id"])]=pp
+        p=_normalize_transaction_payload_to_model(payload,vocab)
 
-    def ensure_parent(table,key_col,value):
-        if value in (None,""):
-            return False
-        if exists(table,key_col,value):
-            return True
-        payload=parent_payloads.get(table,{}).get(str(value))
-        if not isinstance(payload,dict):
-            return False
+        # Drop unresolved optional FK ids rather than blocking a source-backed transaction.
+        # Preserve them in metadata so they can be reconciled later.
+        meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+        meta=dict(meta)
+        for fld,table,col in (
+            ("buyer_entity_id","pc_entities","entity_id"),
+            ("seller_entity_id","pc_entities","entity_id"),
+            ("target_entity_id","pc_entities","entity_id"),
+            ("target_asset_id","pc_assets","asset_id"),
+            ("target_mobile_asset_id","pc_mobile_assets","mobile_asset_id"),
+            ("source_id","pc_sources","source_id"),
+        ):
+            val=p.get(fld)
+            if val in (None,""):
+                continue
+            try:
+                hit=(sb.table(table).select(col).eq(col,val).limit(1).execute().data or [])
+            except Exception:
+                hit=[]
+            if not hit:
+                meta[f"unresolved_{fld}"]=val
+                p.pop(fld,None)
+        p["metadata"]=meta
+
         try:
-            sb.table(table).upsert(payload,on_conflict=key_col).execute()
-            return exists(table,key_col,value)
-        except Exception:
-            return False
+            sb.table("pc_transactions").upsert(p,on_conflict="transaction_id").execute()
+            mark_applied(row,p,"model_direct_transaction_upsert")
+            report["transactions_applied"]+=1
+        except Exception as exc:
+            mark_review(row,f"transaction upsert failed: {exc}","model_direct_transaction_guard")
 
-    def mark_review(row, reason):
+    # 2. Child participants after parent transactions exist.
+    for row in rows:
+        if row.get("target_table")!="pc_transaction_participants":
+            continue
+        payload=row.get("payload") if isinstance(row.get("payload"),dict) else {}
+        p=dict(payload)
+        pid=p.get("participant_id")
+        txid=p.get("transaction_id")
+        if not pid:
+            mark_review(row,"participant_id is required","model_transaction_participant_guard")
+            report["participants_review"]+=1
+            continue
+        if not txid:
+            mark_review(row,"transaction_id is required","model_transaction_participant_guard")
+            report["participants_review"]+=1
+            continue
+
+        try:
+            txhit=(sb.table("pc_transactions").select("transaction_id")
+                   .eq("transaction_id",txid).limit(1).execute().data or [])
+        except Exception:
+            txhit=[]
+        if not txhit:
+            mark_review(row,f"transaction_id {txid!r} does not resolve after parent apply",
+                        "model_transaction_participant_guard")
+            report["participants_review"]+=1
+            continue
+
+        role=_participant_role_to_model(p.get("role"),vocab)
+        if not role:
+            mark_review(row,f"participant role {p.get('role')!r} is not registered in live role metadata",
+                        "model_transaction_participant_guard")
+            report["participants_review"]+=1
+            continue
+        p["role"]=role
+
+        # Optional entity FK. Unresolved named participants are allowed by the schema.
+        eid=p.get("entity_id")
+        if eid not in (None,""):
+            try:
+                ehit=(sb.table("pc_entities").select("entity_id")
+                      .eq("entity_id",eid).limit(1).execute().data or [])
+            except Exception:
+                ehit=[]
+            if not ehit:
+                meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+                meta=dict(meta)
+                meta["unresolved_entity_id"]=eid
+                p["metadata"]=meta
+                p.pop("entity_id",None)
+
+        # Source FK is optional. Keep provenance URLs in metadata if source_id is absent.
+        sid=p.get("source_id")
+        if sid not in (None,""):
+            try:
+                shit=(sb.table("pc_sources").select("source_id")
+                      .eq("source_id",sid).limit(1).execute().data or [])
+            except Exception:
+                shit=[]
+            if not shit:
+                meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+                meta=dict(meta); meta["unresolved_source_id"]=sid
+                p["metadata"]=meta
+                p.pop("source_id",None)
+
+        try:
+            sb.table("pc_transaction_participants").upsert(p,on_conflict="participant_id").execute()
+            mark_applied(row,p,"model_transaction_participant_upsert")
+            report["participants_applied"]+=1
+        except Exception as exc:
+            mark_review(row,f"participant upsert failed: {exc}",
+                        "model_transaction_participant_guard")
+            report["participants_review"]+=1
+
+    return report
+
+
+def _canonical_apply_model_post_rows(job_id):
+    """Apply semantic links that the current SQL event-link processor cannot represent.
+
+    pc_event_links is retained for supported canonical object types. Event↔transaction
+    association is preserved bidirectionally in event/transaction metadata until the
+    database gets a dedicated transaction-link table or transaction endpoint support.
+    """
+    report={"transaction_links_applied":0,"review":0,"errors":[]}
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,payload,review_status,resolution_status,natural_key")
+              .eq("ingestion_job_id",str(job_id))
+              .eq("target_table","pc_event_links")
+              .limit(10000).execute().data or [])
+    except Exception as exc:
+        report["errors"].append(f"event-link read: {exc}")
+        return report
+
+    def mark_review(row,reason):
         report["review"]+=1
         try:
             sb.table("pc_staged_records").update({
                 "review_status":"pending",
                 "validation_status":"needs_review",
                 "resolution_status":"BROKEN_REFERENCE",
-                "resolution_method":"python_transaction_extension_guard",
-                "resolution_details":{"reason":str(reason)[:1000],"handler":"python_transaction_extension_guard"},
+                "resolution_method":"model_event_transaction_bridge_guard",
+                "resolution_details":{"reason":str(reason)[:1500]},
             }).eq("staged_record_id",row["staged_record_id"]).execute()
         except Exception:
             pass
         report["errors"].append(f"{row.get('natural_key')}: {reason}")
 
     for row in rows:
+        payload=row.get("payload") if isinstance(row.get("payload"),dict) else {}
+        if str(payload.get("linked_type") or "").casefold() not in {"transaction","deal"}:
+            continue
         if str(row.get("review_status") or "").lower()=="applied":
             continue
-        payload=row.get("payload") if isinstance(row.get("payload"),dict) else {}
-        table=row.get("target_table")
 
-        if table=="pc_transaction_participants":
-            txid=payload.get("transaction_id")
-            if not ensure_parent("pc_transactions","transaction_id",txid):
-                mark_review(row,f"transaction_id {txid!r} is not canonical yet")
-                continue
+        eid=payload.get("event_id")
+        txid=payload.get("linked_id")
+        try:
+            evs=(sb.table("pc_events").select("event_id,metadata")
+                 .eq("event_id",eid).limit(1).execute().data or [])
+            txs=(sb.table("pc_transactions").select("transaction_id,metadata")
+                 .eq("transaction_id",txid).limit(1).execute().data or [])
+        except Exception as exc:
+            mark_review(row,f"parent lookup failed: {exc}")
+            continue
+        if not evs:
+            mark_review(row,f"event_id {eid!r} is not canonical")
+            continue
+        if not txs:
+            mark_review(row,f"transaction_id {txid!r} is not canonical")
+            continue
 
-            eid=payload.get("entity_id")
-            if eid not in (None,"") and not exists("pc_entities","entity_id",eid):
-                mark_review(row,f"entity_id {eid!r} does not resolve to pc_entities")
-                continue
-
-            role=str(payload.get("role") or "").strip()
-            if valid_roles and role not in valid_roles:
-                mapped=role_aliases.get(role.casefold())
-                if mapped and mapped in valid_roles:
-                    payload=dict(payload); payload["role"]=mapped
-                else:
-                    mark_review(row,f"participant role {role!r} is not registered in pc_meta_transaction_participant_roles")
-                    continue
-
-            try:
-                sb.table("pc_transaction_participants").upsert(payload,on_conflict="participant_id").execute()
-                sb.table("pc_staged_records").update({
-                    "payload":payload,
-                    "review_status":"applied",
-                    "validation_status":"reviewed",
-                    "resolution_status":"READY",
-                    "resolution_method":"python_transaction_extension_apply",
-                    "resolution_confidence":1.0,
-                    "candidate_count":1,
-                }).eq("staged_record_id",row["staged_record_id"]).execute()
-                report["participants_applied"]+=1
-            except Exception as exc:
-                mark_review(row,f"participant apply failed: {exc}")
-
-        elif table=="pc_event_links" and str(payload.get("linked_type") or "").casefold() in {"transaction","deal"}:
-            # pc_event_links' SQL relationship processor does not currently support a
-            # transaction/deal endpoint. Preserve the semantic link bidirectionally in
-            # parent metadata instead of forcing an unsupported polymorphic object type.
-            eid=payload.get("event_id")
-            txid=payload.get("linked_id")
-            if not ensure_parent("pc_events","event_id",eid):
-                mark_review(row,f"event_id {eid!r} is not canonical yet")
-                continue
-            if not ensure_parent("pc_transactions","transaction_id",txid):
-                mark_review(row,f"transaction link target {txid!r} is not canonical yet")
-                continue
-            try:
-                ev=(sb.table("pc_events").select("event_id,metadata").eq("event_id",eid).limit(1).execute().data or [{}])[0]
-                tx=(sb.table("pc_transactions").select("transaction_id,metadata").eq("transaction_id",txid).limit(1).execute().data or [{}])[0]
-                evm=ev.get("metadata") if isinstance(ev.get("metadata"),dict) else {}
-                txm=tx.get("metadata") if isinstance(tx.get("metadata"),dict) else {}
-                evm=dict(evm); txm=dict(txm)
-                evlinks=evm.get("linked_transaction_ids") if isinstance(evm.get("linked_transaction_ids"),list) else []
-                txlinks=txm.get("linked_event_ids") if isinstance(txm.get("linked_event_ids"),list) else []
-                if txid not in evlinks: evlinks.append(txid)
-                if eid not in txlinks: txlinks.append(eid)
-                evm["linked_transaction_ids"]=evlinks
-                txm["linked_event_ids"]=txlinks
-                evm["transaction_link_method"]="metadata_bridge_until_pc_event_links_supports_transaction"
-                txm["event_link_method"]="metadata_bridge_until_pc_event_links_supports_transaction"
-                sb.table("pc_events").update({"metadata":evm}).eq("event_id",eid).execute()
-                sb.table("pc_transactions").update({"metadata":txm}).eq("transaction_id",txid).execute()
-                sb.table("pc_staged_records").update({
-                    "review_status":"applied",
-                    "validation_status":"reviewed",
-                    "resolution_status":"READY",
-                    "resolution_method":"python_event_transaction_metadata_bridge",
-                    "resolution_confidence":1.0,
-                    "candidate_count":1,
-                    "resolution_details":{
-                        "event_id":eid,
-                        "transaction_id":txid,
-                        "note":"pc_event_links transaction endpoint unsupported; linked bidirectionally in parent metadata"
-                    },
-                }).eq("staged_record_id",row["staged_record_id"]).execute()
-                report["transaction_links_applied"]+=1
-            except Exception as exc:
-                mark_review(row,f"event→transaction metadata bridge failed: {exc}")
+        try:
+            ev=evs[0]; tx=txs[0]
+            evm=ev.get("metadata") if isinstance(ev.get("metadata"),dict) else {}
+            txm=tx.get("metadata") if isinstance(tx.get("metadata"),dict) else {}
+            evm=dict(evm); txm=dict(txm)
+            evlinks=evm.get("linked_transaction_ids") if isinstance(evm.get("linked_transaction_ids"),list) else []
+            txlinks=txm.get("linked_event_ids") if isinstance(txm.get("linked_event_ids"),list) else []
+            if txid not in evlinks: evlinks.append(txid)
+            if eid not in txlinks: txlinks.append(eid)
+            evm["linked_transaction_ids"]=evlinks
+            txm["linked_event_ids"]=txlinks
+            evm["transaction_link_method"]="canonical_metadata_bridge"
+            txm["event_link_method"]="canonical_metadata_bridge"
+            sb.table("pc_events").update({"metadata":evm}).eq("event_id",eid).execute()
+            sb.table("pc_transactions").update({"metadata":txm}).eq("transaction_id",txid).execute()
+            sb.table("pc_staged_records").update({
+                "review_status":"applied",
+                "validation_status":"reviewed",
+                "resolution_status":"READY",
+                "resolution_method":"model_event_transaction_metadata_bridge",
+                "resolution_confidence":1.0,
+                "candidate_count":1,
+                "resolution_details":{
+                    "event_id":eid,
+                    "transaction_id":txid,
+                    "note":"semantic bridge stored in parent metadata; pc_event_links transaction endpoint unsupported"
+                },
+            }).eq("staged_record_id",row["staged_record_id"]).execute()
+            report["transaction_links_applied"]+=1
+        except Exception as exc:
+            mark_review(row,f"event→transaction bridge failed: {exc}")
 
     return report
 
 
 def _canonical_process_job(job_id):
-    """Run V5, then apply the transaction/corporate compatibility extension pass."""
-    result=(sb.rpc(
-        "pc_process_ingestion_job_v5",
-        {"p_ingestion_job_id":str(job_id)}
-    ).execute().data or {})
-    extension=_canonical_apply_transaction_extensions(job_id)
-    if isinstance(result,dict):
-        result["transaction_extensions"]=extension
-        return result
-    return {"processor_result":result,"transaction_extensions":extension}
+    """Model-driven package processor.
+
+    1. Apply direct transaction-family parents/children using live model vocab/FKs.
+    2. Run SQL V5 for canonical identities and supported graph edges.
+    3. Apply semantic post-links that SQL V5 does not yet represent.
+    4. Re-run standard relationship processors so newly-created parents unlock edges.
+
+    This makes package processing dependency-aware instead of relying on worksheet order.
+    """
+    pre=_canonical_apply_model_direct_rows(job_id)
+
+    try:
+        processor=(sb.rpc(
+            "pc_process_ingestion_job_v5",
+            {"p_ingestion_job_id":str(job_id)}
+        ).execute().data or {})
+    except Exception as exc:
+        processor={"error":str(exc)}
+
+    post=_canonical_apply_model_post_rows(job_id)
+
+    rel={}
+    try:
+        rel["event_links"]=_process_relationship_backlog(sb,job_id)
+    except Exception as exc:
+        rel["event_links_error"]=str(exc)
+    try:
+        rel["relationships"]=_process_generic_relationship_backlog(sb,job_id)
+    except Exception as exc:
+        rel["relationships_error"]=str(exc)
+
+    return {
+        "model_preapply":pre,
+        "processor":processor,
+        "model_postapply":post,
+        "relationship_pass":rel,
+    }
+
 
 def _canonical_create_job(title, source_scope):
     payload={
@@ -3961,7 +4201,7 @@ if page=="Canonical Home":
 elif page=="Canonical Loader":
     title(
         "Canonical loader",
-        "Load a workbook as one package. Workbook IDs are package-local keys; the database decides the canonical identity."
+        "Load a workbook as one model-driven package. Parents are applied before children; canonical identities resolve first; graph edges follow automatically."
     )
     if not sb:
         st.error("Supabase service connection required.")
