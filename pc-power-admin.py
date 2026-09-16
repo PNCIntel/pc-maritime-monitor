@@ -8,6 +8,9 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
+LOADER_BUILD = "17-model-aware-transaction-fix-2026-09-16"
+
+
 ROOT=Path(__file__).resolve().parent
 SHARED=ROOT/"shared"
 if str(SHARED) not in sys.path: sys.path.insert(0,str(SHARED))
@@ -3462,11 +3465,10 @@ def _norm_vocab_token(value):
 
 
 def _ensure_transaction_role_vocab():
-    """Ensure the model has the basic transaction participant semantics.
+    """Ensure baseline transaction participant roles exist and verify them.
 
-    pc_transaction_participants.role is NOT NULL and FK-controlled. These are
-    generic transaction roles, not business data, so the loader may safely ensure
-    the baseline vocabulary exists.
+    These are controlled metadata rows required by the live FK from
+    pc_transaction_participants.role. They are model vocabulary, not business data.
     """
     defaults=[
         {"role":"buyer","display_name":"Buyer / Acquirer","role_group":"acquirer","description":"Purchasing or acquiring party","active":True},
@@ -3478,15 +3480,24 @@ def _ensure_transaction_role_vocab():
         {"role":"advisor","display_name":"Advisor","role_group":"advisor","description":"Financial, legal or other transaction advisor","active":True},
         {"role":"financier","display_name":"Financier","role_group":"financier","description":"Debt or equity financing provider","active":True},
     ]
-    try:
-        for row in defaults:
-            sb.table("pc_meta_transaction_participant_roles").upsert(
-                {**row,"metadata":{"system_baseline":True}},
-                on_conflict="role"
-            ).execute()
-    except Exception:
-        # Existing metadata remains authoritative if writes are restricted.
-        pass
+    result={"attempted":len(defaults),"verified":[],"errors":[]}
+    for row in defaults:
+        try:
+            existing=(sb.table("pc_meta_transaction_participant_roles")
+                      .select("role").eq("role",row["role"]).limit(1).execute().data or [])
+            if not existing:
+                sb.table("pc_meta_transaction_participant_roles").insert(
+                    {**row,"metadata":{"system_baseline":True,"installed_by":"canonical_loader_v17"}}
+                ).execute()
+            check=(sb.table("pc_meta_transaction_participant_roles")
+                   .select("role").eq("role",row["role"]).limit(1).execute().data or [])
+            if check:
+                result["verified"].append(row["role"])
+            else:
+                result["errors"].append(f"{row['role']}: insert returned no readable row")
+        except Exception as exc:
+            result["errors"].append(f"{row['role']}: {exc}")
+    return result
 
 
 def _load_transaction_vocab():
@@ -3495,8 +3506,8 @@ def _load_transaction_vocab():
     The loader should conform incoming packages to the database model, not require
     spreadsheet authors to know internal enum keys.
     """
-    _ensure_transaction_role_vocab()
-    vocab={"types":[],"stages":[],"roles":[],"categories":[]}
+    role_install=_ensure_transaction_role_vocab()
+    vocab={"types":[],"stages":[],"roles":[],"categories":[],"role_install":role_install}
     try:
         vocab["types"]=(sb.table("pc_meta_transaction_types")
             .select("transaction_type,transaction_category,display_name,active")
@@ -3584,13 +3595,13 @@ def _normalize_transaction_payload_to_model(payload, vocab):
 
 
 def _participant_role_to_model(role, vocab):
-    """Resolve a package role to a live pc_meta_transaction_participant_roles key."""
+    """Resolve a package role to the live FK-controlled role vocabulary."""
     if role in (None,""):
         return None
     wanted=_norm_vocab_token(role)
     rows=vocab.get("roles") or []
 
-    # First, exact key/display match against whatever columns the live role table exposes.
+    # Exact key/display match.
     for r in rows:
         key=r.get("role")
         if key and _norm_vocab_token(key)==wanted:
@@ -3599,20 +3610,53 @@ def _participant_role_to_model(role, vocab):
             if r.get(fld) and _norm_vocab_token(r.get(fld))==wanted:
                 return key
 
-    # Common semantic aliases, but only return them when that key exists in live metadata.
     aliases={
-        "buyer_offeror":["buyer","acquirer","offeror"],
-        "offeror":["buyer","offeror","acquirer"],
-        "acquirer":["buyer","acquirer"],
-        "seller_tendering_shareholders":["seller","shareholder","tendering_shareholder"],
-        "tendering_shareholders":["seller","shareholder","tendering_shareholder"],
-        "target_company":["target","target_company"],
-        "ultimate_parent_sponsor":["sponsor","parent","ultimate_parent"],
+        "buyer_offeror":["buyer","offeror","acquirer"],
+        "offeror":["offeror","buyer","acquirer"],
+        "acquirer":["buyer","acquirer","offeror"],
+        "seller_tendering_shareholders":["seller","shareholder"],
+        "tendering_shareholders":["seller","shareholder"],
+        "target_company":["target"],
+        "ultimate_parent_sponsor":["sponsor"],
     }
-    live={_norm_vocab_token(r.get("role")):r.get("role") for r in rows if r.get("role")}
-    for candidate in aliases.get(wanted,[]):
-        if _norm_vocab_token(candidate) in live:
-            return live[_norm_vocab_token(candidate)]
+
+    # Match aliases to either role key OR role_group in the live metadata.
+    candidates=[wanted] + aliases.get(wanted,[])
+    for candidate in candidates:
+        cn=_norm_vocab_token(candidate)
+        for r in rows:
+            if _norm_vocab_token(r.get("role"))==cn or _norm_vocab_token(r.get("role_group"))==cn:
+                return r.get("role")
+
+    # Last safe fallback for the three universal deal roles:
+    # ensure the FK row directly, then return it.
+    if wanted in {"buyer","seller","target","offeror","shareholder","sponsor","advisor","financier"}:
+        defaults={
+            "buyer":("Buyer / Acquirer","acquirer"),
+            "seller":("Seller / Disposing Party","seller"),
+            "target":("Target","target"),
+            "offeror":("Offeror","acquirer"),
+            "shareholder":("Shareholder","shareholder"),
+            "sponsor":("Sponsor / Parent","sponsor"),
+            "advisor":("Advisor","advisor"),
+            "financier":("Financier","financier"),
+        }
+        display,group=defaults[wanted]
+        try:
+            sb.table("pc_meta_transaction_participant_roles").upsert({
+                "role":wanted,
+                "display_name":display,
+                "role_group":group,
+                "description":f"Canonical transaction participant role: {display}",
+                "active":True,
+                "metadata":{"system_baseline":True,"installed_by":"canonical_loader_v17"},
+            },on_conflict="role").execute()
+            check=(sb.table("pc_meta_transaction_participant_roles")
+                   .select("role").eq("role",wanted).limit(1).execute().data or [])
+            if check:
+                return wanted
+        except Exception:
+            pass
     return None
 
 
@@ -3644,6 +3688,8 @@ def _canonical_apply_model_direct_rows(job_id):
         return report
 
     vocab=_load_transaction_vocab()
+    for err in (vocab.get("role_install") or {}).get("errors",[]):
+        report["errors"].append(f"role metadata install: {err}")
 
     def mark_applied(row,payload,method):
         details={"canonical_target_table":"pc_transaction_participants"} if row.get("target_table")==MODEL_DIRECT_PARTICIPANT_TARGET else {}
@@ -3744,8 +3790,17 @@ def _canonical_apply_model_direct_rows(job_id):
 
         role=_participant_role_to_model(p.get("role"),vocab)
         if not role:
-            mark_review(row,f"participant role {p.get('role')!r} is not registered in live role metadata",
-                        "model_transaction_participant_guard")
+            live_roles=[
+                {"role":r.get("role"),"display_name":r.get("display_name"),"role_group":r.get("role_group")}
+                for r in (vocab.get("roles") or [])
+            ]
+            install_errors=(vocab.get("role_install") or {}).get("errors",[])
+            mark_review(
+                row,
+                f"participant role {p.get('role')!r} cannot resolve. "
+                f"Live roles={live_roles}. Role-install errors={install_errors}",
+                "model_transaction_participant_guard"
+            )
             report["participants_review"]+=1
             continue
         p["role"]=role
@@ -3884,6 +3939,39 @@ def _canonical_apply_model_post_rows(job_id):
     return report
 
 
+
+def _canonical_finalize_existing_rows(job_id):
+    """ALREADY_EXISTS is a successful idempotent outcome, not analyst review."""
+    report={"applied_existing":0,"errors":[]}
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,resolution_status,review_status,target_table,resolved_entity_id,resolution_method,resolution_details")
+              .eq("ingestion_job_id",str(job_id))
+              .limit(10000).execute().data or [])
+    except Exception as exc:
+        report["errors"].append(str(exc))
+        return report
+
+    for row in rows:
+        if str(row.get("resolution_status") or "").upper()!="ALREADY_EXISTS":
+            continue
+        if str(row.get("review_status") or "").lower()=="applied":
+            continue
+        try:
+            details=row.get("resolution_details") if isinstance(row.get("resolution_details"),dict) else {}
+            details=dict(details)
+            details["idempotent_existing"]=True
+            sb.table("pc_staged_records").update({
+                "review_status":"applied",
+                "validation_status":"reviewed",
+                "resolution_details":details,
+            }).eq("staged_record_id",row["staged_record_id"]).execute()
+            report["applied_existing"]+=1
+        except Exception as exc:
+            report["errors"].append(f"{row.get('staged_record_id')}: {exc}")
+    return report
+
+
 def _canonical_process_job(job_id):
     """Model-driven package processor.
 
@@ -3916,11 +4004,15 @@ def _canonical_process_job(job_id):
     except Exception as exc:
         rel["relationships_error"]=str(exc)
 
+    finalized=_canonical_finalize_existing_rows(job_id)
+
     return {
+        "loader_build":LOADER_BUILD,
         "model_preapply":pre,
         "processor":processor,
         "model_postapply":post,
         "relationship_pass":rel,
+        "idempotent_finalize":finalized,
     }
 
 
@@ -4252,6 +4344,7 @@ elif page=="Canonical Loader":
         "Canonical loader",
         "Load a workbook as one model-driven package. Parents are applied before children; canonical identities resolve first; graph edges follow automatically."
     )
+    st.caption(f"Loader build: `{LOADER_BUILD}`")
     if not sb:
         st.error("Supabase service connection required.")
     else:
