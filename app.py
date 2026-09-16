@@ -32,7 +32,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.40-relationship-endpoint-canonicalization"
+APP_VERSION = "v3.3.42-canonical-relationships-authoritative"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2515,6 +2515,41 @@ def label(x):
     return str(live.get(s) or static or s).strip()
 
 
+
+def humanize_internal_object_id(value):
+    """Last-resort UI fallback: never expose implementation IDs to end users."""
+    s=str(value or "").strip()
+    if not s:
+        return ""
+
+    # Strip known internal prefixes.  More-specific prefixes must come first.
+    prefixes=(
+        "VES_ADM_","VES_ATL_","VES_NMDC_","VES_","VESSEL_",
+        "MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_","EVENT_"
+    )
+    core=s
+    matched=False
+    for p in prefixes:
+        if core.upper().startswith(p):
+            core=core[len(p):]
+            matched=True
+            break
+
+    if not matched:
+        return s
+
+    core=core.replace("_"," ").replace("-"," ")
+    core=re.sub(r"\s+"," ",core).strip()
+
+    # Preserve common acronyms while making identifiers human-readable.
+    keep={"AD","UAE","UK","US","USA","MSC","CMA","CGM","NMDC","IMO","LNG","LPG","COSCO"}
+    words=[]
+    for w in core.split():
+        wu=w.upper()
+        words.append(wu if wu in keep else wu)
+    return " ".join(words)
+
+
 def relationship_endpoint_label(endpoint_id, endpoint_type=""):
     """Resolve relationship endpoints from the already-loaded canonical frames.
 
@@ -2584,7 +2619,11 @@ def relationship_endpoint_label(endpoint_id, endpoint_type=""):
 
     # 5) Global live/static resolver as final named fallback.
     nm=label(eid)
-    return nm if nm else eid
+    if nm and nm != eid and not str(nm).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
+        return nm
+
+    # Absolute UI safety net: internal IDs must never be visible.
+    return humanize_internal_object_id(eid)
 
 
 def pretty_enum(v):
@@ -3264,12 +3303,27 @@ def _overlay_live_company_rollup(prof, entity_id, entity_name):
         dk=[k for k in keys if k in combined.columns]
         return combined.drop_duplicates(subset=dk,keep="last") if dk else combined
 
-    prof["relationships"] = _merge(prof.get("relationships"), live.get("relationships"), ["Relationship ID"])
+    # Canonical normalized relationships are authoritative.
+    # Do NOT merge migration-era / workbook relationship rows back into company
+    # profiles once live canonical relationships are available; those legacy rows
+    # can contain raw object IDs in display fields and duplicate canonical edges.
+    _live_rels = live.get("relationships")
+    if isinstance(_live_rels, pd.DataFrame) and not _live_rels.empty:
+        prof["relationships"] = _live_rels.copy()
+    else:
+        prof["relationships"] = prof.get("relationships", pd.DataFrame())
+
     prof["assets"] = _merge(prof.get("assets"), live.get("assets"), ["Asset ID"])
     prof["ports"] = _merge(prof.get("ports"), live.get("ports"), ["Port ID"])
     prof["port_terminals"] = _merge(prof.get("port_terminals"), live.get("terminals"), ["Terminal ID"])
     prof["maritime_vessels"] = _merge(prof.get("maritime_vessels"), live.get("vessels"), ["Vessel ID"])
-    prof["vessel_relationships"] = _merge(prof.get("vessel_relationships"), live.get("vessel_relationships"), ["Vessel ID","Company ID","Relationship"])
+
+    # Same rule for the vessel/company relationship helper frame: canonical wins.
+    _live_vessel_rels = live.get("vessel_relationships")
+    if isinstance(_live_vessel_rels, pd.DataFrame) and not _live_vessel_rels.empty:
+        prof["vessel_relationships"] = _live_vessel_rels.copy()
+    else:
+        prof["vessel_relationships"] = prof.get("vessel_relationships", pd.DataFrame())
     return prof
 
 
@@ -3956,6 +4010,11 @@ def readable_relationships(df, entity_id):
         # Do not trust migration-era Source/Target display text.
         src_name=relationship_endpoint_label(src,src_type)
         tgt_name=relationship_endpoint_label(tgt,tgt_type)
+
+        if str(src_name).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
+            src_name=humanize_internal_object_id(src_name)
+        if str(tgt_name).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
+            tgt_name=humanize_internal_object_id(tgt_name)
 
         st.markdown(
             f"<div class='pc-rel'><b>{src_name}</b> → {rel} → <b>{tgt_name}</b></div>",
@@ -4746,6 +4805,10 @@ def render_company_profile(entity_id, entity_name):
                 _ttype=str(_rr.get("Target Type") or "").strip()
                 _sname=relationship_endpoint_label(_sid,_stype)
                 _tname=relationship_endpoint_label(_tid,_ttype)
+                if str(_sname).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
+                    _sname=humanize_internal_object_id(_sname)
+                if str(_tname).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
+                    _tname=humanize_internal_object_id(_tname)
                 _rel=pretty_relationship(_rr.get("Relationship","related_to"))
                 _sn="n"+hashlib.sha1(("s|"+_sid).encode("utf-8")).hexdigest()[:12]
                 _tn="n"+hashlib.sha1(("t|"+_tid).encode("utf-8")).hexdigest()[:12]
@@ -5182,6 +5245,8 @@ def render_relationship_actions(
         # Always resolve from canonical registries; a supplied migration-era
         # resolved_name may itself still be an internal ID.
         name=relationship_endpoint_label(eid,endpoint_type)
+        if str(name).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
+            name=humanize_internal_object_id(name)
         page,key,route_id=object_route(endpoint_type or '',eid,name)
         if not page:
             continue
