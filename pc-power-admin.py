@@ -1,14 +1,14 @@
 from __future__ import annotations
 from datetime import datetime, date, timedelta
 from pathlib import Path
-import os, sys, json, uuid, hashlib, re, io, zipfile, mimetypes
+import os, sys, json, uuid, hashlib, re, io, zipfile, mimetypes, urllib.parse
 from datetime import date, datetime
 from decimal import Decimal
 import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "21-imo-first-auto-company-link-2026-09-16"
+LOADER_BUILD = "22-sources-first-imo-auto-link-2026-09-16"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4320,6 +4320,10 @@ def _canonical_process_job(job_id, deferred_rows=None):
     # Support Retry on jobs created by v16-v18.
     deferred.extend(_collect_legacy_internal_deferred(job_id))
 
+    # V22: provenance is a parent dependency too. Register/resolve pc_sources
+    # before canonical object or graph application. This also repairs V21 jobs on Retry.
+    sources_first=_v22_sources_first_for_job(job_id)
+
     # Transactions are direct parent rows; normalize/apply them before V5.
     pre=_canonical_apply_model_direct_rows(job_id)
 
@@ -4349,6 +4353,7 @@ def _canonical_process_job(job_id, deferred_rows=None):
 
     return {
         "loader_build":LOADER_BUILD,
+        "sources_first":sources_first,
         "model_preapply":pre,
         "processor":processor,
         "idempotent_finalize_before_graph":finalized_before,
@@ -4523,9 +4528,201 @@ def _ensure_exact_company_entity(name, entity_type="company", subtype=None, hq_c
         return None
 
 
+
+def _research_url(value):
+    """Extract a URL from either a plain string or AI research-source object."""
+    if isinstance(value,str):
+        u=value.strip()
+        return u if u.lower().startswith(("http://","https://")) else None
+    if isinstance(value,dict):
+        u=str(value.get("url") or value.get("source_url") or "").strip()
+        return u if u.lower().startswith(("http://","https://")) else None
+    return None
+
+
+def _source_id_for_url(url):
+    digest=hashlib.sha1(str(url).strip().encode("utf-8")).hexdigest()[:20].upper()
+    return f"SRC_WEB_{digest}"
+
+
+def _source_name_from_url(url):
+    try:
+        host=urllib.parse.urlparse(url).netloc.casefold()
+        host=host[4:] if host.startswith("www.") else host
+        return host or "Web research source"
+    except Exception:
+        return "Web research source"
+
+
+def _ensure_research_source(url):
+    """Ensure one research URL has a canonical pc_sources record and return source_id."""
+    url=_research_url(url)
+    if not url:
+        return None
+    sid=_source_id_for_url(url)
+    try:
+        hit=(sb.table("pc_sources").select("source_id,url")
+             .eq("url",url).limit(1).execute().data or [])
+        if hit:
+            return str(hit[0]["source_id"])
+    except Exception:
+        pass
+
+    name=_source_name_from_url(url)
+    row={
+        "source_id":sid,
+        "publisher":name,
+        "source_name":name,
+        "source_type":"web_research",
+        "coverage":"Canonical vessel/company identity and relationship research",
+        "url":url,
+        "reliability":"medium",
+        "ingestion_method":"canonical_loader_research",
+        "redistribution_status":"link_only",
+        "attribution_required":True,
+        "active":True,
+        "notes":"Automatically registered from metadata.research_sources by canonical loader V22."
+    }
+    try:
+        # Use only live writable columns if the helper/RPC is available.
+        try:
+            writable=set(_table_write_columns_live(sb,"pc_sources"))
+            row={k:v for k,v in row.items() if k in writable}
+        except Exception:
+            pass
+        sb.table("pc_sources").upsert(row,on_conflict="source_id").execute()
+        return sid
+    except Exception:
+        # Fall back to a minimal shape known to be used by this app.
+        minimal={
+            "source_id":sid,
+            "source_name":name,
+            "source_type":"web_research",
+            "url":url,
+            "active":True,
+        }
+        try:
+            sb.table("pc_sources").upsert(minimal,on_conflict="source_id").execute()
+            return sid
+        except Exception:
+            return None
+
+
+def _primary_source_id_from_metadata(metadata):
+    """Register all research URLs and return the first canonical source_id."""
+    if not isinstance(metadata,dict):
+        return None
+    vals=[]
+    for key in ("research_sources","sources"):
+        v=metadata.get(key)
+        if isinstance(v,list):
+            vals.extend(v)
+    if metadata.get("source_url"):
+        vals.insert(0,metadata.get("source_url"))
+
+    primary=None
+    for item in vals:
+        url=_research_url(item)
+        if not url:
+            continue
+        sid=_ensure_research_source(url)
+        if sid and primary is None:
+            primary=sid
+    return primary
+
+
+def _v22_sources_first_for_job(job_id):
+    """Backfill canonical pc_sources BEFORE any deferred graph apply.
+
+    This also repairs already-staged V21 jobs: research_sources -> pc_sources,
+    then payload.source_id + pc_staged_records.source_id are populated before retry.
+    """
+    report={"rows_scanned":0,"rows_with_sources":0,"sources_registered":0,"rows_updated":0,"errors":[]}
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,payload,source_id,review_status")
+              .eq("ingestion_job_id",str(job_id))
+              .limit(20000).execute().data or [])
+    except Exception as exc:
+        report["errors"].append(f"staging read: {exc}")
+        return report
+
+    seen_source_ids=set()
+    for r in rows:
+        report["rows_scanned"]+=1
+        p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+        meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+        if not meta:
+            continue
+
+        urls=[]
+        for key in ("research_sources","sources"):
+            vals=meta.get(key)
+            if isinstance(vals,list):
+                urls.extend(vals)
+        if meta.get("source_url"):
+            urls.insert(0,meta.get("source_url"))
+        if not any(_research_url(x) for x in urls):
+            continue
+
+        report["rows_with_sources"]+=1
+        source_ids=[]
+        for item in urls:
+            url=_research_url(item)
+            if not url:
+                continue
+            sid=_ensure_research_source(url)
+            if sid:
+                source_ids.append(sid)
+                if sid not in seen_source_ids:
+                    seen_source_ids.add(sid)
+                    report["sources_registered"]+=1
+
+        if not source_ids:
+            continue
+
+        primary=source_ids[0]
+        changed=False
+        if not p.get("source_id"):
+            p=dict(p)
+            p["source_id"]=primary
+            changed=True
+        meta=dict(meta)
+        if meta.get("canonical_source_ids") != source_ids:
+            meta["canonical_source_ids"]=source_ids
+            p["metadata"]=meta
+            changed=True
+
+        if changed or not r.get("source_id"):
+            patch={"payload":_jsonable(p),"source_id":primary}
+            try:
+                sb.table("pc_staged_records").update(patch).eq(
+                    "staged_record_id",r["staged_record_id"]
+                ).execute()
+                report["rows_updated"]+=1
+            except Exception as exc:
+                # Some deployments may not expose staged source_id; payload source_id is still useful.
+                try:
+                    sb.table("pc_staged_records").update({"payload":_jsonable(p)}).eq(
+                        "staged_record_id",r["staged_record_id"]
+                    ).execute()
+                    report["rows_updated"]+=1
+                except Exception as exc2:
+                    report["errors"].append(
+                        f"{r.get('staged_record_id')}: {exc2}"
+                    )
+    return report
+
+
 def _relationship_row(job_id, source_id, relationship_type, target_id,
                       source_name=None, target_name=None, confidence=0.99,
                       research_sources=None, source_record_key=None):
+    primary_source_id=None
+    for _src in (research_sources or []):
+        primary_source_id=_ensure_research_source(_src)
+        if primary_source_id:
+            break
+
     rel_payload={
         "relationship_id":_canonical_semantic_relationship_id({
             "source_type":"entity","source_id":source_id,
@@ -4540,6 +4737,7 @@ def _relationship_row(job_id, source_id, relationship_type, target_id,
         "target_id":target_id,
         "target_name":target_name,
         "confidence":confidence,
+        "source_id":primary_source_id,
         "record_status":"verified",
         "metadata":{
             "auto_linked_by":"canonical_loader_v21",
@@ -4643,6 +4841,15 @@ def _v21_prepare_native_package(job_id, sections_config):
                 md=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {}
                 if isinstance(md.get("research_sources"),list):
                     research_sources=md.get("research_sources")
+
+                # Sources are canonical parents too: register them before vessel/graph writes.
+                primary_source_id=None
+                for _src in research_sources:
+                    primary_source_id=_ensure_research_source(_src)
+                    if primary_source_id:
+                        break
+                if primary_source_id and not payload.get("source_id"):
+                    payload["source_id"]=primary_source_id
                 for company_name,rel,etype,subtype in link_specs:
                     eid=_ensure_exact_company_entity(
                         company_name,entity_type=etype,subtype=subtype,
@@ -5018,7 +5225,7 @@ elif page=="Canonical Loader":
         "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
-    st.success("V21 fast path: existing IMO → update vessel; exact company → reuse; missing company → create once; company relationship → auto-link. Review is reserved for true duplicate-name collisions.")
+    st.success("V22 fast path: register research sources first → existing IMO updates vessel → exact company reuses/creates once → vessel-company relationship auto-links. Retry also repairs earlier V21 jobs.")
     if not sb:
         st.error("Supabase service connection required.")
     else:
