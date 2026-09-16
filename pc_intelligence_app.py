@@ -2032,7 +2032,10 @@ def _meta_value(row, keys):
 
 
 def publication_summary(row):
-    """Prefer the loader's 60–90 word enrichment; use sourced event text only as a fallback."""
+    """Prefer a temporary publication edit, then loader enrichment, then sourced event text."""
+    override = clean_display_text(row.get("_pub_summary", "")) if hasattr(row, "get") else ""
+    if override:
+        return override
     for c in [
         "Brief 75", "Brief 60-90", "AI Summary 60-90", "Summary 60-90",
         "Publication Summary", "Intelligence Summary"
@@ -2076,6 +2079,22 @@ def publication_event_point(event_id, row=None):
             if not locs.empty:
                 r = locs.iloc[0]
                 return float(r["Latitude"]), float(r["Longitude"]), clean_display_text(r.get("Location", "")), "Canonical"
+
+    # Loader-enriched coordinate hint in event metadata. This lets newly staged events map
+    # immediately even before a dedicated pc_event_locations row has been promoted.
+    if row is not None:
+        meta = row.get("Metadata", {}) if hasattr(row, "get") else {}
+        if isinstance(meta, dict):
+            geo = meta.get("geolocation") or meta.get("map_hint") or {}
+            if isinstance(geo, dict):
+                try:
+                    lat = float(geo.get("latitude"))
+                    lon = float(geo.get("longitude"))
+                    label = clean_display_text(geo.get("label") or geo.get("location_name") or row.get("Location", ""))
+                    accuracy = clean_display_text(geo.get("accuracy") or "Loader hint")
+                    return lat, lon, label or "Mapped event", accuracy
+                except (TypeError, ValueError):
+                    pass
 
     # Publication fallback: keeps a graphic usable when a legacy event has only a textual location.
     # These coordinates are deliberately theatre/place centroids and are labelled Approximate.
@@ -2221,10 +2240,10 @@ def render_intelligence_brief(selected_rows, region_name, publication_date, outp
         canvas.text(x+0.012, y+h-0.024, f"0{idx}", transform=canvas.transAxes,
                     color=blue, fontsize=8, fontweight="bold", va="top")
 
-        title = clean_display_text(row.get("Title", "Untitled event"))
-        country = clean_display_text(row.get("Country / Countries", ""))
-        etype = clean_display_text(row.get("Event Type", row.get("Event Family", "Event")))
-        severity = clean_display_text(row.get("Severity", ""))
+        title = clean_display_text(row.get("_pub_title", "")) or clean_display_text(row.get("Title", "Untitled event"))
+        country = clean_display_text(row.get("_pub_label", "")) or clean_display_text(row.get("Country / Countries", ""))
+        etype = clean_display_text(row.get("_pub_event_type", "")) or clean_display_text(row.get("Event Type", row.get("Event Family", "Event")))
+        severity = clean_display_text(row.get("_pub_severity", "")) or clean_display_text(row.get("Severity", ""))
         summary = publication_summary(row)
 
         canvas.text(x + 0.042, y + h - 0.025, f"{country or region_name} · {etype}".upper(),
@@ -2911,7 +2930,34 @@ elif page == "Intelligence Brief Builder":
                 )
 
         if len(selected) == 4:
-            rows = [candidates.iloc[i] for i in selected]
+            base_rows = [candidates.iloc[i].copy() for i in selected]
+            st.markdown("### Publication editor")
+            st.caption("Edits below affect only this export. They do not alter the canonical event record.")
+            rows = []
+            for n, r in enumerate(base_rows, start=1):
+                eid = clean_display_text(r.get("Event ID", "")) or f"story_{n}"
+                safe_eid = re.sub(r"[^A-Za-z0-9_-]+", "_", eid)
+                with st.expander(f"{n}. {clean_display_text(r.get('Title','Untitled event'))}", expanded=(n==1)):
+                    e1, e2 = st.columns([1.35, 1])
+                    pub_title = e1.text_input("Headline", value=clean_display_text(r.get("Title", "")), key=f"pc_pub_edit_title_{safe_eid}_{n}")
+                    default_label = clean_display_text(r.get("Country / Countries", "")) or region_name
+                    pub_label = e2.text_input("Country / theatre label", value=default_label, key=f"pc_pub_edit_label_{safe_eid}_{n}")
+                    e3, e4 = st.columns([1.35, 1])
+                    pub_type = e3.text_input("Event type label", value=clean_display_text(r.get("Event Type", r.get("Event Family", "Event"))), key=f"pc_pub_edit_type_{safe_eid}_{n}")
+                    sev_default = clean_display_text(r.get("Severity", ""))
+                    sev_options = ["LOW","MEDIUM","HIGH","CRITICAL"]
+                    sev_index = sev_options.index(sev_default.upper()) if sev_default.upper() in sev_options else 1
+                    pub_severity = e4.selectbox("Severity", sev_options, index=sev_index, key=f"pc_pub_edit_sev_{safe_eid}_{n}")
+                    pub_summary = st.text_area("60–90 word publication text", value=publication_summary(r), height=150, key=f"pc_pub_edit_summary_{safe_eid}_{n}")
+                    wc = len(clean_display_text(pub_summary).split())
+                    st.caption(f"{wc} words · {'ready' if 60 <= wc <= 90 else 'aim for 60–90 words'}")
+                    r["_pub_title"] = pub_title
+                    r["_pub_label"] = pub_label
+                    r["_pub_event_type"] = pub_type
+                    r["_pub_severity"] = pub_severity
+                    r["_pub_summary"] = pub_summary
+                    rows.append(r)
+
             try:
                 with st.spinner("Rendering P&C Intelligence publication…"):
                     png_bytes = render_intelligence_brief(rows, region_name, pub_date, "png")

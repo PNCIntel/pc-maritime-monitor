@@ -8,7 +8,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "23-current-upload-job-state-2026-09-16"
+LOADER_BUILD = "24-current-upload-job-state-2026-09-16"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -5518,6 +5518,7 @@ elif page=="Canonical Loader":
                 last=st.session_state.get("canonical_last_job")
                 last_hash=str(st.session_state.get("canonical_last_job_hash") or "")
                 current_hash=str(file_hash)
+
                 if last and last_hash == current_hash:
                     st.markdown("### Current upload result")
                     summ,by_table=_canonical_job_summary(last)
@@ -5527,10 +5528,6 @@ elif page=="Canonical Loader":
                     m3.metric("Review",summ.get("review",0))
                     m4.metric("Broken refs",summ.get("broken",0))
                     dataframe(by_table)
-                elif up:
-                    st.info("No result exists yet for this current upload. The loader will not show an older job here.")
-                    if st.session_state.get("canonical_last_load_error"):
-                        st.error(st.session_state["canonical_last_load_error"])
 
                     if summ.get("review",0):
                         review_rows=_canonical_review_rows(last,2000)
@@ -5581,6 +5578,11 @@ elif page=="Canonical Loader":
                                 st.rerun()
                             except Exception as exc:
                                 st.exception(exc)
+
+                elif up:
+                    st.info("No result exists yet for this current upload. The loader will not show an older job here.")
+                    if st.session_state.get("canonical_last_load_error"):
+                        st.error(st.session_state["canonical_last_load_error"])
 
             except Exception as exc:
                 st.exception(exc)
