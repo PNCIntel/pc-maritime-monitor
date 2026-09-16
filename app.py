@@ -32,7 +32,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.38-relationship-display-resolution"
+APP_VERSION = "v3.3.38-global-canonical-label-resolver"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2477,8 +2477,64 @@ def build_label_index():
     return idx
 LABELS=build_label_index()
 
+@st.cache_data(show_spinner=False, ttl=60)
+def _canonical_display_name_index():
+    """Live canonical ID -> human-readable label map.
+
+    This is the final UI safety net for migration-era relationships.  Internal IDs
+    remain valid join/navigation keys, but VES_*, ASSET_*, ENT_* and event IDs
+    should never be exposed as normal display labels when a canonical name exists.
+    """
+    idx={}
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return idx
+
+        specs=[
+            ("pc_entities","entity_id,name", "entity_id", "name"),
+            ("pc_assets","asset_id,name", "asset_id", "name"),
+            ("pc_mobile_assets","mobile_asset_id,name", "mobile_asset_id", "name"),
+            ("pc_events","event_id,title", "event_id", "title"),
+        ]
+        for table,columns,id_col,name_col in specs:
+            try:
+                rows=pc_safe_rows(sb,table,columns,30000)
+            except Exception:
+                rows=[]
+            for r in rows or []:
+                oid=str(r.get(id_col) or "").strip()
+                nm=str(r.get(name_col) or "").strip()
+                if oid and nm:
+                    idx[oid]=nm
+    except Exception:
+        pass
+    return idx
+
 def label(x):
-    s=str(x).strip(); return LABELS.get(s,s)
+    """Resolve any canonical/internal identifier to a human-readable display label."""
+    s=str(x or "").strip()
+    if not s:
+        return ""
+
+    # Existing workbook/canonical projection first.
+    known=str(LABELS.get(s) or "").strip()
+    if known and known != s:
+        return known
+
+    # Live canonical database is authoritative for IDs not present in the static
+    # label index (especially newly-loaded vessels/assets and inbound graph edges).
+    looks_internal=(
+        s.startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","EVT_","EVENT_","PORT_","TERM_"))
+        or (len(s) >= 24 and "_" in s)
+    )
+    if looks_internal:
+        live=_canonical_display_name_index()
+        resolved=str(live.get(s) or "").strip()
+        if resolved:
+            return resolved
+
+    return known or s
 
 def pretty_enum(v):
     """Turn implementation taxonomies/codes into ordinary English for the UI."""
@@ -2831,25 +2887,7 @@ def _live_canonical_company_rollup(entity_id, entity_name):
 
         entities = {str(r.get("entity_id") or "").strip(): str(r.get("name") or "").strip()
                     for r in (erows or [])}
-        asset_names = {str(r.get("asset_id") or "").strip(): str(r.get("name") or "").strip()
-                       for r in (arows or [])}
-        mobile_names = {str(r.get("mobile_asset_id") or "").strip(): str(r.get("name") or "").strip()
-                        for r in (mrows or [])}
         relationships = rrows or []
-
-        def _endpoint_name(endpoint_type, endpoint_id):
-            """Resolve a canonical graph endpoint to its human-readable display name."""
-            et = str(endpoint_type or "").strip().casefold()
-            eid = str(endpoint_id or "").strip()
-            if not eid:
-                return ""
-            if et in {"entity", "company", "organisation", "organization"}:
-                return entities.get(eid) or eid
-            if et == "asset":
-                return asset_names.get(eid) or eid
-            if et in {"mobile_asset", "vessel"}:
-                return mobile_names.get(eid) or eid
-            return label(eid) or eid
 
         # Start from exact selected canonical ID.
         scope = {str(entity_id).strip()}
@@ -2915,53 +2953,31 @@ def _live_canonical_company_rollup(entity_id, entity_name):
             rel = str(rr.get("relationship_type") or "").strip()
             rel_norm = rel.casefold().replace("-","_").replace(" ","_")
 
-            # Company pages need both outbound and inbound graph edges.  A common
-            # canonical pattern is VESSEL -> OPERATED_BY -> COMPANY, so restricting
-            # this loop to source IDs in scope exposed raw vessel IDs through the
-            # legacy fallback instead of the canonical vessel names.
-            if sid not in scope and tid not in scope:
+            if sid not in scope:
                 continue
 
-            source_name = _endpoint_name(st, sid)
-            target_name = _endpoint_name(tt, tid)
-
-            # Capture operational assets/vessels regardless of edge direction.
-            if sid in scope:
-                if tt == "asset" and rel_norm in {
-                    "operates","owns","manages","controls","administers",
-                    "concession_holder","invested_in","develops"
-                }:
+            target_name = entities.get(tid, tid)
+            if tt == "asset":
+                for a in arows or []:
+                    if str(a.get("asset_id") or "").strip() == tid:
+                        target_name = str(a.get("name") or tid)
+                        break
+                if rel_norm in {"operates","owns","manages","controls","administers",
+                                "concession_holder","invested_in","develops"}:
                     graph_assets.add(tid)
-                elif tt in {"mobile_asset","vessel"} and rel_norm in {
-                    "operates","owns","manages","charters","controls"
-                }:
+
+            elif tt in {"mobile_asset","vessel"}:
+                for m in mrows or []:
+                    if str(m.get("mobile_asset_id") or "").strip() == tid:
+                        target_name = str(m.get("name") or tid)
+                        break
+                if rel_norm in {"operates","owns","manages","charters","controls"}:
                     graph_vessels.add(tid)
                     vessel_rel_display.append({
                         "Vessel ID": tid,
                         "Vessel Name": target_name,
                         "Company ID": sid,
-                        "Company": _endpoint_name(st, sid),
-                        "Relationship": pretty_relationship(rel),
-                        "Role": pretty_relationship(rel),
-                        "Source ID": str(rr.get("evidence_source_id") or "").strip(),
-                    })
-
-            if tid in scope:
-                if st == "asset" and rel_norm in {
-                    "operated_by","owned_by","managed_by","controlled_by",
-                    "administered_by","concession_of","invested_by","developed_by"
-                }:
-                    graph_assets.add(sid)
-                elif st in {"mobile_asset","vessel"} and rel_norm in {
-                    "operated_by","owned_by","managed_by","chartered_by","controlled_by",
-                    "fleet_of"
-                }:
-                    graph_vessels.add(sid)
-                    vessel_rel_display.append({
-                        "Vessel ID": sid,
-                        "Vessel Name": source_name,
-                        "Company ID": tid,
-                        "Company": _endpoint_name(tt, tid),
+                        "Company": entities.get(sid, sid),
                         "Relationship": pretty_relationship(rel),
                         "Role": pretty_relationship(rel),
                         "Source ID": str(rr.get("evidence_source_id") or "").strip(),
@@ -2970,7 +2986,7 @@ def _live_canonical_company_rollup(entity_id, entity_name):
             rel_display.append({
                 "Relationship ID": str(rr.get("relationship_id") or "").strip(),
                 "Source Entity": sid,
-                "Source": source_name,
+                "Source": entities.get(sid, sid),
                 "Source Type": st,
                 "Relationship": rel,
                 "Target Entity": tid,
@@ -3823,24 +3839,19 @@ def readable_relationships(df, entity_id):
         src=str(r.get("Source Entity","")).strip()
         tgt=str(r.get("Target Entity","")).strip()
         rel=pretty_relationship(r.get("Relationship",""))
-        src_name=str(r.get("Source") or label(src) or src).strip()
-        tgt_name=str(r.get("Target") or label(tgt) or tgt).strip()
+        src_existing=str(r.get("Source") or "").strip()
+        tgt_existing=str(r.get("Target") or "").strip()
+
+        # Do not trust a migration-era display field if it is just the internal ID.
+        src_name=label(src) if (not src_existing or src_existing == src or src_existing.startswith(("VES_","ASSET_","ENT_","MOB_","MOBILE_"))) else src_existing
+        tgt_name=label(tgt) if (not tgt_existing or tgt_existing == tgt or tgt_existing.startswith(("VES_","ASSET_","ENT_","MOB_","MOBILE_"))) else tgt_existing
 
         st.markdown(
             f"<div class='pc-rel'><b>{src_name}</b> → {rel} → <b>{tgt_name}</b></div>",
             unsafe_allow_html=True
         )
 
-        render_relationship_actions(
-            src,
-            tgt,
-            f"company_{entity_id}_{i}",
-            current_entity_id=entity_id,
-            source_name=src_name,
-            target_name=tgt_name,
-            source_type=str(r.get("Source Type","")).strip(),
-            target_type=str(r.get("Target Type","")).strip(),
-        )
+        render_relationship_actions(src,tgt,f"company_{entity_id}_{i}",current_entity_id=entity_id)
 
 def show_named_list(df, title_col, subtitle_cols=None, source_col="Source URL", max_items=100):
     """Readable cards with normal HTML links, never repeated Streamlit buttons."""
@@ -4613,8 +4624,10 @@ def render_company_profile(entity_id, entity_name):
             for _i,(_, _rr) in enumerate(_rdf.iterrows(),1):
                 _sid=str(_rr.get("Source Entity") or f"s{_i}")
                 _tid=str(_rr.get("Target Entity") or f"t{_i}")
-                _sname=str(_rr.get("Source") or label(_sid) or _sid)
-                _tname=str(_rr.get("Target") or label(_tid) or _tid)
+                _sraw=str(_rr.get("Source") or "").strip()
+                _traw=str(_rr.get("Target") or "").strip()
+                _sname=label(_sid) if (not _sraw or _sraw == _sid or _sraw.startswith(("VES_","ASSET_","ENT_","MOB_","MOBILE_"))) else _sraw
+                _tname=label(_tid) if (not _traw or _traw == _tid or _traw.startswith(("VES_","ASSET_","ENT_","MOB_","MOBILE_"))) else _traw
                 _rel=pretty_relationship(_rr.get("Relationship","related_to"))
                 _sn="n"+hashlib.sha1(("s|"+_sid).encode("utf-8")).hexdigest()[:12]
                 _tn="n"+hashlib.sha1(("t|"+_tid).encode("utf-8")).hexdigest()[:12]
@@ -5030,39 +5043,26 @@ def object_route(entity_type, entity_id, entity_name):
         return ("Vessels","vessel_pick_id",eid)
     return (None,None,None)
 
-def render_relationship_actions(
-    source_id,
-    target_id,
-    row_key,
-    current_entity_id=None,
-    source_name=None,
-    target_name=None,
-    source_type=None,
-    target_type=None,
-):
+def render_relationship_actions(source_id, target_id, row_key, current_entity_id=None):
     """Show contextual drill-down buttons beneath a readable relationship line.
 
-    Canonical IDs remain navigation keys; human-readable endpoint names are used for
-    every visible button label.  Optional endpoint types make routing reliable for
-    IDs such as ENT_*, ASSET_* and VES_* without exposing those IDs to users.
+    Only endpoints with a canonical destination page are rendered. Terminal links route
+    through Ports and resolve the parent port there. This keeps relationship chains
+    readable while making the graph directly navigable.
     """
     actions=[]
     seen=set()
-    endpoints=[
-        (source_id, source_name, source_type),
-        (target_id, target_name, target_type),
-    ]
-    for endpoint_id, resolved_name, endpoint_type in endpoints:
-        eid=str(endpoint_id or "").strip()
+    for endpoint_id in [source_id,target_id]:
+        eid=str(endpoint_id).strip()
         if not eid or eid in seen or (current_entity_id and eid==str(current_entity_id)):
             continue
         seen.add(eid)
-        name=str(resolved_name or "").strip() or label(eid) or eid
-        page,key,route_id=object_route(endpoint_type or '',eid,name)
+        name=label(eid)
+        page,key,route_id=object_route('',eid,name)
         if not page:
             continue
         if page=='Companies': kind='Company'
-        elif page=='Ports' and (str(endpoint_type or '').casefold().find('terminal') >= 0 or eid.startswith('TERM')): kind='Terminal'
+        elif page=='Ports' and eid.startswith('TERM'): kind='Terminal'
         elif page=='Ports': kind='Port'
         elif page=='Vessels': kind='Vessel'
         elif page=='Shipyards': kind='Shipyard'
