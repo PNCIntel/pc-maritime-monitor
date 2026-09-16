@@ -1,11 +1,30 @@
 import streamlit as st
 import os, sys
+import io
+import textwrap
 import pandas as pd
 import re
 try:
     import pydeck as pdk
 except Exception:
     pdk = None
+
+# Publication renderer dependencies. The app remains usable if optional mapping
+# dependencies are unavailable; the builder will fall back to a coordinate grid.
+try:
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import FancyBboxPatch, ConnectionPatch
+    import matplotlib.image as mpimg
+except Exception:
+    plt = None
+    FancyBboxPatch = None
+    ConnectionPatch = None
+    mpimg = None
+
+try:
+    from mpl_toolkits.basemap import Basemap
+except Exception:
+    Basemap = None
 from pathlib import Path
 from datetime import datetime
 
@@ -636,6 +655,7 @@ st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 
 NAV = {
     "INTELLIGENCE DESK": ["Operating Picture", "Regional Maps", "Alerts & Incidents"],
+    "PUBLICATIONS": ["Intelligence Brief Builder"],
     "FORWARD MONITORING": ["Watch Areas", "Monitoring & Indicators"],
     "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
     "DISCOVERY": ["Intelligence Search", "Source Monitor"],
@@ -1285,6 +1305,357 @@ def ranked_operating_picture(df,limit=5):
     return x.head(limit)
 
 
+
+# -----------------------------------------------------------------------------
+# P&C publication builder — four-story map brief with PDF export
+# -----------------------------------------------------------------------------
+PUBLICATION_REGIONS = {
+    "Global": {
+        "phrases": [],
+        "bounds": (-170, 170, -58, 78),
+    },
+    "GCC": {
+        "phrases": [
+            "united arab emirates", "uae", "saudi arabia", "oman", "qatar",
+            "bahrain", "kuwait", "abu dhabi", "dubai", "fujairah", "jeddah",
+            "jazan", "jizan", "yanbu", "doha", "muscat", "manama"
+        ],
+        "bounds": (32, 61, 12, 33),
+    },
+    "Middle East": {
+        "phrases": [
+            "united arab emirates", "uae", "saudi arabia", "oman", "qatar", "bahrain",
+            "kuwait", "iran", "iraq", "yemen", "israel", "palestine", "gaza",
+            "jordan", "lebanon", "syria", "red sea", "gulf of oman", "hormuz",
+            "arabian gulf", "persian gulf", "bab el-mandeb"
+        ],
+        "bounds": (28, 64, 10, 39),
+    },
+    "Red Sea / Bab el-Mandeb": {
+        "phrases": [
+            "red sea", "bab el-mandeb", "yemen", "houthi", "jeddah", "yanbu", "jazan",
+            "jizan", "djibouti", "eritrea", "sudan", "suez", "aqaba", "mocha"
+        ],
+        "bounds": (30, 47, 8, 31),
+    },
+    "Black Sea": {
+        "phrases": [
+            "black sea", "sea of azov", "ukraine", "russia", "crimea", "odesa", "odessa",
+            "sevastopol", "novorossiysk", "constanta", "constanța", "varna", "burgas",
+            "bosporus", "bosphorus", "danube delta", "turkish coast"
+        ],
+        "bounds": (26, 44, 39, 48.8),
+    },
+    "Mediterranean": {
+        "phrases": [
+            "mediterranean", "ionian", "adriatic", "aegean", "crete", "cyprus", "malta",
+            "libya", "tunisia", "algeria", "italy", "sicily", "greece", "lebanon",
+            "israel", "syria", "gibraltar", "marseille", "barcelona"
+        ],
+        "bounds": (-7, 39, 29, 47),
+    },
+    "Europe": {
+        "phrases": [
+            "europe", "united kingdom", "uk", "france", "germany", "netherlands", "belgium",
+            "spain", "italy", "poland", "romania", "bulgaria", "greece", "norway", "sweden",
+            "finland", "denmark", "baltic", "black sea", "mediterranean", "ukraine"
+        ],
+        "bounds": (-13, 42, 33, 72),
+    },
+    "Africa": {
+        "phrases": [
+            "africa", "egypt", "libya", "tunisia", "algeria", "morocco", "sudan", "djibouti",
+            "eritrea", "ethiopia", "somalia", "kenya", "tanzania", "mozambique", "south africa",
+            "nigeria", "ghana", "angola", "congo"
+        ],
+        "bounds": (-20, 55, -38, 38),
+    },
+    "Asia-Pacific": {
+        "phrases": [
+            "china", "japan", "taiwan", "south korea", "north korea", "philippines", "indonesia",
+            "malaysia", "singapore", "vietnam", "thailand", "australia", "new zealand", "hong kong",
+            "south china sea", "east china sea", "asia-pacific", "asia pacific"
+        ],
+        "bounds": (88, 180, -48, 55),
+    },
+    "North America": {
+        "phrases": [
+            "united states", "usa", "u.s.", "canada", "mexico", "alaska", "great lakes",
+            "gulf of mexico", "panama canal"
+        ],
+        "bounds": (-170, -52, 8, 76),
+    },
+    "South America": {
+        "phrases": [
+            "south america", "brazil", "argentina", "chile", "peru", "ecuador", "colombia",
+            "venezuela", "uruguay", "paraguay", "bolivia", "guyana", "suriname"
+        ],
+        "bounds": (-84, -32, -57, 14),
+    },
+}
+
+
+def _publication_blob(df):
+    if df is None or df.empty:
+        return pd.Series(dtype="string")
+    blob = pd.Series("", index=df.index, dtype="string")
+    for c in [
+        "Country / Countries", "Location", "Title", "Description", "Event Family", "Event Type",
+        "Mode", "Operational Impact", "Trade / Commercial Impact"
+    ]:
+        if c in df.columns:
+            blob = blob.str.cat(text_col(df, c), sep=" ")
+    return blob.str.casefold()
+
+
+def publication_region_events(region_name):
+    """Return P&C Intelligence-routed events for the selected publication geography."""
+    if hazard_events is None or hazard_events.empty:
+        return pd.DataFrame()
+    df = hazard_events.copy()
+    cfg = PUBLICATION_REGIONS.get(region_name, PUBLICATION_REGIONS["Global"])
+    phrases = cfg.get("phrases") or []
+    if phrases:
+        blob = _publication_blob(df)
+        pattern = "|".join(re.escape(str(p).casefold()) for p in phrases)
+        df = df[blob.str.contains(pattern, regex=True, na=False)].copy()
+    if "Start Date" in df.columns:
+        df["_publication_date"] = pd.to_datetime(df["Start Date"], errors="coerce")
+        df = df.sort_values("_publication_date", ascending=False)
+    return df
+
+
+def _meta_value(row, keys):
+    meta = row.get("Metadata", {}) if hasattr(row, "get") else {}
+    if not isinstance(meta, dict):
+        return ""
+    # Support both flat and nested enrichment payloads without binding the UI to one loader version.
+    pools = [meta]
+    for nested_key in ["ai_enrichment", "enrichment", "publication", "analysis"]:
+        nested = meta.get(nested_key)
+        if isinstance(nested, dict):
+            pools.append(nested)
+    for pool in pools:
+        for key in keys:
+            v = pool.get(key)
+            if v not in (None, "", [], {}):
+                return clean_display_text(v)
+    return ""
+
+
+def publication_summary(row):
+    """Prefer the loader's 60–90 word enrichment; use sourced event text only as a fallback."""
+    for c in [
+        "Brief 75", "Brief 60-90", "AI Summary 60-90", "Summary 60-90",
+        "Publication Summary", "Intelligence Summary"
+    ]:
+        if c in row.index:
+            v = clean_display_text(row.get(c, ""))
+            if v:
+                return v
+    v = _meta_value(row, [
+        "brief_75", "brief75", "summary_60_90", "summary_60-90", "ai_summary_60_90",
+        "publication_summary", "intelligence_summary"
+    ])
+    if v:
+        return v
+
+    # Backward-compatible fallback for records ingested before narrative enrichment became mandatory.
+    pieces = []
+    for c in ["Description", "Operational Impact", "Trade / Commercial Impact"]:
+        val = clean_display_text(row.get(c, ""))
+        if val and val not in pieces:
+            pieces.append(val)
+    text = " ".join(pieces).strip()
+    if not text:
+        return "No 60–90 word publication summary has been loaded for this event."
+    words = text.split()
+    return " ".join(words[:90])
+
+
+def publication_summary_word_count(row):
+    return len(publication_summary(row).split())
+
+
+def publication_event_point(event_id):
+    if event_locations is None or event_locations.empty or not event_id:
+        return None
+    locs = event_locations[text_col(event_locations, "Event ID").eq(str(event_id))].copy()
+    if locs.empty:
+        return None
+    locs["Latitude"] = pd.to_numeric(locs.get("Latitude"), errors="coerce")
+    locs["Longitude"] = pd.to_numeric(locs.get("Longitude"), errors="coerce")
+    locs = locs[locs["Latitude"].notna() & locs["Longitude"].notna()]
+    if locs.empty:
+        return None
+    r = locs.iloc[0]
+    return float(r["Latitude"]), float(r["Longitude"]), clean_display_text(r.get("Location", ""))
+
+
+def _publication_logo_path():
+    candidates = [
+        ROOT / "assets" / "power-corridors-logo-dark-matched-transparent(1).png",
+        ROOT / "assets" / "power-corridors-logo-dark-matched-transparent.png",
+        ROOT / "power-corridors-logo-dark-matched-transparent(1).png",
+        ROOT / "power-corridors-logo-dark-matched-transparent.png",
+        ROOT / "assets" / "power-corridors-logo-light-matched-transparent(3).png",
+        ROOT / "power-corridors-logo-light-matched-transparent(3).png",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
+def _wrapped(text, width):
+    return "\n".join(textwrap.wrap(clean_display_text(text), width=width, break_long_words=False, break_on_hyphens=False))
+
+
+def render_intelligence_brief(selected_rows, region_name, publication_date, output_format="png"):
+    """Render one landscape P&C Intelligence brief. Returns PNG/PDF bytes."""
+    if plt is None:
+        raise RuntimeError("Matplotlib is required for publication export.")
+    rows = [r for r in selected_rows]
+    if len(rows) != 4:
+        raise ValueError("Exactly four stories are required for this publication format.")
+
+    bg = "#081018"
+    panel = "#101922"
+    line = "#30404d"
+    ivory = "#f1ede3"
+    muted = "#aeb6bb"
+    gold = "#d4af57"
+    cyan = "#1888b4"
+
+    fig = plt.figure(figsize=(16, 9), facecolor=bg)
+    canvas = fig.add_axes([0, 0, 1, 1])
+    canvas.set_xlim(0, 1); canvas.set_ylim(0, 1); canvas.axis("off")
+
+    # Header / brand
+    logo = _publication_logo_path()
+    if logo is not None and mpimg is not None:
+        try:
+            ax_logo = fig.add_axes([0.035, 0.878, 0.265, 0.095])
+            ax_logo.imshow(mpimg.imread(str(logo)))
+            ax_logo.axis("off")
+        except Exception:
+            pass
+    canvas.text(0.50, 0.945, "P&C INTELLIGENCE", ha="center", va="center", color=ivory,
+                fontsize=24, fontweight="bold")
+    canvas.text(0.50, 0.908, region_name.upper(), ha="center", va="center", color=gold,
+                fontsize=15, fontweight="bold")
+    canvas.text(0.965, 0.945, pd.to_datetime(publication_date).strftime("%d %B %Y"),
+                ha="right", va="center", color=muted, fontsize=10)
+    canvas.plot([0.035, 0.965], [0.865, 0.865], color=line, lw=1)
+
+    # Map occupies centre 44% of the page.
+    map_ax = fig.add_axes([0.285, 0.19, 0.43, 0.62], facecolor=bg)
+    lon_min, lon_max, lat_min, lat_max = PUBLICATION_REGIONS[region_name]["bounds"]
+    map_ax.set_xlim(lon_min, lon_max); map_ax.set_ylim(lat_min, lat_max)
+    map_ax.set_facecolor(bg)
+    for sp in map_ax.spines.values():
+        sp.set_edgecolor(line)
+    map_ax.tick_params(colors=muted, labelsize=6)
+
+    m = None
+    if Basemap is not None:
+        try:
+            m = Basemap(
+                projection="cyl", llcrnrlon=lon_min, urcrnrlon=lon_max,
+                llcrnrlat=lat_min, urcrnrlat=lat_max, resolution="c", ax=map_ax
+            )
+            m.drawmapboundary(fill_color=bg, color=line, linewidth=0.7)
+            m.fillcontinents(color="#122a37", lake_color=bg, zorder=1)
+            m.drawcoastlines(color="#4e7487", linewidth=0.55, zorder=2)
+            m.drawcountries(color="#355262", linewidth=0.35, zorder=2)
+        except Exception:
+            m = None
+    if m is None:
+        map_ax.grid(color=line, alpha=.35, linewidth=.5)
+        map_ax.set_xlabel("Longitude", color=muted, fontsize=7)
+        map_ax.set_ylabel("Latitude", color=muted, fontsize=7)
+
+    # Four story cards: two left, two right. Each card gets a line from its mapped event point.
+    card_specs = [
+        (0.035, 0.56, 0.225, 0.27),
+        (0.035, 0.23, 0.225, 0.27),
+        (0.74, 0.56, 0.225, 0.27),
+        (0.74, 0.23, 0.225, 0.27),
+    ]
+    card_targets = [
+        (0.26, 0.695), (0.26, 0.365), (0.74, 0.695), (0.74, 0.365)
+    ]
+
+    for idx, (row, spec) in enumerate(zip(rows, card_specs), start=1):
+        x, y, w, h = spec
+        patch = FancyBboxPatch(
+            (x, y), w, h, boxstyle="round,pad=0.006,rounding_size=0.008",
+            transform=canvas.transAxes, facecolor=panel, edgecolor=line, linewidth=0.8
+        )
+        canvas.add_patch(patch)
+
+        title = clean_display_text(row.get("Title", "Untitled event"))
+        country = clean_display_text(row.get("Country / Countries", ""))
+        etype = clean_display_text(row.get("Event Type", row.get("Event Family", "Event")))
+        severity = clean_display_text(row.get("Severity", ""))
+        summary = publication_summary(row)
+
+        canvas.text(x + 0.012, y + h - 0.026, f"{country or region_name} · {etype}".upper(),
+                    transform=canvas.transAxes, ha="left", va="top", color=gold,
+                    fontsize=7.5, fontweight="bold")
+        canvas.text(x + 0.012, y + h - 0.060, _wrapped(title, 33),
+                    transform=canvas.transAxes, ha="left", va="top", color=ivory,
+                    fontsize=10.5, fontweight="bold", linespacing=1.08)
+        canvas.text(x + 0.012, y + h - 0.115, _wrapped(summary, 43),
+                    transform=canvas.transAxes, ha="left", va="top", color=muted,
+                    fontsize=7.45, linespacing=1.18)
+        if severity:
+            canvas.text(x + w - 0.012, y + 0.014, severity.upper(),
+                        transform=canvas.transAxes, ha="right", va="bottom", color=cyan,
+                        fontsize=7, fontweight="bold")
+
+        point = publication_event_point(row.get("Event ID", ""))
+        if point:
+            lat, lon, _ = point
+            if lon_min <= lon <= lon_max and lat_min <= lat <= lat_max:
+                map_ax.scatter([lon], [lat], s=42, c=gold, edgecolors=ivory, linewidths=.65, zorder=5)
+                # Connect map data coordinates to figure-relative card edge.
+                target = card_targets[idx-1]
+                con = ConnectionPatch(
+                    xyA=(lon, lat), coordsA=map_ax.transData,
+                    xyB=target, coordsB=canvas.transAxes,
+                    arrowstyle="->", shrinkA=4, shrinkB=3,
+                    mutation_scale=9, linewidth=0.75, color="#89a8b7", alpha=.9
+                )
+                fig.add_artist(con)
+                map_ax.text(lon, lat, str(idx), color=bg, fontsize=6.5,
+                            ha="center", va="center", fontweight="bold", zorder=6)
+
+    canvas.text(0.035, 0.105, "POWER & CORRIDORS · INTELLIGENCE",
+                transform=canvas.transAxes, color=gold, fontsize=8, fontweight="bold")
+    canvas.text(0.035, 0.075,
+                "Four selected intelligence events · map points use canonical event coordinates where available.",
+                transform=canvas.transAxes, color=muted, fontsize=7.2)
+    canvas.text(0.965, 0.075, "powerncorridors.com", transform=canvas.transAxes,
+                ha="right", color=muted, fontsize=7.2)
+
+    bio = io.BytesIO()
+    if output_format.lower() == "pdf":
+        fig.savefig(bio, format="pdf", facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.08)
+    else:
+        fig.savefig(bio, format="png", dpi=180, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.08)
+    plt.close(fig)
+    bio.seek(0)
+    return bio.getvalue()
+
+
+def _publication_story_label(row):
+    date = clean_display_text(row.get("Start Date", ""))[:10]
+    title = clean_display_text(row.get("Title", "Untitled event"))
+    loc = clean_display_text(row.get("Country / Countries", row.get("Location", "")))
+    return f"{date} · {loc} · {title}" if loc else f"{date} · {title}"
+
+
 # -----------------------------------------------------------------------------
 # 1. OPERATING PICTURE
 # -----------------------------------------------------------------------------
@@ -1345,6 +1716,107 @@ if page == "Operating Picture":
     <span class='pc-badge'>Weather & Natural Hazards</span><span class='pc-badge'>Labour & Civil Disruption</span>
     <span class='pc-badge'>Conflict Escalation</span><span class='pc-badge'>Critical Infrastructure</span>
     """, unsafe_allow_html=True)
+
+# -----------------------------------------------------------------------------
+# P&C INTELLIGENCE PUBLICATION BUILDER
+# -----------------------------------------------------------------------------
+elif page == "Intelligence Brief Builder":
+    section(
+        "Publications",
+        "P&C Intelligence Brief Builder",
+        "Select a geography and four intelligence stories, preview the mapped publication, then export a one-page PDF."
+    )
+    st.caption(
+        "This first publication template uses the P&C Intelligence event layer. The region name is printed on the image, "
+        "and map arrows use canonical event coordinates where available."
+    )
+
+    c1, c2, c3 = st.columns([1.05, 1, 1])
+    region_name = c1.selectbox("Publication geography", list(PUBLICATION_REGIONS.keys()), key="pc_pub_region")
+    pub_date = c2.date_input("Publication date", value=datetime.now().date(), key="pc_pub_date")
+    lookback = c3.selectbox("Story window", ["7 days", "14 days", "30 days", "90 days", "All loaded"], index=2, key="pc_pub_lookback")
+
+    candidates = publication_region_events(region_name)
+    if not candidates.empty and lookback != "All loaded" and "Start Date" in candidates.columns:
+        days = int(lookback.split()[0])
+        cutoff = pd.Timestamp(pub_date) - pd.Timedelta(days=days)
+        dates = pd.to_datetime(candidates["Start Date"], errors="coerce")
+        candidates = candidates[(dates >= cutoff) & (dates <= pd.Timestamp(pub_date) + pd.Timedelta(days=1))].copy()
+
+    if candidates.empty:
+        st.warning("No P&C Intelligence events match this geography and time window.")
+    else:
+        candidates = candidates.reset_index(drop=True)
+        option_ids = list(range(len(candidates)))
+        default_ids = option_ids[:4]
+        selected = st.multiselect(
+            "Select exactly four stories",
+            option_ids,
+            default=default_ids,
+            max_selections=4,
+            format_func=lambda i: _publication_story_label(candidates.iloc[i]),
+            key="pc_pub_story_selection"
+        )
+
+        ready_count = 0
+        if selected:
+            st.markdown("### Selected story readiness")
+            readiness_rows = []
+            for i in selected:
+                r = candidates.iloc[i]
+                wc = publication_summary_word_count(r)
+                point = publication_event_point(r.get("Event ID", ""))
+                enriched = 60 <= wc <= 90
+                if enriched:
+                    ready_count += 1
+                readiness_rows.append({
+                    "Story": clean_display_text(r.get("Title", "")),
+                    "Summary words": wc,
+                    "60–90 word load": "Ready" if enriched else "Needs enrichment",
+                    "Mapped": "Yes" if point else "No",
+                    "Location": point[2] if point else clean_display_text(r.get("Location", "")),
+                })
+            show_df(pd.DataFrame(readiness_rows), height=190)
+            if ready_count < len(selected):
+                st.info(
+                    "Older records may fall back to Description / impact text. New AI-loader events should arrive with a "
+                    "dedicated 60–90 word publication summary so the renderer does not need to rewrite them."
+                )
+
+        if len(selected) == 4:
+            rows = [candidates.iloc[i] for i in selected]
+            try:
+                with st.spinner("Rendering P&C Intelligence publication…"):
+                    png_bytes = render_intelligence_brief(rows, region_name, pub_date, "png")
+                    pdf_bytes = render_intelligence_brief(rows, region_name, pub_date, "pdf")
+                st.markdown("### Preview")
+                st.image(png_bytes, use_container_width=True)
+
+                safe_region = re.sub(r"[^A-Za-z0-9]+", "-", region_name).strip("-").lower()
+                date_slug = pd.to_datetime(pub_date).strftime("%Y-%m-%d")
+                d1, d2 = st.columns(2)
+                d1.download_button(
+                    "Download PDF",
+                    data=pdf_bytes,
+                    file_name=f"pc-intelligence-{safe_region}-{date_slug}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary",
+                    key="pc_pub_download_pdf"
+                )
+                d2.download_button(
+                    "Download PNG",
+                    data=png_bytes,
+                    file_name=f"pc-intelligence-{safe_region}-{date_slug}.png",
+                    mime="image/png",
+                    use_container_width=True,
+                    key="pc_pub_download_png"
+                )
+            except Exception as exc:
+                st.error(f"Publication renderer error: {exc}")
+                st.caption("PDF/PNG export requires matplotlib. Basemap is optional but recommended for coastlines and country outlines.")
+        else:
+            st.info(f"Select exactly four stories to build the publication. Current selection: {len(selected)}.")
 
 # -----------------------------------------------------------------------------
 # 2. ALERTS & INCIDENTS
