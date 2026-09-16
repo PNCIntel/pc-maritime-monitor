@@ -32,7 +32,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.42-canonical-relationships-authoritative"
+APP_VERSION = "v3.3.43-group-vessel-rollup"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2983,6 +2983,40 @@ def _live_canonical_company_rollup(entity_id, entity_name):
                         for r in (mrows or [])}
         relationships = rrows or []
 
+        # pc_relationships can grow well beyond the generic safe_rows window. Company
+        # pages must not lose recently-loaded graph edges merely because they fall
+        # outside that broad result set. Hydrate the selected company's relationship
+        # neighbourhood directly from Supabase and merge it into the working graph.
+        rel_columns = (
+            "relationship_id,source_type,source_id,relationship_type,target_type,target_id,"
+            "ownership_percent,operating_control,confidence,record_status,evidence_source_id,notes,metadata"
+        )
+
+        def _hydrate_relationship_neighbourhood(entity_ids):
+            nonlocal relationships
+            ids=[str(x).strip() for x in (entity_ids or []) if str(x).strip()]
+            if not ids:
+                return
+            merged={str(r.get("relationship_id") or "").strip():r for r in relationships if str(r.get("relationship_id") or "").strip()}
+            anonymous=[]
+            for eid in ids:
+                for field in ("source_id","target_id"):
+                    try:
+                        rows=(sb.table("pc_relationships")
+                              .select(rel_columns)
+                              .eq(field,eid)
+                              .limit(5000)
+                              .execute().data or [])
+                    except Exception:
+                        rows=[]
+                    for rr in rows:
+                        rid=str(rr.get("relationship_id") or "").strip()
+                        if rid:
+                            merged[rid]=rr
+                        else:
+                            anonymous.append(rr)
+            relationships=list(merged.values())+anonymous
+
         def _endpoint_name(endpoint_type, endpoint_id):
             et=str(endpoint_type or "").strip().casefold()
             eid=str(endpoint_id or "").strip()
@@ -3027,6 +3061,11 @@ def _live_canonical_company_rollup(entity_id, entity_name):
         if not scope and requested_id:
             scope.add(requested_id)
 
+        # Preserve the initially-resolved company IDs so vessel rows can distinguish
+        # direct links from links inherited through controlled subsidiaries.
+        root_scope=set(scope)
+        _hydrate_relationship_neighbourhood(scope)
+
         down = {
             "owns","owns_group_company","parent_of","controls","controlled_entity",
             "subsidiary","subsidiary_of_group","consolidates","group_company",
@@ -3034,8 +3073,11 @@ def _live_canonical_company_rollup(entity_id, entity_name):
         }
         reverse = {"subsidiary_of","owned_by","controlled_by","part_of","member_of"}
 
-        # Traverse corporate hierarchy up to five levels.
+        # Traverse corporate hierarchy up to five levels. Re-hydrate after every
+        # expansion so a child entity's vessel edges are available even when the
+        # global relationship table is larger than the generic read window.
         for _ in range(5):
+            _hydrate_relationship_neighbourhood(scope)
             added = set()
             for rr in relationships:
                 st = str(rr.get("source_type") or "").casefold()
@@ -3064,6 +3106,8 @@ def _live_canonical_company_rollup(entity_id, entity_name):
             if not added:
                 break
             scope.update(added)
+
+        _hydrate_relationship_neighbourhood(scope)
 
         # Operational graph targets for this corporate scope.
         graph_assets = set()
@@ -3229,6 +3273,21 @@ def _live_canonical_company_rollup(entity_id, entity_name):
                 })
 
         # Direct owner/operator/manager links plus canonical graph vessel edges.
+        # Build a readable role map so the company profile shows WHY each hull is
+        # included and whether the link is direct or inherited through a subsidiary.
+        vessel_role_map=defaultdict(list)
+        for vr in vessel_rel_display:
+            vid=str(vr.get("Vessel ID") or "").strip()
+            cid=str(vr.get("Company ID") or "").strip()
+            if not vid:
+                continue
+            vessel_role_map[vid].append({
+                "company_id":cid,
+                "company":str(vr.get("Company") or entities.get(cid,cid) or "").strip(),
+                "relationship":str(vr.get("Relationship") or vr.get("Role") or "").strip(),
+                "path":"Direct" if cid in root_scope else "Via subsidiary",
+            })
+
         live_vessels = []
         for m in mrows or []:
             vid = str(m.get("mobile_asset_id") or "").strip()
@@ -3243,6 +3302,18 @@ def _live_canonical_company_rollup(entity_id, entity_name):
             cap = m.get("capacity_value")
             if cap in (None, ""):
                 cap = research.get("capacity")
+            roles=vessel_role_map.get(vid,[])
+            role_companies=[]
+            role_names=[]
+            role_paths=[]
+            for vr in roles:
+                if vr.get("company") and vr["company"] not in role_companies:
+                    role_companies.append(vr["company"])
+                if vr.get("relationship") and vr["relationship"] not in role_names:
+                    role_names.append(vr["relationship"])
+                if vr.get("path") and vr["path"] not in role_paths:
+                    role_paths.append(vr["path"])
+
             live_vessels.append({
                 "Vessel ID": vid,
                 "Vessel Name": str(m.get("name") or "").strip(),
@@ -3262,6 +3333,9 @@ def _live_canonical_company_rollup(entity_id, entity_name):
                 "Owner": entities.get(owner, owner),
                 "Operator": entities.get(operator, operator),
                 "Manager": entities.get(manager, manager),
+                "Linked Company": " · ".join(role_companies),
+                "Relationship / Role": " · ".join(role_names),
+                "Link Path": " · ".join(role_paths),
                 "Owner / Operator Text": " / ".join(
                     x for x in [entities.get(owner, owner), entities.get(operator, operator)] if x
                 ),
@@ -4708,7 +4782,15 @@ def render_company_profile(entity_id, entity_name):
             display_df(dv,150)
         if not prof["maritime_vessels"].empty:
             st.markdown("### Commercial / maritime vessels")
-            display_df(prof["maritime_vessels"],250)
+            mv=prof["maritime_vessels"].copy()
+            preferred=[
+                "Vessel Name","IMO","Vessel Type","Subtype / Class","Flag",
+                "Link Path","Linked Company","Relationship / Role",
+                "Status","Year Built","DWT","MMSI","Call Sign","Vessel ID"
+            ]
+            show=[c for c in preferred if c in mv.columns]
+            remainder=[c for c in mv.columns if c not in show and c not in {"Metadata"}]
+            display_df(mv[show+remainder],250)
         if not prof["vessel_build_records"].empty:
             st.markdown("### Vessel build records tied to these yards")
             display_df(prof["vessel_build_records"],150)
