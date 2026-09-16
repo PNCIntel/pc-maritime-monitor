@@ -8,7 +8,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "18-model-driven-post-v5-child-apply-2026-09-16"
+LOADER_BUILD = "19-model-first-dependency-engine-2026-09-16"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -3342,6 +3342,15 @@ CANONICAL_LOAD_TABLES = sorted(
 MODEL_DIRECT_PARTICIPANT_TARGET = "pc__direct_transaction_participant"
 MODEL_EVENT_TRANSACTION_BRIDGE_TARGET = "pc__event_transaction_bridge"
 
+# V19: graph/child rows are deliberately NOT exposed to SQL V5 until all
+# canonical parent objects have been resolved. They are staged/applied afterwards
+# by the Python dependency engine using a package-local -> canonical ID map.
+CANONICAL_DEFERRED_TABLES = {
+    "pc_relationships",
+    "pc_event_links",
+    "pc_transaction_participants",
+}
+
 CANONICAL_LOGICAL_TYPE = {
     "pc_entities":"entity",
     "pc_assets":"asset",
@@ -4028,20 +4037,504 @@ def _canonical_finalize_existing_rows(job_id):
     return report
 
 
-def _canonical_process_job(job_id):
-    """Model-driven package processor.
 
-    Critical ordering:
-      1. Pre-apply direct transaction rows so V5 can resolve dependent canonical data.
-      2. Run SQL V5 for supported canonical objects/graph edges.
-      3. RE-APPLY direct child/fact rows after V5, because V5 does not understand
-         loader-internal staging targets and may mark them BROKEN_REFERENCE.
-      4. Apply event↔transaction semantic bridge after both parents exist.
-      5. Re-run supported graph processors.
-      6. Finalize idempotent ALREADY_EXISTS outcomes.
+def _canonical_object_spec(object_type):
+    return {
+        "entity":("pc_entities","entity_id"),
+        "asset":("pc_assets","asset_id"),
+        "mobile_asset":("pc_mobile_assets","mobile_asset_id"),
+        "event":("pc_events","event_id"),
+        "transaction":("pc_transactions","transaction_id"),
+        "deal":("pc_transactions","transaction_id"),
+    }.get(str(object_type or "").casefold())
 
-    The second direct pass is intentional and idempotent.
+
+def _canonical_row_exists(object_type, object_id):
+    spec=_canonical_object_spec(object_type)
+    if not spec or object_id in (None,""):
+        return False
+    table,key=spec
+    try:
+        return bool((sb.table(table).select(key).eq(key,object_id).limit(1).execute().data or []))
+    except Exception:
+        return False
+
+
+def _resolve_package_object_id(target_table,payload,resolved_id=None):
+    """Return the canonical ID for one staged package object.
+
+    Strong-key rules:
+      mobile asset -> IMO first
+      entity       -> resolver result, then exact canonical ID, then unique exact name
+      asset/event  -> resolver result, then exact canonical ID
+      transaction  -> exact transaction_id
     """
+    payload=payload if isinstance(payload,dict) else {}
+    if resolved_id not in (None,""):
+        return str(resolved_id)
+
+    if target_table=="pc_mobile_assets":
+        imo=str(payload.get("imo") or "").strip()
+        if imo:
+            try:
+                hits=(sb.table("pc_mobile_assets").select("mobile_asset_id,imo")
+                      .eq("imo",imo).limit(3).execute().data or [])
+                if len(hits)==1:
+                    return str(hits[0]["mobile_asset_id"])
+            except Exception:
+                pass
+        mid=payload.get("mobile_asset_id")
+        if mid and _canonical_row_exists("mobile_asset",mid):
+            return str(mid)
+
+    elif target_table=="pc_entities":
+        eid=payload.get("entity_id")
+        if eid and _canonical_row_exists("entity",eid):
+            return str(eid)
+        name=str(payload.get("name") or "").strip()
+        if name:
+            try:
+                hits=(sb.table("pc_entities").select("entity_id,name")
+                      .eq("name",name).limit(3).execute().data or [])
+                if len(hits)==1:
+                    return str(hits[0]["entity_id"])
+            except Exception:
+                pass
+
+    elif target_table=="pc_assets":
+        aid=payload.get("asset_id")
+        if aid and _canonical_row_exists("asset",aid):
+            return str(aid)
+
+    elif target_table=="pc_events":
+        eid=payload.get("event_id")
+        if eid and _canonical_row_exists("event",eid):
+            return str(eid)
+
+    elif target_table=="pc_transactions":
+        tid=payload.get("transaction_id")
+        if tid and _canonical_row_exists("transaction",tid):
+            return str(tid)
+
+    return None
+
+
+def _build_package_id_map(job_id):
+    """Map every package-local object ID to the final canonical ID."""
+    mapping={}
+    diagnostics=[]
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("target_table,payload,resolved_entity_id,resolution_status,review_status,natural_key")
+              .eq("ingestion_job_id",str(job_id))
+              .limit(10000).execute().data or [])
+    except Exception as exc:
+        return {},[f"staging map read failed: {exc}"]
+
+    id_field={
+        "pc_entities":"entity_id",
+        "pc_assets":"asset_id",
+        "pc_mobile_assets":"mobile_asset_id",
+        "pc_events":"event_id",
+        "pc_transactions":"transaction_id",
+    }
+    for r in rows:
+        table=r.get("target_table")
+        field=id_field.get(table)
+        if not field:
+            continue
+        payload=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+        local_id=payload.get(field)
+        canonical=_resolve_package_object_id(table,payload,r.get("resolved_entity_id"))
+        if local_id and canonical:
+            mapping[str(local_id)]=str(canonical)
+            mapping[str(canonical)]=str(canonical)
+        elif local_id:
+            diagnostics.append(
+                f"{table} {local_id}: no canonical ID after object phase "
+                f"(resolution={r.get('resolution_status')}, review={r.get('review_status')})"
+            )
+    return mapping,diagnostics
+
+
+def _ensure_relationship_metadata_type(relationship_type, source_type, target_type):
+    """Ensure graph semantics used by a package are visible to the model registry."""
+    if not relationship_type:
+        return
+    try:
+        hit=(sb.table("pc_meta_relationship_types").select("relationship_type")
+             .eq("relationship_type",relationship_type).limit(1).execute().data or [])
+        if hit:
+            return
+    except Exception:
+        return
+    try:
+        sb.table("pc_meta_relationship_types").insert({
+            "relationship_type":relationship_type,
+            "from_entity_type":source_type or "entity",
+            "to_entity_type":target_type or "entity",
+            "relationship_table":"pc_relationships",
+            "from_key_column":"source_id",
+            "to_key_column":"target_id",
+            "relationship_type_column":"relationship_type",
+            "cardinality":"many_to_many",
+            "active":True,
+            "description":f"Canonical graph relationship: {relationship_type}",
+            "metadata":{"installed_by":"canonical_loader_v19","system_baseline":True},
+        }).execute()
+    except Exception:
+        # pc_relationships itself does not FK relationship_type to this registry;
+        # registry enrichment must never block a valid canonical graph edge.
+        pass
+
+
+def _canonical_semantic_relationship_id(payload):
+    src_type=str(payload.get("source_type") or "")
+    src_id=str(payload.get("source_id") or "")
+    rel=str(payload.get("relationship_type") or "")
+    tgt_type=str(payload.get("target_type") or "")
+    tgt_id=str(payload.get("target_id") or "")
+    digest=hashlib.sha256(
+        f"{src_type}|{src_id}|{rel}|{tgt_type}|{tgt_id}".encode("utf-8")
+    ).hexdigest().upper()[:24]
+    return "REL_"+digest
+
+
+def _stage_one_deferred(row):
+    clean=dict(row)
+    clean.pop("target_entity_type",None)
+    data=(sb.table("pc_staged_records").insert(_jsonable(clean)).execute().data or [])
+    return data[0] if data else clean
+
+
+def _mark_deferred_applied(staged_record_id, method, details=None, resolved_id=None):
+    upd={
+        "review_status":"applied",
+        "validation_status":"reviewed",
+        "resolution_status":"READY",
+        "resolution_method":method,
+        "resolution_confidence":1.0,
+        "candidate_count":1,
+        "resolution_details":details or {},
+    }
+    if resolved_id not in (None,""):
+        upd["resolved_entity_id"]=str(resolved_id)
+    sb.table("pc_staged_records").update(upd).eq(
+        "staged_record_id",staged_record_id
+    ).execute()
+
+
+def _mark_deferred_review(staged_record_id, method, reason, details=None):
+    d=dict(details or {})
+    d["reason"]=str(reason)[:1800]
+    sb.table("pc_staged_records").update({
+        "review_status":"pending",
+        "validation_status":"needs_review",
+        "resolution_status":"BROKEN_REFERENCE",
+        "resolution_method":method,
+        "resolution_details":d,
+    }).eq("staged_record_id",staged_record_id).execute()
+
+
+def _apply_deferred_package_rows(job_id, deferred_rows):
+    """Apply children/edges only after canonical parents exist.
+
+    This function is the dependency engine for:
+      transaction -> participants
+      entity/asset/mobile/event -> relationships
+      event -> event_links
+      event <-> transaction semantic bridge
+    """
+    report={
+        "received":len(deferred_rows or []),
+        "participants_applied":0,
+        "relationships_applied":0,
+        "event_links_applied":0,
+        "transaction_bridges_applied":0,
+        "review":0,
+        "errors":[],
+    }
+    if not deferred_rows:
+        return report
+
+    # Persist deferred rows only now, after V5 has finished with parent objects.
+    staged_rows=[]
+    for raw in deferred_rows:
+        try:
+            staged_rows.append(_stage_one_deferred(raw))
+        except Exception as exc:
+            report["errors"].append(f"deferred staging failed: {exc}")
+
+    id_map,map_diag=_build_package_id_map(job_id)
+    report["id_map_entries"]=len(id_map)
+    report["id_map_diagnostics"]=map_diag
+
+    vocab=_load_transaction_vocab()
+
+    def endpoint_id(kind, raw_id):
+        if raw_id in (None,""):
+            return None
+        rid=str(raw_id)
+        if rid in id_map:
+            return id_map[rid]
+        if _canonical_row_exists(kind,rid):
+            return rid
+        return None
+
+    # Parent-child rows first.
+    for row in staged_rows:
+        if row.get("target_table")!="pc_transaction_participants":
+            continue
+        sid=row.get("staged_record_id")
+        p=row.get("payload") if isinstance(row.get("payload"),dict) else {}
+        p=dict(p)
+        txid=endpoint_id("transaction",p.get("transaction_id"))
+        if not txid:
+            _mark_deferred_review(sid,"v19_transaction_participant_guard",
+                                  f"transaction_id {p.get('transaction_id')!r} does not resolve canonically")
+            report["review"]+=1
+            continue
+        p["transaction_id"]=txid
+
+        if p.get("entity_id") not in (None,""):
+            eid=endpoint_id("entity",p.get("entity_id"))
+            if eid:
+                p["entity_id"]=eid
+            else:
+                md=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+                md=dict(md); md["unresolved_package_entity_id"]=p.get("entity_id")
+                p["metadata"]=md
+                p.pop("entity_id",None)
+
+        role=_participant_role_to_model(p.get("role"),vocab)
+        if not role:
+            _mark_deferred_review(
+                sid,"v19_transaction_participant_guard",
+                f"role {p.get('role')!r} is not registered in pc_meta_transaction_participant_roles"
+            )
+            report["review"]+=1
+            continue
+        p["role"]=role
+
+        try:
+            sb.table("pc_transaction_participants").upsert(
+                p,on_conflict="participant_id"
+            ).execute()
+            _mark_deferred_applied(
+                sid,"v19_transaction_participant_apply",
+                {"canonical_transaction_id":txid,"canonical_entity_id":p.get("entity_id")}
+            )
+            report["participants_applied"]+=1
+        except Exception as exc:
+            _mark_deferred_review(sid,"v19_transaction_participant_apply",exc)
+            report["review"]+=1
+            report["errors"].append(str(exc))
+
+    # Generic graph relationships next.
+    for row in staged_rows:
+        if row.get("target_table")!="pc_relationships":
+            continue
+        sid=row.get("staged_record_id")
+        p=row.get("payload") if isinstance(row.get("payload"),dict) else {}
+        p=dict(p)
+        src_kind=str(p.get("source_type") or "")
+        tgt_kind=str(p.get("target_type") or "")
+        src=endpoint_id(src_kind,p.get("source_id"))
+        tgt=endpoint_id(tgt_kind,p.get("target_id"))
+        if not src or not tgt:
+            _mark_deferred_review(
+                sid,"v19_graph_endpoint_guard",
+                f"canonical endpoints unresolved: source={p.get('source_type')}:{p.get('source_id')} -> {src}; "
+                f"target={p.get('target_type')}:{p.get('target_id')} -> {tgt}",
+                {"package_id_map_entries":len(id_map)}
+            )
+            report["review"]+=1
+            continue
+
+        p["source_id"]=src
+        p["target_id"]=tgt
+        _ensure_relationship_metadata_type(p.get("relationship_type"),src_kind,tgt_kind)
+
+        # Reuse an existing semantic edge if present; otherwise create a canonical
+        # deterministic relationship ID. Never make PKG_* a canonical graph ID.
+        try:
+            existing=(sb.table("pc_relationships").select("relationship_id")
+                      .eq("source_type",src_kind).eq("source_id",src)
+                      .eq("relationship_type",p.get("relationship_type"))
+                      .eq("target_type",tgt_kind).eq("target_id",tgt)
+                      .limit(1).execute().data or [])
+        except Exception:
+            existing=[]
+        source_relationship_id=p.get("relationship_id")
+        if existing:
+            p["relationship_id"]=existing[0]["relationship_id"]
+        elif str(source_relationship_id or "").startswith("PKG_") or not source_relationship_id:
+            p["relationship_id"]=_canonical_semantic_relationship_id(p)
+
+        md=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+        md=dict(md)
+        if source_relationship_id and source_relationship_id!=p["relationship_id"]:
+            md["source_package_relationship_id"]=source_relationship_id
+        p["metadata"]=md
+
+        try:
+            sb.table("pc_relationships").upsert(
+                p,on_conflict="relationship_id"
+            ).execute()
+            _mark_deferred_applied(
+                sid,"v19_graph_apply",
+                {
+                    "canonical_source_id":src,
+                    "canonical_target_id":tgt,
+                    "canonical_relationship_id":p["relationship_id"],
+                },
+                p["relationship_id"]
+            )
+            report["relationships_applied"]+=1
+        except Exception as exc:
+            _mark_deferred_review(sid,"v19_graph_apply",exc)
+            report["review"]+=1
+            report["errors"].append(str(exc))
+
+    # Event links last.
+    for row in staged_rows:
+        if row.get("target_table")!="pc_event_links":
+            continue
+        sid=row.get("staged_record_id")
+        p=row.get("payload") if isinstance(row.get("payload"),dict) else {}
+        p=dict(p)
+        eid=endpoint_id("event",p.get("event_id"))
+        linked_type=str(p.get("linked_type") or "").casefold()
+
+        if not eid:
+            _mark_deferred_review(sid,"v19_event_link_guard",
+                                  f"event_id {p.get('event_id')!r} does not resolve canonically")
+            report["review"]+=1
+            continue
+
+        if linked_type in {"transaction","deal"}:
+            txid=endpoint_id("transaction",p.get("linked_id"))
+            if not txid:
+                _mark_deferred_review(sid,"v19_event_transaction_bridge_guard",
+                                      f"transaction {p.get('linked_id')!r} does not resolve canonically")
+                report["review"]+=1
+                continue
+            try:
+                ev=(sb.table("pc_events").select("metadata").eq("event_id",eid)
+                    .limit(1).execute().data or [{}])[0]
+                tx=(sb.table("pc_transactions").select("metadata").eq("transaction_id",txid)
+                    .limit(1).execute().data or [{}])[0]
+                evm=ev.get("metadata") if isinstance(ev.get("metadata"),dict) else {}
+                txm=tx.get("metadata") if isinstance(tx.get("metadata"),dict) else {}
+                evm=dict(evm); txm=dict(txm)
+                evlinks=evm.get("linked_transaction_ids") if isinstance(evm.get("linked_transaction_ids"),list) else []
+                txlinks=txm.get("linked_event_ids") if isinstance(txm.get("linked_event_ids"),list) else []
+                if txid not in evlinks: evlinks.append(txid)
+                if eid not in txlinks: txlinks.append(eid)
+                evm["linked_transaction_ids"]=evlinks
+                txm["linked_event_ids"]=txlinks
+                evm["transaction_link_method"]="canonical_metadata_bridge"
+                txm["event_link_method"]="canonical_metadata_bridge"
+                sb.table("pc_events").update({"metadata":evm}).eq("event_id",eid).execute()
+                sb.table("pc_transactions").update({"metadata":txm}).eq("transaction_id",txid).execute()
+                _mark_deferred_applied(
+                    sid,"v19_event_transaction_metadata_bridge",
+                    {"canonical_event_id":eid,"canonical_transaction_id":txid}
+                )
+                report["transaction_bridges_applied"]+=1
+            except Exception as exc:
+                _mark_deferred_review(sid,"v19_event_transaction_metadata_bridge",exc)
+                report["review"]+=1
+                report["errors"].append(str(exc))
+            continue
+
+        linked=endpoint_id(linked_type,p.get("linked_id"))
+        if not linked:
+            _mark_deferred_review(
+                sid,"v19_event_link_guard",
+                f"linked endpoint {p.get('linked_type')}:{p.get('linked_id')} does not resolve canonically"
+            )
+            report["review"]+=1
+            continue
+        p["event_id"]=eid
+        p["linked_id"]=linked
+        try:
+            existing=(sb.table("pc_event_links").select("event_link_id")
+                      .eq("event_id",eid).eq("linked_type",p.get("linked_type"))
+                      .eq("linked_id",linked).eq("relationship",p.get("relationship"))
+                      .limit(1).execute().data or [])
+        except Exception:
+            existing=[]
+        if existing:
+            p["event_link_id"]=existing[0]["event_link_id"]
+        try:
+            sb.table("pc_event_links").upsert(p,on_conflict="event_link_id").execute()
+            _mark_deferred_applied(
+                sid,"v19_event_link_apply",
+                {"canonical_event_id":eid,"canonical_linked_id":linked},
+                p.get("event_link_id")
+            )
+            report["event_links_applied"]+=1
+        except Exception as exc:
+            _mark_deferred_review(sid,"v19_event_link_apply",exc)
+            report["review"]+=1
+            report["errors"].append(str(exc))
+
+    return report
+
+
+def _collect_legacy_internal_deferred(job_id):
+    """Recover unresolved rows created by v16-v18 so Retry can repair them too."""
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,source_record_key,natural_key,action,payload,confidence,source_id")
+              .eq("ingestion_job_id",str(job_id))
+              .in_("target_table",[MODEL_DIRECT_PARTICIPANT_TARGET,MODEL_EVENT_TRANSACTION_BRIDGE_TARGET])
+              .limit(10000).execute().data or [])
+    except Exception:
+        rows=[]
+    out=[]
+    for r in rows:
+        target=r.get("target_table")
+        if target==MODEL_DIRECT_PARTICIPANT_TARGET:
+            target="pc_transaction_participants"
+        elif target==MODEL_EVENT_TRANSACTION_BRIDGE_TARGET:
+            target="pc_event_links"
+        out.append({
+            "ingestion_job_id":str(job_id),
+            "target_table":target,
+            "source_record_key":r.get("source_record_key"),
+            "natural_key":r.get("natural_key"),
+            "action":r.get("action") or "UPSERT",
+            "payload":r.get("payload") or {},
+            "confidence":r.get("confidence") or 1.0,
+            "source_id":r.get("source_id"),
+            "resolution_status":"PENDING",
+            "validation_status":"pending",
+            "review_status":"pending",
+        })
+        try:
+            sb.table("pc_staged_records").delete().eq(
+                "staged_record_id",r["staged_record_id"]
+            ).execute()
+        except Exception:
+            pass
+    return out
+
+
+def _canonical_process_job(job_id, deferred_rows=None):
+    """V19 model-first dependency engine.
+
+    SQL V5 sees only canonical parent/object rows.
+    Child/edge rows are introduced only after parents resolve, then package-local
+    endpoint IDs are rewritten to canonical IDs and written directly.
+    """
+    deferred=list(deferred_rows or [])
+
+    # Support Retry on jobs created by v16-v18.
+    deferred.extend(_collect_legacy_internal_deferred(job_id))
+
+    # Transactions are direct parent rows; normalize/apply them before V5.
     pre=_canonical_apply_model_direct_rows(job_id)
 
     try:
@@ -4052,39 +4545,23 @@ def _canonical_process_job(job_id):
     except Exception as exc:
         processor={"error":str(exc)}
 
-    # V5 can overwrite the staging state of internal child targets even after their
-    # canonical row has been inserted. Re-apply them now and restore READY/applied.
-    direct_after_v5=_canonical_apply_model_direct_rows(job_id)
+    # Finalize existing canonical objects as successful no-ops before graph phase.
+    finalized_before=_canonical_finalize_existing_rows(job_id)
 
-    post=_canonical_apply_model_post_rows(job_id)
+    # Apply deferred children/graph using the package-local -> canonical map.
+    deferred_result=_apply_deferred_package_rows(job_id,deferred)
 
-    rel={}
-    try:
-        rel["event_links"]=_process_relationship_backlog(sb,job_id)
-    except Exception as exc:
-        rel["event_links_error"]=str(exc)
-    try:
-        rel["relationships"]=_process_generic_relationship_backlog(sb,job_id)
-    except Exception as exc:
-        rel["relationships_error"]=str(exc)
-
-    # One last post pass because relationship processors can also update staged states.
-    post_final=_canonical_apply_model_post_rows(job_id)
-    direct_final=_canonical_apply_model_direct_rows(job_id)
-
-    finalized=_canonical_finalize_existing_rows(job_id)
+    finalized_after=_canonical_finalize_existing_rows(job_id)
 
     return {
         "loader_build":LOADER_BUILD,
         "model_preapply":pre,
         "processor":processor,
-        "model_direct_after_v5":direct_after_v5,
-        "model_postapply":post,
-        "relationship_pass":rel,
-        "model_post_final":post_final,
-        "model_direct_final":direct_final,
-        "idempotent_finalize":finalized,
+        "idempotent_finalize_before_graph":finalized_before,
+        "deferred_dependency_apply":deferred_result,
+        "idempotent_finalize_after_graph":finalized_after,
     }
+
 
 
 def _canonical_create_job(title, source_scope):
@@ -4138,14 +4615,19 @@ def _normalize_canonical_payload_dates(payload,target_table):
     return payload
 
 def _canonical_stage_records(job_id, sections_config):
-    """Stage a whole package for the V5 canonical processor.
+    """Stage a whole package in dependency-safe phases.
 
-    Supports both flat spreadsheet rows and loader-native rows shaped like
-    pc_staged_records (target_table + natural_key + payload). Package-local IDs
-    are preserved inside payload so pc_process_ingestion_job_v5 can map them to
-    canonical IDs before graph edges are written.
+    Phase 1 (inserted immediately):
+      canonical identity objects + direct parent/fact tables.
+
+    Phase 2 (held in memory until Phase 1 is resolved/applied):
+      pc_transaction_participants, pc_relationships, pc_event_links.
+
+    This is the core V19 rule: the loader reads the model/dependencies first and
+    never asks a child/edge row to resolve before its parent endpoints exist.
     """
     staged=[]
+    deferred=[]
     table_counts={}
     skipped_sections=[]
     native_rows=0
@@ -4160,13 +4642,10 @@ def _canonical_stage_records(job_id, sections_config):
         native=bool(cfg.get("native")) or _loader_native_section(df)
 
         logical=_canonical_target_entity_type(target)
-        if not logical and target not in CANONICAL_DIRECT_TABLES:
+        if not logical and target not in CANONICAL_DIRECT_TABLES and target not in CANONICAL_DEFERRED_TABLES:
             raise ValueError(
-                f"{target} is not registered in pc_meta_entity_types. "
-                "Register it in System metadata or exclude that sheet."
+                f"{target} is not registered in pc_meta_entity_types and is not a supported direct/deferred table."
             )
-        # Direct fact/child tables are not canonical identity types. Leaving this NULL
-        # is intentional and FK-safe because pc_staged_records.target_entity_type is nullable.
 
         for row_no,row in enumerate(df.to_dict("records"),1):
             if native:
@@ -4186,22 +4665,27 @@ def _canonical_stage_records(job_id, sections_config):
             supplied_nk=_clean_upload_scalar(row.get("natural_key")) if isinstance(row,dict) else None
             nk=str(supplied_nk or _natural_key_global(payload,target,row_no))
             source_record_key=_clean_upload_scalar(row.get("source_record_key")) if isinstance(row,dict) else None
-            action=str(_clean_upload_scalar(row.get("action")) or "UPSERT").upper()
+            source_action=str(_clean_upload_scalar(row.get("action")) or "UPSERT").upper()
             confidence=_clean_upload_scalar(row.get("confidence")) if isinstance(row,dict) else None
             try:
                 confidence=float(confidence) if confidence is not None else 1.0
             except Exception:
                 confidence=1.0
 
-            staged_target=target
-            if target=="pc_transaction_participants":
-                staged_target=MODEL_DIRECT_PARTICIPANT_TARGET
-            elif target=="pc_event_links" and str((payload or {}).get("linked_type") or "").casefold() in {"transaction","deal"}:
-                staged_target=MODEL_EVENT_TRANSACTION_BRIDGE_TARGET
+            # In a canonical-loader package, REVIEW means "resolve against the
+            # canonical registry and only stop if ambiguity remains", not
+            # "force analyst interaction before matching".
+            action=source_action
+            if native and source_action=="REVIEW":
+                action="UPSERT"
+                md=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {}
+                md=dict(md)
+                md.setdefault("source_package_action","REVIEW")
+                payload["metadata"]=md
 
             staged_row={
                 "ingestion_job_id":str(job_id),
-                "target_table":staged_target,
+                "target_table":target,
                 "source_record_key":str(source_record_key or f"{section}:{nk}"),
                 "natural_key":nk,
                 "action":action,
@@ -4211,21 +4695,32 @@ def _canonical_stage_records(job_id, sections_config):
                 "validation_status":"pending",
                 "review_status":"pending",
             }
-            if logical and staged_target==target:
+            if logical:
                 staged_row["target_entity_type"]=logical
             if isinstance(row,dict) and _clean_upload_scalar(row.get("source_id")) is not None:
                 staged_row["source_id"]=str(_clean_upload_scalar(row.get("source_id")))
-            staged.append(staged_row)
+
+            if target in CANONICAL_DEFERRED_TABLES:
+                # Do not insert yet. SQL V5 must never see graph/child rows before
+                # their canonical parents have been resolved.
+                staged_row.pop("target_entity_type",None)
+                deferred.append(staged_row)
+            else:
+                staged.append(staged_row)
+
             table_counts[target]=table_counts.get(target,0)+1
 
     for i in range(0,len(staged),250):
         sb.table("pc_staged_records").insert(_jsonable(staged[i:i+250])).execute()
 
     return {
-        "rows":len(staged),
+        "rows":len(staged)+len(deferred),
+        "phase1_rows":len(staged),
+        "deferred_rows":len(deferred),
         "native_rows":native_rows,
         "tables":table_counts,
         "skipped_sections":skipped_sections,
+        "_deferred_records":deferred,
     }
 
 
@@ -4583,8 +5078,9 @@ elif page=="Canonical Loader":
 
                 st.markdown("### What happens when you load")
                 st.caption(
-                    "The whole package is staged, then one canonical processor resolves/upserts objects first "
-                    "and writes relationships/event links second. There is no manual reconcile/apply sequence."
+                    "The loader reads the package dependency path first. Canonical parent objects are resolved/upserted "
+                    "before child rows and graph edges are introduced. Package-local IDs are then rewritten to canonical IDs "
+                    "and relationships/event links are applied automatically."
                 )
                 st.info(
                     "AI/research packages can now be supplied directly as JSON/JSONL records with target_table, "
@@ -4624,10 +5120,11 @@ elif page=="Canonical Loader":
                         )
                         jid=job["ingestion_job_id"]
                         staged=_canonical_stage_records(jid,configs)
+                        deferred_records=staged.pop("_deferred_records",[])
                         st.write("Staged package",staged)
 
                         try:
-                            result=_canonical_process_job(jid)
+                            result=_canonical_process_job(jid,deferred_records)
                             st.write("Canonical processor",result)
                             summary,by_table=_canonical_job_summary(jid)
 
