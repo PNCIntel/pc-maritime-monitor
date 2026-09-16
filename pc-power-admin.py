@@ -8,7 +8,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "22-sources-first-imo-auto-link-2026-09-16"
+LOADER_BUILD = "23-current-upload-job-state-2026-09-16"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -5225,7 +5225,7 @@ elif page=="Canonical Loader":
         "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
-    st.success("V22 fast path: register research sources first → existing IMO updates vessel → exact company reuses/creates once → vessel-company relationship auto-links. Retry also repairs earlier V21 jobs.")
+    st.success("V23: current upload is isolated from prior job state. Sources register first, IMO updates the existing vessel, company resolves/creates once, and graph links follow automatically.")
     if not sb:
         st.error("Supabase service connection required.")
     else:
@@ -5253,6 +5253,16 @@ elif page=="Canonical Loader":
                     st.stop()
                 sections,file_hash=_parse_multitable_upload(up)
                 sections={k:v for k,v in sections.items() if not v.empty}
+
+                # V23: bind the result panel to the CURRENT upload, not a prior job
+                # left in Streamlit session state.
+                current_hash=str(file_hash)
+                previous_hash=str(st.session_state.get("canonical_current_upload_hash") or "")
+                if previous_hash != current_hash:
+                    st.session_state["canonical_current_upload_hash"]=current_hash
+                    st.session_state.pop("canonical_last_job",None)
+                    st.session_state.pop("canonical_last_job_hash",None)
+                    st.session_state.pop("canonical_last_load_error",None)
 
                 recognized=[]
                 ignored=[]
@@ -5423,27 +5433,47 @@ elif page=="Canonical Loader":
                     disabled=has_suspicious
                 ):
                     with st.status("Loading package into the canonical ingestion engine…",expanded=True) as status:
-                        job=_canonical_create_job(
-                            up.name,
-                            {
-                                "architecture":"canonical_upsert_v2",
-                                "file_sha256":file_hash,
-                                "sections":{
-                                    k:{
-                                        "included":bool(v["include"]),
-                                        "target_table":v["target"],
-                                        "rows":len(v["df"]),
-                                    }
-                                    for k,v in configs.items()
-                                },
-                            }
-                        )
-                        jid=job["ingestion_job_id"]
-                        staged=_canonical_stage_records(jid,configs)
-                        deferred_records=staged.pop("_deferred_records",[])
-                        st.write("Staged package",staged)
-
+                        job=None
+                        jid=None
                         try:
+                            job=_canonical_create_job(
+                                up.name,
+                                {
+                                    "architecture":"canonical_upsert_v2",
+                                    "file_sha256":file_hash,
+                                    "sections":{
+                                        k:{
+                                            "included":bool(v["include"]),
+                                            "target_table":v["target"],
+                                            "rows":len(v["df"]),
+                                        }
+                                        for k,v in configs.items()
+                                    },
+                                }
+                            )
+                            jid=job["ingestion_job_id"]
+
+                            # Bind UI immediately to this job, even if staging later fails.
+                            st.session_state["canonical_last_job"]=str(jid)
+                            st.session_state["canonical_last_job_hash"]=str(file_hash)
+                            st.session_state.pop("canonical_last_load_error",None)
+
+                            staged=_canonical_stage_records(jid,configs)
+                            deferred_records=staged.pop("_deferred_records",[])
+                            st.write("Staged package",staged)
+
+                            # Explicit guard: a non-empty selected package must never
+                            # silently proceed with zero staged/deferred rows.
+                            expected_rows=sum(
+                                len(v["df"]) for v in configs.values() if v.get("include")
+                            )
+                            actual_rows=int(staged.get("rows",0) or 0)
+                            if expected_rows > 0 and actual_rows == 0:
+                                raise RuntimeError(
+                                    f"Current upload selected {expected_rows} row(s) but staged 0. "
+                                    "The loader stopped before processing so the prior job cannot be mistaken for this upload."
+                                )
+
                             result=_canonical_process_job(jid,deferred_records)
                             st.write("Canonical processor",result)
                             summary,by_table=_canonical_job_summary(jid)
@@ -5466,17 +5496,30 @@ elif page=="Canonical Loader":
                             st.session_state["canonical_last_job"]=str(jid)
                             st.session_state[f"canonical_result_{jid}"]=result
                         except Exception as exc:
-                            sb.table("pc_ingestion_jobs").update({
-                                "status":"failed",
-                                "completed_at":pd.Timestamp.utcnow().isoformat(),
-                                "error_text":str(exc),
-                            }).eq("ingestion_job_id",str(jid)).execute()
-                            status.update(label="Canonical processor failed",state="error",expanded=True)
+                            err=str(exc)
+                            st.session_state["canonical_last_load_error"]=err
+                            if jid:
+                                try:
+                                    sb.table("pc_ingestion_jobs").update({
+                                        "status":"failed",
+                                        "completed_at":pd.Timestamp.utcnow().isoformat(),
+                                        "error_text":err,
+                                    }).eq("ingestion_job_id",str(jid)).execute()
+                                except Exception:
+                                    pass
+                            status.update(
+                                label="Current upload failed before completion",
+                                state="error",
+                                expanded=True
+                            )
+                            st.error("This error belongs to the CURRENT upload; the previous load is not being displayed as its result.")
                             st.exception(exc)
 
                 last=st.session_state.get("canonical_last_job")
-                if last:
-                    st.markdown("### Last package")
+                last_hash=str(st.session_state.get("canonical_last_job_hash") or "")
+                current_hash=str(file_hash)
+                if last and last_hash == current_hash:
+                    st.markdown("### Current upload result")
                     summ,by_table=_canonical_job_summary(last)
                     m1,m2,m3,m4=st.columns(4)
                     m1.metric("Total",summ.get("total",0))
@@ -5484,6 +5527,10 @@ elif page=="Canonical Loader":
                     m3.metric("Review",summ.get("review",0))
                     m4.metric("Broken refs",summ.get("broken",0))
                     dataframe(by_table)
+                elif up:
+                    st.info("No result exists yet for this current upload. The loader will not show an older job here.")
+                    if st.session_state.get("canonical_last_load_error"):
+                        st.error(st.session_state["canonical_last_load_error"])
 
                     if summ.get("review",0):
                         review_rows=_canonical_review_rows(last,2000)
