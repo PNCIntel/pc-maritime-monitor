@@ -3547,6 +3547,9 @@ def _canonical_apply_transaction_extensions(job_id):
                 mark_review(row,f"participant apply failed: {exc}")
 
         elif table=="pc_event_links" and str(payload.get("linked_type") or "").casefold() in {"transaction","deal"}:
+            # pc_event_links' SQL relationship processor does not currently support a
+            # transaction/deal endpoint. Preserve the semantic link bidirectionally in
+            # parent metadata instead of forcing an unsupported polymorphic object type.
             eid=payload.get("event_id")
             txid=payload.get("linked_id")
             if not exists("pc_events","event_id",eid):
@@ -3556,18 +3559,37 @@ def _canonical_apply_transaction_extensions(job_id):
                 mark_review(row,f"transaction link target {txid!r} is not canonical yet")
                 continue
             try:
-                sb.table("pc_event_links").upsert(payload,on_conflict="event_link_id").execute()
+                ev=(sb.table("pc_events").select("event_id,metadata").eq("event_id",eid).limit(1).execute().data or [{}])[0]
+                tx=(sb.table("pc_transactions").select("transaction_id,metadata").eq("transaction_id",txid).limit(1).execute().data or [{}])[0]
+                evm=ev.get("metadata") if isinstance(ev.get("metadata"),dict) else {}
+                txm=tx.get("metadata") if isinstance(tx.get("metadata"),dict) else {}
+                evm=dict(evm); txm=dict(txm)
+                evlinks=evm.get("linked_transaction_ids") if isinstance(evm.get("linked_transaction_ids"),list) else []
+                txlinks=txm.get("linked_event_ids") if isinstance(txm.get("linked_event_ids"),list) else []
+                if txid not in evlinks: evlinks.append(txid)
+                if eid not in txlinks: txlinks.append(eid)
+                evm["linked_transaction_ids"]=evlinks
+                txm["linked_event_ids"]=txlinks
+                evm["transaction_link_method"]="metadata_bridge_until_pc_event_links_supports_transaction"
+                txm["event_link_method"]="metadata_bridge_until_pc_event_links_supports_transaction"
+                sb.table("pc_events").update({"metadata":evm}).eq("event_id",eid).execute()
+                sb.table("pc_transactions").update({"metadata":txm}).eq("transaction_id",txid).execute()
                 sb.table("pc_staged_records").update({
                     "review_status":"applied",
                     "validation_status":"reviewed",
                     "resolution_status":"READY",
-                    "resolution_method":"python_event_transaction_link_apply",
+                    "resolution_method":"python_event_transaction_metadata_bridge",
                     "resolution_confidence":1.0,
                     "candidate_count":1,
+                    "resolution_details":{
+                        "event_id":eid,
+                        "transaction_id":txid,
+                        "note":"pc_event_links transaction endpoint unsupported; linked bidirectionally in parent metadata"
+                    },
                 }).eq("staged_record_id",row["staged_record_id"]).execute()
                 report["transaction_links_applied"]+=1
             except Exception as exc:
-                mark_review(row,f"event→transaction link apply failed: {exc}")
+                mark_review(row,f"event→transaction metadata bridge failed: {exc}")
 
     return report
 
@@ -3830,6 +3852,8 @@ def _canonical_section_target(section,df):
         if target in registered:
             et=registered[target].get("entity_type")
             return target,True,f"recognized data sheet · registered type: {et}"
+        if target in CANONICAL_DIRECT_TABLES:
+            return target,True,"recognized direct child/fact table · staged without target_entity_type"
         return target,False,(
             f"recognized data sheet, but {target} is not registered in pc_meta_entity_types; "
             "excluded until metadata is registered"
