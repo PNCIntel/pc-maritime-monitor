@@ -32,7 +32,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.39-canonical-company-identity-bridge"
+APP_VERSION = "v3.3.40-relationship-endpoint-canonicalization"
 RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2514,6 +2514,79 @@ def label(x):
     live=_live_canonical_labels()
     return str(live.get(s) or static or s).strip()
 
+
+def relationship_endpoint_label(endpoint_id, endpoint_type=""):
+    """Resolve relationship endpoints from the already-loaded canonical frames.
+
+    Relationship rendering must use the same canonical object names as the Vessels,
+    Assets and Companies pages.  This avoids migration-era Source/Target text leaking
+    internal IDs such as VES_ADM_AL_ALIAH into the UI.
+    """
+    eid=str(endpoint_id or "").strip()
+    et=str(endpoint_type or "").strip().casefold()
+
+    if not eid:
+        return ""
+
+    # 1) Canonical vessel/mobile-asset frame already loaded from Supabase.
+    try:
+        cv=_CANON_VESSELS
+        if isinstance(cv,pd.DataFrame) and not cv.empty and "Vessel ID" in cv.columns:
+            hit=cv[cv["Vessel ID"].fillna("").astype(str).eq(eid)]
+            if not hit.empty:
+                nm=str(hit.iloc[0].get("Vessel Name") or "").strip()
+                if nm:
+                    return nm
+    except Exception:
+        pass
+
+    # 2) Current merged maritime vessel table.
+    try:
+        mv=TABLES.get(("Maritime","Vessels"),pd.DataFrame())
+        if isinstance(mv,pd.DataFrame) and not mv.empty and "Vessel ID" in mv.columns:
+            hit=mv[mv["Vessel ID"].fillna("").astype(str).eq(eid)]
+            if not hit.empty:
+                for nc in ("Vessel Name","Vessel","Name"):
+                    if nc in hit.columns:
+                        nm=str(hit.iloc[0].get(nc) or "").strip()
+                        if nm and nm != eid:
+                            return nm
+    except Exception:
+        pass
+
+    # 3) Canonical company/entity catalogue.
+    try:
+        if et in {"entity","company","organisation","organization"} or eid.startswith(("ENT_","COMP")):
+            nm=label(eid)
+            if nm and nm != eid:
+                return nm
+    except Exception:
+        pass
+
+    # 4) Fixed assets / ports / terminals.
+    try:
+        for key,id_col,name_cols in [
+            (("Infrastructure","Assets"),"Asset ID",("Asset","Name")),
+            (("Maritime","Ports"),"Port ID",("Port / Facility","Port","Name")),
+            (("Maritime","Port Terminals"),"Terminal ID",("Terminal / Facility","Terminal","Name")),
+        ]:
+            df=TABLES.get(key,pd.DataFrame())
+            if isinstance(df,pd.DataFrame) and not df.empty and id_col in df.columns:
+                hit=df[df[id_col].fillna("").astype(str).eq(eid)]
+                if not hit.empty:
+                    for nc in name_cols:
+                        if nc in hit.columns:
+                            nm=str(hit.iloc[0].get(nc) or "").strip()
+                            if nm and nm != eid:
+                                return nm
+    except Exception:
+        pass
+
+    # 5) Global live/static resolver as final named fallback.
+    nm=label(eid)
+    return nm if nm else eid
+
+
 def pretty_enum(v):
     """Turn implementation taxonomies/codes into ordinary English for the UI."""
     s=str(v).strip()
@@ -3876,17 +3949,13 @@ def readable_relationships(df, entity_id):
         src=str(r.get("Source Entity","")).strip()
         tgt=str(r.get("Target Entity","")).strip()
         rel=pretty_relationship(r.get("Relationship",""))
-        src_raw=str(r.get("Source") or "").strip()
-        tgt_raw=str(r.get("Target") or "").strip()
+        src_type=str(r.get("Source Type","")).strip()
+        tgt_type=str(r.get("Target Type","")).strip()
 
-        src_name=label(src) if (
-            not src_raw or src_raw == src or
-            src_raw.startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","PORT_","TERM_"))
-        ) else src_raw
-        tgt_name=label(tgt) if (
-            not tgt_raw or tgt_raw == tgt or
-            tgt_raw.startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","PORT_","TERM_"))
-        ) else tgt_raw
+        # Canonical object registries are authoritative for endpoint display names.
+        # Do not trust migration-era Source/Target display text.
+        src_name=relationship_endpoint_label(src,src_type)
+        tgt_name=relationship_endpoint_label(tgt,tgt_type)
 
         st.markdown(
             f"<div class='pc-rel'><b>{src_name}</b> → {rel} → <b>{tgt_name}</b></div>",
@@ -3898,8 +3967,8 @@ def readable_relationships(df, entity_id):
             current_entity_id=entity_id,
             source_name=src_name,
             target_name=tgt_name,
-            source_type=str(r.get("Source Type","")).strip(),
-            target_type=str(r.get("Target Type","")).strip(),
+            source_type=src_type,
+            target_type=tgt_type,
         )
 
 def show_named_list(df, title_col, subtitle_cols=None, source_col="Source URL", max_items=100):
@@ -4673,16 +4742,10 @@ def render_company_profile(entity_id, entity_name):
             for _i,(_, _rr) in enumerate(_rdf.iterrows(),1):
                 _sid=str(_rr.get("Source Entity") or f"s{_i}")
                 _tid=str(_rr.get("Target Entity") or f"t{_i}")
-                _sraw=str(_rr.get("Source") or "").strip()
-                _traw=str(_rr.get("Target") or "").strip()
-                _sname=label(_sid) if (
-                    not _sraw or _sraw == _sid or
-                    _sraw.startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","PORT_","TERM_"))
-                ) else _sraw
-                _tname=label(_tid) if (
-                    not _traw or _traw == _tid or
-                    _traw.startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","PORT_","TERM_"))
-                ) else _traw
+                _stype=str(_rr.get("Source Type") or "").strip()
+                _ttype=str(_rr.get("Target Type") or "").strip()
+                _sname=relationship_endpoint_label(_sid,_stype)
+                _tname=relationship_endpoint_label(_tid,_ttype)
                 _rel=pretty_relationship(_rr.get("Relationship","related_to"))
                 _sn="n"+hashlib.sha1(("s|"+_sid).encode("utf-8")).hexdigest()[:12]
                 _tn="n"+hashlib.sha1(("t|"+_tid).encode("utf-8")).hexdigest()[:12]
@@ -5116,7 +5179,9 @@ def render_relationship_actions(
         if not eid or eid in seen or (current_entity_id and eid==str(current_entity_id)):
             continue
         seen.add(eid)
-        name=str(resolved_name or "").strip() or label(eid)
+        # Always resolve from canonical registries; a supplied migration-era
+        # resolved_name may itself still be an internal ID.
+        name=relationship_endpoint_label(eid,endpoint_type)
         page,key,route_id=object_route(endpoint_type or '',eid,name)
         if not page:
             continue
