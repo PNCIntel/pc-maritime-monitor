@@ -432,6 +432,74 @@ def intelligence_event_filter(df: pd.DataFrame) -> pd.DataFrame:
     override=blob.str.contains(hard_disruption,case=False,regex=True,na=False)
     return df[inc & (~corp | override)].copy()
 
+def exclude_horizon_calendar_events(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove forward-calendar records from operational/security datasets.
+
+    The raw event layer remains untouched for Horizon Calendar.  This boundary
+    prevents holidays, anniversaries, commemorations, elections, summits and
+    other scheduled calendar records from appearing as incidents elsewhere.
+    It deliberately does not exclude an event merely because the word
+    'scheduled' appears in a strike/closure description.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+
+    x = df.copy()
+    idx = x.index
+    classifier = pd.Series("", index=idx, dtype="string")
+
+    # Classification fields are weighted more heavily than free description,
+    # so a real incident that mentions a future date is not accidentally lost.
+    for c in [
+        "Event Nature", "Event Domain", "Event Family", "Event Type",
+        "Event Temporality", "Event Phase", "Event Category",
+        "Event Subcategory", "Mode", "Title"
+    ]:
+        if c in x.columns:
+            classifier = classifier.str.cat(
+                x[c].fillna("").astype(str), sep=" "
+            )
+
+    # Pull only classification-like metadata keys, not the whole metadata blob.
+    if "Metadata" in x.columns:
+        def _meta_class(v):
+            if not isinstance(v, dict):
+                return ""
+            keys = [
+                "story_type", "event_temporality", "temporality",
+                "event_phase", "phase", "event_category", "category",
+                "calendar_type", "horizon_type"
+            ]
+            return " ".join(str(v.get(k, "")) for k in keys)
+        classifier = classifier.str.cat(
+            x["Metadata"].map(_meta_class).astype("string"), sep=" "
+        )
+
+    horizon_pat = (
+        r"\banniversar(?:y|ies)?\b|"
+        r"\bnational holiday\b|\bpublic holiday\b|\bbank holiday\b|"
+        r"\bcommemorat(?:ion|ive)\b|\bindependence day\b|\bvictory day\b|"
+        r"\bmemorial day\b|\breform day\b|\bfestival\b|"
+        r"\belection\b|\breferendum\b|\bsummit\b|\bconference\b|"
+        r"\bgrand prix\b|\bsporting event\b|\bgames\b|"
+        r"\bhorizon calendar\b|\bforward calendar\b|\bcalendar event\b"
+    )
+    is_horizon = classifier.str.contains(
+        horizon_pat, case=False, regex=True, na=False
+    )
+
+    # Explicit event_type values used by the Horizon loads.
+    if "Event Type" in x.columns:
+        et = text_col(x, "Event Type").str.casefold().str.strip()
+        is_horizon |= et.isin({
+            "anniversary", "holiday", "public_holiday", "national_holiday",
+            "commemoration", "election", "referendum", "summit",
+            "conference", "festival", "sporting_event", "calendar_event"
+        })
+
+    return x[~is_horizon].copy()
+
+
 def clean_display_text(v):
     """Clean transport/database formatting before anything reaches the UI."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
@@ -946,6 +1014,7 @@ def _canonical_db_vessels():
 # Core canonical datasets
 companies = xl("01_core_entities.xlsx", "Companies")
 ports = xl("02_maritime.xlsx", "Ports")
+port_terminals = xl("02_maritime.xlsx", "Port Terminals")
 _legacy_vessels = xl("02_maritime.xlsx", "Vessels")
 _db_vessels = _canonical_db_vessels()
 if not _db_vessels.empty:
@@ -990,7 +1059,9 @@ if not _db_events.empty:
     hazard_events_raw = _db_events
 else:
     hazard_events_raw = xl("13_events_hazards.xlsx", "Events")
-hazard_events = intelligence_event_filter(hazard_events_raw)
+hazard_events = exclude_horizon_calendar_events(
+    intelligence_event_filter(hazard_events_raw)
+)
 
 if not _db_event_locations.empty:
     event_locations = _db_event_locations
@@ -1072,7 +1143,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v3.5 event graph fixed · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
+st.sidebar.caption(f"v3.7 global horizon gate + disruption analytics · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -2763,6 +2834,134 @@ def horizon_events_frame(df=None):
     pat=r"scheduled|forecast|recurring|seasonal|upcoming|planned|election|referendum|anniversar|holiday|summit|conference|festival|sport|games|marathon|grand prix|exercise|deadline|monsoon|hurricane season|cyclone season"
     return out[blob.str.cat(meta,sep=" ").str.contains(pat,case=False,regex=True,na=False)].copy()
 
+def operational_latest_frame(df):
+    """Observed/current intelligence only. Scheduled horizon entries never lead Latest Intelligence."""
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+    out = df.copy()
+    hids = _horizon_id_set()
+    if hids and "Event ID" in out.columns:
+        out = out[~text_col(out, "Event ID").isin(hids)].copy()
+
+    # Also guard against horizon-like metadata that may not yet be exposed in a dedicated column.
+    blob = _event_text_blob(out)
+    horizon_like = (
+        r"\banniversar|\bnational holiday|\bpublic holiday|\belection\b|\breferendum\b|"
+        r"\bsummit\b|\bconference\b|\bsporting event\b|\bgrand prix\b|\bgames\b|"
+        r"\bseasonal\b|\bforecast\b|\bscheduled\b|\bupcoming\b"
+    )
+    out = out[~blob.str.contains(horizon_like, case=False, regex=True, na=False)].copy()
+
+    # Future-dated records should not appear as newest incident reporting.
+    if "Start Date" in out.columns:
+        d = pd.to_datetime(out["Start Date"], errors="coerce", utc=True).dt.tz_convert(None)
+        today_end = pd.Timestamp.utcnow().tz_localize(None).normalize() + pd.Timedelta(days=1)
+        out = out[d.isna() | (d < today_end)].copy()
+    return out
+
+def render_horizon_sidebar_compact(limit=4):
+    """Small forward-look panel for Operating Picture.
+
+    Shows the nearest upcoming Horizon dates from today onward.
+    Horizon items never replace observed/current incident reporting.
+    """
+    # Primary source: canonical horizon helper.
+    h = horizon_events_frame()
+
+    # Fallback: if the helper returns nothing because newer horizon columns
+    # have not yet propagated through the bridge, recover future calendar-like
+    # records directly from the raw event layer.
+    if h is None or h.empty:
+        src = hazard_events_raw.copy() if hazard_events_raw is not None else pd.DataFrame()
+        if not src.empty and "Start Date" in src.columns:
+            blob = _event_text_blob(src)
+            pat = (
+                r"anniversar|national holiday|public holiday|election|referendum|"
+                r"summit|conference|sport|grand prix|games|scheduled|forecast|"
+                r"seasonal|upcoming|holiday|commemoration"
+            )
+            h = src[blob.str.contains(pat, case=False, regex=True, na=False)].copy()
+        else:
+            h = pd.DataFrame()
+
+    if h is None or h.empty or "Start Date" not in h.columns:
+        st.markdown(
+            '<div class="pc-empty">No upcoming Horizon dates are currently available in the event layer.</div>',
+            unsafe_allow_html=True
+        )
+        if st.button("Open Horizon Calendar →", key="open_horizon_from_operating_empty", use_container_width=True):
+            st.session_state["pcintel_page"] = "Horizon Calendar"
+            st.rerun()
+        return
+
+    # Use the app/runtime date, normalize to date only, and keep all future dates.
+    h = h.copy()
+    h["_hdate"] = pd.to_datetime(h["Start Date"], errors="coerce", utc=True).dt.tz_convert(None)
+
+    today = pd.Timestamp.now().normalize()
+    upcoming = h[h["_hdate"].notna() & (h["_hdate"] >= today)].copy()
+
+    # If no future records are found, retain the nearest records that begin today
+    # or later according to their raw date string before declaring the panel empty.
+    if upcoming.empty:
+        raw_dates = pd.to_datetime(text_col(h, "Start Date"), errors="coerce")
+        upcoming = h[raw_dates.notna() & (raw_dates.dt.date >= today.date())].copy()
+        if not upcoming.empty:
+            upcoming["_hdate"] = pd.to_datetime(upcoming["Start Date"], errors="coerce")
+
+    if not upcoming.empty:
+        upcoming = upcoming.sort_values("_hdate", ascending=True, na_position="last")
+
+        # Remove obvious duplicates so the panel stays useful.
+        dedupe_cols = [c for c in ["Title", "Start Date", "Country / Countries", "Location"] if c in upcoming.columns]
+        if dedupe_cols:
+            upcoming = upcoming.drop_duplicates(subset=dedupe_cols)
+
+        upcoming = upcoming.head(int(limit))
+
+        for n, (_, r) in enumerate(upcoming.iterrows()):
+            dt = pd.to_datetime(r.get("Start Date"), errors="coerce")
+            date_label = dt.strftime("%d %b") if not pd.isna(dt) else ""
+            title = clean_display_text(r.get("Title", "Untitled event"))
+            typ = clean_display_text(
+                r.get("Event Type", "")
+                or r.get("Event Category", "")
+                or r.get("Event Family", "")
+            )
+            loc = clean_display_text(
+                r.get("Country / Countries", "")
+                or r.get("Location", "")
+            )
+
+            # Keep sidebar cards concise.
+            if len(title) > 70:
+                title = title[:67].rstrip() + "…"
+            if len(loc) > 50:
+                loc = loc[:47].rstrip() + "…"
+
+            st.markdown(
+                "<div class='pc-card' style='padding:.62rem .72rem;margin-bottom:.42rem'>"
+                f"<div class='pc-card-meta'>{html_lib.escape(date_label)}"
+                + (f" · {html_lib.escape(typ)}" if typ else "")
+                + "</div>"
+                f"<div class='pc-card-title' style='font-size:.88rem;line-height:1.25'>{html_lib.escape(title)}</div>"
+                + (f"<div class='pc-card-body' style='font-size:.76rem'>{html_lib.escape(loc)}</div>" if loc else "")
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+    else:
+        st.markdown(
+            '<div class="pc-empty">No upcoming Horizon dates found from today onward.</div>',
+            unsafe_allow_html=True
+        )
+
+    # Button always comes last.
+    if st.button("Open Horizon Calendar →", key="open_horizon_from_operating", use_container_width=True):
+        st.session_state["pcintel_page"] = "Horizon Calendar"
+        st.rerun()
+
+
+
 def _severity_rank(v):
     return {"CRITICAL":5,"SEVERE":4,"HIGH":3,"MODERATE":2,"MEDIUM":2,"LOW":1}.get(clean_display_text(v).upper(),0)
 
@@ -2894,25 +3093,31 @@ if page == "Operating Picture":
     pgsa = compliance_designations[text_col(compliance_designations, "Regime ID").eq("REGIME_PGSA")] if not compliance_designations.empty else compliance_designations
     marsec_feeds = source_feeds[text_col(source_feeds, "Default Event Families").str.contains("ground|collision|sar|pollution|casualty|maritime|fire|rescue", case=False, regex=True, na=False)] if not source_feeds.empty else source_feeds
 
-    section("Latest intelligence", "Latest intelligence", "Newest reporting and assessed incidents in the intelligence base — surfaced first, not buried in a register.")
-    latest = hazard_events.copy()
-    if not latest.empty:
-        if "Start Date" in latest.columns:
-            latest["_date"]=pd.to_datetime(latest["Start Date"],errors="coerce")
-            latest=latest.sort_values("_date",ascending=False,na_position="last")
-        latest_non_compliance=latest[~_is_compliance_watchlist_event(latest)].copy()
-        if latest_non_compliance.empty:
-            latest_non_compliance=latest
-        cols=st.columns(3)
-        for i,(_,r) in enumerate(latest_non_compliance.head(3).iterrows()):
-            with cols[i]:
-                event_card(r,key_prefix=f"latest_{i}")
-        if len(latest_non_compliance)>3:
-            with st.expander(f"More latest intelligence ({min(len(latest_non_compliance)-3,12)})",expanded=False):
-                for j,(_,r) in enumerate(latest_non_compliance.iloc[3:15].iterrows(),start=3):
-                    event_card(r,key_prefix=f"latest_more_{j}")
-    else:
-        st.markdown('<div class="pc-empty">No event records available.</div>', unsafe_allow_html=True)
+    latest_col, horizon_col = st.columns([2.7,1.0], gap="large")
+    with latest_col:
+        section("Latest intelligence", "Latest intelligence", "Newest observed reporting and assessed incidents — scheduled holidays, anniversaries and other horizon dates are excluded.")
+        latest = operational_latest_frame(hazard_events)
+        if not latest.empty:
+            if "Start Date" in latest.columns:
+                latest["_date"]=pd.to_datetime(latest["Start Date"],errors="coerce")
+                latest=latest.sort_values("_date",ascending=False,na_position="last")
+            latest_non_compliance=latest[~_is_compliance_watchlist_event(latest)].copy()
+            if latest_non_compliance.empty:
+                latest_non_compliance=latest
+            cols=st.columns(2)
+            for i,(_,r) in enumerate(latest_non_compliance.head(2).iterrows()):
+                with cols[i]:
+                    event_card(r,key_prefix=f"latest_{i}")
+            if len(latest_non_compliance)>2:
+                with st.expander(f"More latest intelligence ({min(len(latest_non_compliance)-2,10)})",expanded=False):
+                    for j,(_,r) in enumerate(latest_non_compliance.iloc[2:12].iterrows(),start=2):
+                        event_card(r,key_prefix=f"latest_more_{j}")
+        else:
+            st.markdown('<div class="pc-empty">No recent observed intelligence events available.</div>', unsafe_allow_html=True)
+
+    with horizon_col:
+        section("Forward look", "Important dates", "Selected dates from the Horizon Calendar. Open the calendar for the full detail and source trail.")
+        render_horizon_sidebar_compact(limit=4)
 
     # When the user explicitly opens an event/object, show the complete canonical
     # context immediately here. The close control in the drill-down returns to
@@ -2932,7 +3137,7 @@ if page == "Operating Picture":
     left, right = st.columns([1.55,1.0],gap="large")
     with left:
         section("01 · Immediate", "Priority operating picture", "What matters now — ranked by severity, recency and operational consequence.")
-        priority=ranked_operating_picture(hazard_events.copy(),5) if not hazard_events.empty else pd.DataFrame()
+        priority=ranked_operating_picture(operational_latest_frame(hazard_events),5) if not hazard_events.empty else pd.DataFrame()
         if not priority.empty:
             for j,(_,r) in enumerate(priority.iterrows()):
                 event_card(r,key_prefix=f"priority_{j}")
@@ -3505,115 +3710,385 @@ elif page == "Disruptions & Event Graph":
     section(
         "Operational datasets",
         "Disruptions & Event Graph",
-        "Cross-domain operational history tied back to canonical ports, companies, vessels, actors/groups and geography. Use this page to move from event counts to the connected trade-system objects affected."
+        "Operational disruption history tied to canonical ports, companies, vessels, actors/groups and geography. Calendar and Horizon records are excluded from this workspace."
     )
-    base_events=hazard_events.copy()
+
+    base_events = hazard_events.copy()
     if base_events.empty:
-        st.info("No canonical intelligence events are currently available.")
+        st.info("No canonical operational intelligence events are currently available.")
     else:
-        blob=(text_col(base_events,"Event Family")+" "+text_col(base_events,"Event Type")+" "+text_col(base_events,"Title")+" "+text_col(base_events,"Description")).str.casefold()
-        disruption_terms=r"disrupt|strike|lockout|closure|closed|fire|explosion|collision|allision|grounding|crane|storm|cyclone|weather|flood|blockade|protest|spill|outage|congestion|berth|terminal incident|port incident"
-        disruption_events=base_events[blob.str.contains(disruption_terms,regex=True,na=False)].copy()
-        smuggling_events=smuggling_events_frame()
-        disruption_ids=_event_ids(disruption_events); smuggling_ids=_event_ids(smuggling_events)
-        union_ids=disruption_ids|smuggling_ids
-        dataset_events=base_events[text_col(base_events,"Event ID").isin(union_ids)].copy() if union_ids else pd.DataFrame()
+        blob = (
+            text_col(base_events,"Event Family")+" "+
+            text_col(base_events,"Event Type")+" "+
+            text_col(base_events,"Title")+" "+
+            text_col(base_events,"Description")+" "+
+            text_col(base_events,"Operational Impact")
+        ).str.casefold()
 
-        f1,f2,f3=st.columns([1.2,1,1])
-        dataset_mode=f1.selectbox("Dataset",["All disruption + illicit events","Disruptions only","Smuggling / illicit only"],key="event_graph_dataset")
-        if dataset_mode=="Disruptions only": work=disruption_events.copy()
-        elif dataset_mode=="Smuggling / illicit only": work=smuggling_events.copy()
-        else: work=dataset_events.copy()
-        country_opts=["All"]+sorted([x for x in text_col(work,"Country / Countries").unique() if x])
-        country=f2.selectbox("Country / corridor",country_opts,key="event_graph_country")
-        sev_opts=["All"]+sorted([x for x in text_col(work,"Severity").unique() if x])
-        sev=f3.selectbox("Severity",sev_opts,key="event_graph_severity")
-        if country!="All": work=work[text_col(work,"Country / Countries").eq(country)]
-        if sev!="All": work=work[text_col(work,"Severity").eq(sev)]
+        disruption_terms = (
+            r"disrupt|strike|lockout|closure|closed|fire|explosion|collision|"
+            r"allision|grounding|crane|storm|cyclone|weather|flood|blockade|"
+            r"protest|spill|outage|congestion|berth|terminal incident|port incident|"
+            r"accident|infrastructure failure|power failure|cyber|ransomware"
+        )
+        disruption_events = base_events[
+            blob.str.contains(disruption_terms, regex=True, na=False)
+        ].copy()
+        smuggling_events = smuggling_events_frame(base_events)
 
-        alinks=_links_for_events(event_asset_links,work)
-        clinks=_links_for_events(event_company_links,work)
-        mlinks=_links_for_events(event_mobile_asset_links,work)
-        actor_work=event_actor_links[text_col(event_actor_links,"event_id").isin(_event_ids(work))].copy() if not event_actor_links.empty else pd.DataFrame()
+        disruption_ids = _event_ids(disruption_events)
+        smuggling_ids = _event_ids(smuggling_events)
+        union_ids = disruption_ids | smuggling_ids
+        dataset_events = (
+            base_events[text_col(base_events,"Event ID").isin(union_ids)].copy()
+            if union_ids else pd.DataFrame()
+        )
 
-        m1,m2,m3,m4,m5,m6=st.columns(6)
-        m1.metric("Events",len(work))
-        m2.metric("Ports / assets",alinks["Asset ID"].astype(str).nunique() if not alinks.empty and "Asset ID" in alinks.columns else 0)
-        m3.metric("Companies",clinks["Company ID"].astype(str).nunique() if not clinks.empty and "Company ID" in clinks.columns else 0)
-        m4.metric("Vessels",mlinks["Mobile Asset ID"].astype(str).nunique() if not mlinks.empty and "Mobile Asset ID" in mlinks.columns else 0)
-        m5.metric("Actors / groups",actor_work["actor_id"].astype(str).nunique() if not actor_work.empty else 0)
-        m6.metric("Countries",len({c for v in text_col(work,"Country / Countries") for c in _analytics_country_tokens(v)}))
+        # Dataset choice.
+        d1,d2,d3 = st.columns([1.35,1,1])
+        dataset_mode = d1.selectbox(
+            "Dataset",
+            ["Disruptions only","All disruption + illicit events","Smuggling / illicit only"],
+            index=0,
+            key="event_graph_dataset"
+        )
+        if dataset_mode == "Disruptions only":
+            work = disruption_events.copy()
+        elif dataset_mode == "Smuggling / illicit only":
+            work = smuggling_events.copy()
+        else:
+            work = dataset_events.copy()
 
-        tabs=st.tabs(["Overview","Disruptions","Smuggling","Ports & assets","Companies","Actors / groups","Countries & regions","Event graph"])
-        with tabs[0]:
-            adf=_analytics_prepare_events(work)
-            a,b=st.columns(2)
-            with a:
-                st.markdown("#### Events by region")
-                _analytics_render_chart(adf,"Bar","Region",top_n=15)
-            with b:
-                st.markdown("#### Events by type")
-                _analytics_render_chart(adf,"Bar","Event Type",top_n=15)
-            st.markdown("#### Monthly activity")
-            _analytics_render_chart(adf,"Line","Event Family",time_grain="Monthly",top_n=8)
-        with tabs[1]:
-            dv=disruption_events.copy()
-            if country!="All": dv=dv[text_col(dv,"Country / Countries").eq(country)]
-            show_df(dv,["Start Date","Country / Countries","Location","Event Family","Event Type","Severity","Title","Operational Impact"],600)
-        with tabs[2]:
-            sv=smuggling_events.copy()
-            if country!="All": sv=sv[text_col(sv,"Country / Countries").eq(country)]
-            show_df(sv,["Start Date","Country / Countries","Location","Event Type","Severity","Title","Operational Impact"],600)
-        with tabs[3]:
-            graph=_event_graph_join(event_asset_links,work,"Asset")
-            if graph.empty: st.info("No canonical port/asset relationships exist for this selection yet.")
-            else:
-                agg=graph.groupby(["Asset","Asset Type","Country"],dropna=False)["Event ID"].nunique().reset_index(name="Events").sort_values("Events",ascending=False)
-                show_df(agg,["Asset","Asset Type","Country","Events"],420)
-                if alt is not None and not agg.empty:
-                    st.altair_chart(alt.Chart(agg.head(25)).mark_bar().encode(x="Events:Q",y=alt.Y("Asset:N",sort="-x"),tooltip=["Asset","Asset Type","Country","Events"]),use_container_width=True)
-                st.markdown("#### Underlying linked events")
-                show_df(graph,["Asset","Relationship","Start Date","Event Type","Severity","Location","Title"],500)
-        with tabs[4]:
-            graph=_event_graph_join(event_company_links,work,"Company")
-            if graph.empty: st.info("No canonical company/entity relationships exist for this selection yet.")
-            else:
-                agg=graph.groupby(["Company","Entity Type","HQ Country"],dropna=False)["Event ID"].nunique().reset_index(name="Events").sort_values("Events",ascending=False)
-                show_df(agg,["Company","Entity Type","HQ Country","Events"],420)
-                show_df(graph,["Company","Relationship","Start Date","Event Type","Severity","Location","Title"],500)
-        with tabs[5]:
-            if actor_work.empty or actor_directory.empty:
-                st.info("No canonical actor/group relationships exist for this selection yet.")
-            else:
-                ad=actor_directory[[c for c in ["actor_id","canonical_name","actor_class","actor_subtype","primary_country"] if c in actor_directory.columns]].copy()
-                x=actor_work.merge(ad,on="actor_id",how="left")
-                agg=x.groupby(["canonical_name","actor_class","actor_subtype","primary_country"],dropna=False)["event_id"].nunique().reset_index(name="Events").sort_values("Events",ascending=False)
-                agg=agg.rename(columns={"canonical_name":"Actor / Group","actor_class":"Class","actor_subtype":"Subtype","primary_country":"Country"})
-                show_df(agg,["Actor / Group","Class","Subtype","Country","Events"],450)
-                if alt is not None and not agg.empty:
-                    st.altair_chart(alt.Chart(agg.head(20)).mark_bar().encode(x="Events:Q",y=alt.Y("Actor / Group:N",sort="-x"),tooltip=["Actor / Group","Class","Subtype","Country","Events"]),use_container_width=True)
-        with tabs[6]:
-            adf=_analytics_prepare_events(work)
-            a,b=st.columns(2)
-            with a: _analytics_render_chart(adf,"Bar","Region",top_n=20)
-            with b: _analytics_render_chart(adf,"Bar","Country",top_n=25)
-            st.markdown("#### Region / country breakdown")
-            show_df(_analytics_breakdown(adf,"Region"),["Region","Count","% of breakdown","Critical / Severe","High","Medium","Low"],340)
-        with tabs[7]:
-            detail=work.copy()
-            if "Start Date" in detail.columns:
-                detail["_d"]=pd.to_datetime(detail["Start Date"],errors="coerce")
-                detail=detail.sort_values("_d",ascending=False,na_position="last")
-            detail=detail.reset_index(drop=True)
-            if detail.empty:
-                st.info("No matching events.")
-            else:
-                pick=st.selectbox("Select event",range(len(detail)),format_func=lambda i:f"{str(detail.iloc[i].get('Start Date',''))[:10]} · {clean_display_text(detail.iloc[i].get('Title',''))}",key="dataset_event_graph_pick")
-                row=detail.iloc[pick]; eid=clean_display_text(row.get("Event ID",""))
-                event_card(row,key_prefix=f"dataset_graph_{eid}")
-                if eid:
-                    render_connected_context(eid)
+        adf = _analytics_prepare_events(work)
+        if adf.empty:
+            st.info("No events match this dataset.")
+        else:
+            # Time dimensions used for filtering and charts.
+            adf["_year"] = adf["_date"].dt.year.astype("Int64").astype("string")
+            adf["_month_num"] = adf["_date"].dt.month.astype("Int64")
+            adf["_month"] = adf["_date"].dt.strftime("%b")
+            adf["_year_month"] = adf["_date"].dt.to_period("M").astype("string")
 
+            years = ["All"] + sorted(
+                [x for x in adf["_year"].dropna().astype(str).unique() if x and x != "<NA>"],
+                reverse=True
+            )
+            year = d2.selectbox("Year", years, key="event_graph_year")
+            if year != "All":
+                adf = adf[adf["_year"].eq(year)].copy()
+
+            month_order = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+            months_present = set(adf["_month"].dropna().astype(str))
+            months = ["All"] + [m for m in month_order if m in months_present]
+            month = d3.selectbox("Month", months, key="event_graph_month")
+            if month != "All":
+                adf = adf[adf["_month"].eq(month)].copy()
+
+            # Geography and severity dimensions.
+            g1,g2,g3 = st.columns(3)
+            regions = sorted({
+                r for rs in adf.get("_regions", pd.Series(dtype=object))
+                for r in (rs if isinstance(rs,list) else [])
+                if r and r != "Unspecified"
+            })
+            region = g1.selectbox("Region", ["All"]+regions, key="event_graph_region")
+            if region != "All":
+                adf = adf[
+                    adf["_regions"].map(
+                        lambda rs: region in rs if isinstance(rs,list) else False
+                    )
+                ].copy()
+
+            countries = sorted({
+                c for cs in adf.get("_countries", pd.Series(dtype=object))
+                for c in (cs if isinstance(cs,list) else [])
+                if c and c != "Unspecified"
+            })
+            country = g2.selectbox("Country", ["All"]+countries, key="event_graph_country")
+            if country != "All":
+                adf = adf[
+                    adf["_countries"].map(
+                        lambda cs: country in cs if isinstance(cs,list) else False
+                    )
+                ].copy()
+
+            severities = sorted([
+                x for x in text_col(adf,"Severity").unique()
+                if clean_display_text(x)
+            ])
+            sev = g3.selectbox("Severity", ["All"]+severities, key="event_graph_severity")
+            if sev != "All":
+                adf = adf[text_col(adf,"Severity").eq(sev)].copy()
+
+            # Return to the canonical event-shaped frame for graph joins.
+            ids = _event_ids(adf)
+            work = work[text_col(work,"Event ID").isin(ids)].copy() if ids else pd.DataFrame()
+
+            alinks = _links_for_events(event_asset_links, work)
+            clinks = _links_for_events(event_company_links, work)
+            mlinks = _links_for_events(event_mobile_asset_links, work)
+            actor_work = (
+                event_actor_links[
+                    text_col(event_actor_links,"event_id").isin(_event_ids(work))
+                ].copy()
+                if not event_actor_links.empty else pd.DataFrame()
+            )
+
+            m1,m2,m3,m4,m5,m6 = st.columns(6)
+            m1.metric("Events", len(work))
+            m2.metric("Ports / assets", alinks["Asset ID"].astype(str).nunique() if not alinks.empty and "Asset ID" in alinks.columns else 0)
+            m3.metric("Companies", clinks["Company ID"].astype(str).nunique() if not clinks.empty and "Company ID" in clinks.columns else 0)
+            m4.metric("Vessels", mlinks["Mobile Asset ID"].astype(str).nunique() if not mlinks.empty and "Mobile Asset ID" in mlinks.columns else 0)
+            m5.metric("Actors / groups", actor_work["actor_id"].astype(str).nunique() if not actor_work.empty else 0)
+            m6.metric("Countries", len({
+                c for cs in adf.get("_countries", pd.Series(dtype=object))
+                for c in (cs if isinstance(cs,list) else []) if c
+            }))
+
+            tabs = st.tabs([
+                "Overview","Disruptions","Smuggling","Ports & assets",
+                "Companies","Actors / groups","Countries & regions","Event graph"
+            ])
+
+            with tabs[0]:
+                st.markdown("### Disruption picture")
+
+                # Year / month graphics.
+                a,b = st.columns(2)
+                with a:
+                    st.markdown("#### Events by year")
+                    y = (
+                        adf[adf["_year"].notna()]
+                        .groupby("_year")["Event ID"].nunique()
+                        .reset_index(name="Events")
+                        .rename(columns={"_year":"Year"})
+                        .sort_values("Year")
+                    )
+                    if not y.empty:
+                        if alt is not None:
+                            st.altair_chart(
+                                alt.Chart(y).mark_bar().encode(
+                                    x=alt.X("Year:N", sort="ascending"),
+                                    y="Events:Q",
+                                    tooltip=["Year","Events"]
+                                ),
+                                use_container_width=True
+                            )
+                        else:
+                            st.bar_chart(y.set_index("Year")["Events"])
+
+                with b:
+                    st.markdown("#### Events by month")
+                    mm = (
+                        adf[adf["_month"].notna()]
+                        .groupby(["_month_num","_month"])["Event ID"].nunique()
+                        .reset_index(name="Events")
+                        .sort_values("_month_num")
+                        .rename(columns={"_month":"Month"})
+                    )
+                    if not mm.empty:
+                        if alt is not None:
+                            st.altair_chart(
+                                alt.Chart(mm).mark_bar().encode(
+                                    x=alt.X("Month:N", sort=month_order),
+                                    y="Events:Q",
+                                    tooltip=["Month","Events"]
+                                ),
+                                use_container_width=True
+                            )
+                        else:
+                            st.bar_chart(mm.set_index("Month")["Events"])
+
+                a,b = st.columns(2)
+                with a:
+                    st.markdown("#### Events by region")
+                    _analytics_render_chart(adf,"Bar","Region",top_n=15)
+                with b:
+                    st.markdown("#### Events by country")
+                    _analytics_render_chart(adf,"Bar","Country",top_n=20)
+
+                a,b = st.columns(2)
+                with a:
+                    st.markdown("#### Events by type")
+                    _analytics_render_chart(adf,"Bar","Event Type",top_n=15)
+                with b:
+                    st.markdown("#### Events by severity")
+                    _analytics_render_chart(adf,"Bar","Severity",top_n=10)
+
+                st.markdown("#### Monthly trend")
+                _analytics_render_chart(
+                    adf,"Line","Event Family",
+                    time_grain="Monthly",top_n=8
+                )
+
+            with tabs[1]:
+                dv = disruption_events.copy()
+                if ids:
+                    dv = dv[text_col(dv,"Event ID").isin(ids)].copy()
+                show_df(
+                    dv,
+                    ["Start Date","Country / Countries","Location","Event Family",
+                     "Event Type","Severity","Title","Operational Impact"],
+                    600
+                )
+                if not dv.empty:
+                    st.download_button(
+                        "Download filtered disruptions (CSV)",
+                        dv.to_csv(index=False).encode("utf-8"),
+                        file_name="pc-disruptions-filtered.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key="disruption_download"
+                    )
+
+            with tabs[2]:
+                sv = smuggling_events.copy()
+                if ids:
+                    sv = sv[text_col(sv,"Event ID").isin(ids)].copy()
+                show_df(
+                    sv,
+                    ["Start Date","Country / Countries","Location","Event Type",
+                     "Severity","Title","Operational Impact"],
+                    600
+                )
+
+            with tabs[3]:
+                graph = _event_graph_join(event_asset_links,work,"Asset")
+                if graph.empty:
+                    st.info("No canonical port/asset relationships exist for this selection yet.")
+                else:
+                    agg = (
+                        graph.groupby(["Asset","Asset Type","Country"],dropna=False)["Event ID"]
+                        .nunique().reset_index(name="Events")
+                        .sort_values("Events",ascending=False)
+                    )
+                    show_df(agg,["Asset","Asset Type","Country","Events"],420)
+                    if alt is not None and not agg.empty:
+                        st.altair_chart(
+                            alt.Chart(agg.head(25)).mark_bar().encode(
+                                x="Events:Q",
+                                y=alt.Y("Asset:N",sort="-x"),
+                                tooltip=["Asset","Asset Type","Country","Events"]
+                            ),
+                            use_container_width=True
+                        )
+                    st.markdown("#### Underlying linked events")
+                    show_df(
+                        graph,
+                        ["Asset","Relationship","Start Date","Event Type",
+                         "Severity","Location","Title"],
+                        500
+                    )
+
+            with tabs[4]:
+                graph = _event_graph_join(event_company_links,work,"Company")
+                if graph.empty:
+                    st.info("No canonical company/entity relationships exist for this selection yet.")
+                else:
+                    agg = (
+                        graph.groupby(["Company","Entity Type","HQ Country"],dropna=False)["Event ID"]
+                        .nunique().reset_index(name="Events")
+                        .sort_values("Events",ascending=False)
+                    )
+                    show_df(agg,["Company","Entity Type","HQ Country","Events"],420)
+                    show_df(
+                        graph,
+                        ["Company","Relationship","Start Date","Event Type",
+                         "Severity","Location","Title"],
+                        500
+                    )
+
+            with tabs[5]:
+                if actor_work.empty or actor_directory.empty:
+                    st.info("No canonical actor/group relationships exist for this selection yet.")
+                else:
+                    ad = actor_directory[
+                        [c for c in [
+                            "actor_id","canonical_name","actor_class",
+                            "actor_subtype","primary_country"
+                        ] if c in actor_directory.columns]
+                    ].copy()
+                    x = actor_work.merge(ad,on="actor_id",how="left")
+                    agg = (
+                        x.groupby(
+                            ["canonical_name","actor_class","actor_subtype","primary_country"],
+                            dropna=False
+                        )["event_id"].nunique()
+                        .reset_index(name="Events")
+                        .sort_values("Events",ascending=False)
+                        .rename(columns={
+                            "canonical_name":"Actor / Group",
+                            "actor_class":"Class",
+                            "actor_subtype":"Subtype",
+                            "primary_country":"Country"
+                        })
+                    )
+                    show_df(
+                        agg,
+                        ["Actor / Group","Class","Subtype","Country","Events"],
+                        450
+                    )
+                    if alt is not None and not agg.empty:
+                        st.altair_chart(
+                            alt.Chart(agg.head(20)).mark_bar().encode(
+                                x="Events:Q",
+                                y=alt.Y("Actor / Group:N",sort="-x"),
+                                tooltip=["Actor / Group","Class","Subtype","Country","Events"]
+                            ),
+                            use_container_width=True
+                        )
+
+            with tabs[6]:
+                a,b = st.columns(2)
+                with a:
+                    _analytics_render_chart(adf,"Bar","Region",top_n=20)
+                with b:
+                    _analytics_render_chart(adf,"Bar","Country",top_n=25)
+                st.markdown("#### Region breakdown")
+                show_df(
+                    _analytics_breakdown(adf,"Region"),
+                    ["Region","Count","% of breakdown",
+                     "Critical / Severe","High","Medium","Low"],
+                    340
+                )
+                st.markdown("#### Country breakdown")
+                show_df(
+                    _analytics_breakdown(adf,"Country"),
+                    ["Country","Count","% of breakdown",
+                     "Critical / Severe","High","Medium","Low"],
+                    420
+                )
+
+            with tabs[7]:
+                detail = work.copy()
+                if "Start Date" in detail.columns:
+                    detail["_d"] = pd.to_datetime(detail["Start Date"],errors="coerce")
+                    detail = detail.sort_values("_d",ascending=False,na_position="last")
+                detail = detail.reset_index(drop=True)
+                if detail.empty:
+                    st.info("No matching events.")
+                else:
+                    pick = st.selectbox(
+                        "Event",
+                        range(len(detail)),
+                        format_func=lambda i: (
+                            f"{str(detail.iloc[i].get('Start Date',''))[:10]} · "
+                            f"{clean_display_text(detail.iloc[i].get('Title',''))}"
+                        ),
+                        key="event_graph_pick"
+                    )
+                    er = detail.iloc[pick]
+                    eid = str(er.get("Event ID","") or "")
+                    left,right = st.columns([1.15,1])
+                    with left:
+                        event_card(er,key_prefix=f"event_graph_{eid}")
+                    with right:
+                        section(
+                            "Connected objects",
+                            "Event relationship graph",
+                            "Canonical relationships and derived owner/operator exposure."
+                        )
+                        render_connected_context(eid)
 
 elif page == "Smuggling & Illicit Trade":
     section(
@@ -4727,10 +5202,12 @@ elif page == "Ports & Infrastructure":
 
             pid = str(pr.iloc[0].get("Port ID","")) if not pr.empty else ""
 
-            linked_terminals = (
-                port_terminals[text_col(port_terminals,"Port ID").eq(pid)].copy()
-                if pid and not port_terminals.empty else pd.DataFrame()
-            )
+            linked_terminals = pd.DataFrame()
+            if pid and isinstance(port_terminals, pd.DataFrame) and not port_terminals.empty:
+                if "Port ID" in port_terminals.columns:
+                    linked_terminals = port_terminals[
+                        text_col(port_terminals,"Port ID").eq(pid)
+                    ].copy()
             if not linked_terminals.empty:
                 st.markdown("**Linked terminals**")
                 show_df(
@@ -4781,18 +5258,153 @@ elif page == "Ports & Infrastructure":
 
     with tabs[4]:
         st.markdown("### Port disruption analytics")
-        st.caption("Charts resolve back to the same canonical event records and port/asset links shown elsewhere on this page.")
-        adf=_analytics_prepare_events(pe)
-        a,b=st.columns(2)
-        with a: _analytics_render_chart(adf,"Bar","Country",top_n=20)
-        with b: _analytics_render_chart(adf,"Bar","Event Type",top_n=20)
-        st.markdown("#### Disruptions over time")
-        _analytics_render_chart(adf,"Line","Event Family",time_grain="Monthly",top_n=8)
-        graph=_event_graph_join(infra_links,pe,"Asset")
-        if not graph.empty:
-            agg=graph.groupby(["Asset","Country"],dropna=False)["Event ID"].nunique().reset_index(name="Events").sort_values("Events",ascending=False)
-            st.markdown("#### Most frequently affected ports / assets")
-            show_df(agg,["Asset","Country","Events"],340)
+        st.caption(
+            "Operational events only. Horizon/calendar records are excluded. "
+            "Filter and graph port disruption by year, month, region and country."
+        )
+
+        padf = _analytics_prepare_events(pe)
+        if padf.empty:
+            st.info("No port/infrastructure disruption events are currently available.")
+        else:
+            padf["_year"] = padf["_date"].dt.year.astype("Int64").astype("string")
+            padf["_month_num"] = padf["_date"].dt.month.astype("Int64")
+            padf["_month"] = padf["_date"].dt.strftime("%b")
+
+            f1,f2,f3,f4 = st.columns(4)
+            years = ["All"] + sorted(
+                [x for x in padf["_year"].dropna().astype(str).unique() if x and x != "<NA>"],
+                reverse=True
+            )
+            py = f1.selectbox("Year", years, key="port_disruption_year")
+            if py != "All":
+                padf = padf[padf["_year"].eq(py)].copy()
+
+            month_order = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+            month_present = set(padf["_month"].dropna().astype(str))
+            pm = f2.selectbox(
+                "Month",
+                ["All"]+[m for m in month_order if m in month_present],
+                key="port_disruption_month"
+            )
+            if pm != "All":
+                padf = padf[padf["_month"].eq(pm)].copy()
+
+            regions = sorted({
+                r for rs in padf.get("_regions",pd.Series(dtype=object))
+                for r in (rs if isinstance(rs,list) else [])
+                if r and r != "Unspecified"
+            })
+            pr = f3.selectbox("Region", ["All"]+regions, key="port_disruption_region")
+            if pr != "All":
+                padf = padf[
+                    padf["_regions"].map(lambda rs: pr in rs if isinstance(rs,list) else False)
+                ].copy()
+
+            countries = sorted({
+                c for cs in padf.get("_countries",pd.Series(dtype=object))
+                for c in (cs if isinstance(cs,list) else [])
+                if c and c != "Unspecified"
+            })
+            pc = f4.selectbox("Country", ["All"]+countries, key="port_disruption_country")
+            if pc != "All":
+                padf = padf[
+                    padf["_countries"].map(lambda cs: pc in cs if isinstance(cs,list) else False)
+                ].copy()
+
+            pids = _event_ids(padf)
+            pview = pe[text_col(pe,"Event ID").isin(pids)].copy() if pids else pd.DataFrame()
+
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("Matching disruptions", len(pview))
+            c2.metric("Countries", len({
+                c for cs in padf.get("_countries",pd.Series(dtype=object))
+                for c in (cs if isinstance(cs,list) else []) if c
+            }))
+            c3.metric("Regions", len({
+                r for rs in padf.get("_regions",pd.Series(dtype=object))
+                for r in (rs if isinstance(rs,list) else []) if r
+            }))
+            c4.metric(
+                "Linked assets",
+                _links_for_events(infra_links,pview)["Asset ID"].astype(str).nunique()
+                if not _links_for_events(infra_links,pview).empty and
+                   "Asset ID" in _links_for_events(infra_links,pview).columns else 0
+            )
+
+            a,b = st.columns(2)
+            with a:
+                st.markdown("#### By year")
+                yy = (
+                    padf[padf["_year"].notna()]
+                    .groupby("_year")["Event ID"].nunique()
+                    .reset_index(name="Events")
+                    .rename(columns={"_year":"Year"})
+                    .sort_values("Year")
+                )
+                if not yy.empty:
+                    if alt is not None:
+                        st.altair_chart(
+                            alt.Chart(yy).mark_bar().encode(
+                                x=alt.X("Year:N",sort="ascending"),
+                                y="Events:Q",tooltip=["Year","Events"]
+                            ),
+                            use_container_width=True
+                        )
+                    else:
+                        st.bar_chart(yy.set_index("Year")["Events"])
+            with b:
+                st.markdown("#### By month")
+                mm = (
+                    padf[padf["_month"].notna()]
+                    .groupby(["_month_num","_month"])["Event ID"].nunique()
+                    .reset_index(name="Events")
+                    .sort_values("_month_num")
+                    .rename(columns={"_month":"Month"})
+                )
+                if not mm.empty:
+                    if alt is not None:
+                        st.altair_chart(
+                            alt.Chart(mm).mark_bar().encode(
+                                x=alt.X("Month:N",sort=month_order),
+                                y="Events:Q",tooltip=["Month","Events"]
+                            ),
+                            use_container_width=True
+                        )
+                    else:
+                        st.bar_chart(mm.set_index("Month")["Events"])
+
+            a,b = st.columns(2)
+            with a:
+                st.markdown("#### By region")
+                _analytics_render_chart(padf,"Bar","Region",top_n=20)
+            with b:
+                st.markdown("#### By country")
+                _analytics_render_chart(padf,"Bar","Country",top_n=25)
+
+            a,b = st.columns(2)
+            with a:
+                st.markdown("#### By event type")
+                _analytics_render_chart(padf,"Bar","Event Type",top_n=20)
+            with b:
+                st.markdown("#### By severity")
+                _analytics_render_chart(padf,"Bar","Severity",top_n=10)
+
+            st.markdown("#### Monthly trend")
+            _analytics_render_chart(
+                padf,"Line","Event Family",
+                time_grain="Monthly",top_n=8
+            )
+
+            graph = _event_graph_join(infra_links,pview,"Asset")
+            if not graph.empty:
+                agg = (
+                    graph.groupby(["Asset","Country"],dropna=False)["Event ID"]
+                    .nunique().reset_index(name="Events")
+                    .sort_values("Events",ascending=False)
+                )
+                st.markdown("#### Most frequently affected ports / assets")
+                show_df(agg,["Asset","Country","Events"],340)
 
     with tabs[5]:
         st.markdown("### Smuggling and illicit-trade events tied to ports")
