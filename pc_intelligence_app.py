@@ -8,6 +8,7 @@ import zlib
 import textwrap
 import pandas as pd
 import re
+import html as html_lib
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 try:
@@ -2610,38 +2611,103 @@ def _smuggling_actor_counts(view):
     )
 
 
-def render_horizon_sidebar_compact(limit=6):
-    """Small forward-look panel for Operating Picture; never replaces incident reporting."""
+def render_horizon_sidebar_compact(limit=4):
+    """Small forward-look panel for Operating Picture.
+
+    Shows the nearest upcoming Horizon dates from today onward.
+    Horizon items never replace observed/current incident reporting.
+    """
+    # Primary source: canonical horizon helper.
     h = horizon_events_frame()
+
+    # Fallback: if the helper returns nothing because newer horizon columns
+    # have not yet propagated through the bridge, recover future calendar-like
+    # records directly from the raw event layer.
+    if h is None or h.empty:
+        src = hazard_events_raw.copy() if hazard_events_raw is not None else pd.DataFrame()
+        if not src.empty and "Start Date" in src.columns:
+            blob = _event_text_blob(src)
+            pat = (
+                r"anniversar|national holiday|public holiday|election|referendum|"
+                r"summit|conference|sport|grand prix|games|scheduled|forecast|"
+                r"seasonal|upcoming|holiday|commemoration"
+            )
+            h = src[blob.str.contains(pat, case=False, regex=True, na=False)].copy()
+        else:
+            h = pd.DataFrame()
+
     if h is None or h.empty or "Start Date" not in h.columns:
-        st.markdown('<div class="pc-empty">No upcoming horizon dates.</div>', unsafe_allow_html=True)
-        return
-
-    dates = pd.to_datetime(h["Start Date"], errors="coerce", utc=True).dt.tz_convert(None)
-    today = pd.Timestamp.utcnow().tz_localize(None).normalize()
-    upcoming = h[(dates >= today) & (dates <= today + pd.Timedelta(days=30))].copy()
-    if upcoming.empty:
-        st.markdown('<div class="pc-empty">No material dates in the next 30 days.</div>', unsafe_allow_html=True)
-        return
-
-    upcoming["_hdate"] = pd.to_datetime(upcoming["Start Date"], errors="coerce", utc=True).dt.tz_convert(None)
-    upcoming = upcoming.sort_values("_hdate", ascending=True).head(limit)
-
-    for _, r in upcoming.iterrows():
-        dt = pd.to_datetime(r.get("Start Date"), errors="coerce")
-        date_label = dt.strftime("%d %b") if not pd.isna(dt) else ""
-        title = clean_display_text(r.get("Title",""))
-        typ = clean_display_text(r.get("Event Type","") or r.get("Event Category",""))
-        loc = clean_display_text(r.get("Country / Countries","") or r.get("Location",""))
         st.markdown(
-            "<div class='pc-card' style='padding:.65rem .75rem;margin-bottom:.45rem'>"
-            f"<div class='pc-card-meta'>{date_label} · {html_lib.escape(typ)}</div>"
-            f"<div class='pc-card-title' style='font-size:.90rem'>{html_lib.escape(title)}</div>"
-            f"<div class='pc-card-body' style='font-size:.78rem'>{html_lib.escape(loc)}</div>"
-            "</div>",
+            '<div class="pc-empty">No upcoming Horizon dates are currently available in the event layer.</div>',
+            unsafe_allow_html=True
+        )
+        if st.button("Open Horizon Calendar →", key="open_horizon_from_operating_empty", use_container_width=True):
+            st.session_state["pcintel_page"] = "Horizon Calendar"
+            st.rerun()
+        return
+
+    # Use the app/runtime date, normalize to date only, and keep all future dates.
+    h = h.copy()
+    h["_hdate"] = pd.to_datetime(h["Start Date"], errors="coerce", utc=True).dt.tz_convert(None)
+
+    today = pd.Timestamp.now().normalize()
+    upcoming = h[h["_hdate"].notna() & (h["_hdate"] >= today)].copy()
+
+    # If no future records are found, retain the nearest records that begin today
+    # or later according to their raw date string before declaring the panel empty.
+    if upcoming.empty:
+        raw_dates = pd.to_datetime(text_col(h, "Start Date"), errors="coerce")
+        upcoming = h[raw_dates.notna() & (raw_dates.dt.date >= today.date())].copy()
+        if not upcoming.empty:
+            upcoming["_hdate"] = pd.to_datetime(upcoming["Start Date"], errors="coerce")
+
+    if not upcoming.empty:
+        upcoming = upcoming.sort_values("_hdate", ascending=True, na_position="last")
+
+        # Remove obvious duplicates so the panel stays useful.
+        dedupe_cols = [c for c in ["Title", "Start Date", "Country / Countries", "Location"] if c in upcoming.columns]
+        if dedupe_cols:
+            upcoming = upcoming.drop_duplicates(subset=dedupe_cols)
+
+        upcoming = upcoming.head(int(limit))
+
+        for n, (_, r) in enumerate(upcoming.iterrows()):
+            dt = pd.to_datetime(r.get("Start Date"), errors="coerce")
+            date_label = dt.strftime("%d %b") if not pd.isna(dt) else ""
+            title = clean_display_text(r.get("Title", "Untitled event"))
+            typ = clean_display_text(
+                r.get("Event Type", "")
+                or r.get("Event Category", "")
+                or r.get("Event Family", "")
+            )
+            loc = clean_display_text(
+                r.get("Country / Countries", "")
+                or r.get("Location", "")
+            )
+
+            # Keep sidebar cards concise.
+            if len(title) > 70:
+                title = title[:67].rstrip() + "…"
+            if len(loc) > 50:
+                loc = loc[:47].rstrip() + "…"
+
+            st.markdown(
+                "<div class='pc-card' style='padding:.62rem .72rem;margin-bottom:.42rem'>"
+                f"<div class='pc-card-meta'>{html_lib.escape(date_label)}"
+                + (f" · {html_lib.escape(typ)}" if typ else "")
+                + "</div>"
+                f"<div class='pc-card-title' style='font-size:.88rem;line-height:1.25'>{html_lib.escape(title)}</div>"
+                + (f"<div class='pc-card-body' style='font-size:.76rem'>{html_lib.escape(loc)}</div>" if loc else "")
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+    else:
+        st.markdown(
+            '<div class="pc-empty">No upcoming Horizon dates found from today onward.</div>',
             unsafe_allow_html=True
         )
 
+    # Button always comes last.
     if st.button("Open Horizon Calendar →", key="open_horizon_from_operating", use_container_width=True):
         st.session_state["pcintel_page"] = "Horizon Calendar"
         st.rerun()
@@ -3150,7 +3216,7 @@ if page == "Operating Picture":
 
     with horizon_col:
         section("Forward look", "Important dates", "Selected dates from the Horizon Calendar. Open the calendar for the full detail and source trail.")
-        render_horizon_sidebar_compact(limit=6)
+        render_horizon_sidebar_compact(limit=4)
 
     # When the user explicitly opens an event/object, show the complete canonical
     # context immediately here. The close control in the drill-down returns to
