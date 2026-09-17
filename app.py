@@ -1095,7 +1095,7 @@ def _canonical_db_event_frames():
         erows = pc_safe_rows(
             sb,
             "pc_events",
-            "event_id,start_date,end_date,event_nature,event_domain,event_family,event_type,severity,status,mode,countries,location,title,description,operational_impact,commercial_impact,confidence,trade_relevance,intelligence_relevance,trade_visible,intelligence_visible,alert_worthy,record_status,source_id,metadata",
+            "event_id,start_date,end_date,event_nature,event_domain,event_family,event_type,severity,status,mode,countries,location,title,description,operational_impact,commercial_impact,confidence,trade_relevance,intelligence_relevance,trade_visible,intelligence_visible,alert_worthy,record_status,source_id,metadata,event_temporality,event_phase,event_category,event_subcategory,all_day,date_precision,expected_attendance,expected_disruption,impact_probability,impact_horizon,baseline_condition,trigger_threshold,recurrence_rule,parent_event_id,calendar_year,verification_status,last_verified_at",
             5000,
             order="start_date",
         )
@@ -1135,6 +1135,23 @@ def _canonical_db_event_frames():
             "record_status":"Record Status",
             "source_id":"Source ID",
             "metadata":"Metadata",
+            "event_temporality":"Event Temporality",
+            "event_phase":"Event Phase",
+            "event_category":"Event Category",
+            "event_subcategory":"Event Subcategory",
+            "all_day":"All Day",
+            "date_precision":"Date Precision",
+            "expected_attendance":"Expected Attendance",
+            "expected_disruption":"Expected Disruption",
+            "impact_probability":"Impact Probability",
+            "impact_horizon":"Impact Horizon",
+            "baseline_condition":"Baseline Condition",
+            "trigger_threshold":"Trigger Threshold",
+            "recurrence_rule":"Recurrence Rule",
+            "parent_event_id":"Parent Event ID",
+            "calendar_year":"Calendar Year",
+            "verification_status":"Verification Status",
+            "last_verified_at":"Last Verified At",
         })
 
         if lrows:
@@ -7917,7 +7934,7 @@ _bst=backend_status()
 st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend")
 
 NAV_SECTIONS={
-    "OPERATING PICTURE":["Overview","Regional Maps","Port Activity","Alerts & Disruptions","Watch Areas"],
+    "OPERATING PICTURE":["Overview","Forward Calendar","Regional Maps","Port Activity","Alerts & Disruptions","Watch Areas"],
     "DOMAINS":["Maritime","Rail","Aviation","Trucking","Government & Security","Defence & Shipbuilding","Energy & Industry"],
     "TRADE NETWORK":["Ports & Terminals","Corridors & Systems","Companies","Vessels","Investments"],
     "MARKETS & POLICY":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Sanctions & Compliance","Trade Policy","Contracts"],
@@ -8987,6 +9004,27 @@ def canonical_pgsa_vessels_trade():
     return best_event,df
 
 
+
+def trade_horizon_events(df):
+    """Forward-looking records with plausible commercial/operational relevance."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    out=df.copy()
+    blob=pd.Series("",index=out.index,dtype="string")
+    for c in ["Event Nature","Event Domain","Event Family","Event Type","Event Temporality","Event Phase","Event Category","Event Subcategory","Title","Description","Operational Impact","Trade / Commercial Impact","Expected Disruption","Country / Countries","Location","Mode"]:
+        if c in out.columns:
+            blob=blob.str.cat(out[c].fillna("").astype(str),sep=" ")
+    meta=pd.Series("",index=out.index,dtype="string")
+    if "Metadata" in out.columns:
+        meta=out["Metadata"].apply(
+            lambda v:" ".join(str(v.get(k,"")) for k in ["event_temporality","temporality","event_phase","phase","event_category","category"] if isinstance(v,dict))
+        ).astype("string")
+    horizon_pat=r"scheduled|forecast|recurring|seasonal|upcoming|planned|election|referendum|holiday|summit|conference|festival|sport|games|exercise|deadline|strike|closure|monsoon|hurricane season|cyclone season"
+    commercial_pat=r"port|maritime|shipping|aviation|airport|flight|rail|road|truck|border|customs|energy|oil|gas|lng|trade|logistics|supply|business|bank|closure|congestion|delay|disruption|strike|holiday|sanction|tariff"
+    mask=blob.str.cat(meta,sep=" ").str.contains(horizon_pat,case=False,regex=True,na=False)
+    mask &= blob.str.contains(commercial_pat,case=False,regex=True,na=False)
+    return out[mask].copy()
+
 if page=="Overview":
     header("Trade System","Live news, markets, port activity, companies, infrastructure, fleets, contracts, investment and corridors across the global trade network.")
 
@@ -9039,6 +9077,36 @@ if page=="Overview":
             render_event_cards(events,6)
         else:
             st.info("No recent operational events.")
+
+
+elif page=="Forward Calendar":
+    header("Forward Calendar","Scheduled, seasonal and anticipated events with potential consequences for trade, logistics, transport, energy and business continuity.")
+    base_events=events.copy() if "events" in globals() and isinstance(events,pd.DataFrame) else pd.DataFrame()
+    fdf=trade_horizon_events(base_events)
+    if fdf.empty:
+        st.info("No forward-calendar events are currently classified in the shared event universe.")
+    else:
+        today=pd.Timestamp.utcnow().date()
+        c1,c2,c3=st.columns(3)
+        window=c1.selectbox("Window",["Next 7 days","Next 30 days","Next 90 days","All"],index=1,key="trade_horizon_window")
+        mode_values=["All"]+sorted([x for x in fdf.get("Mode",pd.Series(dtype=str)).fillna("").astype(str).unique() if x])
+        country_values=["All"]+sorted([x for x in fdf.get("Country / Countries",pd.Series(dtype=str)).fillna("").astype(str).unique() if x])
+        mode=c2.selectbox("Mode",mode_values,index=0,key="trade_horizon_mode")
+        country=c3.selectbox("Country / region",country_values,index=0,key="trade_horizon_country")
+        if "Start Date" in fdf.columns and window!="All":
+            d=pd.to_datetime(fdf["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+            days=int(re.search(r"\d+",window).group())
+            fdf=fdf[(d.dt.date>=today)&(d.dt.date<=today+pd.Timedelta(days=days))]
+        if mode!="All" and "Mode" in fdf.columns:
+            fdf=fdf[fdf["Mode"].fillna("").astype(str).eq(mode)]
+        if country!="All" and "Country / Countries" in fdf.columns:
+            fdf=fdf[fdf["Country / Countries"].fillna("").astype(str).eq(country)]
+        d1,d2,d3=st.columns(3)
+        d1.metric("Forward events",len(fdf))
+        d2.metric("Countries / regions",fdf.get("Country / Countries",pd.Series(dtype=str)).nunique())
+        d3.metric("Modes",fdf.get("Mode",pd.Series(dtype=str)).nunique())
+        cols=[c for c in ["Start Date","End Date","Country / Countries","Location","Event Family","Event Type","Title","Severity","Mode","Operational Impact","Trade / Commercial Impact","Confidence"] if c in fdf.columns]
+        display_df(fdf[cols] if cols else fdf,620)
 
 elif page=="Search":
     header("Search P&C","One query across companies, ports, shipyards, vessels, contracts, transactions, news, events and systems.")

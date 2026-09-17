@@ -8,6 +8,8 @@ import zlib
 import textwrap
 import pandas as pd
 import re
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 try:
     import altair as alt
 except Exception:
@@ -36,7 +38,7 @@ try:
 except Exception:
     Basemap = None
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, date
 
 SHARED_DIR = Path(__file__).resolve().parent / "shared"
 if str(SHARED_DIR) not in sys.path:
@@ -468,7 +470,7 @@ def _canonical_db_event_frames():
         erows = pc_safe_rows(
             sb,
             "pc_events",
-            "event_id,start_date,end_date,event_nature,event_domain,event_family,event_type,severity,status,mode,countries,location,title,description,operational_impact,commercial_impact,confidence,trade_relevance,intelligence_relevance,trade_visible,intelligence_visible,alert_worthy,record_status,source_id,metadata",
+            "event_id,start_date,end_date,event_nature,event_domain,event_family,event_type,severity,status,mode,countries,location,title,description,operational_impact,commercial_impact,confidence,trade_relevance,intelligence_relevance,trade_visible,intelligence_visible,alert_worthy,record_status,source_id,metadata,event_temporality,event_phase,event_category,event_subcategory,all_day,date_precision,expected_attendance,expected_disruption,impact_probability,impact_horizon,baseline_condition,trigger_threshold,recurrence_rule,parent_event_id,calendar_year,verification_status,last_verified_at",
             5000,
             order="start_date",
         )
@@ -508,6 +510,23 @@ def _canonical_db_event_frames():
             "record_status":"Record Status",
             "source_id":"Source ID",
             "metadata":"Metadata",
+            "event_temporality":"Event Temporality",
+            "event_phase":"Event Phase",
+            "event_category":"Event Category",
+            "event_subcategory":"Event Subcategory",
+            "all_day":"All Day",
+            "date_precision":"Date Precision",
+            "expected_attendance":"Expected Attendance",
+            "expected_disruption":"Expected Disruption",
+            "impact_probability":"Impact Probability",
+            "impact_horizon":"Impact Horizon",
+            "baseline_condition":"Baseline Condition",
+            "trigger_threshold":"Trigger Threshold",
+            "recurrence_rule":"Recurrence Rule",
+            "parent_event_id":"Parent Event ID",
+            "calendar_year":"Calendar Year",
+            "verification_status":"Verification Status",
+            "last_verified_at":"Last Verified At",
         })
 
         if lrows:
@@ -768,10 +787,10 @@ st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 
 NAV = {
     "INTELLIGENCE DESK": ["Operating Picture", "Intelligence Analytics", "Regional Maps", "Alerts & Incidents"],
-    "PUBLICATIONS": ["Intelligence Brief Builder"],
+    "PUBLICATIONS": ["Report Studio", "Intelligence Brief Builder"],
     "ACTORS & NETWORKS": ["Actors & Networks"],
-    "FORWARD MONITORING": ["Watch Areas", "Monitoring & Indicators"],
-    "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
+    "FORWARD MONITORING": ["Horizon Calendar", "Watch Areas", "Monitoring & Indicators"],
+    "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Smuggling & Illicit Trade", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
     "DISCOVERY": ["Intelligence Search", "Source Monitor"],
 }
 
@@ -824,7 +843,7 @@ pc_render_drilldown_search()
 # Header
 st.markdown('<div class="pc-kicker">Power & Corridors Intelligence</div>', unsafe_allow_html=True)
 st.markdown(f'<div class="pc-title">{page}</div>', unsafe_allow_html=True)
-st.markdown('<div class="pc-deck">Decision-useful intelligence on geopolitical disruption, maritime security, trade corridors, aviation, sanctions, critical infrastructure and operational risk.</div>', unsafe_allow_html=True)
+st.markdown('<div class="pc-deck">Decision-useful intelligence on geopolitical disruption, smuggling and illicit trade, maritime security, trade corridors, aviation, sanctions, critical infrastructure, forward risk and operational impact.</div>', unsafe_allow_html=True)
 st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
 
 def _watch_tokens(v):
@@ -2430,6 +2449,174 @@ def _publication_story_label(row):
 # 1. OPERATING PICTURE
 # -----------------------------------------------------------------------------
 
+
+# -----------------------------------------------------------------------------
+# Horizon, smuggling and report-production helpers
+# -----------------------------------------------------------------------------
+REPORT_TEMPLATES = {
+    "MENA Weekly": {"region":"Middle East & North Africa","days":7,"story_words":400},
+    "Global Weekly": {"region":"Global","days":7,"story_words":400},
+    "APAC Weekly": {"region":"Asia-Pacific","days":7,"story_words":400},
+    "Europe Weekly": {"region":"Europe","days":7,"story_words":400},
+    "GCC Weekly Intelligence": {"region":"Gulf / GCC","days":7,"story_words":220,"gcc":True},
+}
+REPORT_SECTIONS = [
+    ("Security & Conflict", r"war|conflict|attack|missile|drone|terror|armed|military|explosion|sabotage"),
+    ("Smuggling & Illicit Trade", r"smuggl|traffick|narcotic|drug|cocaine|heroin|captagon|methamphetamine|contraband|illicit|interdiction|seizure"),
+    ("Maritime Security", r"maritime|vessel|ship|piracy|hijack|boarding|port|hormuz|red sea|bab el|gulf of oman|mediterranean"),
+    ("Aviation & Movement", r"aviation|airspace|airport|flight|road|rail|border|movement|transport|closure"),
+    ("Sanctions & Compliance", r"sanction|designation|enforcement|compliance|export control|embargo"),
+    ("Civil Unrest & Labour", r"protest|riot|civil unrest|strike|labour|demonstration"),
+    ("Natural Hazards", r"weather|storm|flood|cyclone|hurricane|earthquake|wildfire|monsoon|heat"),
+]
+_GCC_COUNTRIES=["Saudi Arabia","United Arab Emirates","Oman","Bahrain","Qatar","Kuwait"]
+
+def _event_text_blob(df):
+    if df is None or df.empty: return pd.Series(dtype="string")
+    blob=pd.Series("",index=df.index,dtype="string")
+    for c in ["Event Nature","Event Domain","Event Family","Event Type","Event Temporality","Event Phase","Event Category","Event Subcategory","Title","Description","Operational Impact","Trade / Commercial Impact","Expected Disruption","Location","Country / Countries","Mode"]:
+        if c in df.columns: blob=blob.str.cat(text_col(df,c),sep=" ")
+    return blob
+
+def smuggling_events_frame(df=None):
+    src=hazard_events if df is None else df
+    if src is None or src.empty: return pd.DataFrame()
+    pat=r"smuggl|traffick|narcotic|drug seizure|cocaine|heroin|captagon|methamphetamine|contraband|illicit trade|arms trafficking|weapons trafficking|human trafficking|migrant smuggling|interdiction"
+    return src[_event_text_blob(src).str.contains(pat,case=False,regex=True,na=False)].copy()
+
+def horizon_events_frame(df=None):
+    src=hazard_events_raw if df is None else df
+    if src is None or src.empty: return pd.DataFrame()
+    out=src.copy(); blob=_event_text_blob(out)
+    meta=pd.Series("",index=out.index,dtype="string")
+    if "Metadata" in out.columns:
+        meta=out["Metadata"].apply(lambda v:" ".join(str(v.get(k,"")) for k in ["event_temporality","temporality","event_phase","phase","event_category","category"] if isinstance(v,dict))).astype("string")
+    pat=r"scheduled|forecast|recurring|seasonal|upcoming|planned|election|referendum|anniversar|holiday|summit|conference|festival|sport|games|marathon|grand prix|exercise|deadline|monsoon|hurricane season|cyclone season"
+    return out[blob.str.cat(meta,sep=" ").str.contains(pat,case=False,regex=True,na=False)].copy()
+
+def _severity_rank(v):
+    return {"CRITICAL":5,"SEVERE":4,"HIGH":3,"MODERATE":2,"MEDIUM":2,"LOW":1}.get(clean_display_text(v).upper(),0)
+
+def _rank_report_candidates(df):
+    if df is None or df.empty: return df
+    out=df.copy()
+    out["_sev_rank"]=text_col(out,"Severity").apply(_severity_rank)
+    if "Start Date" in out.columns:
+        out["_report_dt"]=pd.to_datetime(out["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+    else: out["_report_dt"]=pd.NaT
+    return out.sort_values(["_sev_rank","_report_dt"],ascending=[False,False])
+
+def _extract_urls_any(v):
+    urls=[]
+    def walk(x):
+        if isinstance(x,str):
+            urls.extend(re.findall(r"https?://[^\s\]\[\)\(\}\{\"'<>]+",x))
+        elif isinstance(x,dict):
+            for y in x.values(): walk(y)
+        elif isinstance(x,(list,tuple,set)):
+            for y in x: walk(y)
+    walk(v); out=[]
+    for u in urls:
+        u=u.rstrip(".,;")
+        if u and u not in out: out.append(u)
+    return out
+
+def _source_url_map():
+    out={}
+    if sources is None or sources.empty: return out
+    idc=next((c for c in ["Source ID","source_id","ID"] if c in sources.columns),None)
+    urlc=next((c for c in ["URL","Source URL","source_url"] if c in sources.columns),None)
+    if not idc or not urlc: return out
+    for _,r in sources.iterrows():
+        sid=clean_display_text(r.get(idc,"")); url=clean_display_text(r.get(urlc,""))
+        if sid and url: out[sid]=url
+    return out
+
+def event_source_urls(row):
+    urls=[]
+    sid=clean_display_text(row.get("Source ID",""))
+    sm=_source_url_map()
+    if sid in sm: urls.append(sm[sid])
+    for k in ["Metadata","Description","Operational Impact","Trade / Commercial Impact"]:
+        urls.extend(_extract_urls_any(row.get(k)))
+    return list(dict.fromkeys(urls))
+
+def _report_region_candidates(region_name,start_dt,end_dt):
+    df=publication_region_events(region_name)
+    if df is None or df.empty: return pd.DataFrame()
+    if "Start Date" in df.columns:
+        d=pd.to_datetime(df["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+        df=df[(d.dt.date>=start_dt)&(d.dt.date<=end_dt)].copy()
+    return _rank_report_candidates(df)
+
+def _section_candidates(df,pat):
+    if df is None or df.empty: return pd.DataFrame()
+    return _rank_report_candidates(df[_event_text_blob(df).str.contains(pat,case=False,regex=True,na=False)].copy())
+
+def _fallback_story(row):
+    s=clean_display_text(row.get("Description","")) or "No sourced situation update is available."
+    a=" ".join([clean_display_text(row.get(c,"")) for c in ["Operational Impact","Trade / Commercial Impact"] if clean_display_text(row.get(c,""))]) or "Further assessment is required."
+    return f"Situation Update\n{s}\n\nAssessment / Impact / Business Implications\n{a}"
+
+def _ai_expand_story(row,report_name,target_words=400,risk_rating=""):
+    api_key=os.getenv("OPENAI_API_KEY","").strip()
+    if not api_key: raise RuntimeError("OPENAI_API_KEY is not configured.")
+    model=os.getenv("PC_REPORT_MODEL","gpt-5.6-luna").strip() or "gpt-5.6-luna"
+    evidence=[]
+    for col in ["Title","Start Date","Country / Countries","Location","Event Family","Event Type","Description","Operational Impact","Trade / Commercial Impact","Confidence"]:
+        v=clean_display_text(row.get(col,""))
+        if v: evidence.append(f"{col}: {v}")
+    urls=event_source_urls(row)
+    if urls: evidence.append("Sources: "+" | ".join(urls))
+    prompt=(
+        f"You are writing one story for Power & Corridors Intelligence in the {report_name} house style. "
+        f"The analyst-set risk rating is {risk_rating or 'UNRATED'}; do not change it. "
+        f"Use ONLY the supplied evidence and do not invent facts. Write about {int(target_words)} words, "
+        "using exactly the headings 'Situation Update' and 'Assessment / Impact / Business Implications'. "
+        "Distinguish reported facts from assessment and focus on security, trade, logistics, infrastructure, movement, regulation, insurance, energy and business continuity only where supported.\n\n"
+        + "\n".join(evidence)
+    )
+    payload=json.dumps({"model":model,"input":prompt}).encode("utf-8")
+    req=Request("https://api.openai.com/v1/responses",data=payload,headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"},method="POST")
+    with urlopen(req,timeout=90) as resp: data=json.loads(resp.read().decode("utf-8"))
+    if data.get("output_text"): return str(data["output_text"]).strip()
+    parts=[]
+    for item in data.get("output",[]):
+        for c in item.get("content",[]) if isinstance(item,dict) else []:
+            if isinstance(c,dict) and c.get("text"): parts.append(str(c["text"]))
+    if not parts: raise RuntimeError("AI response contained no text.")
+    return "\n".join(parts).strip()
+
+def _build_report_markdown(name,as_of,sections,edits,horizon_rows):
+    refs=[]
+    def source_nums(row):
+        nums=[]
+        for u in event_source_urls(row):
+            if u not in refs: refs.append(u)
+            nums.append(refs.index(u)+1)
+        return nums
+    lines=[f"# {name}",f"**{as_of.strftime('%d %B %Y')}**","","## Key Takeaways"]
+    for sec,rows in sections.items():
+        for row in rows[:1]:
+            e=edits.get(str(row.name),{})
+            lines.append(f"- {e.get('title') or clean_display_text(row.get('Title',''))} — {e.get('risk') or clean_display_text(row.get('Severity','')) or 'UNRATED'}")
+    if horizon_rows:
+        lines+=["","## Horizon & Upcoming Events"]
+        for row in horizon_rows:
+            lines.append(f"- **{clean_display_text(row.get('Start Date',''))[:10]}** — {clean_display_text(row.get('Country / Countries',''))}: {clean_display_text(row.get('Title',''))}")
+    for sec,rows in sections.items():
+        if not rows: continue
+        lines+=["",f"## {sec}"]
+        for row in rows:
+            e=edits.get(str(row.name),{})
+            nums=source_nums(row)
+            lines += [f"### {e.get('title') or clean_display_text(row.get('Title',''))} — {e.get('risk') or clean_display_text(row.get('Severity','')) or 'UNRATED'}",
+                      e.get("text") or _fallback_story(row)]
+            if nums: lines.append("Source refs: "+", ".join(f"[{n}]" for n in nums))
+    lines+=["","## Sources"]
+    lines += [f"[{i}] {u}" for i,u in enumerate(refs,1)] or ["No source URLs resolved from selected canonical records."]
+    return "\n".join(lines)
+
 if page == "Operating Picture":
     active_mon = monitoring[text_col(monitoring, "Status").str.contains("Active", case=False, na=False)] if not monitoring.empty else monitoring
     security_terms = ["Security", "Conflict", "Maritime", "Piracy", "Attack", "Ground", "Explosion", "SAR", "Pollution", "Drone", "Missile", "Seizure", "Boarding"]
@@ -2995,6 +3182,143 @@ elif page == "Actors & Networks":
 # -----------------------------------------------------------------------------
 # 3. ALERTS & INCIDENTS
 # -----------------------------------------------------------------------------
+
+elif page == "Horizon Calendar":
+    section("Forward", "Horizon Calendar", "Scheduled, forecast, recurring and seasonal events that may change security, movement or trade conditions before they occur.")
+    hdf=horizon_events_frame()
+    if hdf.empty:
+        st.info("No horizon-classified events are available yet.")
+    else:
+        today=pd.Timestamp.utcnow().date()
+        f1,f2,f3=st.columns(3)
+        window=f1.selectbox("Window",["Next 7 days","Next 30 days","Next 90 days","All"],index=1)
+        region=f2.selectbox("Region",list(PUBLICATION_REGIONS.keys()),index=0,key="horizon_region")
+        sev=f3.selectbox("Minimum severity",["All","LOW","MODERATE","HIGH","SEVERE","CRITICAL"],index=0)
+        if "Start Date" in hdf.columns and window!="All":
+            hd=pd.to_datetime(hdf["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+            days=int(re.search(r"\d+",window).group())
+            hdf=hdf[(hd.dt.date>=today)&(hd.dt.date<=today+timedelta(days=days))].copy()
+        if region!="Global":
+            allowed=publication_region_events(region)
+            ids=set(text_col(allowed,"Event ID")) if not allowed.empty and "Event ID" in allowed.columns else set()
+            if ids: hdf=hdf[text_col(hdf,"Event ID").isin(ids)].copy()
+        if sev!="All":
+            hdf=hdf[text_col(hdf,"Severity").apply(_severity_rank)>=_severity_rank(sev)].copy()
+        hdf=_rank_report_candidates(hdf)
+        c1,c2,c3=st.columns(3)
+        c1.metric("Upcoming records",len(hdf))
+        c2.metric("High / severe",sum(text_col(hdf,"Severity").str.upper().isin(["HIGH","SEVERE","CRITICAL"])))
+        c3.metric("Countries / theatres",text_col(hdf,"Country / Countries").nunique())
+        show_df(hdf,["Start Date","End Date","Country / Countries","Location","Event Family","Event Type","Title","Severity","Operational Impact","Trade / Commercial Impact","Confidence"],620)
+
+elif page == "Smuggling & Illicit Trade":
+    section("Domain", "Smuggling & Illicit Trade", "Narcotics, arms, human trafficking, migrant smuggling, contraband and interdictions, linked to actors, vessels, borders, ports and routes where evidence exists.")
+    sdf=smuggling_events_frame()
+    if sdf.empty:
+        st.info("No smuggling/illicit-trade events are currently routed into the canonical intelligence event layer.")
+    else:
+        s1,s2,s3,s4=st.columns(4)
+        years=sorted(pd.to_datetime(sdf["Start Date"],errors="coerce",utc=True).dt.year.dropna().astype(int).unique().tolist(),reverse=True) if "Start Date" in sdf.columns else []
+        countries=["All"]+sorted([x for x in text_col(sdf,"Country / Countries").unique() if x])
+        types=["All"]+sorted([x for x in text_col(sdf,"Event Type").unique() if x])
+        year=s1.selectbox("Year",["All"]+years,index=0)
+        country=s2.selectbox("Country / corridor",countries,index=0)
+        typ=s3.selectbox("Type",types,index=0)
+        minsev=s4.selectbox("Minimum severity",["All","LOW","MODERATE","HIGH","SEVERE","CRITICAL"],index=0,key="smug_sev")
+        view=sdf.copy()
+        if year!="All":
+            d=pd.to_datetime(view["Start Date"],errors="coerce",utc=True)
+            view=view[d.dt.year.eq(int(year))]
+        if country!="All": view=view[text_col(view,"Country / Countries").eq(country)]
+        if typ!="All": view=view[text_col(view,"Event Type").eq(typ)]
+        if minsev!="All": view=view[text_col(view,"Severity").apply(_severity_rank)>=_severity_rank(minsev)]
+        c1,c2,c3,c4=st.columns(4)
+        c1.metric("Events",len(view))
+        c2.metric("Countries / corridors",text_col(view,"Country / Countries").nunique())
+        c3.metric("Event types",text_col(view,"Event Type").nunique())
+        c4.metric("High+",sum(text_col(view,"Severity").apply(_severity_rank)>=3))
+        show_df(_rank_report_candidates(view),["Start Date","Country / Countries","Location","Event Type","Title","Severity","Description","Operational Impact","Trade / Commercial Impact","Confidence"],680)
+        st.download_button("Download filtered dataset (CSV)",view.to_csv(index=False).encode("utf-8"),file_name="pc-smuggling-illicit-trade.csv",mime="text/csv",use_container_width=True)
+
+elif page == "Report Studio":
+    section("Publications", "Report Studio", "Build sourced weekly intelligence products directly from the canonical event layer. Risk ratings are analyst choices; AI expands selected stories without selecting the rating.")
+    template_name=st.selectbox("Report template",list(REPORT_TEMPLATES.keys()),index=0)
+    cfg=REPORT_TEMPLATES[template_name]
+    c1,c2,c3,c4=st.columns(4)
+    as_of=c1.date_input("Report date",value=pd.Timestamp.utcnow().date(),key="report_asof")
+    lookback=c2.number_input("Lookback days",1,31,int(cfg.get("days",7)),1)
+    story_words=c3.number_input("Target words / story",150,800,int(cfg.get("story_words",400)),50)
+    max_per_section=c4.number_input("Stories / section",1,5,2,1)
+    start_dt=as_of-timedelta(days=int(lookback)-1)
+    base=_report_region_candidates(cfg["region"],start_dt,as_of)
+    st.caption(f"{cfg['region']} · {start_dt:%d %b %Y}–{as_of:%d %b %Y} · {len(base):,} candidates")
+    h=horizon_events_frame()
+    horizon_rows=[]
+    if not h.empty and "Start Date" in h.columns:
+        hd=pd.to_datetime(h["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+        hv=h[(hd.dt.date>as_of)&(hd.dt.date<=as_of+timedelta(days=30))].copy()
+        if cfg["region"]!="Global":
+            allowed=publication_region_events(cfg["region"])
+            ids=set(text_col(allowed,"Event ID")) if not allowed.empty else set()
+            if ids: hv=hv[text_col(hv,"Event ID").isin(ids)]
+        horizon_rows=[r for _,r in _rank_report_candidates(hv).head(8).iterrows()]
+    ai_ready=bool(os.getenv("OPENAI_API_KEY","").strip())
+    st.caption(("AI expansion available" if ai_ready else "AI expansion not configured") + f" · {os.getenv('PC_REPORT_MODEL','gpt-5.6-luna')}")
+    sections={}; edits={}
+    if cfg.get("gcc"):
+        # GCC keeps its own country-led structure; selected lead stories are assembled into country sections.
+        for country in _GCC_COUNTRIES:
+            cdf=base[_event_text_blob(base).str.contains(("united arab emirates|uae|dubai|abu dhabi") if country=="United Arab Emirates" else re.escape(country),case=False,regex=True,na=False)].copy()
+            cdf=_rank_report_candidates(cdf)
+            with st.expander(country,expanded=country in ["Saudi Arabia","United Arab Emirates"]):
+                risk=st.selectbox("Country risk",["LOW","MODERATE","HIGH","SEVERE","CRITICAL"],index=2,key=f"gccrisk_{country}")
+                trend=st.selectbox("Trend",["IMPROVING","STABLE","WATCH","WORSENING"],index=2,key=f"gcctrend_{country}")
+                if cdf.empty:
+                    st.caption("No candidate events in this window.")
+                    continue
+                idx=st.selectbox("Lead story",list(range(min(len(cdf),12))),format_func=lambda i:_publication_story_label(cdf.iloc[i]),key=f"gcclead_{country}")
+                row=cdf.iloc[idx].copy(); key=str(row.name)
+                title=st.text_input("Headline",value=clean_display_text(row.get("Title","")),key=f"gcctitle_{country}")
+                skey=f"gcctext_{country}"
+                if skey not in st.session_state: st.session_state[skey]=_fallback_story(row)
+                if st.button(f"AI expand {country}",key=f"gccai_{country}",disabled=not ai_ready):
+                    try: st.session_state[skey]=_ai_expand_story(row,template_name,int(story_words),risk)
+                    except Exception as exc: st.error(str(exc))
+                txt=st.text_area("Country story",value=st.session_state[skey],height=270,key=f"gccarea_{country}")
+                row["_gcc_country"]=country; row["_gcc_trend"]=trend
+                sections[country]=[row]; edits[key]={"title":title,"risk":risk,"text":txt}
+    else:
+        for sec,pat in REPORT_SECTIONS:
+            sdf=_section_candidates(base,pat)
+            with st.expander(f"{sec} · {len(sdf)} candidates",expanded=sec in ["Security & Conflict","Smuggling & Illicit Trade"]):
+                if sdf.empty:
+                    sections[sec]=[]; st.caption("No matching events."); continue
+                opts=list(range(min(len(sdf),20)))
+                picks=st.multiselect("Select stories",opts,default=opts[:min(int(max_per_section),len(opts))],format_func=lambda i:_publication_story_label(sdf.iloc[i]),key=f"pick_{template_name}_{sec}")
+                rows=[]
+                for j,i in enumerate(picks):
+                    row=sdf.iloc[i].copy(); rows.append(row); key=str(row.name)
+                    safe=re.sub(r"[^A-Za-z0-9_-]+","_",clean_display_text(row.get("Event ID",key)))
+                    p1,p2=st.columns([2.5,1])
+                    title=p1.text_input("Headline",value=clean_display_text(row.get("Title","")),key=f"title_{safe}_{sec}_{j}")
+                    opts_r=["LOW","MODERATE","HIGH","SEVERE","CRITICAL"]
+                    sev=clean_display_text(row.get("Severity","MODERATE")).upper()
+                    risk=p2.selectbox("Risk",opts_r,index=opts_r.index(sev) if sev in opts_r else 1,key=f"risk_{safe}_{sec}_{j}")
+                    skey=f"story_{safe}_{sec}_{j}"
+                    if skey not in st.session_state: st.session_state[skey]=_fallback_story(row)
+                    if st.button(f"AI expand to ~{int(story_words)} words",key=f"ai_{safe}_{sec}_{j}",disabled=not ai_ready):
+                        try: st.session_state[skey]=_ai_expand_story(row,template_name,int(story_words),risk)
+                        except Exception as exc: st.error(str(exc))
+                    txt=st.text_area("Publication copy",value=st.session_state[skey],height=280,key=f"area_{safe}_{sec}_{j}")
+                    edits[key]={"title":title,"risk":risk,"text":txt}
+                    st.caption(f"Resolved source URLs: {len(event_source_urls(row))}")
+                sections[sec]=rows
+    md=_build_report_markdown(template_name,as_of,sections,edits,horizon_rows)
+    st.markdown("### Report preview")
+    st.text_area("Markdown",value=md,height=700,key=f"preview_{template_name}")
+    slug=re.sub(r"[^a-z0-9]+","-",template_name.lower()).strip("-")
+    st.download_button("Download report (Markdown)",md.encode("utf-8"),file_name=f"{slug}-{as_of.isoformat()}.md",mime="text/markdown",use_container_width=True,type="primary")
+
 elif page == "Intelligence Brief Builder":
     section(
         "Publications",
