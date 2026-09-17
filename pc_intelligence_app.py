@@ -23,6 +23,10 @@ except Exception:
 # Publication renderer dependencies. Matplotlib is required for PNG/PDF export.
 # Basemap is optional; when unavailable the renderer uses a geographic grid fallback.
 try:
+    import matplotlib as mpl
+    mpl.rcParams["pdf.fonttype"] = 42
+    mpl.rcParams["ps.fonttype"] = 42
+    mpl.rcParams["text.usetex"] = False
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyBboxPatch, ConnectionPatch
     from matplotlib.collections import PolyCollection
@@ -2966,14 +2970,14 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
     with PdfPages(bio) as pdf:
         # ---------- cover ----------
         fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
-        ax=fig.add_axes([0,0,1,1]); ax.axis('off')
+        ax=fig.add_axes([0,0,1,1]); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.set_autoscale_on(False); ax.axis('off')
         ax.add_patch(plt.Rectangle((0,0.88),1,0.12,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
         if not _add_pdf_logo(fig,x=0.055,y=0.926,w=0.285,h=0.046,backing=True):
             ax.text(0.07,0.935,"POWER & CORRIDORS",color=white,fontsize=16,fontweight='bold',va='center')
         ax.text(0.93,0.935,"P&C INTELLIGENCE",ha='right',va='center',color=gold,fontsize=9,fontweight='bold')
         ax.text(0.5,0.72,safe(name).upper(),ha='center',va='center',color=navy,fontsize=27,fontweight='bold')
         ax.text(0.5,0.675,pd.to_datetime(as_of).strftime('%d %B %Y').upper(),ha='center',color=muted,fontsize=12)
-        ax.plot([0.18,0.82],[0.635,0.635],color=blue,lw=2)
+        ax.plot([0.18,0.82],[0.635,0.635],color=blue,lw=2,transform=ax.transAxes)
         story_count=sum(len(v or []) for v in sections.values())
         ax.text(0.5,0.54,"DECISION-USEFUL INTELLIGENCE",ha='center',color=gold,fontsize=10,fontweight='bold')
         deck=("Geopolitical disruption, smuggling and illicit trade, maritime security, trade corridors, aviation, sanctions, "
@@ -2992,7 +2996,7 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
 
         # ---------- key takeaways + horizon ----------
         fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
-        ax=fig.add_axes([0,0,1,1]); ax.axis('off')
+        ax=fig.add_axes([0,0,1,1]); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.set_autoscale_on(False); ax.axis('off')
         ax.add_patch(plt.Rectangle((0,0.94),1,0.06,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
         if not _add_pdf_logo(fig,x=0.050,y=0.949,w=0.225,h=0.031,backing=True):
             ax.text(0.07,0.967,"POWER & CORRIDORS",color=white,fontsize=8,fontweight='bold',va='center')
@@ -3009,7 +3013,7 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
             y-=0.055 + 0.018*max(0,wrap(title,80).count('\n'))
             if y<0.56: break
 
-        ax.plot([0.07,0.93],[0.54,0.54],color=line,lw=0.8)
+        ax.plot([0.07,0.93],[0.54,0.54],color=line,lw=0.8,transform=ax.transAxes)
         y=0.50
         ax.text(0.07,y,"HORIZON · NEXT 30 DAYS",color=gold,fontsize=9,fontweight='bold'); y-=0.035
         if horizon_rows:
@@ -3044,7 +3048,7 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
                 nums=source_nums(row)
 
                 fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
-                ax=fig.add_axes([0,0,1,1]); ax.axis('off')
+                ax=fig.add_axes([0,0,1,1]); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.set_autoscale_on(False); ax.axis('off')
                 ax.add_patch(plt.Rectangle((0,0.94),1,0.06,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
                 if not _add_pdf_logo(fig,x=0.050,y=0.949,w=0.225,h=0.031,backing=True):
                     ax.text(0.07,0.967,"POWER & CORRIDORS",color=white,fontsize=8,fontweight='bold',va='center')
@@ -3059,7 +3063,7 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
                 meta=' · '.join([x for x in [dt,loc,etype,trend] if x])
                 if meta:
                     ax.text(0.07,y,wrap(meta,85),color=gold,fontsize=8.5,fontweight='bold',va='top'); y-=0.05
-                ax.plot([0.07,0.93],[y,y],color=line,lw=0.8); y-=0.04
+                ax.plot([0.07,0.93],[y,y],color=line,lw=0.8,transform=ax.transAxes); y-=0.04
                 for head,body in parts.items():
                     ax.text(0.07,y,head.upper(),color=navy2,fontsize=10,fontweight='bold',va='top'); y-=0.032
                     wrapped=wrap(body,92)
@@ -3076,7 +3080,7 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
 
         # ---------- sources ----------
         fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
-        ax=fig.add_axes([0,0,1,1]); ax.axis('off')
+        ax=fig.add_axes([0,0,1,1]); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.set_autoscale_on(False); ax.axis('off')
         ax.add_patch(plt.Rectangle((0,0.94),1,0.06,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
         if not _add_pdf_logo(fig,x=0.050,y=0.949,w=0.225,h=0.031,backing=True):
             ax.text(0.07,0.967,"POWER & CORRIDORS",color=white,fontsize=8,fontweight='bold',va='center')
