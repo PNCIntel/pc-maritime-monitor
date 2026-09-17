@@ -194,6 +194,159 @@ if st.session_state.get("pc_intel_appearance","Dark") == "Light":
 # -----------------------------------------------------------------------------
 # Data helpers — all reads are from the same Excel-backed P&C model
 # -----------------------------------------------------------------------------
+# Canonical event-object graph from Supabase
+# -----------------------------------------------------------------------------
+@st.cache_data(show_spinner=False, ttl=60)
+def _canonical_db_event_object_links():
+    """Resolve canonical event -> asset/entity/mobile-asset edges for the UI.
+
+    pc_event_links is authoritative. Workbook-shaped relationship sheets are
+    used only when the canonical database has no applicable rows.
+    """
+    assets_df=pd.DataFrame(); entities_df=pd.DataFrame(); mobile_df=pd.DataFrame()
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return assets_df,entities_df,mobile_df
+        links=pc_safe_rows(
+            sb,"pc_event_links",
+            "event_link_id,event_id,linked_type,linked_id,linked_name,relationship,confidence,source_id,metadata",
+            30000,
+        )
+        if not links:
+            return assets_df,entities_df,mobile_df
+        ldf=pd.DataFrame(links)
+
+        arows=pc_safe_rows(
+            sb,"pc_assets",
+            "asset_id,name,asset_type,subtype,country,region_city,owner_entity_id,operator_entity_id,status,record_status,metadata",
+            15000,
+        )
+        erows=pc_safe_rows(
+            sb,"pc_entities",
+            "entity_id,name,entity_type,hq_country,status,metadata",
+            15000,
+        )
+        mrows=pc_safe_rows(
+            sb,"pc_mobile_assets",
+            "mobile_asset_id,name,asset_type,subtype,imo,mmsi,flag,status,metadata",
+            15000,
+        )
+        amap={str(r.get('asset_id')):r for r in arows or []}
+        emap={str(r.get('entity_id')):r for r in erows or []}
+        mmap={str(r.get('mobile_asset_id')):r for r in mrows or []}
+
+        assets=[]; entities=[]; mobiles=[]
+        for _,r in ldf.iterrows():
+            ltype=clean_display_text(r.get('linked_type','')).casefold()
+            lid=clean_display_text(r.get('linked_id',''))
+            base={
+                'Event Link ID':r.get('event_link_id'),
+                'Event ID':r.get('event_id'),
+                'Relationship':r.get('relationship'),
+                'Confidence':r.get('confidence'),
+                'Source ID':r.get('source_id'),
+            }
+            if ltype=='asset':
+                obj=amap.get(lid,{})
+                assets.append({**base,
+                    'Asset ID':lid,
+                    'Asset':clean_display_text(obj.get('name') or r.get('linked_name')),
+                    'Asset Type':clean_display_text(obj.get('asset_type')),
+                    'Asset Subtype':clean_display_text(obj.get('subtype')),
+                    'Country':clean_display_text(obj.get('country')),
+                    'Region / City':clean_display_text(obj.get('region_city')),
+                    'Owner Entity ID':obj.get('owner_entity_id'),
+                    'Owner Entity':clean_display_text(emap.get(str(obj.get('owner_entity_id')),{ }).get('name')) if obj.get('owner_entity_id') else '',
+                    'Operator Entity ID':obj.get('operator_entity_id'),
+                    'Operator Entity':clean_display_text(emap.get(str(obj.get('operator_entity_id')),{ }).get('name')) if obj.get('operator_entity_id') else '',
+                })
+            elif ltype=='entity':
+                obj=emap.get(lid,{})
+                entities.append({**base,
+                    'Company ID':lid,
+                    'Company':clean_display_text(obj.get('name') or r.get('linked_name')),
+                    'Entity Type':clean_display_text(obj.get('entity_type')),
+                    'HQ Country':clean_display_text(obj.get('hq_country')),
+                })
+            elif ltype=='mobile_asset':
+                obj=mmap.get(lid,{})
+                mobiles.append({**base,
+                    'Mobile Asset ID':lid,
+                    'Mobile Asset':clean_display_text(obj.get('name') or r.get('linked_name')),
+                    'Asset Type':clean_display_text(obj.get('asset_type')),
+                    'Subtype':clean_display_text(obj.get('subtype')),
+                    'IMO':clean_display_text(obj.get('imo')),
+                    'MMSI':clean_display_text(obj.get('mmsi')),
+                    'Flag':clean_display_text(obj.get('flag')),
+                })
+        return pd.DataFrame(assets),pd.DataFrame(entities),pd.DataFrame(mobiles)
+    except Exception:
+        return assets_df,entities_df,mobile_df
+
+
+def _event_ids(df):
+    if df is None or df.empty or 'Event ID' not in df.columns:
+        return set()
+    return set(text_col(df,'Event ID').dropna().astype(str))
+
+
+def _links_for_events(link_df,event_df):
+    if link_df is None or link_df.empty:
+        return pd.DataFrame()
+    ids=_event_ids(event_df)
+    if not ids or 'Event ID' not in link_df.columns:
+        return pd.DataFrame(columns=link_df.columns)
+    return link_df[text_col(link_df,'Event ID').isin(ids)].copy()
+
+
+def _derived_company_links_from_assets(asset_links):
+    """Derive owner/operator company exposure from an affected canonical asset.
+
+    These are exposure edges, not claims that the company caused the event.
+    """
+    if asset_links is None or asset_links.empty:
+        return pd.DataFrame()
+    rows=[]
+    for _,r in asset_links.iterrows():
+        for id_col,name_col,rel in [
+            ('Owner Entity ID','Owner Entity','owner of affected asset'),
+            ('Operator Entity ID','Operator Entity','operator of affected asset'),
+        ]:
+            cid=clean_display_text(r.get(id_col,'')); cname=clean_display_text(r.get(name_col,''))
+            if not cid and not cname:
+                continue
+            rows.append({
+                'Event ID':r.get('Event ID'),
+                'Company ID':cid,
+                'Company':cname or cid,
+                'Entity Type':'Company',
+                'HQ Country':'',
+                'Relationship':rel,
+                'Confidence':r.get('Confidence'),
+                'Source ID':r.get('Source ID'),
+                'Derived From Asset':r.get('Asset'),
+            })
+    return pd.DataFrame(rows)
+
+
+def _event_graph_join(link_df,event_df,label_col):
+    """Attach event facts to a canonical relationship frame for dataset tabs."""
+    if link_df is None or link_df.empty or event_df is None or event_df.empty:
+        return pd.DataFrame()
+    links=_links_for_events(link_df,event_df)
+    if links.empty:
+        return links
+    cols=[c for c in ['Event ID','Start Date','Event Family','Event Type','Severity','Country / Countries','Location','Title','Operational Impact'] if c in event_df.columns]
+    ev=event_df[cols].drop_duplicates('Event ID') if 'Event ID' in cols else pd.DataFrame()
+    if ev.empty:
+        return links
+    out=links.merge(ev,on='Event ID',how='left')
+    if label_col in out.columns:
+        out[label_col]=out[label_col].map(clean_display_text)
+    return out
+
+# -----------------------------------------------------------------------------
 @st.cache_data(show_spinner=False, ttl=300)
 def xl(file_name: str, sheet: str) -> pd.DataFrame:
     return bridge_load_sheet(DATA, file_name, sheet, dtype_str=False)
@@ -919,7 +1072,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v3.4 event graph · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
+st.sidebar.caption(f"v3.5 event graph fixed · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -2033,159 +2186,6 @@ def _analytics_render_chart(df, chart_type, group_by, time_grain="Daily", top_n=
             st.altair_chart(chart,use_container_width=True)
 
 
-
-# -----------------------------------------------------------------------------
-# Canonical event-object graph from Supabase
-# -----------------------------------------------------------------------------
-@st.cache_data(show_spinner=False, ttl=60)
-def _canonical_db_event_object_links():
-    """Resolve canonical event -> asset/entity/mobile-asset edges for the UI.
-
-    pc_event_links is authoritative. Workbook-shaped relationship sheets are
-    used only when the canonical database has no applicable rows.
-    """
-    assets_df=pd.DataFrame(); entities_df=pd.DataFrame(); mobile_df=pd.DataFrame()
-    try:
-        sb=pc_db_client(service=True)
-        if sb is None:
-            return assets_df,entities_df,mobile_df
-        links=pc_safe_rows(
-            sb,"pc_event_links",
-            "event_link_id,event_id,linked_type,linked_id,linked_name,relationship,confidence,source_id,metadata",
-            30000,
-        )
-        if not links:
-            return assets_df,entities_df,mobile_df
-        ldf=pd.DataFrame(links)
-
-        arows=pc_safe_rows(
-            sb,"pc_assets",
-            "asset_id,name,asset_type,subtype,country,region_city,owner_entity_id,operator_entity_id,status,record_status,metadata",
-            15000,
-        )
-        erows=pc_safe_rows(
-            sb,"pc_entities",
-            "entity_id,name,entity_type,hq_country,status,metadata",
-            15000,
-        )
-        mrows=pc_safe_rows(
-            sb,"pc_mobile_assets",
-            "mobile_asset_id,name,asset_type,subtype,imo,mmsi,flag,status,metadata",
-            15000,
-        )
-        amap={str(r.get('asset_id')):r for r in arows or []}
-        emap={str(r.get('entity_id')):r for r in erows or []}
-        mmap={str(r.get('mobile_asset_id')):r for r in mrows or []}
-
-        assets=[]; entities=[]; mobiles=[]
-        for _,r in ldf.iterrows():
-            ltype=clean_display_text(r.get('linked_type','')).casefold()
-            lid=clean_display_text(r.get('linked_id',''))
-            base={
-                'Event Link ID':r.get('event_link_id'),
-                'Event ID':r.get('event_id'),
-                'Relationship':r.get('relationship'),
-                'Confidence':r.get('confidence'),
-                'Source ID':r.get('source_id'),
-            }
-            if ltype=='asset':
-                obj=amap.get(lid,{})
-                assets.append({**base,
-                    'Asset ID':lid,
-                    'Asset':clean_display_text(obj.get('name') or r.get('linked_name')),
-                    'Asset Type':clean_display_text(obj.get('asset_type')),
-                    'Asset Subtype':clean_display_text(obj.get('subtype')),
-                    'Country':clean_display_text(obj.get('country')),
-                    'Region / City':clean_display_text(obj.get('region_city')),
-                    'Owner Entity ID':obj.get('owner_entity_id'),
-                    'Owner Entity':clean_display_text(emap.get(str(obj.get('owner_entity_id')),{ }).get('name')) if obj.get('owner_entity_id') else '',
-                    'Operator Entity ID':obj.get('operator_entity_id'),
-                    'Operator Entity':clean_display_text(emap.get(str(obj.get('operator_entity_id')),{ }).get('name')) if obj.get('operator_entity_id') else '',
-                })
-            elif ltype=='entity':
-                obj=emap.get(lid,{})
-                entities.append({**base,
-                    'Company ID':lid,
-                    'Company':clean_display_text(obj.get('name') or r.get('linked_name')),
-                    'Entity Type':clean_display_text(obj.get('entity_type')),
-                    'HQ Country':clean_display_text(obj.get('hq_country')),
-                })
-            elif ltype=='mobile_asset':
-                obj=mmap.get(lid,{})
-                mobiles.append({**base,
-                    'Mobile Asset ID':lid,
-                    'Mobile Asset':clean_display_text(obj.get('name') or r.get('linked_name')),
-                    'Asset Type':clean_display_text(obj.get('asset_type')),
-                    'Subtype':clean_display_text(obj.get('subtype')),
-                    'IMO':clean_display_text(obj.get('imo')),
-                    'MMSI':clean_display_text(obj.get('mmsi')),
-                    'Flag':clean_display_text(obj.get('flag')),
-                })
-        return pd.DataFrame(assets),pd.DataFrame(entities),pd.DataFrame(mobiles)
-    except Exception:
-        return assets_df,entities_df,mobile_df
-
-
-def _event_ids(df):
-    if df is None or df.empty or 'Event ID' not in df.columns:
-        return set()
-    return set(text_col(df,'Event ID').dropna().astype(str))
-
-
-def _links_for_events(link_df,event_df):
-    if link_df is None or link_df.empty:
-        return pd.DataFrame()
-    ids=_event_ids(event_df)
-    if not ids or 'Event ID' not in link_df.columns:
-        return pd.DataFrame(columns=link_df.columns)
-    return link_df[text_col(link_df,'Event ID').isin(ids)].copy()
-
-
-def _derived_company_links_from_assets(asset_links):
-    """Derive owner/operator company exposure from an affected canonical asset.
-
-    These are exposure edges, not claims that the company caused the event.
-    """
-    if asset_links is None or asset_links.empty:
-        return pd.DataFrame()
-    rows=[]
-    for _,r in asset_links.iterrows():
-        for id_col,name_col,rel in [
-            ('Owner Entity ID','Owner Entity','owner of affected asset'),
-            ('Operator Entity ID','Operator Entity','operator of affected asset'),
-        ]:
-            cid=clean_display_text(r.get(id_col,'')); cname=clean_display_text(r.get(name_col,''))
-            if not cid and not cname:
-                continue
-            rows.append({
-                'Event ID':r.get('Event ID'),
-                'Company ID':cid,
-                'Company':cname or cid,
-                'Entity Type':'Company',
-                'HQ Country':'',
-                'Relationship':rel,
-                'Confidence':r.get('Confidence'),
-                'Source ID':r.get('Source ID'),
-                'Derived From Asset':r.get('Asset'),
-            })
-    return pd.DataFrame(rows)
-
-
-def _event_graph_join(link_df,event_df,label_col):
-    """Attach event facts to a canonical relationship frame for dataset tabs."""
-    if link_df is None or link_df.empty or event_df is None or event_df.empty:
-        return pd.DataFrame()
-    links=_links_for_events(link_df,event_df)
-    if links.empty:
-        return links
-    cols=[c for c in ['Event ID','Start Date','Event Family','Event Type','Severity','Country / Countries','Location','Title','Operational Impact'] if c in event_df.columns]
-    ev=event_df[cols].drop_duplicates('Event ID') if 'Event ID' in cols else pd.DataFrame()
-    if ev.empty:
-        return links
-    out=links.merge(ev,on='Event ID',how='left')
-    if label_col in out.columns:
-        out[label_col]=out[label_col].map(clean_display_text)
-    return out
 
 # -----------------------------------------------------------------------------
 # Publication builder helpers
