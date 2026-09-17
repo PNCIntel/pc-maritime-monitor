@@ -2302,8 +2302,28 @@ def _embedded_png(b64_text):
         return None
 
 
+def _trim_transparent_image(img):
+    """Crop transparent padding from an RGBA matplotlib image array."""
+    if img is None:
+        return None
+    try:
+        import numpy as _np
+        arr=_np.asarray(img)
+        if arr.ndim==3 and arr.shape[2]>=4:
+            alpha=arr[:,:,3]
+            ys,xs=_np.where(alpha>0.01)
+            if len(xs) and len(ys):
+                pad=8
+                x0=max(0,int(xs.min())-pad); x1=min(arr.shape[1],int(xs.max())+pad+1)
+                y0=max(0,int(ys.min())-pad); y1=min(arr.shape[0],int(ys.max())+pad+1)
+                return arr[y0:y1,x0:x1]
+    except Exception:
+        pass
+    return img
+
+
 def _publication_logo_image():
-    # Prefer a repository asset when present, otherwise use the embedded official light-background logo.
+    # Prefer a repository asset when present, otherwise use the embedded official transparent logo.
     for p in [
         ROOT / "assets" / "power-corridors-logo-light-matched-transparent.png",
         ROOT / "assets" / "power-corridors-logo-light-matched-transparent(3).png",
@@ -2312,10 +2332,32 @@ def _publication_logo_image():
     ]:
         if p.exists() and mpimg is not None:
             try:
-                return mpimg.imread(str(p))
+                return _trim_transparent_image(mpimg.imread(str(p)))
             except Exception:
                 pass
-    return _embedded_png(_EMBEDDED_PC_LOGO_B64)
+    return _trim_transparent_image(_embedded_png(_EMBEDDED_PC_LOGO_B64))
+
+
+def _add_pdf_logo(fig, x=0.055, y=0.948, w=0.255, h=0.038, backing=True):
+    """Place the real P&C logo at a fixed physical location without distortion.
+
+    The official mark is dark/navy, so on navy PDF headers it is placed on a
+    white backing chip rather than being drawn directly onto the dark bar.
+    """
+    logo=_publication_logo_image()
+    if logo is None:
+        return False
+    if backing:
+        bax=fig.add_axes([x-0.010,y-0.008,w+0.020,h+0.016],zorder=9)
+        bax.set_facecolor("#FFFFFF")
+        bax.set_xticks([]); bax.set_yticks([])
+        for sp in bax.spines.values():
+            sp.set_visible(False)
+        bax.patch.set_alpha(1.0)
+    la=fig.add_axes([x,y,w,h],zorder=10)
+    la.imshow(logo, interpolation="lanczos", aspect="equal")
+    la.set_axis_off()
+    return True
 
 
 def _wrapped(text, width):
@@ -2348,8 +2390,9 @@ def render_intelligence_brief(selected_rows, region_name, publication_date, outp
     # Header: official P&C logo, explicit product name, large region title, date.
     logo_img = _publication_logo_image()
     if logo_img is not None:
-        ax_logo = fig.add_axes([0.035, 0.885, 0.285, 0.085])
-        ax_logo.imshow(logo_img); ax_logo.axis("off")
+        ax_logo = fig.add_axes([0.035, 0.892, 0.275, 0.070])
+        ax_logo.imshow(logo_img, interpolation="lanczos", aspect="equal")
+        ax_logo.axis("off")
     else:
         canvas.text(0.035, 0.935, "POWER & CORRIDORS", ha="left", va="center", color=navy,
                     fontsize=22, fontweight="bold")
@@ -2925,11 +2968,8 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
         fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
         ax=fig.add_axes([0,0,1,1]); ax.axis('off')
         ax.add_patch(plt.Rectangle((0,0.88),1,0.12,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
-        logo=_publication_logo_image()
-        if logo is not None:
-            la=fig.add_axes([0.07,0.905,0.25,0.065]); la.imshow(logo); la.axis('off')
-        else:
-            ax.text(0.07,0.935,"POWER & CORRIDORS",color=gold,fontsize=17,fontweight='bold',va='center')
+        if not _add_pdf_logo(fig,x=0.055,y=0.926,w=0.285,h=0.046,backing=True):
+            ax.text(0.07,0.935,"POWER & CORRIDORS",color=white,fontsize=16,fontweight='bold',va='center')
         ax.text(0.93,0.935,"P&C INTELLIGENCE",ha='right',va='center',color=gold,fontsize=9,fontweight='bold')
         ax.text(0.5,0.72,safe(name).upper(),ha='center',va='center',color=navy,fontsize=27,fontweight='bold')
         ax.text(0.5,0.675,pd.to_datetime(as_of).strftime('%d %B %Y').upper(),ha='center',color=muted,fontsize=12)
@@ -2948,13 +2988,14 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
             ax.text(x,0.315,val,ha='center',color=navy,fontsize=14,fontweight='bold')
         ax.text(0.07,0.065,"POWER & CORRIDORS · INTELLIGENCE",color=gold,fontsize=8,fontweight='bold')
         ax.text(0.93,0.065,"powerncorridors.com/intelligence",ha='right',color=blue,fontsize=8,fontweight='bold')
-        pdf.savefig(fig,bbox_inches='tight',pad_inches=0); plt.close(fig)
+        pdf.savefig(fig, facecolor=white); plt.close(fig)
 
         # ---------- key takeaways + horizon ----------
         fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
         ax=fig.add_axes([0,0,1,1]); ax.axis('off')
         ax.add_patch(plt.Rectangle((0,0.94),1,0.06,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
-        ax.text(0.07,0.967,"POWER & CORRIDORS INTELLIGENCE",color=gold,fontsize=8,fontweight='bold',va='center')
+        if not _add_pdf_logo(fig,x=0.050,y=0.949,w=0.225,h=0.031,backing=True):
+            ax.text(0.07,0.967,"POWER & CORRIDORS",color=white,fontsize=8,fontweight='bold',va='center')
         ax.text(0.93,0.967,safe(name).upper(),ha='right',color=white,fontsize=10,fontweight='bold',va='center')
         y=0.89
         ax.text(0.07,y,"KEY TAKEAWAYS",color=gold,fontsize=9,fontweight='bold'); y-=0.04
@@ -2985,7 +3026,7 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
             ax.text(0.075,y,"No upcoming horizon records in the selected window.",color=muted,fontsize=9)
         ax.text(0.07,0.045,pd.to_datetime(as_of).strftime('%d %B %Y'),color=muted,fontsize=8)
         ax.text(0.93,0.045,"Page 2",ha='right',color=muted,fontsize=8)
-        pdf.savefig(fig,bbox_inches='tight',pad_inches=0); plt.close(fig)
+        pdf.savefig(fig, facecolor=white); plt.close(fig)
 
         page_no=3
         # ---------- stories ----------
@@ -3005,7 +3046,8 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
                 fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
                 ax=fig.add_axes([0,0,1,1]); ax.axis('off')
                 ax.add_patch(plt.Rectangle((0,0.94),1,0.06,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
-                ax.text(0.07,0.967,"POWER & CORRIDORS INTELLIGENCE",color=gold,fontsize=8,fontweight='bold',va='center')
+                if not _add_pdf_logo(fig,x=0.050,y=0.949,w=0.225,h=0.031,backing=True):
+                    ax.text(0.07,0.967,"POWER & CORRIDORS",color=white,fontsize=8,fontweight='bold',va='center')
                 ax.text(0.93,0.967,safe(name).upper(),ha='right',color=white,fontsize=10,fontweight='bold',va='center')
                 ax.text(0.07,0.895,sec.upper(),color=gold,fontsize=9,fontweight='bold')
                 risk_color={'LOW':green,'MODERATE':gold,'HIGH':orange,'SEVERE':red,'CRITICAL':'#8C3D36'}.get(risk,navy2)
@@ -3029,14 +3071,15 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
                     ax.text(0.07,max(0.10,y),"Source refs: "+", ".join(f"[{n}]" for n in nums),color=muted,fontsize=8)
                 ax.text(0.07,0.045,pd.to_datetime(as_of).strftime('%d %B %Y'),color=muted,fontsize=8)
                 ax.text(0.93,0.045,f"Page {page_no}",ha='right',color=muted,fontsize=8)
-                pdf.savefig(fig,bbox_inches='tight',pad_inches=0); plt.close(fig)
+                pdf.savefig(fig, facecolor=white); plt.close(fig)
                 page_no += 1
 
         # ---------- sources ----------
         fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
         ax=fig.add_axes([0,0,1,1]); ax.axis('off')
         ax.add_patch(plt.Rectangle((0,0.94),1,0.06,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
-        ax.text(0.07,0.967,"POWER & CORRIDORS INTELLIGENCE",color=gold,fontsize=8,fontweight='bold',va='center')
+        if not _add_pdf_logo(fig,x=0.050,y=0.949,w=0.225,h=0.031,backing=True):
+            ax.text(0.07,0.967,"POWER & CORRIDORS",color=white,fontsize=8,fontweight='bold',va='center')
         ax.text(0.93,0.967,"SOURCES",ha='right',color=white,fontsize=10,fontweight='bold',va='center')
         ax.text(0.07,0.89,"SOURCES",color=gold,fontsize=10,fontweight='bold')
         y=0.84
@@ -3050,7 +3093,7 @@ def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_r
             ax.text(0.07,y,"No source URLs resolved from selected canonical records.",color=muted,fontsize=9)
         ax.text(0.07,0.045,pd.to_datetime(as_of).strftime('%d %B %Y'),color=muted,fontsize=8)
         ax.text(0.93,0.045,f"Page {page_no}",ha='right',color=muted,fontsize=8)
-        pdf.savefig(fig,bbox_inches='tight',pad_inches=0); plt.close(fig)
+        pdf.savefig(fig, facecolor=white); plt.close(fig)
 
     bio.seek(0)
     return bio.getvalue()
