@@ -8,6 +8,7 @@ import zlib
 import textwrap
 import pandas as pd
 import re
+import html as html_lib
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 try:
@@ -1237,7 +1238,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v4.1 horizon panel restored · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
+st.sidebar.caption(f"v4.2 horizon render fixed · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -3056,11 +3057,11 @@ def render_horizon_sidebar_compact(limit=4):
 
                 st.markdown(
                     "<div class='pc-card' style='padding:.58rem .68rem;margin-bottom:.4rem'>"
-                    f"<div class='pc-card-meta'>{html_lib.escape(date_label)}"
-                    + (f" · {html_lib.escape(typ)}" if typ else "")
+                    f"<div class='pc-card-meta'>{html_lib.escape(str(date_label or ''))}"
+                    + (f" · {html_lib.escape(str(typ or ''))}" if typ else "")
                     + "</div>"
-                    f"<div class='pc-card-title' style='font-size:.86rem;line-height:1.22'>{html_lib.escape(title)}</div>"
-                    + (f"<div class='pc-card-body' style='font-size:.74rem'>{html_lib.escape(loc)}</div>" if loc else "")
+                    f"<div class='pc-card-title' style='font-size:.86rem;line-height:1.22'>{html_lib.escape(str(title or ''))}</div>"
+                    + (f"<div class='pc-card-body' style='font-size:.74rem'>{html_lib.escape(str(loc or ''))}</div>" if loc else "")
                     + "</div>",
                     unsafe_allow_html=True,
                 )
