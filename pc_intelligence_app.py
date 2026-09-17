@@ -300,6 +300,100 @@ def _links_for_events(link_df,event_df):
     return link_df[text_col(link_df,'Event ID').isin(ids)].copy()
 
 
+
+def _event_ids_for_affected_port(event_df, port_id="", port_name=""):
+    """Return current event IDs demonstrably connected to one port."""
+    ids = set()
+    if event_df is None or event_df.empty or "Event ID" not in event_df.columns:
+        return ids
+
+    allowed = _event_ids(event_df)
+
+    # Canonical event -> asset link is authoritative.
+    if (
+        port_id
+        and isinstance(event_asset_links, pd.DataFrame)
+        and not event_asset_links.empty
+        and {"Event ID","Asset ID"}.issubset(event_asset_links.columns)
+    ):
+        hits = event_asset_links[
+            text_col(event_asset_links,"Event ID").isin(allowed)
+            & text_col(event_asset_links,"Asset ID").eq(str(port_id))
+        ]
+        ids |= set(text_col(hits,"Event ID"))
+
+    # Conservative fallback for older unresolved rows.
+    if port_name:
+        fallback = event_df[
+            contains_any(
+                event_df,
+                ["Location","Title","Description","Operational Impact"],
+                [port_name]
+            )
+        ]
+        if "Event ID" in fallback.columns:
+            ids |= set(text_col(fallback,"Event ID"))
+
+    return {x for x in ids if x and x.lower() not in {"none","nan"}}
+
+
+def _affected_ports_for_events(event_df):
+    """Return only canonical ports affected by the supplied event set."""
+    cols = ["Port ID","Port / Facility","Country","Events"]
+    if (
+        event_df is None or event_df.empty
+        or not isinstance(ports, pd.DataFrame) or ports.empty
+        or "Port / Facility" not in ports.columns
+        or "Event ID" not in event_df.columns
+    ):
+        return pd.DataFrame(columns=cols)
+
+    rows = []
+    for _, pr in ports.iterrows():
+        pname = clean_display_text(pr.get("Port / Facility",""))
+        if not pname:
+            continue
+        pid = clean_display_text(pr.get("Port ID","")) if "Port ID" in ports.columns else ""
+        eids = _event_ids_for_affected_port(event_df, pid, pname)
+        if not eids:
+            continue
+        rows.append({
+            "Port ID": pid,
+            "Port / Facility": pname,
+            "Country": clean_display_text(pr.get("Country","")),
+            "Events": len(eids),
+        })
+
+    if not rows:
+        return pd.DataFrame(columns=cols)
+
+    return (
+        pd.DataFrame(rows)
+        .drop_duplicates(subset=["Port ID","Port / Facility"])
+        .sort_values(["Events","Port / Facility"], ascending=[False,True])
+        .reset_index(drop=True)
+    )
+
+
+def _events_affecting_ports(event_df):
+    """Keep only events tied to at least one canonical port."""
+    if event_df is None or event_df.empty or "Event ID" not in event_df.columns:
+        return pd.DataFrame(columns=event_df.columns if isinstance(event_df,pd.DataFrame) else [])
+
+    ap = _affected_ports_for_events(event_df)
+    if ap.empty:
+        return pd.DataFrame(columns=event_df.columns)
+
+    ids = set()
+    for _, pr in ap.iterrows():
+        ids |= _event_ids_for_affected_port(
+            event_df,
+            clean_display_text(pr.get("Port ID","")),
+            clean_display_text(pr.get("Port / Facility","")),
+        )
+
+    return event_df[text_col(event_df,"Event ID").isin(ids)].copy() if ids else pd.DataFrame(columns=event_df.columns)
+
 def _derived_company_links_from_assets(asset_links):
     """Derive owner/operator company exposure from an affected canonical asset.
 
@@ -1143,7 +1237,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v3.7 global horizon gate + disruption analytics · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
+st.sidebar.caption(f"v4.0 disruption port consistency · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -2834,6 +2928,14 @@ def horizon_events_frame(df=None):
     pat=r"scheduled|forecast|recurring|seasonal|upcoming|planned|election|referendum|anniversar|holiday|summit|conference|festival|sport|games|marathon|grand prix|exercise|deadline|monsoon|hurricane season|cyclone season"
     return out[blob.str.cat(meta,sep=" ").str.contains(pat,case=False,regex=True,na=False)].copy()
 
+def _horizon_id_set():
+    """Canonical event IDs that belong to the forward calendar, not Latest Intelligence."""
+    h = horizon_events_frame()
+    if h is None or h.empty or "Event ID" not in h.columns:
+        return set()
+    return set(text_col(h, "Event ID").astype(str))
+
+
 def operational_latest_frame(df):
     """Observed/current intelligence only. Scheduled horizon entries never lead Latest Intelligence."""
     if df is None or df.empty:
@@ -3820,6 +3922,32 @@ elif page == "Disruptions & Event Graph":
             if sev != "All":
                 adf = adf[text_col(adf,"Severity").eq(sev)].copy()
 
+            pre_port_ids = _event_ids(adf)
+            pre_port_work = (
+                work[text_col(work,"Event ID").isin(pre_port_ids)].copy()
+                if pre_port_ids else pd.DataFrame()
+            )
+            disruption_ports = _affected_ports_for_events(pre_port_work)
+
+            if not disruption_ports.empty:
+                selected_port = st.selectbox(
+                    "Affected port",
+                    ["All affected ports"] + disruption_ports["Port / Facility"].tolist(),
+                    key="event_graph_affected_port"
+                )
+                if selected_port != "All affected ports":
+                    prow = disruption_ports[
+                        disruption_ports["Port / Facility"].eq(selected_port)
+                    ].iloc[0]
+                    selected_ids = _event_ids_for_affected_port(
+                        pre_port_work,
+                        clean_display_text(prow.get("Port ID","")),
+                        selected_port
+                    )
+                    adf = adf[text_col(adf,"Event ID").isin(selected_ids)].copy()
+            else:
+                st.caption("No affected ports are mapped to the current disruption selection.")
+
             # Return to the canonical event-shaped frame for graph joins.
             ids = _event_ids(adf)
             work = work[text_col(work,"Event ID").isin(ids)].copy() if ids else pd.DataFrame()
@@ -3953,6 +4081,25 @@ elif page == "Disruptions & Event Graph":
                 )
 
             with tabs[3]:
+                affected_ports_view = _affected_ports_for_events(work)
+                if not affected_ports_view.empty:
+                    st.markdown("#### Affected ports")
+                    show_df(
+                        affected_ports_view,
+                        ["Port / Facility","Country","Events"],
+                        300
+                    )
+                    if alt is not None:
+                        st.altair_chart(
+                            alt.Chart(affected_ports_view.head(25)).mark_bar().encode(
+                                x="Events:Q",
+                                y=alt.Y("Port / Facility:N",sort="-x"),
+                                tooltip=["Port / Facility","Country","Events"]
+                            ),
+                            use_container_width=True
+                        )
+
+                st.markdown("#### All affected assets")
                 graph = _event_graph_join(event_asset_links,work,"Asset")
                 if graph.empty:
                     st.info("No canonical port/asset relationships exist for this selection yet.")
@@ -5183,22 +5330,35 @@ elif page == "Ports & Infrastructure":
         if ports.empty or "Port / Facility" not in ports.columns:
             st.info("No port records are currently loaded.")
         else:
-            pnames = sorted(
-                ports["Port / Facility"].dropna().astype(str).unique().tolist()
-            )
-            pname = st.selectbox(
-                "Port / facility",
-                pnames,
-                key="intel_port_drilldown"
-            )
+            affected_ports = _affected_ports_for_events(pe)
 
-            pr = ports[text_col(ports,"Port / Facility").eq(pname)].copy()
-            show_df(
-                pr,
-                ["Port / Facility","Country","Operator","Facility Type",
-                 "Key Role","Coverage Note"],
-                170
+            if affected_ports.empty:
+                st.info(
+                    "No ports currently have mapped security, disruption or illicit-trade events. "
+                    "Load or resolve event→port relationships to populate this drill-down."
+                )
+                pname = None
+            else:
+                st.caption(
+                    f"{len(affected_ports):,} affected ports are currently available in the Intelligence drill-down."
+                )
+                pname = st.selectbox(
+                    "Affected port / facility",
+                    affected_ports["Port / Facility"].tolist(),
+                    key="intel_port_drilldown"
+                )
+
+            pr = (
+                ports[text_col(ports,"Port / Facility").eq(pname)].copy()
+                if pname else pd.DataFrame()
             )
+            if not pr.empty:
+                show_df(
+                    pr,
+                    ["Port / Facility","Country","Operator","Facility Type",
+                     "Key Role","Coverage Note"],
+                    170
+                )
 
             pid = str(pr.iloc[0].get("Port ID","")) if not pr.empty else ""
 
@@ -5263,9 +5423,10 @@ elif page == "Ports & Infrastructure":
             "Filter and graph port disruption by year, month, region and country."
         )
 
-        padf = _analytics_prepare_events(pe)
+        port_disruption_events = _events_affecting_ports(pe)
+        padf = _analytics_prepare_events(port_disruption_events)
         if padf.empty:
-            st.info("No port/infrastructure disruption events are currently available.")
+            st.info("No port-linked disruption events are currently available.")
         else:
             padf["_year"] = padf["_date"].dt.year.astype("Int64").astype("string")
             padf["_month_num"] = padf["_date"].dt.month.astype("Int64")
@@ -5312,8 +5473,39 @@ elif page == "Ports & Infrastructure":
                     padf["_countries"].map(lambda cs: pc in cs if isinstance(cs,list) else False)
                 ].copy()
 
+            pre_ids = _event_ids(padf)
+            pre_view = (
+                port_disruption_events[
+                    text_col(port_disruption_events,"Event ID").isin(pre_ids)
+                ].copy()
+                if pre_ids else pd.DataFrame()
+            )
+            filtered_ports = _affected_ports_for_events(pre_view)
+
+            if not filtered_ports.empty:
+                selected_port = st.selectbox(
+                    "Affected port",
+                    ["All affected ports"] + filtered_ports["Port / Facility"].tolist(),
+                    key="port_disruption_affected_port"
+                )
+                if selected_port != "All affected ports":
+                    prow = filtered_ports[
+                        filtered_ports["Port / Facility"].eq(selected_port)
+                    ].iloc[0]
+                    selected_ids = _event_ids_for_affected_port(
+                        pre_view,
+                        clean_display_text(prow.get("Port ID","")),
+                        selected_port
+                    )
+                    padf = padf[text_col(padf,"Event ID").isin(selected_ids)].copy()
+
             pids = _event_ids(padf)
-            pview = pe[text_col(pe,"Event ID").isin(pids)].copy() if pids else pd.DataFrame()
+            pview = (
+                port_disruption_events[
+                    text_col(port_disruption_events,"Event ID").isin(pids)
+                ].copy()
+                if pids else pd.DataFrame()
+            )
 
             c1,c2,c3,c4 = st.columns(4)
             c1.metric("Matching disruptions", len(pview))
@@ -5396,6 +5588,24 @@ elif page == "Ports & Infrastructure":
                 time_grain="Monthly",top_n=8
             )
 
+            affected_ports_ranked = _affected_ports_for_events(pview)
+            if not affected_ports_ranked.empty:
+                st.markdown("#### Most frequently affected ports")
+                show_df(
+                    affected_ports_ranked,
+                    ["Port / Facility","Country","Events"],
+                    340
+                )
+                if alt is not None:
+                    st.altair_chart(
+                        alt.Chart(affected_ports_ranked.head(25)).mark_bar().encode(
+                            x="Events:Q",
+                            y=alt.Y("Port / Facility:N",sort="-x"),
+                            tooltip=["Port / Facility","Country","Events"]
+                        ),
+                        use_container_width=True
+                    )
+
             graph = _event_graph_join(infra_links,pview,"Asset")
             if not graph.empty:
                 agg = (
@@ -5403,7 +5613,7 @@ elif page == "Ports & Infrastructure":
                     .nunique().reset_index(name="Events")
                     .sort_values("Events",ascending=False)
                 )
-                st.markdown("#### Most frequently affected ports / assets")
+                st.markdown("#### Other affected infrastructure assets")
                 show_df(agg,["Asset","Country","Events"],340)
 
     with tabs[5]:
