@@ -8,7 +8,6 @@ import zlib
 import textwrap
 import pandas as pd
 import re
-import html as html_lib
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 try:
@@ -23,22 +22,16 @@ except Exception:
 # Publication renderer dependencies. Matplotlib is required for PNG/PDF export.
 # Basemap is optional; when unavailable the renderer uses a geographic grid fallback.
 try:
-    import matplotlib as mpl
-    mpl.rcParams["pdf.fonttype"] = 42
-    mpl.rcParams["ps.fonttype"] = 42
-    mpl.rcParams["text.usetex"] = False
     import matplotlib.pyplot as plt
     from matplotlib.patches import FancyBboxPatch, ConnectionPatch
     from matplotlib.collections import PolyCollection
     import matplotlib.image as mpimg
-    from matplotlib.backends.backend_pdf import PdfPages
 except Exception:
     plt = None
     FancyBboxPatch = None
     ConnectionPatch = None
     PolyCollection = None
     mpimg = None
-    PdfPages = None
 
 try:
     from mpl_toolkits.basemap import Basemap
@@ -46,22 +39,6 @@ except Exception:
     Basemap = None
 from pathlib import Path
 from datetime import datetime, timedelta, date
-
-try:
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib import colors as rl_colors
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
-    from reportlab.lib.units import mm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle, KeepTogether
-except Exception:
-    A4 = None
-    rl_colors = None
-    getSampleStyleSheet = None
-    ParagraphStyle = None
-    TA_LEFT = TA_CENTER = TA_RIGHT = None
-    mm = None
-    SimpleDocTemplate = Paragraph = Spacer = PageBreak = Table = TableStyle = KeepTogether = None
 
 SHARED_DIR = Path(__file__).resolve().parent / "shared"
 if str(SHARED_DIR) not in sys.path:
@@ -477,6 +454,31 @@ def render_connected_context(event_id):
             view["Relationship"] = view["Relationship"].map(humanize_relationship)
         show_df(view, ["System", "Relationship", "Confidence"], 180)
 
+    # Canonical vessel/mobile-asset relationships loaded from pc_event_links.
+    try:
+        mlinks = event_mobile_asset_links[text_col(event_mobile_asset_links,"Event ID").eq(eid)] if not event_mobile_asset_links.empty else pd.DataFrame()
+    except Exception:
+        mlinks = pd.DataFrame()
+    if not mlinks.empty:
+        st.markdown("**Associated vessels / mobile assets**")
+        show_df(mlinks,["Mobile Asset","Asset Type","Subtype","IMO","Flag","Relationship","Confidence"],220)
+        for _,mr in mlinks.iterrows():
+            mid=clean_display_text(mr.get("Mobile Asset ID",""))
+            mname=clean_display_text(mr.get("Mobile Asset",""))
+            if mid:
+                pc_drilldown_button("mobile_asset",mid,f"Open {mname or 'mobile asset'}",key=f"intel_mobile_dd_{eid}_{mid}",use_container_width=True)
+
+    # Actor relationships are a separate canonical edge model.
+    try:
+        al = event_actor_links[text_col(event_actor_links,"event_id").eq(eid)] if not event_actor_links.empty else pd.DataFrame()
+        if not al.empty and not actor_directory.empty:
+            names=actor_directory[["actor_id","canonical_name","actor_class","actor_subtype"]].copy()
+            al=al.merge(names,on="actor_id",how="left")
+            st.markdown("**Associated actors / groups**")
+            show_df(al.rename(columns={"canonical_name":"Actor","actor_role":"Role","actor_class":"Class","actor_subtype":"Subtype","attribution_status":"Attribution"}),["Actor","Class","Subtype","Role","Attribution","confidence"],230)
+    except Exception:
+        pass
+
 
 
 def _canonical_db_event_frames():
@@ -629,16 +631,92 @@ def _canonical_db_actor_frames():
 actor_directory, event_actor_links, actor_relationships, actor_designations = _canonical_db_actor_frames()
 
 
+@st.cache_data(show_spinner=False, ttl=60)
+def _canonical_db_actor_layer_frames(layer):
+    """Return actor directory + event links for one analytical actor layer.
+
+    Preferred path uses the SQL views installed for criminal/enforcement separation.
+    If those views are unavailable, the caller falls back to deterministic filtering of
+    the all-actor canonical frames already loaded above.
+    """
+    actors = pd.DataFrame()
+    links = pd.DataFrame()
+    layer_key = clean_display_text(layer).lower()
+    if layer_key not in {"criminal", "enforcement"}:
+        return actors, links
+    try:
+        sb = pc_db_client(service=True)
+        if sb is None:
+            return actors, links
+        directory_view = "v_pc_illicit_actor_directory" if layer_key == "criminal" else "v_pc_enforcement_actor_directory"
+        links_view = "v_pc_illicit_event_actor_links" if layer_key == "criminal" else "v_pc_enforcement_event_actor_links"
+        arows = pc_safe_rows(
+            sb, directory_view,
+            "actor_id,legacy_actor_id,canonical_name,short_name,actor_class,actor_subtype,status,primary_country,countries,description,confidence,designation_count,designations,linked_events,latest_event_date,high_critical_events,distinct_roles,roles_seen",
+            5000, order="canonical_name",
+        )
+        if arows:
+            actors = pd.DataFrame(arows)
+        lrows = pc_safe_rows(
+            sb, links_view,
+            "event_actor_link_id,event_id,actor_id,actor_role,attribution_status,confidence,link_basis,source_id,analyst_reviewed,metadata,created_at,updated_at",
+            10000,
+        )
+        if lrows:
+            links = pd.DataFrame(lrows)
+    except Exception:
+        pass
+    return actors, links
+
+
+def _fallback_actor_layer_frames(layer, actors_df=None, links_df=None):
+    """Class/subtype fallback when layer SQL views are absent or empty."""
+    actors = (actor_directory if actors_df is None else actors_df).copy()
+    links = (event_actor_links if links_df is None else links_df).copy()
+    if actors.empty:
+        return actors, links.iloc[0:0].copy() if not links.empty else links
+    layer_key = clean_display_text(layer).lower()
+    cls = actors.get("actor_class", pd.Series("", index=actors.index)).fillna("").astype(str).str.lower()
+    sub = actors.get("actor_subtype", pd.Series("", index=actors.index)).fillna("").astype(str).str.lower()
+    if layer_key == "criminal":
+        mask = cls.isin({"organized_crime_group","criminal_network","armed_group","hacktivist_group"})
+        mask |= ((cls == "person") & sub.str.contains(r"smuggler|trafficker|facilitator", regex=True, na=False))
+    elif layer_key == "enforcement":
+        mask = cls.isin({"law_enforcement_agency","state_security_actor","military","customs_authority","border_force"})
+    else:
+        return actors, links
+    actors = actors[mask].copy()
+    if links.empty or "actor_id" not in links.columns:
+        return actors, links.iloc[0:0].copy() if not links.empty else links
+    ids = set(actors["actor_id"].astype(str)) if "actor_id" in actors.columns else set()
+    return actors, links[links["actor_id"].astype(str).isin(ids)].copy()
+
+
+def _actor_layer_frames(layer_label):
+    """Resolve UI label to the best available actor/link frames."""
+    if layer_label == "All":
+        return actor_directory.copy(), event_actor_links.copy()
+    key = "criminal" if layer_label.startswith("Criminal") else "enforcement"
+    actors, links = _canonical_db_actor_layer_frames(key)
+    if actors.empty:
+        actors, links = _fallback_actor_layer_frames(key)
+    elif links.empty and not event_actor_links.empty:
+        ids = set(actors["actor_id"].astype(str)) if "actor_id" in actors.columns else set()
+        links = event_actor_links[event_actor_links["actor_id"].astype(str).isin(ids)].copy()
+    return actors, links
+
+
 def _actor_list_text(v):
     if isinstance(v, (list, tuple, set)):
         return ", ".join([clean_display_text(x) for x in v if clean_display_text(x)])
     return clean_display_text(v)
 
 
-def _actor_event_frame(actor_id):
-    if event_actor_links.empty or hazard_events_raw.empty:
+def _actor_event_frame(actor_id, links_df=None):
+    source_links = event_actor_links if links_df is None else links_df
+    if source_links.empty or hazard_events_raw.empty:
         return pd.DataFrame()
-    links = event_actor_links[event_actor_links["actor_id"].astype(str).eq(str(actor_id))].copy()
+    links = source_links[source_links["actor_id"].astype(str).eq(str(actor_id))].copy()
     if links.empty or "Event ID" not in hazard_events_raw.columns:
         return pd.DataFrame()
     ev = hazard_events_raw.copy()
@@ -765,8 +843,22 @@ if not _db_event_locations.empty:
     event_locations = _db_event_locations
 else:
     event_locations = xl("13_events_hazards.xlsx", "Event Locations")
-event_asset_links = xl("13_events_hazards.xlsx", "Event Asset Links")
-event_company_links = xl("13_events_hazards.xlsx", "Event Company Links")
+_db_event_asset_links, _db_event_company_links, event_mobile_asset_links = _canonical_db_event_object_links()
+if not _db_event_asset_links.empty:
+    event_asset_links = _db_event_asset_links
+else:
+    event_asset_links = xl("13_events_hazards.xlsx", "Event Asset Links")
+if not _db_event_company_links.empty:
+    event_company_links = _db_event_company_links
+else:
+    event_company_links = xl("13_events_hazards.xlsx", "Event Company Links")
+# Add indirect owner/operator exposure from canonical affected assets.
+_derived_company_links = _derived_company_links_from_assets(event_asset_links)
+if not _derived_company_links.empty:
+    event_company_links = pd.concat([event_company_links,_derived_company_links],ignore_index=True,sort=False) if not event_company_links.empty else _derived_company_links
+    _dedupe_cols=[c for c in ["Event ID","Company ID","Company","Relationship"] if c in event_company_links.columns]
+    if _dedupe_cols:
+        event_company_links=event_company_links.drop_duplicates(subset=_dedupe_cols,keep="first")
 event_system_links = xl("13_events_hazards.xlsx", "Event System Links")
 impact_chains = xl("13_events_hazards.xlsx", "Impact Chains")
 
@@ -813,7 +905,7 @@ NAV = {
     "PUBLICATIONS": ["Report Studio", "Intelligence Brief Builder"],
     "ACTORS & NETWORKS": ["Actors & Networks"],
     "FORWARD MONITORING": ["Horizon Calendar", "Watch Areas", "Monitoring & Indicators"],
-    "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Smuggling & Illicit Trade", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
+    "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Disruptions & Event Graph", "Smuggling & Illicit Trade", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
     "DISCOVERY": ["Intelligence Search", "Source Monitor"],
 }
 
@@ -827,7 +919,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v3.3 actors · {_bst.get('mode','excel').title()} backend · shared canonical model")
+st.sidebar.caption(f"v3.4 event graph · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -1941,6 +2033,160 @@ def _analytics_render_chart(df, chart_type, group_by, time_grain="Daily", top_n=
             st.altair_chart(chart,use_container_width=True)
 
 
+
+# -----------------------------------------------------------------------------
+# Canonical event-object graph from Supabase
+# -----------------------------------------------------------------------------
+@st.cache_data(show_spinner=False, ttl=60)
+def _canonical_db_event_object_links():
+    """Resolve canonical event -> asset/entity/mobile-asset edges for the UI.
+
+    pc_event_links is authoritative. Workbook-shaped relationship sheets are
+    used only when the canonical database has no applicable rows.
+    """
+    assets_df=pd.DataFrame(); entities_df=pd.DataFrame(); mobile_df=pd.DataFrame()
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return assets_df,entities_df,mobile_df
+        links=pc_safe_rows(
+            sb,"pc_event_links",
+            "event_link_id,event_id,linked_type,linked_id,linked_name,relationship,confidence,source_id,metadata",
+            30000,
+        )
+        if not links:
+            return assets_df,entities_df,mobile_df
+        ldf=pd.DataFrame(links)
+
+        arows=pc_safe_rows(
+            sb,"pc_assets",
+            "asset_id,name,asset_type,subtype,country,region_city,owner_entity_id,operator_entity_id,status,record_status,metadata",
+            15000,
+        )
+        erows=pc_safe_rows(
+            sb,"pc_entities",
+            "entity_id,name,entity_type,hq_country,status,metadata",
+            15000,
+        )
+        mrows=pc_safe_rows(
+            sb,"pc_mobile_assets",
+            "mobile_asset_id,name,asset_type,subtype,imo,mmsi,flag,status,metadata",
+            15000,
+        )
+        amap={str(r.get('asset_id')):r for r in arows or []}
+        emap={str(r.get('entity_id')):r for r in erows or []}
+        mmap={str(r.get('mobile_asset_id')):r for r in mrows or []}
+
+        assets=[]; entities=[]; mobiles=[]
+        for _,r in ldf.iterrows():
+            ltype=clean_display_text(r.get('linked_type','')).casefold()
+            lid=clean_display_text(r.get('linked_id',''))
+            base={
+                'Event Link ID':r.get('event_link_id'),
+                'Event ID':r.get('event_id'),
+                'Relationship':r.get('relationship'),
+                'Confidence':r.get('confidence'),
+                'Source ID':r.get('source_id'),
+            }
+            if ltype=='asset':
+                obj=amap.get(lid,{})
+                assets.append({**base,
+                    'Asset ID':lid,
+                    'Asset':clean_display_text(obj.get('name') or r.get('linked_name')),
+                    'Asset Type':clean_display_text(obj.get('asset_type')),
+                    'Asset Subtype':clean_display_text(obj.get('subtype')),
+                    'Country':clean_display_text(obj.get('country')),
+                    'Region / City':clean_display_text(obj.get('region_city')),
+                    'Owner Entity ID':obj.get('owner_entity_id'),
+                    'Owner Entity':clean_display_text(emap.get(str(obj.get('owner_entity_id')),{ }).get('name')) if obj.get('owner_entity_id') else '',
+                    'Operator Entity ID':obj.get('operator_entity_id'),
+                    'Operator Entity':clean_display_text(emap.get(str(obj.get('operator_entity_id')),{ }).get('name')) if obj.get('operator_entity_id') else '',
+                })
+            elif ltype=='entity':
+                obj=emap.get(lid,{})
+                entities.append({**base,
+                    'Company ID':lid,
+                    'Company':clean_display_text(obj.get('name') or r.get('linked_name')),
+                    'Entity Type':clean_display_text(obj.get('entity_type')),
+                    'HQ Country':clean_display_text(obj.get('hq_country')),
+                })
+            elif ltype=='mobile_asset':
+                obj=mmap.get(lid,{})
+                mobiles.append({**base,
+                    'Mobile Asset ID':lid,
+                    'Mobile Asset':clean_display_text(obj.get('name') or r.get('linked_name')),
+                    'Asset Type':clean_display_text(obj.get('asset_type')),
+                    'Subtype':clean_display_text(obj.get('subtype')),
+                    'IMO':clean_display_text(obj.get('imo')),
+                    'MMSI':clean_display_text(obj.get('mmsi')),
+                    'Flag':clean_display_text(obj.get('flag')),
+                })
+        return pd.DataFrame(assets),pd.DataFrame(entities),pd.DataFrame(mobiles)
+    except Exception:
+        return assets_df,entities_df,mobile_df
+
+
+def _event_ids(df):
+    if df is None or df.empty or 'Event ID' not in df.columns:
+        return set()
+    return set(text_col(df,'Event ID').dropna().astype(str))
+
+
+def _links_for_events(link_df,event_df):
+    if link_df is None or link_df.empty:
+        return pd.DataFrame()
+    ids=_event_ids(event_df)
+    if not ids or 'Event ID' not in link_df.columns:
+        return pd.DataFrame(columns=link_df.columns)
+    return link_df[text_col(link_df,'Event ID').isin(ids)].copy()
+
+
+def _derived_company_links_from_assets(asset_links):
+    """Derive owner/operator company exposure from an affected canonical asset.
+
+    These are exposure edges, not claims that the company caused the event.
+    """
+    if asset_links is None or asset_links.empty:
+        return pd.DataFrame()
+    rows=[]
+    for _,r in asset_links.iterrows():
+        for id_col,name_col,rel in [
+            ('Owner Entity ID','Owner Entity','owner of affected asset'),
+            ('Operator Entity ID','Operator Entity','operator of affected asset'),
+        ]:
+            cid=clean_display_text(r.get(id_col,'')); cname=clean_display_text(r.get(name_col,''))
+            if not cid and not cname:
+                continue
+            rows.append({
+                'Event ID':r.get('Event ID'),
+                'Company ID':cid,
+                'Company':cname or cid,
+                'Entity Type':'Company',
+                'HQ Country':'',
+                'Relationship':rel,
+                'Confidence':r.get('Confidence'),
+                'Source ID':r.get('Source ID'),
+                'Derived From Asset':r.get('Asset'),
+            })
+    return pd.DataFrame(rows)
+
+
+def _event_graph_join(link_df,event_df,label_col):
+    """Attach event facts to a canonical relationship frame for dataset tabs."""
+    if link_df is None or link_df.empty or event_df is None or event_df.empty:
+        return pd.DataFrame()
+    links=_links_for_events(link_df,event_df)
+    if links.empty:
+        return links
+    cols=[c for c in ['Event ID','Start Date','Event Family','Event Type','Severity','Country / Countries','Location','Title','Operational Impact'] if c in event_df.columns]
+    ev=event_df[cols].drop_duplicates('Event ID') if 'Event ID' in cols else pd.DataFrame()
+    if ev.empty:
+        return links
+    out=links.merge(ev,on='Event ID',how='left')
+    if label_col in out.columns:
+        out[label_col]=out[label_col].map(clean_display_text)
+    return out
+
 # -----------------------------------------------------------------------------
 # Publication builder helpers
 # -----------------------------------------------------------------------------
@@ -2306,28 +2552,8 @@ def _embedded_png(b64_text):
         return None
 
 
-def _trim_transparent_image(img):
-    """Crop transparent padding from an RGBA matplotlib image array."""
-    if img is None:
-        return None
-    try:
-        import numpy as _np
-        arr=_np.asarray(img)
-        if arr.ndim==3 and arr.shape[2]>=4:
-            alpha=arr[:,:,3]
-            ys,xs=_np.where(alpha>0.01)
-            if len(xs) and len(ys):
-                pad=8
-                x0=max(0,int(xs.min())-pad); x1=min(arr.shape[1],int(xs.max())+pad+1)
-                y0=max(0,int(ys.min())-pad); y1=min(arr.shape[0],int(ys.max())+pad+1)
-                return arr[y0:y1,x0:x1]
-    except Exception:
-        pass
-    return img
-
-
 def _publication_logo_image():
-    # Prefer a repository asset when present, otherwise use the embedded official transparent logo.
+    # Prefer a repository asset when present, otherwise use the embedded official light-background logo.
     for p in [
         ROOT / "assets" / "power-corridors-logo-light-matched-transparent.png",
         ROOT / "assets" / "power-corridors-logo-light-matched-transparent(3).png",
@@ -2336,32 +2562,10 @@ def _publication_logo_image():
     ]:
         if p.exists() and mpimg is not None:
             try:
-                return _trim_transparent_image(mpimg.imread(str(p)))
+                return mpimg.imread(str(p))
             except Exception:
                 pass
-    return _trim_transparent_image(_embedded_png(_EMBEDDED_PC_LOGO_B64))
-
-
-def _add_pdf_logo(fig, x=0.055, y=0.948, w=0.255, h=0.038, backing=True):
-    """Place the real P&C logo at a fixed physical location without distortion.
-
-    The official mark is dark/navy, so on navy PDF headers it is placed on a
-    white backing chip rather than being drawn directly onto the dark bar.
-    """
-    logo=_publication_logo_image()
-    if logo is None:
-        return False
-    if backing:
-        bax=fig.add_axes([x-0.010,y-0.008,w+0.020,h+0.016],zorder=9)
-        bax.set_facecolor("#FFFFFF")
-        bax.set_xticks([]); bax.set_yticks([])
-        for sp in bax.spines.values():
-            sp.set_visible(False)
-        bax.patch.set_alpha(1.0)
-    la=fig.add_axes([x,y,w,h],zorder=10)
-    la.imshow(logo, interpolation="lanczos", aspect="equal")
-    la.set_axis_off()
-    return True
+    return _embedded_png(_EMBEDDED_PC_LOGO_B64)
 
 
 def _wrapped(text, width):
@@ -2394,9 +2598,8 @@ def render_intelligence_brief(selected_rows, region_name, publication_date, outp
     # Header: official P&C logo, explicit product name, large region title, date.
     logo_img = _publication_logo_image()
     if logo_img is not None:
-        ax_logo = fig.add_axes([0.035, 0.892, 0.275, 0.070])
-        ax_logo.imshow(logo_img, interpolation="lanczos", aspect="equal")
-        ax_logo.axis("off")
+        ax_logo = fig.add_axes([0.035, 0.885, 0.285, 0.085])
+        ax_logo.imshow(logo_img); ax_logo.axis("off")
     else:
         canvas.text(0.035, 0.935, "POWER & CORRIDORS", ha="left", va="center", color=navy,
                     fontsize=22, fontweight="bold")
@@ -2560,206 +2763,6 @@ def horizon_events_frame(df=None):
     pat=r"scheduled|forecast|recurring|seasonal|upcoming|planned|election|referendum|anniversar|holiday|summit|conference|festival|sport|games|marathon|grand prix|exercise|deadline|monsoon|hurricane season|cyclone season"
     return out[blob.str.cat(meta,sep=" ").str.contains(pat,case=False,regex=True,na=False)].copy()
 
-
-def _horizon_id_set():
-    """Canonical event IDs that belong to the forward calendar, not Latest Intelligence."""
-    h = horizon_events_frame()
-    if h is None or h.empty or "Event ID" not in h.columns:
-        return set()
-    return set(text_col(h, "Event ID").astype(str))
-
-
-def operational_latest_frame(df):
-    """Observed/current intelligence only. Scheduled horizon entries never lead Latest Intelligence."""
-    if df is None or df.empty:
-        return pd.DataFrame() if df is None else df.copy()
-    out = df.copy()
-    hids = _horizon_id_set()
-    if hids and "Event ID" in out.columns:
-        out = out[~text_col(out, "Event ID").isin(hids)].copy()
-
-    # Also guard against horizon-like metadata that may not yet be exposed in a dedicated column.
-    blob = _event_text_blob(out)
-    horizon_like = (
-        r"\banniversar|\bnational holiday|\bpublic holiday|\belection\b|\breferendum\b|"
-        r"\bsummit\b|\bconference\b|\bsporting event\b|\bgrand prix\b|\bgames\b|"
-        r"\bseasonal\b|\bforecast\b|\bscheduled\b|\bupcoming\b"
-    )
-    out = out[~blob.str.contains(horizon_like, case=False, regex=True, na=False)].copy()
-
-    # Future-dated records should not appear as newest incident reporting.
-    if "Start Date" in out.columns:
-        d = pd.to_datetime(out["Start Date"], errors="coerce", utc=True).dt.tz_convert(None)
-        today_end = pd.Timestamp.utcnow().tz_localize(None).normalize() + pd.Timedelta(days=1)
-        out = out[d.isna() | (d < today_end)].copy()
-    return out
-
-
-def _smuggling_class(row):
-    """Analytical class for charts; derived only from the event's existing evidence text."""
-    blob = " ".join(
-        clean_display_text(row.get(c, ""))
-        for c in ["Event Type","Event Family","Title","Description","Operational Impact","Trade / Commercial Impact"]
-    ).lower()
-    rules = [
-        ("Human trafficking", r"human trafficking|trafficked persons|forced labour|forced labor"),
-        ("Migrant smuggling", r"migrant smuggling|people smuggling|irregular migrant|illegal migration|small boat"),
-        ("Arms / weapons", r"arms smuggl|weapon|firearm|ammunition|missile|explosive"),
-        ("Narcotics", r"narcotic|drug|cocaine|heroin|captagon|meth|amphetamine|cannabis|hashish|fentanyl"),
-        ("Tobacco / alcohol", r"cigarette|tobacco|alcohol|spirits"),
-        ("Fuel / oil", r"fuel smuggl|oil smuggl|diesel|petrol|gasoline"),
-        ("Cash / gold / valuables", r"cash smuggl|currency smuggl|gold smuggl|jewel|precious"),
-        ("Counterfeit / commercial contraband", r"counterfeit|contraband|electronics|medicine|pharmaceutical|customs fraud"),
-    ]
-    for label, pat in rules:
-        if re.search(pat, blob, re.I):
-            return label
-    return "Other illicit trade"
-
-
-def _smuggling_mode(row):
-    blob = " ".join(
-        clean_display_text(row.get(c, ""))
-        for c in ["Mode","Location","Title","Description","Event Type"]
-    ).lower()
-    if re.search(r"\bvessel\b|\bship\b|\bboat\b|\bport\b|\bmaritime\b|\bsea\b|\bferry\b", blob):
-        return "Maritime"
-    if re.search(r"\bairport\b|\bflight\b|\bair cargo\b|\baircraft\b", blob):
-        return "Aviation"
-    if re.search(r"\bborder\b|\btruck\b|\bvehicle\b|\broad\b|\bcar\b|\blorry\b", blob):
-        return "Land / border"
-    if re.search(r"\bparcel\b|\bmail\b|\bpostal\b|\bcourier\b", blob):
-        return "Parcel / postal"
-    return "Unspecified / other"
-
-
-def _smuggling_actor_counts(view):
-    """Return linked actor counts for the currently filtered event set."""
-    if view is None or view.empty or event_actor_links.empty or actor_directory.empty or "Event ID" not in view.columns:
-        return pd.DataFrame(columns=["Actor","Events"])
-    ids = set(text_col(view, "Event ID"))
-    links = event_actor_links[event_actor_links["event_id"].astype(str).isin(ids)].copy()
-    if links.empty:
-        return pd.DataFrame(columns=["Actor","Events"])
-
-    name_col = next((c for c in ["canonical_name","short_name","name"] if c in actor_directory.columns), None)
-    if not name_col or "actor_id" not in actor_directory.columns:
-        return pd.DataFrame(columns=["Actor","Events"])
-
-    names = actor_directory[["actor_id", name_col]].copy()
-    names.columns = ["actor_id","Actor"]
-    links = links.merge(names, on="actor_id", how="left")
-    links["Actor"] = links["Actor"].fillna("Unresolved actor")
-    return (
-        links.groupby("Actor")["event_id"]
-        .nunique()
-        .sort_values(ascending=False)
-        .reset_index(name="Events")
-    )
-
-
-def render_horizon_sidebar_compact(limit=4):
-    """Small forward-look panel for Operating Picture.
-
-    Shows the nearest upcoming Horizon dates from today onward.
-    Horizon items never replace observed/current incident reporting.
-    """
-    # Primary source: canonical horizon helper.
-    h = horizon_events_frame()
-
-    # Fallback: if the helper returns nothing because newer horizon columns
-    # have not yet propagated through the bridge, recover future calendar-like
-    # records directly from the raw event layer.
-    if h is None or h.empty:
-        src = hazard_events_raw.copy() if hazard_events_raw is not None else pd.DataFrame()
-        if not src.empty and "Start Date" in src.columns:
-            blob = _event_text_blob(src)
-            pat = (
-                r"anniversar|national holiday|public holiday|election|referendum|"
-                r"summit|conference|sport|grand prix|games|scheduled|forecast|"
-                r"seasonal|upcoming|holiday|commemoration"
-            )
-            h = src[blob.str.contains(pat, case=False, regex=True, na=False)].copy()
-        else:
-            h = pd.DataFrame()
-
-    if h is None or h.empty or "Start Date" not in h.columns:
-        st.markdown(
-            '<div class="pc-empty">No upcoming Horizon dates are currently available in the event layer.</div>',
-            unsafe_allow_html=True
-        )
-        if st.button("Open Horizon Calendar →", key="open_horizon_from_operating_empty", use_container_width=True):
-            st.session_state["pcintel_page"] = "Horizon Calendar"
-            st.rerun()
-        return
-
-    # Use the app/runtime date, normalize to date only, and keep all future dates.
-    h = h.copy()
-    h["_hdate"] = pd.to_datetime(h["Start Date"], errors="coerce", utc=True).dt.tz_convert(None)
-
-    today = pd.Timestamp.now().normalize()
-    upcoming = h[h["_hdate"].notna() & (h["_hdate"] >= today)].copy()
-
-    # If no future records are found, retain the nearest records that begin today
-    # or later according to their raw date string before declaring the panel empty.
-    if upcoming.empty:
-        raw_dates = pd.to_datetime(text_col(h, "Start Date"), errors="coerce")
-        upcoming = h[raw_dates.notna() & (raw_dates.dt.date >= today.date())].copy()
-        if not upcoming.empty:
-            upcoming["_hdate"] = pd.to_datetime(upcoming["Start Date"], errors="coerce")
-
-    if not upcoming.empty:
-        upcoming = upcoming.sort_values("_hdate", ascending=True, na_position="last")
-
-        # Remove obvious duplicates so the panel stays useful.
-        dedupe_cols = [c for c in ["Title", "Start Date", "Country / Countries", "Location"] if c in upcoming.columns]
-        if dedupe_cols:
-            upcoming = upcoming.drop_duplicates(subset=dedupe_cols)
-
-        upcoming = upcoming.head(int(limit))
-
-        for n, (_, r) in enumerate(upcoming.iterrows()):
-            dt = pd.to_datetime(r.get("Start Date"), errors="coerce")
-            date_label = dt.strftime("%d %b") if not pd.isna(dt) else ""
-            title = clean_display_text(r.get("Title", "Untitled event"))
-            typ = clean_display_text(
-                r.get("Event Type", "")
-                or r.get("Event Category", "")
-                or r.get("Event Family", "")
-            )
-            loc = clean_display_text(
-                r.get("Country / Countries", "")
-                or r.get("Location", "")
-            )
-
-            # Keep sidebar cards concise.
-            if len(title) > 70:
-                title = title[:67].rstrip() + "…"
-            if len(loc) > 50:
-                loc = loc[:47].rstrip() + "…"
-
-            st.markdown(
-                "<div class='pc-card' style='padding:.62rem .72rem;margin-bottom:.42rem'>"
-                f"<div class='pc-card-meta'>{html_lib.escape(date_label)}"
-                + (f" · {html_lib.escape(typ)}" if typ else "")
-                + "</div>"
-                f"<div class='pc-card-title' style='font-size:.88rem;line-height:1.25'>{html_lib.escape(title)}</div>"
-                + (f"<div class='pc-card-body' style='font-size:.76rem'>{html_lib.escape(loc)}</div>" if loc else "")
-                + "</div>",
-                unsafe_allow_html=True,
-            )
-    else:
-        st.markdown(
-            '<div class="pc-empty">No upcoming Horizon dates found from today onward.</div>',
-            unsafe_allow_html=True
-        )
-
-    # Button always comes last.
-    if st.button("Open Horizon Calendar →", key="open_horizon_from_operating", use_container_width=True):
-        st.session_state["pcintel_page"] = "Horizon Calendar"
-        st.rerun()
-
-
 def _severity_rank(v):
     return {"CRITICAL":5,"SEVERE":4,"HIGH":3,"MODERATE":2,"MEDIUM":2,"LOW":1}.get(clean_display_text(v).upper(),0)
 
@@ -2883,354 +2886,6 @@ def _build_report_markdown(name,as_of,sections,edits,horizon_rows):
     lines += [f"[{i}] {u}" for i,u in enumerate(refs,1)] or ["No source URLs resolved from selected canonical records."]
     return "\n".join(lines)
 
-
-def _split_story_sections(text):
-    text = clean_display_text(text)
-    blocks = {"Situation Update": [], "Assessment / Impact / Business Implications": []}
-    current = "Situation Update"
-    seen_heading = False
-    for raw in text.splitlines():
-        line = raw.strip()
-        low = line.lower()
-        if low == 'situation update':
-            current = "Situation Update"; seen_heading = True; continue
-        if low == 'assessment / impact / business implications':
-            current = "Assessment / Impact / Business Implications"; seen_heading = True; continue
-        if line:
-            blocks.setdefault(current, []).append(line)
-    if not seen_heading:
-        return {"Situation Update": text}
-    out = {}
-    for k, vals in blocks.items():
-        if vals:
-            out[k] = " ".join(vals)
-    return out or {"Situation Update": text}
-
-
-def _report_pdf_styles():
-    if getSampleStyleSheet is None or ParagraphStyle is None or rl_colors is None:
-        raise RuntimeError("ReportLab is required for report PDF export.")
-    styles = getSampleStyleSheet()
-    navy = rl_colors.HexColor("#07111F")
-    navy2 = rl_colors.HexColor("#102238")
-    gold = rl_colors.HexColor("#D7B66A")
-    ivory = rl_colors.HexColor("#F3F6FA")
-    textc = rl_colors.HexColor("#16202A")
-    muted = rl_colors.HexColor("#5D6B7A")
-    line = rl_colors.HexColor("#CBD5E1")
-    styles.add(ParagraphStyle(name='PC_CoverKicker', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=12, textColor=gold, alignment=TA_CENTER, spaceAfter=8))
-    styles.add(ParagraphStyle(name='PC_CoverTitle', parent=styles['Title'], fontName='Helvetica-Bold', fontSize=24, leading=28, textColor=navy, alignment=TA_CENTER, spaceAfter=8))
-    styles.add(ParagraphStyle(name='PC_CoverDeck', parent=styles['BodyText'], fontName='Helvetica', fontSize=10.5, leading=14, textColor=muted, alignment=TA_CENTER, spaceAfter=12))
-    styles.add(ParagraphStyle(name='PC_SectionTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=15, leading=18, textColor=navy, spaceBefore=8, spaceAfter=8))
-    styles.add(ParagraphStyle(name='PC_SubSection', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=11, leading=13, textColor=navy2, spaceBefore=6, spaceAfter=5))
-    styles.add(ParagraphStyle(name='PC_StoryTitle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=12.2, leading=15, textColor=navy, spaceAfter=4))
-    styles.add(ParagraphStyle(name='PC_Body', parent=styles['BodyText'], fontName='Helvetica', fontSize=9.4, leading=13.2, textColor=textc, spaceAfter=6))
-    styles.add(ParagraphStyle(name='PC_Small', parent=styles['BodyText'], fontName='Helvetica', fontSize=8.3, leading=10.5, textColor=muted, spaceAfter=4))
-    return styles, navy, navy2, gold, ivory, textc, muted, line
-
-
-
-def _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_rows):
-    """Pure-Matplotlib multi-page PDF fallback for Streamlit Cloud deployments.
-
-    Uses the same P&C light publication palette as the existing Intelligence Brief
-    renderer and requires only matplotlib, which the app already uses.
-    """
-    if plt is None or PdfPages is None:
-        raise RuntimeError("Matplotlib PDF support is unavailable.")
-
-    navy = "#07111F"
-    navy2 = "#102238"
-    blue = "#078DB8"
-    gold = "#D7B66A"
-    muted = "#5D6B7A"
-    pale = "#F3F7FA"
-    line = "#CBD5E1"
-    white = "#FFFFFF"
-    red = "#B65F56"
-    orange = "#BF8B55"
-    green = "#5E8B74"
-
-    def safe(v):
-        return clean_display_text(v)
-
-    def wrap(s, width=92):
-        return "\n".join(textwrap.wrap(safe(s), width=width, break_long_words=False, break_on_hyphens=False))
-
-    refs=[]
-    def source_nums(row):
-        nums=[]
-        for u in event_source_urls(row):
-            if u not in refs:
-                refs.append(u)
-            nums.append(refs.index(u)+1)
-        return nums
-
-    bio=io.BytesIO()
-    with PdfPages(bio) as pdf:
-        # ---------- cover ----------
-        fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
-        ax=fig.add_axes([0,0,1,1]); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.set_autoscale_on(False); ax.axis('off')
-        ax.add_patch(plt.Rectangle((0,0.88),1,0.12,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
-        if not _add_pdf_logo(fig,x=0.055,y=0.926,w=0.285,h=0.046,backing=True):
-            ax.text(0.07,0.935,"POWER & CORRIDORS",color=white,fontsize=16,fontweight='bold',va='center')
-        ax.text(0.93,0.935,"P&C INTELLIGENCE",ha='right',va='center',color=gold,fontsize=9,fontweight='bold')
-        ax.text(0.5,0.72,safe(name).upper(),ha='center',va='center',color=navy,fontsize=27,fontweight='bold')
-        ax.text(0.5,0.675,pd.to_datetime(as_of).strftime('%d %B %Y').upper(),ha='center',color=muted,fontsize=12)
-        ax.plot([0.18,0.82],[0.635,0.635],color=blue,lw=2,transform=ax.transAxes)
-        story_count=sum(len(v or []) for v in sections.values())
-        ax.text(0.5,0.54,"DECISION-USEFUL INTELLIGENCE",ha='center',color=gold,fontsize=10,fontweight='bold')
-        deck=("Geopolitical disruption, smuggling and illicit trade, maritime security, trade corridors, aviation, sanctions, "
-              "critical infrastructure, forward risk and operational impact.")
-        ax.text(0.5,0.49,wrap(deck,72),ha='center',va='top',color=muted,fontsize=11,linespacing=1.45)
-        # metric cards
-        cards=[("STORIES",str(story_count)),("HORIZON ITEMS",str(len(horizon_rows or []))),("FORMAT","WEEKLY PDF")]
-        xs=[0.21,0.50,0.79]
-        for (label,val),x in zip(cards,xs):
-            ax.add_patch(FancyBboxPatch((x-0.11,0.29),0.22,0.11,boxstyle="round,pad=0.008,rounding_size=0.008",transform=ax.transAxes,facecolor=pale,edgecolor=line,lw=0.8))
-            ax.text(x,0.355,label,ha='center',color=gold,fontsize=8,fontweight='bold')
-            ax.text(x,0.315,val,ha='center',color=navy,fontsize=14,fontweight='bold')
-        ax.text(0.07,0.065,"POWER & CORRIDORS · INTELLIGENCE",color=gold,fontsize=8,fontweight='bold')
-        ax.text(0.93,0.065,"powerncorridors.com/intelligence",ha='right',color=blue,fontsize=8,fontweight='bold')
-        pdf.savefig(fig, facecolor=white); plt.close(fig)
-
-        # ---------- key takeaways + horizon ----------
-        fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
-        ax=fig.add_axes([0,0,1,1]); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.set_autoscale_on(False); ax.axis('off')
-        ax.add_patch(plt.Rectangle((0,0.94),1,0.06,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
-        if not _add_pdf_logo(fig,x=0.050,y=0.949,w=0.225,h=0.031,backing=True):
-            ax.text(0.07,0.967,"POWER & CORRIDORS",color=white,fontsize=8,fontweight='bold',va='center')
-        ax.text(0.93,0.967,safe(name).upper(),ha='right',color=white,fontsize=10,fontweight='bold',va='center')
-        y=0.89
-        ax.text(0.07,y,"KEY TAKEAWAYS",color=gold,fontsize=9,fontweight='bold'); y-=0.04
-        for sec,rows in sections.items():
-            if not rows: continue
-            row=rows[0]; e=edits.get(str(row.name),{})
-            title=e.get('title') or safe(row.get('Title','Untitled event'))
-            risk=(e.get('risk') or safe(row.get('Severity','')) or 'UNRATED').upper()
-            ax.text(0.075,y,"•",color=blue,fontsize=12,fontweight='bold',va='top')
-            ax.text(0.095,y,wrap(f"{title} — {risk}",80),color=navy,fontsize=10,fontweight='bold',va='top',linespacing=1.25)
-            y-=0.055 + 0.018*max(0,wrap(title,80).count('\n'))
-            if y<0.56: break
-
-        ax.plot([0.07,0.93],[0.54,0.54],color=line,lw=0.8,transform=ax.transAxes)
-        y=0.50
-        ax.text(0.07,y,"HORIZON · NEXT 30 DAYS",color=gold,fontsize=9,fontweight='bold'); y-=0.035
-        if horizon_rows:
-            for r in horizon_rows[:8]:
-                dt=pd.to_datetime(r.get('Start Date'),errors='coerce')
-                d=dt.strftime('%d %b') if not pd.isna(dt) else safe(r.get('Start Date',''))[:10]
-                title=safe(r.get('Title',''))
-                loc=safe(r.get('Country / Countries','') or r.get('Location',''))
-                ax.text(0.075,y,d.upper(),color=blue,fontsize=8,fontweight='bold',va='top')
-                ax.text(0.16,y,wrap(f"{title}" + (f" · {loc}" if loc else ""),68),color=navy2,fontsize=9,va='top',linespacing=1.25)
-                y-=0.048 + 0.015*max(0,wrap(title,68).count('\n'))
-                if y<0.10: break
-        else:
-            ax.text(0.075,y,"No upcoming horizon records in the selected window.",color=muted,fontsize=9)
-        ax.text(0.07,0.045,pd.to_datetime(as_of).strftime('%d %B %Y'),color=muted,fontsize=8)
-        ax.text(0.93,0.045,"Page 2",ha='right',color=muted,fontsize=8)
-        pdf.savefig(fig, facecolor=white); plt.close(fig)
-
-        page_no=3
-        # ---------- stories ----------
-        for sec,rows in sections.items():
-            for row in rows:
-                e=edits.get(str(row.name),{})
-                title=e.get('title') or safe(row.get('Title','Untitled event'))
-                risk=(e.get('risk') or safe(row.get('Severity','')) or 'UNRATED').upper()
-                dt=safe(row.get('Start Date',''))[:10]
-                loc=safe(row.get('Country / Countries','') or row.get('Location',''))
-                etype=safe(row.get('Event Type','') or row.get('Event Family','Event'))
-                trend=safe(row.get('_gcc_trend',''))
-                story_text=e.get('text') or _fallback_story(row)
-                parts=_split_story_sections(story_text)
-                nums=source_nums(row)
-
-                fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
-                ax=fig.add_axes([0,0,1,1]); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.set_autoscale_on(False); ax.axis('off')
-                ax.add_patch(plt.Rectangle((0,0.94),1,0.06,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
-                if not _add_pdf_logo(fig,x=0.050,y=0.949,w=0.225,h=0.031,backing=True):
-                    ax.text(0.07,0.967,"POWER & CORRIDORS",color=white,fontsize=8,fontweight='bold',va='center')
-                ax.text(0.93,0.967,safe(name).upper(),ha='right',color=white,fontsize=10,fontweight='bold',va='center')
-                ax.text(0.07,0.895,sec.upper(),color=gold,fontsize=9,fontweight='bold')
-                risk_color={'LOW':green,'MODERATE':gold,'HIGH':orange,'SEVERE':red,'CRITICAL':'#8C3D36'}.get(risk,navy2)
-                ax.add_patch(FancyBboxPatch((0.77,0.855),0.16,0.05,boxstyle="round,pad=0.005,rounding_size=0.006",transform=ax.transAxes,facecolor=risk_color,edgecolor=risk_color))
-                ax.text(0.85,0.88,risk,ha='center',va='center',color=white,fontsize=9,fontweight='bold')
-                ax.text(0.07,0.84,wrap(title,55),color=navy,fontsize=17,fontweight='bold',va='top',linespacing=1.08)
-                title_lines=wrap(title,55).count('\n')+1
-                y=0.84-0.045*title_lines
-                meta=' · '.join([x for x in [dt,loc,etype,trend] if x])
-                if meta:
-                    ax.text(0.07,y,wrap(meta,85),color=gold,fontsize=8.5,fontweight='bold',va='top'); y-=0.05
-                ax.plot([0.07,0.93],[y,y],color=line,lw=0.8,transform=ax.transAxes); y-=0.04
-                for head,body in parts.items():
-                    ax.text(0.07,y,head.upper(),color=navy2,fontsize=10,fontweight='bold',va='top'); y-=0.032
-                    wrapped=wrap(body,92)
-                    lines=wrapped.count('\n')+1
-                    ax.text(0.07,y,wrapped,color='#16202A',fontsize=9.5,va='top',linespacing=1.35)
-                    y-=0.024*lines+0.04
-                    if y<0.14: break
-                if nums:
-                    ax.text(0.07,max(0.10,y),"Source refs: "+", ".join(f"[{n}]" for n in nums),color=muted,fontsize=8)
-                ax.text(0.07,0.045,pd.to_datetime(as_of).strftime('%d %B %Y'),color=muted,fontsize=8)
-                ax.text(0.93,0.045,f"Page {page_no}",ha='right',color=muted,fontsize=8)
-                pdf.savefig(fig, facecolor=white); plt.close(fig)
-                page_no += 1
-
-        # ---------- sources ----------
-        fig=plt.figure(figsize=(8.27,11.69),facecolor=white)
-        ax=fig.add_axes([0,0,1,1]); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.set_autoscale_on(False); ax.axis('off')
-        ax.add_patch(plt.Rectangle((0,0.94),1,0.06,transform=ax.transAxes,facecolor=navy,edgecolor='none'))
-        if not _add_pdf_logo(fig,x=0.050,y=0.949,w=0.225,h=0.031,backing=True):
-            ax.text(0.07,0.967,"POWER & CORRIDORS",color=white,fontsize=8,fontweight='bold',va='center')
-        ax.text(0.93,0.967,"SOURCES",ha='right',color=white,fontsize=10,fontweight='bold',va='center')
-        ax.text(0.07,0.89,"SOURCES",color=gold,fontsize=10,fontweight='bold')
-        y=0.84
-        if refs:
-            for i,u in enumerate(refs,1):
-                block=wrap(f"[{i}] {u}",90)
-                ax.text(0.07,y,block,color=navy2,fontsize=8.5,va='top',linespacing=1.25)
-                y-=0.024*(block.count('\n')+1)+0.018
-                if y<0.09: break
-        else:
-            ax.text(0.07,y,"No source URLs resolved from selected canonical records.",color=muted,fontsize=9)
-        ax.text(0.07,0.045,pd.to_datetime(as_of).strftime('%d %B %Y'),color=muted,fontsize=8)
-        ax.text(0.93,0.045,f"Page {page_no}",ha='right',color=muted,fontsize=8)
-        pdf.savefig(fig, facecolor=white); plt.close(fig)
-
-    bio.seek(0)
-    return bio.getvalue()
-
-
-def render_report_studio_pdf(name, as_of, sections, edits, horizon_rows):
-    if SimpleDocTemplate is None:
-        return _render_report_studio_pdf_matplotlib(name, as_of, sections, edits, horizon_rows)
-    styles, navy, navy2, gold, ivory, textc, muted, line = _report_pdf_styles()
-    refs = []
-    story_count = sum(len(v or []) for v in sections.values())
-
-    def source_nums(row):
-        nums = []
-        for u in event_source_urls(row):
-            if u not in refs:
-                refs.append(u)
-            nums.append(refs.index(u) + 1)
-        return nums
-
-    bio = io.BytesIO()
-    doc = SimpleDocTemplate(bio, pagesize=A4, leftMargin=16*mm, rightMargin=16*mm, topMargin=22*mm, bottomMargin=16*mm, title=name, author='Power & Corridors')
-    story = []
-
-    def chip(text, bg, fg=rl_colors.white):
-        para = Paragraph(f"<font color='{fg}'><b>{clean_display_text(text)}</b></font>", styles['PC_Small'])
-        t = Table([[para]], colWidths=[26*mm])
-        t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),bg),('BOX',(0,0),(-1,-1),0.6,bg),('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5),('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),('ALIGN',(0,0),(-1,-1),'CENTER')]))
-        return t
-
-    story.append(Spacer(1, 18*mm))
-    story.append(Paragraph('POWER &amp; CORRIDORS INTELLIGENCE', styles['PC_CoverKicker']))
-    story.append(Paragraph(name.upper(), styles['PC_CoverTitle']))
-    story.append(Paragraph(as_of.strftime('%d %B %Y'), styles['PC_CoverDeck']))
-    meta = Table([[
-        Paragraph(f"<b>Stories</b><br/>{story_count}", styles['PC_Body']),
-        Paragraph(f"<b>Horizon items</b><br/>{len(horizon_rows or [])}", styles['PC_Body']),
-        Paragraph("<b>Output</b><br/>Analyst-led weekly publication PDF", styles['PC_Body'])
-    ]], colWidths=[55*mm,55*mm,55*mm])
-    meta.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1), rl_colors.HexColor('#F3F7FA')), ('BOX',(0,0),(-1,-1),0.75,line), ('INNERGRID',(0,0),(-1,-1),0.5,line), ('VALIGN',(0,0),(-1,-1),'TOP'), ('LEFTPADDING',(0,0),(-1,-1),8), ('RIGHTPADDING',(0,0),(-1,-1),8), ('TOPPADDING',(0,0),(-1,-1),8), ('BOTTOMPADDING',(0,0),(-1,-1),8)]))
-    story.append(meta)
-    story.append(Spacer(1, 6*mm))
-    story.append(Paragraph('Decision-useful intelligence on geopolitical disruption, smuggling and illicit trade, maritime security, trade corridors, aviation, sanctions, critical infrastructure, forward risk and operational impact.', styles['PC_CoverDeck']))
-    story.append(PageBreak())
-
-    story.append(Paragraph('Key Takeaways', styles['PC_SectionTitle']))
-    taken = 0
-    for sec, rows in sections.items():
-        for row in rows[:1]:
-            e = edits.get(str(row.name), {})
-            title = e.get('title') or clean_display_text(row.get('Title','Untitled event'))
-            risk = e.get('risk') or clean_display_text(row.get('Severity','')) or 'UNRATED'
-            story.append(Paragraph(f"• <b>{title}</b> — {risk}", styles['PC_Body']))
-            taken += 1
-    if taken == 0:
-        story.append(Paragraph('No stories were selected.', styles['PC_Body']))
-
-    if horizon_rows:
-        story.append(Spacer(1, 2*mm))
-        story.append(Paragraph('Horizon &amp; Upcoming Events', styles['PC_SectionTitle']))
-        for row in horizon_rows:
-            dt = clean_display_text(row.get('Start Date',''))[:10]
-            loc = clean_display_text(row.get('Country / Countries','') or row.get('Location',''))
-            title = clean_display_text(row.get('Title','Untitled event'))
-            line_txt = f"<b>{dt}</b> — {loc}: {title}" if loc else f"<b>{dt}</b> — {title}"
-            story.append(Paragraph(line_txt, styles['PC_Body']))
-
-    for sec, rows in sections.items():
-        if not rows:
-            continue
-        story.append(PageBreak())
-        story.append(Paragraph(sec, styles['PC_SectionTitle']))
-        for row in rows:
-            e = edits.get(str(row.name), {})
-            title = e.get('title') or clean_display_text(row.get('Title','Untitled event'))
-            risk = (e.get('risk') or clean_display_text(row.get('Severity','')) or 'UNRATED').upper()
-            dt = clean_display_text(row.get('Start Date',''))[:10]
-            loc = clean_display_text(row.get('Country / Countries','') or row.get('Location',''))
-            etype = clean_display_text(row.get('Event Type','') or row.get('Event Family','Event'))
-            trend = clean_display_text(row.get('_gcc_trend',''))
-            risk_bg = {'LOW': rl_colors.HexColor('#5E8B74'), 'MODERATE': gold, 'HIGH': rl_colors.HexColor('#BF8B55'), 'SEVERE': rl_colors.HexColor('#B65F56'), 'CRITICAL': rl_colors.HexColor('#8C3D36')}.get(risk, navy2)
-            meta_bits = [x for x in [dt, loc, etype, trend] if x]
-            meta_line = ' · '.join(meta_bits)
-            content = []
-            hdr = Table([[Paragraph(title, styles['PC_StoryTitle']), chip(risk, risk_bg)]], colWidths=[138*mm, 28*mm])
-            hdr.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0),('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),2)]))
-            content.append(hdr)
-            if meta_line:
-                content.append(Paragraph(meta_line, styles['PC_Small']))
-            story_text = e.get('text') or _fallback_story(row)
-            parts = _split_story_sections(story_text)
-            for head, body in parts.items():
-                safe = clean_display_text(body).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
-                content.append(Paragraph(head, styles['PC_SubSection']))
-                content.append(Paragraph(safe, styles['PC_Body']))
-            nums = source_nums(row)
-            if nums:
-                content.append(Paragraph('Source refs: ' + ', '.join(f'[{n}]' for n in nums), styles['PC_Small']))
-            content.append(Spacer(1, 4*mm))
-            story.append(KeepTogether(content))
-
-    story.append(PageBreak())
-    story.append(Paragraph('Sources', styles['PC_SectionTitle']))
-    if refs:
-        for i, u in enumerate(refs, 1):
-            safe = clean_display_text(u).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
-            story.append(Paragraph(f'[{i}] {safe}', styles['PC_Body']))
-    else:
-        story.append(Paragraph('No source URLs resolved from selected canonical records.', styles['PC_Body']))
-
-    def _page(canvas, doc):
-        canvas.saveState()
-        width, height = A4
-        canvas.setFillColor(navy)
-        canvas.rect(0, height-18*mm, width, 18*mm, stroke=0, fill=1)
-        canvas.setFillColor(gold)
-        canvas.setFont('Helvetica-Bold', 8)
-        canvas.drawString(doc.leftMargin, height-11.8*mm, 'POWER & CORRIDORS INTELLIGENCE')
-        canvas.setFillColor(ivory)
-        canvas.setFont('Helvetica-Bold', 12)
-        canvas.drawRightString(width-doc.rightMargin, height-11.8*mm, clean_display_text(name).upper())
-        canvas.setStrokeColor(line)
-        canvas.line(doc.leftMargin, 12*mm, width-doc.rightMargin, 12*mm)
-        canvas.setFillColor(muted)
-        canvas.setFont('Helvetica', 8)
-        canvas.drawString(doc.leftMargin, 7.5*mm, pd.to_datetime(as_of).strftime('%d %B %Y'))
-        canvas.drawRightString(width-doc.rightMargin, 7.5*mm, f'Page {canvas.getPageNumber()}')
-        canvas.restoreState()
-
-    doc.build(story, onFirstPage=_page, onLaterPages=_page)
-    bio.seek(0)
-    return bio.getvalue()
-
 if page == "Operating Picture":
     active_mon = monitoring[text_col(monitoring, "Status").str.contains("Active", case=False, na=False)] if not monitoring.empty else monitoring
     security_terms = ["Security", "Conflict", "Maritime", "Piracy", "Attack", "Ground", "Explosion", "SAR", "Pollution", "Drone", "Missile", "Seizure", "Boarding"]
@@ -3239,31 +2894,25 @@ if page == "Operating Picture":
     pgsa = compliance_designations[text_col(compliance_designations, "Regime ID").eq("REGIME_PGSA")] if not compliance_designations.empty else compliance_designations
     marsec_feeds = source_feeds[text_col(source_feeds, "Default Event Families").str.contains("ground|collision|sar|pollution|casualty|maritime|fire|rescue", case=False, regex=True, na=False)] if not source_feeds.empty else source_feeds
 
-    latest_col, horizon_col = st.columns([2.7,1.0], gap="large")
-    with latest_col:
-        section("Latest intelligence", "Latest intelligence", "Newest observed reporting and assessed incidents — scheduled holidays, anniversaries and other horizon dates are excluded.")
-        latest = operational_latest_frame(hazard_events)
-        if not latest.empty:
-            if "Start Date" in latest.columns:
-                latest["_date"]=pd.to_datetime(latest["Start Date"],errors="coerce")
-                latest=latest.sort_values("_date",ascending=False,na_position="last")
-            latest_non_compliance=latest[~_is_compliance_watchlist_event(latest)].copy()
-            if latest_non_compliance.empty:
-                latest_non_compliance=latest
-            cols=st.columns(2)
-            for i,(_,r) in enumerate(latest_non_compliance.head(2).iterrows()):
-                with cols[i]:
-                    event_card(r,key_prefix=f"latest_{i}")
-            if len(latest_non_compliance)>2:
-                with st.expander(f"More latest intelligence ({min(len(latest_non_compliance)-2,10)})",expanded=False):
-                    for j,(_,r) in enumerate(latest_non_compliance.iloc[2:12].iterrows(),start=2):
-                        event_card(r,key_prefix=f"latest_more_{j}")
-        else:
-            st.markdown('<div class="pc-empty">No recent observed intelligence events available.</div>', unsafe_allow_html=True)
-
-    with horizon_col:
-        section("Forward look", "Important dates", "Selected dates from the Horizon Calendar. Open the calendar for the full detail and source trail.")
-        render_horizon_sidebar_compact(limit=4)
+    section("Latest intelligence", "Latest intelligence", "Newest reporting and assessed incidents in the intelligence base — surfaced first, not buried in a register.")
+    latest = hazard_events.copy()
+    if not latest.empty:
+        if "Start Date" in latest.columns:
+            latest["_date"]=pd.to_datetime(latest["Start Date"],errors="coerce")
+            latest=latest.sort_values("_date",ascending=False,na_position="last")
+        latest_non_compliance=latest[~_is_compliance_watchlist_event(latest)].copy()
+        if latest_non_compliance.empty:
+            latest_non_compliance=latest
+        cols=st.columns(3)
+        for i,(_,r) in enumerate(latest_non_compliance.head(3).iterrows()):
+            with cols[i]:
+                event_card(r,key_prefix=f"latest_{i}")
+        if len(latest_non_compliance)>3:
+            with st.expander(f"More latest intelligence ({min(len(latest_non_compliance)-3,12)})",expanded=False):
+                for j,(_,r) in enumerate(latest_non_compliance.iloc[3:15].iterrows(),start=3):
+                    event_card(r,key_prefix=f"latest_more_{j}")
+    else:
+        st.markdown('<div class="pc-empty">No event records available.</div>', unsafe_allow_html=True)
 
     # When the user explicitly opens an event/object, show the complete canonical
     # context immediately here. The close control in the drill-down returns to
@@ -3283,7 +2932,7 @@ if page == "Operating Picture":
     left, right = st.columns([1.55,1.0],gap="large")
     with left:
         section("01 · Immediate", "Priority operating picture", "What matters now — ranked by severity, recency and operational consequence.")
-        priority=ranked_operating_picture(operational_latest_frame(hazard_events),5) if not hazard_events.empty else pd.DataFrame()
+        priority=ranked_operating_picture(hazard_events.copy(),5) if not hazard_events.empty else pd.DataFrame()
         if not priority.empty:
             for j,(_,r) in enumerate(priority.iterrows()):
                 event_card(r,key_prefix=f"priority_{j}")
@@ -3390,10 +3039,20 @@ elif page == "Intelligence Analytics":
         "Interrogate the P&C intelligence event layer by geography, event type, severity, domain and time. Every visual resolves back to the underlying event records."
     )
 
+    analytics_actor_layer = st.radio(
+        "Actor layer",
+        ["Criminal / Illicit", "Enforcement / State", "All"],
+        horizontal=True,
+        index=0,
+        key="intel_analytics_actor_layer",
+        help="Controls which actor relationships are attached to analytical events. Criminal / Illicit is the default; enforcement actors remain available separately."
+    )
+    analytics_actor_directory, analytics_event_actor_links = _actor_layer_frames(analytics_actor_layer)
+
     adf=_analytics_prepare_events(hazard_events)
-    if not adf.empty and not event_actor_links.empty and not actor_directory.empty and "Event ID" in adf.columns:
-        _al = event_actor_links.copy()
-        _an = actor_directory[["actor_id","canonical_name"]].copy()
+    if not adf.empty and not analytics_event_actor_links.empty and not analytics_actor_directory.empty and "Event ID" in adf.columns:
+        _al = analytics_event_actor_links.copy()
+        _an = analytics_actor_directory[["actor_id","canonical_name"]].copy()
         _al = _al.merge(_an, on="actor_id", how="left")
         _al["_event_id_join"] = _al["event_id"].astype(str)
         _actor_names = _al.groupby("_event_id_join")["canonical_name"].apply(
@@ -3601,11 +3260,22 @@ elif page == "Actors & Networks":
         "Actors & Networks",
         "Canonical organisations, armed groups, state-security actors and networks connected to the P&C event layer. Actor identity, operational role and attribution are kept separate."
     )
+    st.caption("Default view prioritises criminal / illicit actors and networks; enforcement actors are retained as a separate analytical layer rather than mixed into the criminal graph.")
 
-    if actor_directory.empty:
-        st.warning("The canonical actor registry is not currently available from Supabase.")
+    actor_layer_mode = st.radio(
+        "Actor layer",
+        ["Criminal / Illicit", "Enforcement / State", "All"],
+        horizontal=True,
+        index=0,
+        key="actor_network_layer_mode",
+        help="Criminal / Illicit is the default analytical view. Enforcement / State shows police, customs, military and security actors. All combines both layers."
+    )
+    page_actor_directory, page_event_actor_links = _actor_layer_frames(actor_layer_mode)
+
+    if page_actor_directory.empty:
+        st.warning(f"No {actor_layer_mode.lower()} actors are currently available from Supabase.")
     else:
-        ad = actor_directory.copy()
+        ad = page_actor_directory.copy()
         for c in ["canonical_name","short_name","actor_class","actor_subtype","status","primary_country","confidence","roles_seen"]:
             if c in ad.columns:
                 ad[c] = ad[c].map(clean_display_text)
@@ -3615,7 +3285,7 @@ elif page == "Actors & Networks":
 
         total_actors=len(ad)
         active_with_events=int((ad["linked_events"]>0).sum()) if "linked_events" in ad.columns else 0
-        linked_events_total=int(event_actor_links["event_id"].astype(str).nunique()) if not event_actor_links.empty else 0
+        linked_events_total=int(page_event_actor_links["event_id"].astype(str).nunique()) if not page_event_actor_links.empty else 0
         high_critical_total=int(ad["high_critical_events"].sum()) if "high_critical_events" in ad.columns else 0
 
         m1,m2,m3,m4=st.columns(4)
@@ -3733,7 +3403,7 @@ elif page == "Actors & Networks":
                     show_df(ddf,["authority","designation_name","designation_type","programme","effective_date","status","confidence"],210)
 
             st.markdown("### Event activity")
-            ev=_actor_event_frame(actor_id)
+            ev=_actor_event_frame(actor_id, page_event_actor_links)
             if ev.empty:
                 st.caption("No linked intelligence events for this actor.")
             else:
@@ -3790,7 +3460,7 @@ elif page == "Actors & Networks":
                 show_df(rdf,["From Actor","Relationship","To Actor","Class","Status","Confidence","Basis"],330)
 
             with st.expander("Analyst / data-quality status",expanded=False):
-                pending=event_actor_links[event_actor_links["actor_id"].astype(str).eq(str(actor_id))].copy() if not event_actor_links.empty else pd.DataFrame()
+                pending=page_event_actor_links[page_event_actor_links["actor_id"].astype(str).eq(str(actor_id))].copy() if not page_event_actor_links.empty else pd.DataFrame()
                 if pending.empty:
                     st.caption("No event-actor links.")
                 else:
@@ -3829,40 +3499,128 @@ elif page == "Horizon Calendar":
         c1.metric("Upcoming records",len(hdf))
         c2.metric("High / severe",sum(text_col(hdf,"Severity").str.upper().isin(["HIGH","SEVERE","CRITICAL"])))
         c3.metric("Countries / theatres",text_col(hdf,"Country / Countries").nunique())
+        show_df(hdf,["Start Date","End Date","Country / Countries","Location","Event Family","Event Type","Title","Severity","Operational Impact","Trade / Commercial Impact","Confidence"],620)
 
-        if "Start Date" in hdf.columns:
-            hdf["_hdate"]=pd.to_datetime(hdf["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
-            hdf=hdf.sort_values("_hdate",ascending=True,na_position="last")
+elif page == "Disruptions & Event Graph":
+    section(
+        "Operational datasets",
+        "Disruptions & Event Graph",
+        "Cross-domain operational history tied back to canonical ports, companies, vessels, actors/groups and geography. Use this page to move from event counts to the connected trade-system objects affected."
+    )
+    base_events=hazard_events.copy()
+    if base_events.empty:
+        st.info("No canonical intelligence events are currently available.")
+    else:
+        blob=(text_col(base_events,"Event Family")+" "+text_col(base_events,"Event Type")+" "+text_col(base_events,"Title")+" "+text_col(base_events,"Description")).str.casefold()
+        disruption_terms=r"disrupt|strike|lockout|closure|closed|fire|explosion|collision|allision|grounding|crane|storm|cyclone|weather|flood|blockade|protest|spill|outage|congestion|berth|terminal incident|port incident"
+        disruption_events=base_events[blob.str.contains(disruption_terms,regex=True,na=False)].copy()
+        smuggling_events=smuggling_events_frame()
+        disruption_ids=_event_ids(disruption_events); smuggling_ids=_event_ids(smuggling_events)
+        union_ids=disruption_ids|smuggling_ids
+        dataset_events=base_events[text_col(base_events,"Event ID").isin(union_ids)].copy() if union_ids else pd.DataFrame()
 
-        section("Calendar", "Important dates", "Date, event/holiday and location first. Open a record for the full Horizon detail, impact assessment and source trail.")
-        for n,(_,r) in enumerate(hdf.head(40).iterrows()):
-            dt=pd.to_datetime(r.get("Start Date"),errors="coerce")
-            date_label=dt.strftime("%d %b %Y") if not pd.isna(dt) else clean_display_text(r.get("Start Date",""))[:10]
-            title=clean_display_text(r.get("Title","Untitled horizon event"))
-            typ=clean_display_text(r.get("Event Type","") or r.get("Event Category",""))
-            loc=clean_display_text(r.get("Country / Countries","") or r.get("Location",""))
-            impact=clean_display_text(r.get("Operational Impact","") or r.get("Description",""))
-            with st.expander(f"{date_label} · {title}", expanded=False):
-                st.markdown(f"**{typ}**" + (f" · {loc}" if loc else ""))
-                if impact:
-                    st.write(impact)
-                urls=event_source_urls(r)
-                if urls:
-                    st.markdown("**Sources / Horizon scan detail**")
-                    for u in urls[:5]:
-                        st.markdown(f"- {u}")
-                eid=clean_display_text(r.get("Event ID",""))
+        f1,f2,f3=st.columns([1.2,1,1])
+        dataset_mode=f1.selectbox("Dataset",["All disruption + illicit events","Disruptions only","Smuggling / illicit only"],key="event_graph_dataset")
+        if dataset_mode=="Disruptions only": work=disruption_events.copy()
+        elif dataset_mode=="Smuggling / illicit only": work=smuggling_events.copy()
+        else: work=dataset_events.copy()
+        country_opts=["All"]+sorted([x for x in text_col(work,"Country / Countries").unique() if x])
+        country=f2.selectbox("Country / corridor",country_opts,key="event_graph_country")
+        sev_opts=["All"]+sorted([x for x in text_col(work,"Severity").unique() if x])
+        sev=f3.selectbox("Severity",sev_opts,key="event_graph_severity")
+        if country!="All": work=work[text_col(work,"Country / Countries").eq(country)]
+        if sev!="All": work=work[text_col(work,"Severity").eq(sev)]
+
+        alinks=_links_for_events(event_asset_links,work)
+        clinks=_links_for_events(event_company_links,work)
+        mlinks=_links_for_events(event_mobile_asset_links,work)
+        actor_work=event_actor_links[text_col(event_actor_links,"event_id").isin(_event_ids(work))].copy() if not event_actor_links.empty else pd.DataFrame()
+
+        m1,m2,m3,m4,m5,m6=st.columns(6)
+        m1.metric("Events",len(work))
+        m2.metric("Ports / assets",alinks["Asset ID"].astype(str).nunique() if not alinks.empty and "Asset ID" in alinks.columns else 0)
+        m3.metric("Companies",clinks["Company ID"].astype(str).nunique() if not clinks.empty and "Company ID" in clinks.columns else 0)
+        m4.metric("Vessels",mlinks["Mobile Asset ID"].astype(str).nunique() if not mlinks.empty and "Mobile Asset ID" in mlinks.columns else 0)
+        m5.metric("Actors / groups",actor_work["actor_id"].astype(str).nunique() if not actor_work.empty else 0)
+        m6.metric("Countries",len({c for v in text_col(work,"Country / Countries") for c in _analytics_country_tokens(v)}))
+
+        tabs=st.tabs(["Overview","Disruptions","Smuggling","Ports & assets","Companies","Actors / groups","Countries & regions","Event graph"])
+        with tabs[0]:
+            adf=_analytics_prepare_events(work)
+            a,b=st.columns(2)
+            with a:
+                st.markdown("#### Events by region")
+                _analytics_render_chart(adf,"Bar","Region",top_n=15)
+            with b:
+                st.markdown("#### Events by type")
+                _analytics_render_chart(adf,"Bar","Event Type",top_n=15)
+            st.markdown("#### Monthly activity")
+            _analytics_render_chart(adf,"Line","Event Family",time_grain="Monthly",top_n=8)
+        with tabs[1]:
+            dv=disruption_events.copy()
+            if country!="All": dv=dv[text_col(dv,"Country / Countries").eq(country)]
+            show_df(dv,["Start Date","Country / Countries","Location","Event Family","Event Type","Severity","Title","Operational Impact"],600)
+        with tabs[2]:
+            sv=smuggling_events.copy()
+            if country!="All": sv=sv[text_col(sv,"Country / Countries").eq(country)]
+            show_df(sv,["Start Date","Country / Countries","Location","Event Type","Severity","Title","Operational Impact"],600)
+        with tabs[3]:
+            graph=_event_graph_join(event_asset_links,work,"Asset")
+            if graph.empty: st.info("No canonical port/asset relationships exist for this selection yet.")
+            else:
+                agg=graph.groupby(["Asset","Asset Type","Country"],dropna=False)["Event ID"].nunique().reset_index(name="Events").sort_values("Events",ascending=False)
+                show_df(agg,["Asset","Asset Type","Country","Events"],420)
+                if alt is not None and not agg.empty:
+                    st.altair_chart(alt.Chart(agg.head(25)).mark_bar().encode(x="Events:Q",y=alt.Y("Asset:N",sort="-x"),tooltip=["Asset","Asset Type","Country","Events"]),use_container_width=True)
+                st.markdown("#### Underlying linked events")
+                show_df(graph,["Asset","Relationship","Start Date","Event Type","Severity","Location","Title"],500)
+        with tabs[4]:
+            graph=_event_graph_join(event_company_links,work,"Company")
+            if graph.empty: st.info("No canonical company/entity relationships exist for this selection yet.")
+            else:
+                agg=graph.groupby(["Company","Entity Type","HQ Country"],dropna=False)["Event ID"].nunique().reset_index(name="Events").sort_values("Events",ascending=False)
+                show_df(agg,["Company","Entity Type","HQ Country","Events"],420)
+                show_df(graph,["Company","Relationship","Start Date","Event Type","Severity","Location","Title"],500)
+        with tabs[5]:
+            if actor_work.empty or actor_directory.empty:
+                st.info("No canonical actor/group relationships exist for this selection yet.")
+            else:
+                ad=actor_directory[[c for c in ["actor_id","canonical_name","actor_class","actor_subtype","primary_country"] if c in actor_directory.columns]].copy()
+                x=actor_work.merge(ad,on="actor_id",how="left")
+                agg=x.groupby(["canonical_name","actor_class","actor_subtype","primary_country"],dropna=False)["event_id"].nunique().reset_index(name="Events").sort_values("Events",ascending=False)
+                agg=agg.rename(columns={"canonical_name":"Actor / Group","actor_class":"Class","actor_subtype":"Subtype","primary_country":"Country"})
+                show_df(agg,["Actor / Group","Class","Subtype","Country","Events"],450)
+                if alt is not None and not agg.empty:
+                    st.altair_chart(alt.Chart(agg.head(20)).mark_bar().encode(x="Events:Q",y=alt.Y("Actor / Group:N",sort="-x"),tooltip=["Actor / Group","Class","Subtype","Country","Events"]),use_container_width=True)
+        with tabs[6]:
+            adf=_analytics_prepare_events(work)
+            a,b=st.columns(2)
+            with a: _analytics_render_chart(adf,"Bar","Region",top_n=20)
+            with b: _analytics_render_chart(adf,"Bar","Country",top_n=25)
+            st.markdown("#### Region / country breakdown")
+            show_df(_analytics_breakdown(adf,"Region"),["Region","Count","% of breakdown","Critical / Severe","High","Medium","Low"],340)
+        with tabs[7]:
+            detail=work.copy()
+            if "Start Date" in detail.columns:
+                detail["_d"]=pd.to_datetime(detail["Start Date"],errors="coerce")
+                detail=detail.sort_values("_d",ascending=False,na_position="last")
+            detail=detail.reset_index(drop=True)
+            if detail.empty:
+                st.info("No matching events.")
+            else:
+                pick=st.selectbox("Select event",range(len(detail)),format_func=lambda i:f"{str(detail.iloc[i].get('Start Date',''))[:10]} · {clean_display_text(detail.iloc[i].get('Title',''))}",key="dataset_event_graph_pick")
+                row=detail.iloc[pick]; eid=clean_display_text(row.get("Event ID",""))
+                event_card(row,key_prefix=f"dataset_graph_{eid}")
                 if eid:
-                    try:
-                        pc_drilldown_button("Open full event detail", "event", eid, key=f"horizon_detail_{n}_{eid}")
-                    except Exception:
-                        pass
+                    render_connected_context(eid)
 
-        with st.expander("Table view", expanded=False):
-            show_df(hdf,["Start Date","End Date","Country / Countries","Location","Event Family","Event Type","Title","Severity","Operational Impact","Trade / Commercial Impact","Confidence"],620)
 
 elif page == "Smuggling & Illicit Trade":
-    section("Domain", "Smuggling & Illicit Trade", "Narcotics, arms, human trafficking, migrant smuggling, contraband and interdictions, linked to actors, vessels, borders, ports and routes where evidence exists.")
+    section(
+        "Domain intelligence",
+        "Smuggling & Illicit Trade",
+        "Narcotics, arms, trafficking, migrant smuggling and contraband as an event graph: events tied to ports/assets, companies, vessels, actors and geography where canonical links exist."
+    )
     sdf=smuggling_events_frame()
     if sdf.empty:
         st.info("No smuggling/illicit-trade events are currently routed into the canonical intelligence event layer.")
@@ -3871,9 +3629,9 @@ elif page == "Smuggling & Illicit Trade":
         years=sorted(pd.to_datetime(sdf["Start Date"],errors="coerce",utc=True).dt.year.dropna().astype(int).unique().tolist(),reverse=True) if "Start Date" in sdf.columns else []
         countries=["All"]+sorted([x for x in text_col(sdf,"Country / Countries").unique() if x])
         types=["All"]+sorted([x for x in text_col(sdf,"Event Type").unique() if x])
-        year=s1.selectbox("Year",["All"]+years,index=0)
-        country=s2.selectbox("Country / corridor",countries,index=0)
-        typ=s3.selectbox("Type",types,index=0)
+        year=s1.selectbox("Year",["All"]+years,index=0,key="smug_year")
+        country=s2.selectbox("Country / corridor",countries,index=0,key="smug_country")
+        typ=s3.selectbox("Type",types,index=0,key="smug_type")
         minsev=s4.selectbox("Minimum severity",["All","LOW","MODERATE","HIGH","SEVERE","CRITICAL"],index=0,key="smug_sev")
         view=sdf.copy()
         if year!="All":
@@ -3882,103 +3640,74 @@ elif page == "Smuggling & Illicit Trade":
         if country!="All": view=view[text_col(view,"Country / Countries").eq(country)]
         if typ!="All": view=view[text_col(view,"Event Type").eq(typ)]
         if minsev!="All": view=view[text_col(view,"Severity").apply(_severity_rank)>=_severity_rank(minsev)]
-        c1,c2,c3,c4=st.columns(4)
+
+        asset_links=_links_for_events(event_asset_links,view)
+        company_links=_links_for_events(event_company_links,view)
+        mobile_links=_links_for_events(event_mobile_asset_links,view)
+        actor_links_view=event_actor_links[text_col(event_actor_links,"event_id").isin(_event_ids(view))].copy() if not event_actor_links.empty else pd.DataFrame()
+
+        c1,c2,c3,c4,c5=st.columns(5)
         c1.metric("Events",len(view))
         c2.metric("Countries / corridors",text_col(view,"Country / Countries").nunique())
-        c3.metric("Event types",text_col(view,"Event Type").nunique())
-        c4.metric("High+",sum(text_col(view,"Severity").apply(_severity_rank)>=3))
+        c3.metric("Linked ports / assets",asset_links["Asset ID"].astype(str).nunique() if not asset_links.empty and "Asset ID" in asset_links.columns else 0)
+        c4.metric("Linked companies",company_links["Company ID"].astype(str).nunique() if not company_links.empty and "Company ID" in company_links.columns else 0)
+        c5.metric("Linked actors",actor_links_view["actor_id"].astype(str).nunique() if not actor_links_view.empty else 0)
 
-        # Derived analytical dimensions use only text already present in the canonical event record.
-        chart_df=view.copy()
-        chart_df["_smuggling_class"]=chart_df.apply(_smuggling_class,axis=1)
-        chart_df["_smuggling_mode"]=chart_df.apply(_smuggling_mode,axis=1)
-        if "Start Date" in chart_df.columns:
-            chart_df["_date"]=pd.to_datetime(chart_df["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
-            chart_df["_month"]=chart_df["_date"].dt.to_period("M").astype(str)
-
-        section("Analysis", "Smuggling patterns", "Explore volume, type, route/mode, geography and linked organisations across the selected period.")
-
-        tab1,tab2,tab3,tab4,tab5=st.tabs(["Trend","Type","Mode / route","Geography","Actors / organisations"])
-
-        with tab1:
-            if "_month" in chart_df.columns:
-                monthly=(chart_df.dropna(subset=["_date"]).groupby("_month").size().reset_index(name="Events"))
-                if not monthly.empty:
-                    if alt is not None:
-                        ch=alt.Chart(monthly).mark_line(point=True).encode(
-                            x=alt.X("_month:N",title="Month",sort=None),
-                            y=alt.Y("Events:Q",title="Events"),
-                            tooltip=["_month","Events"]
-                        ).properties(height=340)
-                        st.altair_chart(ch,use_container_width=True)
-                    else:
-                        st.line_chart(monthly.set_index("_month")["Events"])
-                else:
-                    st.info("No dated records in the current filter.")
+        tabs=st.tabs(["Overview","Events","Ports & assets","Companies","Vessels","Actors & networks","Geography","Event graph"])
+        with tabs[0]:
+            a,b=st.columns(2)
+            with a:
+                st.markdown("#### Smuggling by type")
+                _analytics_render_chart(_analytics_prepare_events(view),"Bar","Event Type",top_n=12)
+            with b:
+                st.markdown("#### Smuggling by country")
+                _analytics_render_chart(_analytics_prepare_events(view),"Bar","Country",top_n=12)
+            st.markdown("#### Activity over time")
+            _analytics_render_chart(_analytics_prepare_events(view),"Line","Event Family",time_grain="Monthly",top_n=8)
+        with tabs[1]:
+            show_df(_rank_report_candidates(view),["Start Date","Country / Countries","Location","Event Type","Title","Severity","Description","Operational Impact","Trade / Commercial Impact","Confidence"],650)
+            st.download_button("Download filtered smuggling dataset (CSV)",view.to_csv(index=False).encode("utf-8"),file_name="pc-smuggling-illicit-trade.csv",mime="text/csv",use_container_width=True,key="smug_download")
+        with tabs[2]:
+            graph=_event_graph_join(event_asset_links,view,"Asset")
+            if graph.empty: st.info("No canonical port/asset links exist for this filtered smuggling set yet.")
             else:
-                st.info("Start Date is unavailable.")
-
-        with tab2:
-            type_counts=(chart_df["_smuggling_class"].value_counts().rename_axis("Type").reset_index(name="Events"))
-            if not type_counts.empty:
-                left,right=st.columns([1.15,1])
-                with left:
+                show_df(graph,["Asset","Asset Type","Country","Relationship","Start Date","Event Type","Severity","Title"],500)
+                agg=graph.groupby(["Asset","Country"],dropna=False)["Event ID"].nunique().reset_index(name="Events").sort_values("Events",ascending=False)
+                if not agg.empty:
                     if alt is not None:
-                        pie=alt.Chart(type_counts).mark_arc(innerRadius=45).encode(
-                            theta=alt.Theta("Events:Q"),
-                            color=alt.Color("Type:N",legend=alt.Legend(orient="bottom")),
-                            tooltip=["Type","Events"]
-                        ).properties(height=360)
-                        st.altair_chart(pie,use_container_width=True)
-                    else:
-                        st.bar_chart(type_counts.set_index("Type")["Events"])
-                with right:
-                    show_df(type_counts,["Type","Events"],360)
-
-        with tab3:
-            mode_counts=(chart_df["_smuggling_mode"].value_counts().rename_axis("Mode").reset_index(name="Events"))
-            if alt is not None and not mode_counts.empty:
-                ch=alt.Chart(mode_counts).mark_bar().encode(
-                    y=alt.Y("Mode:N",sort="-x",title=None),
-                    x=alt.X("Events:Q",title="Events"),
-                    tooltip=["Mode","Events"]
-                ).properties(height=330)
-                st.altair_chart(ch,use_container_width=True)
-            elif not mode_counts.empty:
-                st.bar_chart(mode_counts.set_index("Mode")["Events"])
-
-        with tab4:
-            geo_counts=(text_col(chart_df,"Country / Countries").replace("",pd.NA).dropna().value_counts().head(20).rename_axis("Country / corridor").reset_index(name="Events"))
-            if alt is not None and not geo_counts.empty:
-                ch=alt.Chart(geo_counts).mark_bar().encode(
-                    y=alt.Y("Country / corridor:N",sort="-x",title=None),
-                    x=alt.X("Events:Q",title="Events"),
-                    tooltip=["Country / corridor","Events"]
-                ).properties(height=max(340,min(650,30*len(geo_counts))))
-                st.altair_chart(ch,use_container_width=True)
-            elif not geo_counts.empty:
-                st.bar_chart(geo_counts.set_index("Country / corridor")["Events"])
-
-        with tab5:
-            actor_counts=_smuggling_actor_counts(chart_df)
-            if actor_counts.empty:
-                st.info("No reviewed canonical actor links are available for the current selection. Named organisations remain visible in event detail where source-supported.")
+                        st.altair_chart(alt.Chart(agg.head(20)).mark_bar().encode(x="Events:Q",y=alt.Y("Asset:N",sort="-x"),tooltip=["Asset","Country","Events"]),use_container_width=True)
+                    else: st.bar_chart(agg.head(20).set_index("Asset")["Events"])
+        with tabs[3]:
+            graph=_event_graph_join(event_company_links,view,"Company")
+            if graph.empty: st.info("No canonical company/entity links exist for this filtered smuggling set yet.")
             else:
-                top=actor_counts.head(20)
-                if alt is not None:
-                    ch=alt.Chart(top).mark_bar().encode(
-                        y=alt.Y("Actor:N",sort="-x",title=None),
-                        x=alt.X("Events:Q",title="Linked events"),
-                        tooltip=["Actor","Events"]
-                    ).properties(height=max(340,min(650,30*len(top))))
-                    st.altair_chart(ch,use_container_width=True)
-                else:
-                    st.bar_chart(top.set_index("Actor")["Events"])
-                show_df(top,["Actor","Events"],420)
-
-        section("Record", "Event register", "Filtered event-level evidence behind the charts.")
-        show_df(_rank_report_candidates(view),["Start Date","Country / Countries","Location","Event Type","Title","Severity","Description","Operational Impact","Trade / Commercial Impact","Confidence"],680)
-        st.download_button("Download filtered dataset (CSV)",view.to_csv(index=False).encode("utf-8"),file_name="pc-smuggling-illicit-trade.csv",mime="text/csv",use_container_width=True)
+                show_df(graph,["Company","Entity Type","HQ Country","Relationship","Start Date","Event Type","Severity","Title"],500)
+        with tabs[4]:
+            graph=_event_graph_join(event_mobile_asset_links,view,"Mobile Asset")
+            if graph.empty: st.info("No canonical vessel/mobile-asset links exist for this filtered smuggling set yet.")
+            else: show_df(graph,["Mobile Asset","IMO","Flag","Relationship","Start Date","Event Type","Severity","Title"],500)
+        with tabs[5]:
+            al=actor_links_view.copy()
+            if al.empty or actor_directory.empty:
+                st.info("No canonical actor links exist for this filtered smuggling set yet.")
+            else:
+                ad=actor_directory[[c for c in ["actor_id","canonical_name","actor_class","actor_subtype","primary_country"] if c in actor_directory.columns]].copy()
+                al=al.merge(ad,on="actor_id",how="left")
+                counts=al.groupby(["canonical_name","actor_class","actor_subtype"],dropna=False)["event_id"].nunique().reset_index(name="Events").sort_values("Events",ascending=False)
+                show_df(counts.rename(columns={"canonical_name":"Actor","actor_class":"Class","actor_subtype":"Subtype"}),["Actor","Class","Subtype","Events"],440)
+        with tabs[6]:
+            adf=_analytics_prepare_events(view)
+            a,b=st.columns(2)
+            with a: _analytics_render_chart(adf,"Bar","Region",top_n=15)
+            with b: _analytics_render_chart(adf,"Bar","Country",top_n=20)
+        with tabs[7]:
+            detail=view.sort_values("Start Date",ascending=False,na_position="last").reset_index(drop=True) if "Start Date" in view.columns else view.reset_index(drop=True)
+            if not detail.empty:
+                pick=st.selectbox("Select smuggling event",range(len(detail)),format_func=lambda i:f"{str(detail.iloc[i].get('Start Date',''))[:10]} · {clean_display_text(detail.iloc[i].get('Title',''))}",key="smug_event_graph_pick")
+                row=detail.iloc[pick]; eid=clean_display_text(row.get("Event ID",""))
+                event_card(row,key_prefix=f"smug_graph_{eid}")
+                if eid:
+                    render_connected_context(eid)
 
 elif page == "Report Studio":
     section("Publications", "Report Studio", "Build sourced weekly intelligence products directly from the canonical event layer. Risk ratings are analyst choices; AI expands selected stories without selecting the rating.")
@@ -4054,16 +3783,10 @@ elif page == "Report Studio":
                     st.caption(f"Resolved source URLs: {len(event_source_urls(row))}")
                 sections[sec]=rows
     md=_build_report_markdown(template_name,as_of,sections,edits,horizon_rows)
+    st.markdown("### Report preview")
+    st.text_area("Markdown",value=md,height=700,key=f"preview_{template_name}")
     slug=re.sub(r"[^a-z0-9]+","-",template_name.lower()).strip("-")
-    try:
-        with st.spinner("Rendering branded PDF…"):
-            report_pdf = render_report_studio_pdf(template_name, as_of, sections, edits, horizon_rows)
-        st.success("Styled PDF ready.")
-        st.download_button("Download report (PDF)",report_pdf,file_name=f"{slug}-{as_of.isoformat()}.pdf",mime="application/pdf",use_container_width=True,type="primary")
-    except Exception as exc:
-        st.error(f"PDF renderer error: {exc}")
-    with st.expander("Text preview", expanded=False):
-        st.text_area("Report text",value=md,height=700,key=f"preview_{template_name}")
+    st.download_button("Download report (Markdown)",md.encode("utf-8"),file_name=f"{slug}-{as_of.isoformat()}.md",mime="text/markdown",use_container_width=True,type="primary")
 
 elif page == "Intelligence Brief Builder":
     section(
@@ -4790,7 +4513,10 @@ elif page == "Ports & Infrastructure":
         "Threat Picture",
         "Incidents",
         "Asset Exposure",
-        "Port Drill-down"
+        "Port Drill-down",
+        "Disruption Analytics",
+        "Smuggling / Illicit Links",
+        "Company Exposure"
     ])
 
     with tabs[0]:
@@ -5052,6 +4778,45 @@ elif page == "Ports & Infrastructure":
 # -----------------------------------------------------------------------------
 # 7. AVIATION & MOVEMENT
 # -----------------------------------------------------------------------------
+
+    with tabs[4]:
+        st.markdown("### Port disruption analytics")
+        st.caption("Charts resolve back to the same canonical event records and port/asset links shown elsewhere on this page.")
+        adf=_analytics_prepare_events(pe)
+        a,b=st.columns(2)
+        with a: _analytics_render_chart(adf,"Bar","Country",top_n=20)
+        with b: _analytics_render_chart(adf,"Bar","Event Type",top_n=20)
+        st.markdown("#### Disruptions over time")
+        _analytics_render_chart(adf,"Line","Event Family",time_grain="Monthly",top_n=8)
+        graph=_event_graph_join(infra_links,pe,"Asset")
+        if not graph.empty:
+            agg=graph.groupby(["Asset","Country"],dropna=False)["Event ID"].nunique().reset_index(name="Events").sort_values("Events",ascending=False)
+            st.markdown("#### Most frequently affected ports / assets")
+            show_df(agg,["Asset","Country","Events"],340)
+
+    with tabs[5]:
+        st.markdown("### Smuggling and illicit-trade events tied to ports")
+        smug=smuggling_events_frame()
+        graph=_event_graph_join(infra_links,smug,"Asset")
+        if graph.empty:
+            st.info("No canonical port/asset links currently connect smuggling events to this infrastructure layer.")
+        else:
+            show_df(graph,["Asset","Asset Type","Country","Relationship","Start Date","Event Type","Severity","Location","Title"],560)
+            agg=graph.groupby(["Asset","Country"],dropna=False)["Event ID"].nunique().reset_index(name="Illicit events").sort_values("Illicit events",ascending=False)
+            if alt is not None and not agg.empty:
+                st.altair_chart(alt.Chart(agg.head(20)).mark_bar().encode(x="Illicit events:Q",y=alt.Y("Asset:N",sort="-x"),tooltip=["Asset","Country","Illicit events"]),use_container_width=True)
+
+    with tabs[6]:
+        st.markdown("### Companies connected to port/infrastructure events")
+        graph=_event_graph_join(event_company_links,pe,"Company")
+        if graph.empty:
+            st.info("No canonical company/entity links currently connect to these port and infrastructure events.")
+        else:
+            agg=graph.groupby(["Company","Entity Type","HQ Country"],dropna=False)["Event ID"].nunique().reset_index(name="Events").sort_values("Events",ascending=False)
+            show_df(agg,["Company","Entity Type","HQ Country","Events"],360)
+            st.markdown("#### Underlying company-event links")
+            show_df(graph,["Company","Relationship","Start Date","Event Type","Severity","Location","Title"],520)
+
 elif page == "Aviation & Movement":
     section("Domain intelligence", "Aviation & Movement", "Aircraft, carrier exposure, airspace/airport disruption and multimodal movement events from the same event model.")
     aviation_terms = ["Aviation","Airport","Aircraft","Airspace","Flight","UAV","Drone","GNSS","GPS","Typhoon","Volcanic","Ash"]

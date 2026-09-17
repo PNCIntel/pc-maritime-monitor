@@ -8,7 +8,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "26-imo-finalize-after-v5-2026-09-16"
+LOADER_BUILD = "28-event-link-fast-path-2026-09-17"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4236,6 +4236,152 @@ def _mark_deferred_review(staged_record_id, method, reason, details=None):
     }).eq("staged_record_id",staged_record_id).execute()
 
 
+
+def _v28_apply_event_links_direct(job_id):
+    """Apply canonical event links directly when both endpoints already exist.
+
+    This bypasses the deferred SQL resolver for straightforward links. Event-link
+    source_id remains provenance. The graph identity lives in event_id + linked_type +
+    linked_id + relationship.
+    """
+    report={"scanned":0,"applied":0,"already_applied":0,"unresolved":0,"errors":[]}
+
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,payload,review_status,resolution_status,source_id")
+              .eq("ingestion_job_id",str(job_id))
+              .eq("target_table","pc_event_links")
+              .limit(20000).execute().data or [])
+    except Exception as exc:
+        report["errors"].append(f"event-link staging read: {exc}")
+        return report
+
+    try:
+        writable=set(_table_write_columns_live(sb,"pc_event_links"))
+    except Exception:
+        writable={
+            "event_link_id","event_id","linked_type","linked_id","linked_name",
+            "relationship","confidence","source_id","metadata"
+        }
+
+    for r in rows:
+        if str(r.get("review_status") or "").lower()=="applied":
+            report["already_applied"]+=1
+            continue
+
+        report["scanned"]+=1
+        p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+        p=dict(p)
+        event_id=str(p.get("event_id") or "").strip()
+        linked_type=str(p.get("linked_type") or "").strip().casefold()
+        linked_id=str(p.get("linked_id") or "").strip()
+
+        if not event_id or not linked_type or not linked_id:
+            report["unresolved"]+=1
+            continue
+
+        # Parent event must exist canonically.
+        try:
+            event_ok=bool((sb.table("pc_events")
+                           .select("event_id")
+                           .eq("event_id",event_id)
+                           .limit(1).execute().data or []))
+        except Exception:
+            event_ok=False
+        if not event_ok:
+            report["unresolved"]+=1
+            continue
+
+        # Resolve/validate linked endpoint.
+        endpoint_ok=False
+        canonical_linked_id=linked_id
+        try:
+            if linked_type in {"mobile_asset","vessel"}:
+                hit=(sb.table("pc_mobile_assets")
+                     .select("mobile_asset_id,imo,name")
+                     .eq("mobile_asset_id",linked_id)
+                     .limit(1).execute().data or [])
+                if not hit:
+                    meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+                    imo=str(meta.get("imo") or p.get("imo") or "").strip()
+                    if imo:
+                        hit=(sb.table("pc_mobile_assets")
+                             .select("mobile_asset_id,imo,name")
+                             .eq("imo",imo).limit(2).execute().data or [])
+                if len(hit)==1:
+                    canonical_linked_id=str(hit[0]["mobile_asset_id"])
+                    endpoint_ok=True
+                    p.setdefault("linked_name",hit[0].get("name"))
+            elif linked_type=="entity":
+                hit=(sb.table("pc_entities").select("entity_id,name")
+                     .eq("entity_id",linked_id).limit(1).execute().data or [])
+                if hit:
+                    endpoint_ok=True
+                    p.setdefault("linked_name",hit[0].get("name"))
+            elif linked_type=="asset":
+                hit=(sb.table("pc_assets").select("asset_id,name")
+                     .eq("asset_id",linked_id).limit(1).execute().data or [])
+                if hit:
+                    endpoint_ok=True
+                    p.setdefault("linked_name",hit[0].get("name"))
+            elif linked_type=="event":
+                hit=(sb.table("pc_events").select("event_id,title")
+                     .eq("event_id",linked_id).limit(1).execute().data or [])
+                if hit:
+                    endpoint_ok=True
+                    p.setdefault("linked_name",hit[0].get("title"))
+            else:
+                # Unsupported polymorphic endpoint: leave for specialist processor.
+                endpoint_ok=False
+        except Exception as exc:
+            report["errors"].append(f"{r.get('staged_record_id')}: endpoint lookup failed: {exc}")
+            continue
+
+        if not endpoint_ok:
+            report["unresolved"]+=1
+            continue
+
+        p["linked_id"]=canonical_linked_id
+
+        # Deterministic event-link id if the package did not supply one.
+        if not p.get("event_link_id"):
+            digest=hashlib.sha256(
+                f"{event_id}|{linked_type}|{canonical_linked_id}|{p.get('relationship') or 'related'}".encode("utf-8")
+            ).hexdigest().upper()[:24]
+            p["event_link_id"]="EVLINK_"+digest
+
+        # Provenance source_id is valid on pc_event_links.
+        if not p.get("source_id") and r.get("source_id"):
+            p["source_id"]=r.get("source_id")
+
+        row={k:v for k,v in p.items() if k in writable and v is not None}
+        try:
+            sb.table("pc_event_links").upsert(
+                _jsonable(row),
+                on_conflict="event_link_id"
+            ).execute()
+
+            sb.table("pc_staged_records").update({
+                "resolved_entity_id":str(p["event_link_id"]),
+                "resolution_status":"READY",
+                "resolution_method":"v28_direct_event_link_apply",
+                "resolution_confidence":1.0,
+                "candidate_count":1,
+                "validation_status":"reviewed",
+                "review_status":"applied",
+                "resolution_details":{
+                    "event_id":event_id,
+                    "linked_type":linked_type,
+                    "linked_id":canonical_linked_id,
+                }
+            }).eq("staged_record_id",r["staged_record_id"]).execute()
+            report["applied"]+=1
+        except Exception as exc:
+            report["errors"].append(f"{r.get('staged_record_id')}: direct event-link upsert failed: {exc}")
+
+    return report
+
+
 def _apply_deferred_package_rows(job_id, deferred_rows):
     """Stage deferred child/graph rows, then let the SECURITY DEFINER RPC apply them.
 
@@ -4256,6 +4402,9 @@ def _apply_deferred_package_rows(job_id, deferred_rows):
             report["staged"]+=1
         except Exception as exc:
             report["errors"].append(f"deferred staging failed: {exc}")
+
+    # V28: straightforward canonical event links should not depend on the deferred SQL resolver.
+    report["event_link_fast_path"]=_v28_apply_event_links_direct(job_id)
 
     try:
         report["rpc"]=(sb.rpc(
@@ -4431,6 +4580,89 @@ def _v25_apply_existing_imo_rows(job_id):
     return report
 
 
+
+def _v27_repair_relationship_source_endpoints(job_id):
+    """Repair staged pc_relationships where provenance accidentally overwrote source_id.
+
+    For relationship rows, payload.source_id is the graph endpoint. If source_name is
+    present, resolve/create the canonical entity by exact normalized name and restore
+    payload.source_id. Any SRC_* value is retained only as provenance metadata.
+    """
+    report={"scanned":0,"repaired":0,"already_valid":0,"errors":[]}
+    entity_index=_canonical_entity_index()
+
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,payload,review_status")
+              .eq("ingestion_job_id",str(job_id))
+              .eq("target_table","pc_relationships")
+              .limit(20000).execute().data or [])
+    except Exception as exc:
+        report["errors"].append(f"relationship staging read: {exc}")
+        return report
+
+    for r in rows:
+        report["scanned"] += 1
+        p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+        p=dict(p)
+        src_type=str(p.get("source_type") or "").casefold()
+        src_id=str(p.get("source_id") or "").strip()
+        src_name=str(p.get("source_name") or "").strip()
+
+        if src_type!="entity" or not src_name:
+            continue
+
+        # If source_id already resolves to a canonical entity, leave it alone.
+        valid=False
+        if src_id and not src_id.startswith("SRC_"):
+            try:
+                valid=bool((sb.table("pc_entities")
+                            .select("entity_id")
+                            .eq("entity_id",src_id)
+                            .limit(1).execute().data or []))
+            except Exception:
+                valid=False
+        if valid:
+            report["already_valid"] += 1
+            continue
+
+        eid=_ensure_exact_company_entity(
+            src_name,
+            entity_type="company",
+            metadata=p.get("metadata") if isinstance(p.get("metadata"),dict) else {},
+            entity_index=entity_index,
+        )
+        if not eid:
+            report["errors"].append(f"{r.get('staged_record_id')}: could not resolve entity {src_name!r}")
+            continue
+
+        meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+        meta=dict(meta)
+        if src_id.startswith("SRC_") and not meta.get("provenance_source_id"):
+            meta["provenance_source_id"]=src_id
+
+        p["source_id"]=eid
+        p["metadata"]=meta
+
+        # Recompute deterministic relationship id after endpoint repair.
+        if all(p.get(k) for k in ("source_type","source_id","relationship_type","target_type","target_id")):
+            p["relationship_id"]=_canonical_semantic_relationship_id(p)
+
+        try:
+            sb.table("pc_staged_records").update({
+                "payload":_jsonable(p),
+                "resolution_status":"PENDING",
+                "resolution_method":"v27_relationship_source_endpoint_repaired",
+                "validation_status":"pending",
+                "review_status":"pending",
+            }).eq("staged_record_id",r["staged_record_id"]).execute()
+            report["repaired"] += 1
+        except Exception as exc:
+            report["errors"].append(f"{r.get('staged_record_id')}: {exc}")
+
+    return report
+
+
 def _canonical_process_job(job_id, deferred_rows=None):
     """V19 model-first dependency engine.
 
@@ -4443,8 +4675,11 @@ def _canonical_process_job(job_id, deferred_rows=None):
     # Support Retry on jobs created by v16-v18.
     deferred.extend(_collect_legacy_internal_deferred(job_id))
 
-    # V22: provenance is a parent dependency too.
+    # V22/V27: provenance is a parent dependency too, but must never overwrite
+    # pc_relationships.payload.source_id (the graph endpoint).
     sources_first=_v22_sources_first_for_job(job_id)
+    relationship_source_repair=_v27_repair_relationship_source_endpoints(job_id)
+    event_link_fast_path_before_v5=_v28_apply_event_links_direct(job_id)
 
     # V25: exact IMO means "update this vessel now", not "send it through
     # another identity-resolution queue".
@@ -4465,6 +4700,7 @@ def _canonical_process_job(job_id, deferred_rows=None):
     # Exact IMO is authoritative for this cleanup, so finalize those rows AGAIN
     # after V5 and before graph/deferred application.
     imo_finalize_after_v5=_v25_apply_existing_imo_rows(job_id)
+    event_link_fast_path_after_v5=_v28_apply_event_links_direct(job_id)
 
     # Finalize existing canonical objects as successful no-ops before graph phase.
     finalized_before=_canonical_finalize_existing_rows(job_id)
@@ -4485,10 +4721,13 @@ def _canonical_process_job(job_id, deferred_rows=None):
     return {
         "loader_build":LOADER_BUILD,
         "sources_first":sources_first,
+        "relationship_source_repair":relationship_source_repair,
+        "event_link_fast_path_before_v5":event_link_fast_path_before_v5,
         "imo_fast_path_before_v5":imo_fast_path,
         "model_preapply":pre,
         "processor":processor,
         "imo_finalize_after_v5":imo_finalize_after_v5,
+        "event_link_fast_path_after_v5":event_link_fast_path_after_v5,
         "idempotent_finalize_before_graph":finalized_before,
         "deferred_dependency_apply":deferred_result,
         "deferred_retry_rpc":retry_pending_rpc,
@@ -4816,15 +5055,27 @@ def _v22_sources_first_for_job(job_id):
 
         primary=source_ids[0]
         changed=False
-        if not p.get("source_id"):
-            p=dict(p)
-            p["source_id"]=primary
-            changed=True
+        p=dict(p)
         meta=dict(meta)
+
+        # CRITICAL SEMANTICS:
+        # pc_relationships.payload.source_id is the GRAPH SOURCE ENDPOINT (entity/asset/etc),
+        # NOT a provenance source FK. Provenance belongs in staged_record.source_id and metadata.
+        if str(r.get("target_table") or "") != "pc_relationships":
+            if not p.get("source_id"):
+                p["source_id"]=primary
+                changed=True
+        else:
+            if meta.get("provenance_source_id") != primary:
+                meta["provenance_source_id"]=primary
+                changed=True
+
         if meta.get("canonical_source_ids") != source_ids:
             meta["canonical_source_ids"]=source_ids
-            p["metadata"]=meta
             changed=True
+
+        if changed:
+            p["metadata"]=meta
 
         if changed or not r.get("source_id"):
             patch={"payload":_jsonable(p),"source_id":primary}
@@ -5358,7 +5609,7 @@ elif page=="Canonical Loader":
         "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
-    st.success("V26: exact IMO is finalized after V5 as well as before it, so existing vessels cannot fall back to PENDING. Relationship source_id now remains the company endpoint; research provenance stays in metadata.")
+    st.success("V28: fixes event-link loads too. Canonical event↔vessel/entity/asset links are applied directly when both endpoints exist; they no longer wait on the deferred SQL resolver. V27 relationship/source semantics remain in place.")
     if not sb:
         st.error("Supabase service connection required.")
     else:
