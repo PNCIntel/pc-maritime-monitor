@@ -40,6 +40,22 @@ except Exception:
 from pathlib import Path
 from datetime import datetime, timedelta, date
 
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle, KeepTogether
+except Exception:
+    A4 = None
+    rl_colors = None
+    getSampleStyleSheet = None
+    ParagraphStyle = None
+    TA_LEFT = TA_CENTER = TA_RIGHT = None
+    mm = None
+    SimpleDocTemplate = Paragraph = Spacer = PageBreak = Table = TableStyle = KeepTogether = None
+
 SHARED_DIR = Path(__file__).resolve().parent / "shared"
 if str(SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_DIR))
@@ -2617,6 +2633,180 @@ def _build_report_markdown(name,as_of,sections,edits,horizon_rows):
     lines += [f"[{i}] {u}" for i,u in enumerate(refs,1)] or ["No source URLs resolved from selected canonical records."]
     return "\n".join(lines)
 
+
+def _split_story_sections(text):
+    text = clean_display_text(text)
+    blocks = {"Situation Update": [], "Assessment / Impact / Business Implications": []}
+    current = "Situation Update"
+    seen_heading = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        low = line.lower()
+        if low == 'situation update':
+            current = "Situation Update"; seen_heading = True; continue
+        if low == 'assessment / impact / business implications':
+            current = "Assessment / Impact / Business Implications"; seen_heading = True; continue
+        if line:
+            blocks.setdefault(current, []).append(line)
+    if not seen_heading:
+        return {"Situation Update": text}
+    out = {}
+    for k, vals in blocks.items():
+        if vals:
+            out[k] = " ".join(vals)
+    return out or {"Situation Update": text}
+
+
+def _report_pdf_styles():
+    if getSampleStyleSheet is None or ParagraphStyle is None or rl_colors is None:
+        raise RuntimeError("ReportLab is required for report PDF export.")
+    styles = getSampleStyleSheet()
+    navy = rl_colors.HexColor("#07111F")
+    navy2 = rl_colors.HexColor("#102238")
+    gold = rl_colors.HexColor("#D7B66A")
+    ivory = rl_colors.HexColor("#F3F6FA")
+    textc = rl_colors.HexColor("#16202A")
+    muted = rl_colors.HexColor("#5D6B7A")
+    line = rl_colors.HexColor("#CBD5E1")
+    styles.add(ParagraphStyle(name='PC_CoverKicker', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=12, textColor=gold, alignment=TA_CENTER, spaceAfter=8))
+    styles.add(ParagraphStyle(name='PC_CoverTitle', parent=styles['Title'], fontName='Helvetica-Bold', fontSize=24, leading=28, textColor=navy, alignment=TA_CENTER, spaceAfter=8))
+    styles.add(ParagraphStyle(name='PC_CoverDeck', parent=styles['BodyText'], fontName='Helvetica', fontSize=10.5, leading=14, textColor=muted, alignment=TA_CENTER, spaceAfter=12))
+    styles.add(ParagraphStyle(name='PC_SectionTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=15, leading=18, textColor=navy, spaceBefore=8, spaceAfter=8))
+    styles.add(ParagraphStyle(name='PC_SubSection', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=11, leading=13, textColor=navy2, spaceBefore=6, spaceAfter=5))
+    styles.add(ParagraphStyle(name='PC_StoryTitle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=12.2, leading=15, textColor=navy, spaceAfter=4))
+    styles.add(ParagraphStyle(name='PC_Body', parent=styles['BodyText'], fontName='Helvetica', fontSize=9.4, leading=13.2, textColor=textc, spaceAfter=6))
+    styles.add(ParagraphStyle(name='PC_Small', parent=styles['BodyText'], fontName='Helvetica', fontSize=8.3, leading=10.5, textColor=muted, spaceAfter=4))
+    return styles, navy, navy2, gold, ivory, textc, muted, line
+
+
+def render_report_studio_pdf(name, as_of, sections, edits, horizon_rows):
+    if SimpleDocTemplate is None:
+        raise RuntimeError("ReportLab is required for report PDF export.")
+    styles, navy, navy2, gold, ivory, textc, muted, line = _report_pdf_styles()
+    refs = []
+    story_count = sum(len(v or []) for v in sections.values())
+
+    def source_nums(row):
+        nums = []
+        for u in event_source_urls(row):
+            if u not in refs:
+                refs.append(u)
+            nums.append(refs.index(u) + 1)
+        return nums
+
+    bio = io.BytesIO()
+    doc = SimpleDocTemplate(bio, pagesize=A4, leftMargin=16*mm, rightMargin=16*mm, topMargin=22*mm, bottomMargin=16*mm, title=name, author='Power & Corridors')
+    story = []
+
+    def chip(text, bg, fg=rl_colors.white):
+        para = Paragraph(f"<font color='{fg}'><b>{clean_display_text(text)}</b></font>", styles['PC_Small'])
+        t = Table([[para]], colWidths=[26*mm])
+        t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),bg),('BOX',(0,0),(-1,-1),0.6,bg),('LEFTPADDING',(0,0),(-1,-1),5),('RIGHTPADDING',(0,0),(-1,-1),5),('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),('ALIGN',(0,0),(-1,-1),'CENTER')]))
+        return t
+
+    story.append(Spacer(1, 18*mm))
+    story.append(Paragraph('POWER &amp; CORRIDORS INTELLIGENCE', styles['PC_CoverKicker']))
+    story.append(Paragraph(name.upper(), styles['PC_CoverTitle']))
+    story.append(Paragraph(as_of.strftime('%d %B %Y'), styles['PC_CoverDeck']))
+    meta = Table([[
+        Paragraph(f"<b>Stories</b><br/>{story_count}", styles['PC_Body']),
+        Paragraph(f"<b>Horizon items</b><br/>{len(horizon_rows or [])}", styles['PC_Body']),
+        Paragraph("<b>Output</b><br/>Analyst-led weekly publication PDF", styles['PC_Body'])
+    ]], colWidths=[55*mm,55*mm,55*mm])
+    meta.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1), rl_colors.HexColor('#F3F7FA')), ('BOX',(0,0),(-1,-1),0.75,line), ('INNERGRID',(0,0),(-1,-1),0.5,line), ('VALIGN',(0,0),(-1,-1),'TOP'), ('LEFTPADDING',(0,0),(-1,-1),8), ('RIGHTPADDING',(0,0),(-1,-1),8), ('TOPPADDING',(0,0),(-1,-1),8), ('BOTTOMPADDING',(0,0),(-1,-1),8)]))
+    story.append(meta)
+    story.append(Spacer(1, 6*mm))
+    story.append(Paragraph('Decision-useful intelligence on geopolitical disruption, smuggling and illicit trade, maritime security, trade corridors, aviation, sanctions, critical infrastructure, forward risk and operational impact.', styles['PC_CoverDeck']))
+    story.append(PageBreak())
+
+    story.append(Paragraph('Key Takeaways', styles['PC_SectionTitle']))
+    taken = 0
+    for sec, rows in sections.items():
+        for row in rows[:1]:
+            e = edits.get(str(row.name), {})
+            title = e.get('title') or clean_display_text(row.get('Title','Untitled event'))
+            risk = e.get('risk') or clean_display_text(row.get('Severity','')) or 'UNRATED'
+            story.append(Paragraph(f"• <b>{title}</b> — {risk}", styles['PC_Body']))
+            taken += 1
+    if taken == 0:
+        story.append(Paragraph('No stories were selected.', styles['PC_Body']))
+
+    if horizon_rows:
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph('Horizon &amp; Upcoming Events', styles['PC_SectionTitle']))
+        for row in horizon_rows:
+            dt = clean_display_text(row.get('Start Date',''))[:10]
+            loc = clean_display_text(row.get('Country / Countries','') or row.get('Location',''))
+            title = clean_display_text(row.get('Title','Untitled event'))
+            line_txt = f"<b>{dt}</b> — {loc}: {title}" if loc else f"<b>{dt}</b> — {title}"
+            story.append(Paragraph(line_txt, styles['PC_Body']))
+
+    for sec, rows in sections.items():
+        if not rows:
+            continue
+        story.append(PageBreak())
+        story.append(Paragraph(sec, styles['PC_SectionTitle']))
+        for row in rows:
+            e = edits.get(str(row.name), {})
+            title = e.get('title') or clean_display_text(row.get('Title','Untitled event'))
+            risk = (e.get('risk') or clean_display_text(row.get('Severity','')) or 'UNRATED').upper()
+            dt = clean_display_text(row.get('Start Date',''))[:10]
+            loc = clean_display_text(row.get('Country / Countries','') or row.get('Location',''))
+            etype = clean_display_text(row.get('Event Type','') or row.get('Event Family','Event'))
+            trend = clean_display_text(row.get('_gcc_trend',''))
+            risk_bg = {'LOW': rl_colors.HexColor('#5E8B74'), 'MODERATE': gold, 'HIGH': rl_colors.HexColor('#BF8B55'), 'SEVERE': rl_colors.HexColor('#B65F56'), 'CRITICAL': rl_colors.HexColor('#8C3D36')}.get(risk, navy2)
+            meta_bits = [x for x in [dt, loc, etype, trend] if x]
+            meta_line = ' · '.join(meta_bits)
+            content = []
+            hdr = Table([[Paragraph(title, styles['PC_StoryTitle']), chip(risk, risk_bg)]], colWidths=[138*mm, 28*mm])
+            hdr.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0),('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),2)]))
+            content.append(hdr)
+            if meta_line:
+                content.append(Paragraph(meta_line, styles['PC_Small']))
+            story_text = e.get('text') or _fallback_story(row)
+            parts = _split_story_sections(story_text)
+            for head, body in parts.items():
+                safe = clean_display_text(body).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
+                content.append(Paragraph(head, styles['PC_SubSection']))
+                content.append(Paragraph(safe, styles['PC_Body']))
+            nums = source_nums(row)
+            if nums:
+                content.append(Paragraph('Source refs: ' + ', '.join(f'[{n}]' for n in nums), styles['PC_Small']))
+            content.append(Spacer(1, 4*mm))
+            story.append(KeepTogether(content))
+
+    story.append(PageBreak())
+    story.append(Paragraph('Sources', styles['PC_SectionTitle']))
+    if refs:
+        for i, u in enumerate(refs, 1):
+            safe = clean_display_text(u).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
+            story.append(Paragraph(f'[{i}] {safe}', styles['PC_Body']))
+    else:
+        story.append(Paragraph('No source URLs resolved from selected canonical records.', styles['PC_Body']))
+
+    def _page(canvas, doc):
+        canvas.saveState()
+        width, height = A4
+        canvas.setFillColor(navy)
+        canvas.rect(0, height-18*mm, width, 18*mm, stroke=0, fill=1)
+        canvas.setFillColor(gold)
+        canvas.setFont('Helvetica-Bold', 8)
+        canvas.drawString(doc.leftMargin, height-11.8*mm, 'POWER & CORRIDORS INTELLIGENCE')
+        canvas.setFillColor(ivory)
+        canvas.setFont('Helvetica-Bold', 12)
+        canvas.drawRightString(width-doc.rightMargin, height-11.8*mm, clean_display_text(name).upper())
+        canvas.setStrokeColor(line)
+        canvas.line(doc.leftMargin, 12*mm, width-doc.rightMargin, 12*mm)
+        canvas.setFillColor(muted)
+        canvas.setFont('Helvetica', 8)
+        canvas.drawString(doc.leftMargin, 7.5*mm, pd.to_datetime(as_of).strftime('%d %B %Y'))
+        canvas.drawRightString(width-doc.rightMargin, 7.5*mm, f'Page {canvas.getPageNumber()}')
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_page, onLaterPages=_page)
+    bio.seek(0)
+    return bio.getvalue()
+
 if page == "Operating Picture":
     active_mon = monitoring[text_col(monitoring, "Status").str.contains("Active", case=False, na=False)] if not monitoring.empty else monitoring
     security_terms = ["Security", "Conflict", "Maritime", "Piracy", "Attack", "Ground", "Explosion", "SAR", "Pollution", "Drone", "Missile", "Seizure", "Boarding"]
@@ -3314,10 +3504,16 @@ elif page == "Report Studio":
                     st.caption(f"Resolved source URLs: {len(event_source_urls(row))}")
                 sections[sec]=rows
     md=_build_report_markdown(template_name,as_of,sections,edits,horizon_rows)
-    st.markdown("### Report preview")
-    st.text_area("Markdown",value=md,height=700,key=f"preview_{template_name}")
     slug=re.sub(r"[^a-z0-9]+","-",template_name.lower()).strip("-")
-    st.download_button("Download report (Markdown)",md.encode("utf-8"),file_name=f"{slug}-{as_of.isoformat()}.md",mime="text/markdown",use_container_width=True,type="primary")
+    try:
+        with st.spinner("Rendering branded PDF…"):
+            report_pdf = render_report_studio_pdf(template_name, as_of, sections, edits, horizon_rows)
+        st.success("Styled PDF ready.")
+        st.download_button("Download report (PDF)",report_pdf,file_name=f"{slug}-{as_of.isoformat()}.pdf",mime="application/pdf",use_container_width=True,type="primary")
+    except Exception as exc:
+        st.error(f"PDF renderer error: {exc}")
+    with st.expander("Text preview", expanded=False):
+        st.text_area("Report text",value=md,height=700,key=f"preview_{template_name}")
 
 elif page == "Intelligence Brief Builder":
     section(
