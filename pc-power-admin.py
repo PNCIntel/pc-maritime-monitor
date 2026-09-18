@@ -4509,6 +4509,145 @@ def _v29_resolve_graph_endpoint(job_id, endpoint_type, endpoint_id, endpoint_nam
     return None, "unresolved", name
 
 
+
+def _v34_staged_parent_payload(job_id, endpoint_type, endpoint_id):
+    """Find the staged parent row corresponding to a package-local graph endpoint."""
+    et=str(endpoint_type or "").strip().casefold()
+    table={
+        "entity":"pc_entities","company":"pc_entities","organisation":"pc_entities","organization":"pc_entities",
+        "asset":"pc_assets","port":"pc_assets","terminal":"pc_assets","facility":"pc_assets","infrastructure":"pc_assets",
+        "mobile_asset":"pc_mobile_assets","vessel":"pc_mobile_assets","ship":"pc_mobile_assets","aircraft":"pc_mobile_assets",
+        "route":"pc_transport_routes","transport_route":"pc_transport_routes","corridor":"pc_transport_routes","network":"pc_transport_routes",
+        "event":"pc_events",
+    }.get(et)
+    if not table:
+        return None
+    id_field={
+        "pc_entities":"entity_id","pc_assets":"asset_id","pc_mobile_assets":"mobile_asset_id",
+        "pc_transport_routes":"route_id","pc_events":"event_id"
+    }[table]
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,source_record_key,natural_key,payload,resolved_entity_id,review_status,resolution_status")
+              .eq("ingestion_job_id",str(job_id))
+              .eq("target_table",table)
+              .limit(30000).execute().data or [])
+    except Exception:
+        return None
+    raw=str(endpoint_id or "").strip()
+    for r in rows:
+        p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+        candidates={
+            str(r.get("source_record_key") or "").strip(),
+            str(r.get("natural_key") or "").strip(),
+            str(p.get(id_field) or "").strip(),
+        }
+        if raw and raw in candidates:
+            return r
+    return None
+
+
+def _v34_resolve_graph_endpoint(job_id, endpoint_type, endpoint_id, endpoint_name=None, metadata=None):
+    """V34 closure resolver: live canonical -> package map -> staged-parent payload -> unique name."""
+    cid,method,name=_v29_resolve_graph_endpoint(
+        job_id,endpoint_type,endpoint_id,endpoint_name,metadata
+    )
+    if cid:
+        return cid,method,name
+
+    staged=_v34_staged_parent_payload(job_id,endpoint_type,endpoint_id)
+    if staged:
+        canonical=_v31_resolve_parent_stage_row(staged)
+        p=staged.get("payload") if isinstance(staged.get("payload"),dict) else {}
+        display=(
+            p.get("name") or p.get("route_name") or p.get("title") or
+            endpoint_name or endpoint_id
+        )
+        if canonical:
+            try:
+                sb.table("pc_staged_records").update({
+                    "resolved_entity_id":canonical
+                }).eq("staged_record_id",staged["staged_record_id"]).execute()
+            except Exception:
+                pass
+            return str(canonical),"staged_parent_closure",str(display or "")
+
+        # Parent may have been canonicalized under another ID but staged row did not
+        # capture it. Reuse the richer staged name for one final safe unique-name lookup.
+        et=str(endpoint_type or "").strip().casefold()
+        try:
+            if et in {"entity","company","organisation","organization"}:
+                h=_v29_unique_name_hit("pc_entities","entity_id","name",p.get("name"))
+                if h: return str(h["entity_id"]),"staged_unique_name",str(h.get("name") or "")
+            elif et in {"asset","port","terminal","facility","infrastructure"}:
+                h=_v29_unique_name_hit("pc_assets","asset_id","name",p.get("name"),country=p.get("country"))
+                if h: return str(h["asset_id"]),"staged_unique_name",str(h.get("name") or "")
+            elif et in {"route","transport_route","corridor","network"}:
+                h=_v29_unique_name_hit("pc_transport_routes","route_id","route_name",p.get("route_name"))
+                if h: return str(h["route_id"]),"staged_unique_name",str(h.get("route_name") or "")
+            elif et in {"mobile_asset","vessel","ship","aircraft"}:
+                imo=str(p.get("imo") or "").strip()
+                if imo:
+                    hits=(sb.table("pc_mobile_assets").select("mobile_asset_id,name,imo").eq("imo",imo).limit(2).execute().data or [])
+                    if len(hits)==1:
+                        return str(hits[0]["mobile_asset_id"]),"staged_imo",str(hits[0].get("name") or "")
+                h=_v29_unique_name_hit("pc_mobile_assets","mobile_asset_id","name",p.get("name"))
+                if h: return str(h["mobile_asset_id"]),"staged_unique_name",str(h.get("name") or "")
+        except Exception:
+            pass
+    return None,"unresolved",str(endpoint_name or "")
+
+
+def _v34_resolve_event_parent(job_id, submitted_event_id):
+    """Resolve a staged package event to the live canonical event ID."""
+    raw=str(submitted_event_id or "").strip()
+    if not raw:
+        return None,"missing_event_id"
+
+    # Package-local mapping can differ from submitted event_id after canonical merge.
+    local=_v31_package_local_endpoint_map(job_id)
+    if local.get(raw):
+        return str(local[raw]),"package_local_event_map"
+
+    try:
+        hit=(sb.table("pc_events").select("event_id,title").eq("event_id",raw).limit(1).execute().data or [])
+        if hit:
+            return str(hit[0]["event_id"]),"exact_event_id"
+    except Exception:
+        pass
+
+    staged=_v34_staged_parent_payload(job_id,"event",raw)
+    if staged:
+        canonical=_v31_resolve_parent_stage_row(staged)
+        if canonical:
+            return str(canonical),"staged_event_closure"
+        p=staged.get("payload") if isinstance(staged.get("payload"),dict) else {}
+        title=str(p.get("title") or "").strip()
+        if title:
+            try:
+                hits=(sb.table("pc_events").select("event_id,title").eq("title",title).limit(10).execute().data or [])
+                ids={str(h.get("event_id")) for h in hits if h.get("event_id")}
+                if len(ids)==1:
+                    return next(iter(ids)),"unique_event_title"
+            except Exception:
+                pass
+    return None,"unresolved_event_parent"
+
+
+def _v34_mark_graph_pending(staged_record_id, reason, details):
+    """Persist an exact reason instead of leaving a generic PENDING row."""
+    try:
+        sb.table("pc_staged_records").update({
+            "resolution_status":"REVIEW",
+            "resolution_method":"v34_graph_closure_pending",
+            "resolution_confidence":0.0,
+            "validation_status":"needs_review",
+            "resolution_details":{"reason":reason,**(details or {})}
+        }).eq("staged_record_id",staged_record_id).execute()
+    except Exception:
+        pass
+
+
 def _v29_apply_relationships_direct(job_id):
     """Repair/apply staged canonical relationships after parent objects are resolved.
 
@@ -4544,14 +4683,29 @@ def _v29_apply_relationships_direct(job_id):
         report["scanned"]+=1
         p=dict(r.get("payload") if isinstance(r.get("payload"),dict) else {})
         meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
-        sid,smethod,sname=_v29_resolve_graph_endpoint(
+        sid,smethod,sname=_v34_resolve_graph_endpoint(
             job_id,p.get("source_type"),p.get("source_id"),p.get("source_name"),meta
         )
-        tid,tmethod,tname=_v29_resolve_graph_endpoint(
+        tid,tmethod,tname=_v34_resolve_graph_endpoint(
             job_id,p.get("target_type"),p.get("target_id"),p.get("target_name"),meta
         )
         if not sid or not tid or not p.get("relationship_type"):
             report["unresolved"]+=1
+            _v34_mark_graph_pending(
+                r["staged_record_id"],
+                "relationship_endpoint_unresolved",
+                {
+                    "submitted_source_type":p.get("source_type"),
+                    "submitted_source_id":p.get("source_id"),
+                    "submitted_source_name":p.get("source_name"),
+                    "source_resolution":smethod,
+                    "submitted_target_type":p.get("target_type"),
+                    "submitted_target_id":p.get("target_id"),
+                    "submitted_target_name":p.get("target_name"),
+                    "target_resolution":tmethod,
+                    "relationship_type":p.get("relationship_type"),
+                }
+            )
             continue
 
         p["source_id"]=sid
@@ -4627,27 +4781,42 @@ def _v28_apply_event_links_direct(job_id):
             report["unresolved"]+=1
             continue
 
-        # Parent event must exist canonically.
-        try:
-            event_ok=bool((sb.table("pc_events")
-                           .select("event_id")
-                           .eq("event_id",event_id)
-                           .limit(1).execute().data or []))
-        except Exception:
-            event_ok=False
-        if not event_ok:
+        # V34: the event itself may have been merged/canonicalized under another ID.
+        canonical_event_id,event_method=_v34_resolve_event_parent(job_id,event_id)
+        if not canonical_event_id:
             report["unresolved"]+=1
+            _v34_mark_graph_pending(
+                r["staged_record_id"],
+                "event_parent_unresolved",
+                {"submitted_event_id":event_id,"event_resolution":event_method}
+            )
             continue
+        p["event_id"]=canonical_event_id
 
-        # V29: resolve exact IDs, package-local IDs, IMO, unique names, and routes.
+        # Resolve exact IDs, package-local IDs, staged parent payloads, IMO, unique names and routes.
         meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
-        canonical_linked_id, endpoint_method, resolved_name = _v29_resolve_graph_endpoint(
+        canonical_linked_id, endpoint_method, resolved_name = _v34_resolve_graph_endpoint(
             job_id, linked_type, linked_id, p.get("linked_name"), meta
         )
         if not canonical_linked_id:
             report["unresolved"]+=1
+            _v34_mark_graph_pending(
+                r["staged_record_id"],
+                "event_link_endpoint_unresolved",
+                {
+                    "submitted_event_id":event_id,
+                    "canonical_event_id":canonical_event_id,
+                    "event_resolution":event_method,
+                    "linked_type":linked_type,
+                    "submitted_linked_id":linked_id,
+                    "linked_name":p.get("linked_name"),
+                    "endpoint_resolution":endpoint_method,
+                    "event_resolution":event_method,
+                }
+            )
             continue
 
+        event_id=canonical_event_id
         p["linked_id"]=canonical_linked_id
         if resolved_name and not p.get("linked_name"):
             p["linked_name"]=resolved_name
@@ -5135,6 +5304,10 @@ def _v33_repair_existing_job(job_id):
 
     result["event_links"]=_v28_apply_event_links_direct(job_id)
     result["relationships"]=_v29_apply_relationships_direct(job_id)
+    result["graph_closure_retry"]={
+        "event_links":_v28_apply_event_links_direct(job_id),
+        "relationships":_v29_apply_relationships_direct(job_id),
+    }
 
     specialist=_v33_pending_non_graph_deferred(job_id)
     if specialist:
@@ -5280,6 +5453,13 @@ def _canonical_process_job(job_id, deferred_rows=None):
         retry_pending_rpc={"skipped":True,"reason":"No specialist deferred rows remain."}
 
     finalized_after=_canonical_finalize_existing_rows(job_id)
+
+    # V34: one final graph-closure pass after all parents have been finalized.
+    # This catches edges whose parent was canonicalized/merged during the same run.
+    graph_closure={
+        "event_links":_v28_apply_event_links_direct(job_id),
+        "relationships":_v29_apply_relationships_direct(job_id),
+    }
 
     return {
         "loader_build":LOADER_BUILD,
@@ -6186,7 +6366,7 @@ elif page=="Canonical Loader":
         "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
-    st.success("V33: repairs the current Trade job in place. Text observation IDs are converted to deterministic UUIDs; event links and relationships are applied directly; generic graph rows are no longer sent back through the legacy SQL v21 deferred resolver.")
+    st.success("V34: graph-closure repair. Event parents can resolve through package-local canonical mappings, graph endpoints can close through their staged parent payloads, and unresolved graph rows record an exact endpoint reason instead of remaining opaque PENDING rows.")
     if not sb:
         st.error("Supabase service connection required.")
     else:
