@@ -32,8 +32,8 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.4.0-story-horizon"
-RELEASE_NAME = "Trade Operating Picture · Canonical Developments, Disruptions, Sanctions & Trade Horizon"
+APP_VERSION = "v3.4.2-trade-horizon-fixed"
+RELEASE_NAME = "Trade Operating Picture · Canonical Event Graph, Database Drilldown & Live Trade Horizon"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -9019,67 +9019,237 @@ def _pc_meta_dict(value):
     return {}
 
 
-def trade_horizon_events(df):
-    """Trade Horizon = explicit canonical horizon items first, then legacy forward-looking rows."""
+def trade_horizon_events(df=None):
+    """Canonical Trade Horizon.
+
+    Explicit metadata.horizon rows are authoritative. We also infer clearly
+    forward-looking trade events for backward compatibility. Crucially, horizon
+    rows without a precise Start Date are retained rather than silently dropped.
+    """
+    if df is None or df.empty:
+        df=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     if df is None or df.empty:
         return pd.DataFrame()
 
     out=df.copy()
-    explicit=pd.Series(False,index=out.index)
-    if "Metadata" in out.columns:
-        explicit=out["Metadata"].apply(
-            lambda v: bool((_pc_meta_dict(v).get("horizon") or {}).get("show_in_trade_horizon"))
-        )
+    meta_series=out.get("Metadata",pd.Series([{}]*len(out),index=out.index))
+
+    def _h(v):
+        m=_pc_meta_dict(v)
+        h=m.get("horizon")
+        return h if isinstance(h,dict) else {}
+
+    hmeta=meta_series.apply(_h)
+    explicit=hmeta.apply(lambda h: bool(h.get("show_in_trade_horizon")))
 
     blob=pd.Series("",index=out.index,dtype="string")
     for c in [
-        "Event Nature","Event Domain","Event Family","Event Type","Event Temporality",
-        "Event Phase","Event Category","Event Subcategory","Title","Description",
-        "Operational Impact","Trade / Commercial Impact","Expected Disruption",
-        "Country / Countries","Location","Mode","Status"
+        "Event Nature","Event Domain","Event Family","Event Type","Title","Description",
+        "Operational Impact","Trade / Commercial Impact","Country / Countries",
+        "Location","Mode","Status"
     ]:
         if c in out.columns:
             blob=blob.str.cat(out[c].fillna("").astype(str),sep=" ")
 
-    meta=pd.Series("",index=out.index,dtype="string")
-    if "Metadata" in out.columns:
-        def _meta_horizon_text(v):
-            m=_pc_meta_dict(v)
-            h=m.get("horizon") if isinstance(m.get("horizon"),dict) else {}
-            vals=[
-                m.get("event_temporality"),m.get("temporality"),m.get("event_phase"),
-                m.get("phase"),m.get("event_category"),m.get("category"),
-                h.get("horizon_type"),h.get("next_milestone"),h.get("date_precision"),
-                h.get("target_year")
-            ]
-            return " ".join(str(x) for x in vals if x not in (None,""))
-        meta=out["Metadata"].apply(_meta_horizon_text).astype("string")
+    meta_text=hmeta.apply(
+        lambda h:" ".join(str(x) for x in [
+            h.get("horizon_type"),h.get("next_milestone"),h.get("date_precision"),
+            h.get("target_year"),h.get("target_date"),h.get("window")
+        ] if x not in (None,""))
+    ).astype("string")
 
-    horizon_pat=(
+    inferred=blob.str.cat(meta_text,sep=" ").str.contains(
         r"scheduled|forecast|recurring|seasonal|upcoming|planned|deadline|ballot|"
-        r"milestone|opening|tender|award|approval|expiry|strike|closure|monsoon|"
-        r"hurricane season|cyclone season|chokepoint watch|developing risk|project milestone"
+        r"milestone|opening|tender|award|approval|expiry|strike vote|possible strike|"
+        r"monsoon|hurricane season|cyclone season|chokepoint watch|developing risk|"
+        r"project milestone|capacity addition|service launch|route launch",
+        case=False,regex=True,na=False
     )
-    commercial_pat=(
+    inferred &= blob.str.contains(
         r"port|maritime|shipping|aviation|airport|air cargo|rail|road|truck|border|"
-        r"customs|energy|oil|gas|lng|trade|logistics|supply|business|closure|congestion|"
-        r"delay|disruption|strike|sanction|tariff|terminal|corridor|canal"
+        r"customs|energy|oil|gas|lng|trade|logistics|supply|business|terminal|"
+        r"corridor|canal|sanction|tariff|compliance",
+        case=False,regex=True,na=False
     )
-    inferred=blob.str.cat(meta,sep=" ").str.contains(horizon_pat,case=False,regex=True,na=False)
-    inferred &= blob.str.contains(commercial_pat,case=False,regex=True,na=False)
 
     result=out[explicit | inferred].copy()
     if result.empty:
         return result
 
-    if "Metadata" in result.columns:
-        result["Horizon Type"]=result["Metadata"].apply(
-            lambda v: str(((_pc_meta_dict(v).get("horizon") or {}).get("horizon_type")) or "")
-        )
-        result["Next Milestone"]=result["Metadata"].apply(
-            lambda v: str(((_pc_meta_dict(v).get("horizon") or {}).get("next_milestone")) or "")
-        )
+    result["Horizon Type"]=hmeta.loc[result.index].apply(lambda h:str(h.get("horizon_type") or ""))
+    result["Next Milestone"]=hmeta.loc[result.index].apply(lambda h:str(h.get("next_milestone") or ""))
+    result["Target Year"]=hmeta.loc[result.index].apply(lambda h:str(h.get("target_year") or ""))
+    result["Date Precision"]=hmeta.loc[result.index].apply(lambda h:str(h.get("date_precision") or ""))
+    result["Explicit Horizon"]=explicit.loc[result.index].astype(bool)
+
+    if "Start Date" in result.columns:
+        result["_horizon_date"]=pd.to_datetime(result["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+    else:
+        result["_horizon_date"]=pd.NaT
+
+    # Future project target_year is useful even when start_date is the announcement date.
+    def _effective_date(row):
+        d=row.get("_horizon_date")
+        try:
+            if pd.notna(d):
+                return d
+        except Exception:
+            pass
+        yr=str(row.get("Target Year") or "").strip()
+        if yr.isdigit() and len(yr)==4:
+            return pd.Timestamp(f"{yr}-01-01")
+        return pd.NaT
+    result["_effective_horizon_date"]=result.apply(_effective_date,axis=1)
+
+    # Keep explicit items first, then dated future items, then undated developing risks.
+    result["_explicit_rank"]=result["Explicit Horizon"].astype(int)
+    result=result.sort_values(
+        ["_explicit_rank","_effective_horizon_date"],
+        ascending=[False,True],
+        na_position="last"
+    )
     return result
+
+
+def _trade_horizon_bucket(row, today=None):
+    today=today or pd.Timestamp.utcnow().tz_localize(None).normalize()
+    htype=str(row.get("Horizon Type") or "").casefold()
+    status=str(row.get("Status") or "").casefold()
+    d=row.get("_effective_horizon_date")
+    if "project" in htype or str(row.get("Target Year") or "").strip():
+        return "Projects & milestones"
+    if any(x in htype for x in ["risk","watch","develop"]) or any(x in status for x in ["monitor","develop","pending"]):
+        return "Developing risks"
+    try:
+        if pd.notna(d) and d >= today:
+            return "Upcoming"
+    except Exception:
+        pass
+    return "Other horizon"
+
+
+def render_trade_horizon_workspace():
+    """Live canonical Trade Horizon with future, undated and long-dated items."""
+    header(
+        "Trade Horizon",
+        "Upcoming milestones, developing risks, project openings, regulatory deadlines and seasonal trade events. Explicit canonical horizon metadata is authoritative."
+    )
+
+    render_selected_trade_story_context()
+
+    # Always use the canonical event table that was loaded from Supabase into TABLES.
+    canonical_events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+    fdf=trade_horizon_events(canonical_events)
+
+    if fdf.empty:
+        st.info(
+            "No Trade Horizon items are currently classified. "
+            "Canonical events need metadata.horizon.show_in_trade_horizon=true, "
+            "or a clearly forward-looking trade classification."
+        )
+        return
+
+    today=pd.Timestamp.utcnow().tz_localize(None).normalize()
+
+    # Debug/health strip makes it obvious whether horizon metadata is arriving from DB.
+    explicit_count=int(fdf.get("Explicit Horizon",pd.Series(False,index=fdf.index)).fillna(False).sum())
+    dated_count=int(fdf.get("_effective_horizon_date",pd.Series(pd.NaT,index=fdf.index)).notna().sum())
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Horizon items",len(fdf))
+    m2.metric("Explicit canonical",explicit_count)
+    m3.metric("Dated / year-targeted",dated_count)
+    m4.metric("Developing / undated",len(fdf)-dated_count)
+
+    c1,c2,c3=st.columns(3)
+    window=c1.selectbox(
+        "Window",
+        ["All horizon","Next 30 days","Next 90 days","Next 12 months","Long-term projects"],
+        index=0,
+        key="trade_horizon_window_v342"
+    )
+    mode_values=["All"]+sorted(
+        [x for x in fdf.get("Mode",pd.Series(dtype=str)).fillna("").astype(str).unique() if x]
+    )
+    country_values=["All"]+sorted(
+        [x for x in fdf.get("Country / Countries",pd.Series(dtype=str)).fillna("").astype(str).unique() if x]
+    )
+    mode=c2.selectbox("Mode",mode_values,key="trade_horizon_mode_v342")
+    country=c3.selectbox("Country / region",country_values,key="trade_horizon_country_v342")
+
+    view=fdf.copy()
+    d=view["_effective_horizon_date"]
+
+    if window=="Next 30 days":
+        upper=today+pd.Timedelta(days=30)
+        # Retain explicit undated developing risks; they are horizon items too.
+        view=view[(d.isna() & view["Explicit Horizon"]) | ((d>=today)&(d<=upper))]
+    elif window=="Next 90 days":
+        upper=today+pd.Timedelta(days=90)
+        view=view[(d.isna() & view["Explicit Horizon"]) | ((d>=today)&(d<=upper))]
+    elif window=="Next 12 months":
+        upper=today+pd.Timedelta(days=365)
+        view=view[(d.isna() & view["Explicit Horizon"]) | ((d>=today)&(d<=upper))]
+    elif window=="Long-term projects":
+        view=view[
+            view["Horizon Type"].fillna("").astype(str).str.contains("project|milestone",case=False,regex=True,na=False)
+            | view["Target Year"].fillna("").astype(str).ne("")
+        ]
+
+    if mode!="All" and "Mode" in view.columns:
+        view=view[view["Mode"].fillna("").astype(str).eq(mode)]
+    if country!="All" and "Country / Countries" in view.columns:
+        view=view[view["Country / Countries"].fillna("").astype(str).eq(country)]
+
+    if view.empty:
+        st.warning("No Horizon items match this filter window. Try **All horizon**.")
+        return
+
+    view["Horizon Bucket"]=view.apply(lambda r:_trade_horizon_bucket(r,today),axis=1)
+
+    # Present as cards so each item opens the same database graph drilldown as stories.
+    tabs=st.tabs(["All","Upcoming","Developing risks","Projects & milestones"])
+    bucket_defs=[
+        ("All",None),
+        ("Upcoming","Upcoming"),
+        ("Developing risks","Developing risks"),
+        ("Projects & milestones","Projects & milestones"),
+    ]
+    for tab,(label_txt,bucket) in zip(tabs,bucket_defs):
+        with tab:
+            sub=view if bucket is None else view[view["Horizon Bucket"].eq(bucket)]
+            if sub.empty:
+                st.caption(f"No {label_txt.lower()} items in the selected window.")
+                continue
+
+            # Reuse story graph enrichment if available; otherwise construct display columns.
+            story_frame=_canonical_trade_story_frame()
+            if not story_frame.empty and "Event ID" in story_frame.columns:
+                ids=set(sub["Event ID"].astype(str)) if "Event ID" in sub.columns else set()
+                cards=story_frame[story_frame["Event ID"].astype(str).isin(ids)].copy()
+                if not cards.empty:
+                    # Preserve horizon ordering.
+                    order={str(eid):i for i,eid in enumerate(sub["Event ID"].astype(str).tolist())}
+                    cards["_hor_order"]=cards["Event ID"].astype(str).map(order)
+                    cards=cards.sort_values("_hor_order")
+                    _render_trade_story_cards(cards,50,show_why=True,key_prefix=f"horizon_{bucket or 'all'}")
+                    continue
+
+            # Fallback if story projection isn't available.
+            cols=[c for c in [
+                "Start Date","Horizon Type","Next Milestone","Target Year",
+                "Country / Countries","Location","Event Family","Event Type",
+                "Title","Severity","Status","Mode","Operational Impact",
+                "Trade / Commercial Impact","Confidence"
+            ] if c in sub.columns]
+            display_df(sub[cols],620)
+
+    with st.expander("Horizon classification diagnostics",expanded=False):
+        diag_cols=[c for c in [
+            "Event ID","Title","Start Date","Horizon Type","Next Milestone",
+            "Target Year","Date Precision","Explicit Horizon","Status","Mode"
+        ] if c in fdf.columns]
+        display_df(fdf[diag_cols],420)
+
 
 
 @st.cache_data(show_spinner=False, ttl=60)
@@ -9186,11 +9356,360 @@ def _canonical_trade_story_frame():
     return out
 
 
-def _render_trade_story_cards(df,max_items=8,show_why=True):
+
+@st.cache_data(show_spinner=False, ttl=60)
+def _load_trade_event_database_context(event_id):
+    """Return the full canonical database context behind one Trade story/event."""
+    eid=str(event_id or "").strip()
+    if not eid:
+        return {}
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return {}
+
+        event_rows=(sb.table("pc_events").select("*").eq("event_id",eid).limit(1).execute().data or [])
+        if not event_rows:
+            return {}
+        event=event_rows[0]
+
+        try:
+            locations=(sb.table("pc_event_locations").select("*").eq("event_id",eid).execute().data or [])
+        except Exception:
+            locations=[]
+
+        try:
+            links=(sb.table("pc_event_links").select("*").eq("event_id",eid).execute().data or [])
+        except Exception:
+            links=[]
+
+        entity_ids=[]; asset_ids=[]; mobile_ids=[]; route_ids=[]
+        for l in links:
+            typ=str(l.get("linked_type") or "").strip().casefold()
+            lid=str(l.get("linked_id") or "").strip()
+            if not lid:
+                continue
+            if typ in {"entity","company","organisation","organization"}:
+                entity_ids.append(lid)
+            elif typ in {"asset","port","terminal","facility","infrastructure"}:
+                asset_ids.append(lid)
+            elif typ in {"mobile_asset","vessel","ship","aircraft"}:
+                mobile_ids.append(lid)
+            elif typ in {"route","transport_route","corridor","network"}:
+                route_ids.append(lid)
+
+        def rows_for(table,key,ids):
+            if not ids:
+                return []
+            try:
+                return (sb.table(table).select("*").in_(key,list(dict.fromkeys(ids))).execute().data or [])
+            except Exception:
+                return []
+
+        entities=rows_for("pc_entities","entity_id",entity_ids)
+        assets=rows_for("pc_assets","asset_id",asset_ids)
+        mobile=rows_for("pc_mobile_assets","mobile_asset_id",mobile_ids)
+        routes=rows_for("pc_transport_routes","route_id",route_ids)
+
+        # Graph relationships touching any object linked to this event.
+        rels=[]
+        endpoint_ids=list(dict.fromkeys(entity_ids+asset_ids+mobile_ids+route_ids))
+        if endpoint_ids:
+            try:
+                src=(sb.table("pc_relationships").select("*").in_("source_id",endpoint_ids).execute().data or [])
+            except Exception:
+                src=[]
+            try:
+                tgt=(sb.table("pc_relationships").select("*").in_("target_id",endpoint_ids).execute().data or [])
+            except Exception:
+                tgt=[]
+            seen=set()
+            for rr in src+tgt:
+                rid=str(rr.get("relationship_id") or "")
+                if rid and rid not in seen:
+                    seen.add(rid); rels.append(rr)
+
+        # Sanctions context for any linked entities.
+        sanctions_links=[]
+        sanctions=[]
+        if entity_ids:
+            try:
+                sanctions_links=(sb.table("pc_sanctions_entity_links").select("*")
+                                 .in_("entity_id",list(dict.fromkeys(entity_ids))).execute().data or [])
+            except Exception:
+                sanctions_links=[]
+            designation_ids=[
+                str(x.get("designation_id") or "").strip()
+                for x in sanctions_links if x.get("designation_id")
+            ]
+            if designation_ids:
+                try:
+                    sanctions=(sb.table("pc_sanctions_designations").select("*")
+                               .in_("designation_id",list(dict.fromkeys(designation_ids))).execute().data or [])
+                except Exception:
+                    sanctions=[]
+
+        # Resolve the event source row as well as URL-bearing metadata.
+        source_rows=[]
+        source_id=str(event.get("source_id") or "").strip()
+        if source_id:
+            try:
+                source_rows=(sb.table("pc_sources").select("*").eq("source_id",source_id).limit(3).execute().data or [])
+            except Exception:
+                source_rows=[]
+
+        return {
+            "event":event,
+            "locations":locations,
+            "links":links,
+            "entities":entities,
+            "assets":assets,
+            "mobile_assets":mobile,
+            "routes":routes,
+            "relationships":rels,
+            "sanctions_links":sanctions_links,
+            "sanctions":sanctions,
+            "sources":source_rows,
+        }
+    except Exception:
+        return {}
+
+
+def _pretty_json_value(v):
+    if isinstance(v,(dict,list)):
+        try:
+            return json.dumps(v,ensure_ascii=False,indent=2,default=str)
+        except Exception:
+            return str(v)
+    return "" if v is None else str(v)
+
+
+def _human_record_table(rows, preferred=None):
+    if not rows:
+        return pd.DataFrame()
+    df=pd.DataFrame(rows)
+    if preferred:
+        cols=[c for c in preferred if c in df.columns]
+        rest=[c for c in df.columns if c not in cols and c not in {"created_at","updated_at"}]
+        df=df[cols+rest]
+    return df
+
+
+def _event_source_urls(ctx):
+    urls=[]
+    ev=(ctx or {}).get("event") or {}
+    meta=_pc_meta_dict(ev.get("metadata"))
+    for key in ["research_sources","sources"]:
+        vals=meta.get(key) or []
+        if isinstance(vals,str): vals=[vals]
+        if isinstance(vals,list):
+            for x in vals:
+                if isinstance(x,str) and x.startswith(("http://","https://")):
+                    urls.append(x)
+                elif isinstance(x,dict):
+                    u=str(x.get("url") or x.get("source_url") or "")
+                    if u.startswith(("http://","https://")):
+                        urls.append(u)
+    for s in (ctx or {}).get("sources") or []:
+        for k in ["url","source_url"]:
+            u=str(s.get(k) or "")
+            if u.startswith(("http://","https://")):
+                urls.append(u)
+    return list(dict.fromkeys(urls))
+
+
+def render_selected_trade_story_context():
+    """Full click-through database context for the selected canonical Trade story."""
+    eid=str(st.session_state.get("trade_story_event_id") or "").strip()
+    if not eid:
+        return
+
+    ctx=_load_trade_event_database_context(eid)
+    ev=ctx.get("event") or {}
+    if not ev:
+        st.warning("The selected event is no longer available in the canonical database.")
+        if st.button("Close story context",key="close_missing_trade_story"):
+            st.session_state.pop("trade_story_event_id",None)
+            st.rerun()
+        return
+
+    meta=_pc_meta_dict(ev.get("metadata"))
+    story=meta.get("story") if isinstance(meta.get("story"),dict) else {}
+    disruption=meta.get("disruption") if isinstance(meta.get("disruption"),dict) else {}
+    horizon=meta.get("horizon") if isinstance(meta.get("horizon"),dict) else {}
+
+    title=str(story.get("card_title") or ev.get("title") or "Selected trade development")
+    deck=str(story.get("card_deck") or ev.get("description") or "")
+    why=str(story.get("why_it_matters") or ev.get("commercial_impact") or ev.get("operational_impact") or "")
+
+    st.markdown("---")
+    cclose,ctitle=st.columns([0.18,0.82])
+    with cclose:
+        if st.button("← Close",key=f"close_trade_story_{eid}",use_container_width=True):
+            st.session_state.pop("trade_story_event_id",None)
+            st.rerun()
+    with ctitle:
+        st.markdown("### Database context")
+
+    st.markdown(
+        f"""<div class='pc-hero'>
+        <div class='pc-label'>{html_lib.escape(str(ev.get('event_family') or 'TRADE DEVELOPMENT'))}</div>
+        <div class='pc-hero-title'>{html_lib.escape(title)}</div>
+        <div class='pc-hero-copy'>{html_lib.escape(deck)}</div>
+        </div>""",
+        unsafe_allow_html=True
+    )
+
+    m1,m2,m3,m4,m5=st.columns(5)
+    m1.metric("Severity",str(ev.get("severity") or "—"))
+    m2.metric("Status",str(ev.get("status") or "—"))
+    m3.metric("Domain",str(ev.get("event_domain") or ev.get("mode") or "—"))
+    m4.metric("Confidence",str(ev.get("confidence") or "—"))
+    m5.metric("Linked objects",len(ctx.get("links") or []))
+
+    # The value layer: effects and implications first.
+    st.markdown("#### Effects & implications")
+    e1,e2=st.columns(2,gap="large")
+    with e1:
+        st.markdown(
+            f"""<div class='pc-card'>
+            <div class='pc-label'>Operational effect</div>
+            <div class='pc-search-details'>{html_lib.escape(str(ev.get('operational_impact') or disruption.get('operational_effect') or 'Not yet assessed.'))}</div>
+            </div>""",unsafe_allow_html=True
+        )
+        if disruption:
+            st.markdown(
+                f"""<div class='pc-card'>
+                <div class='pc-label'>Disruption classification</div>
+                <div><b>Type:</b> {html_lib.escape(str(disruption.get('disruption_type') or '—'))}</div>
+                <div><b>Status:</b> {html_lib.escape(str(disruption.get('status') or '—'))}</div>
+                <div><b>Domains:</b> {html_lib.escape(', '.join(str(x) for x in (disruption.get('disruption_domains') or [])) or '—')}</div>
+                </div>""",unsafe_allow_html=True
+            )
+    with e2:
+        st.markdown(
+            f"""<div class='pc-card'>
+            <div class='pc-label'>Commercial / trade effect</div>
+            <div class='pc-search-details'>{html_lib.escape(str(ev.get('commercial_impact') or disruption.get('commercial_effect') or why or 'Not yet assessed.'))}</div>
+            </div>""",unsafe_allow_html=True
+        )
+        if horizon:
+            st.markdown(
+                f"""<div class='pc-card'>
+                <div class='pc-label'>Trade Horizon</div>
+                <div><b>Type:</b> {html_lib.escape(str(horizon.get('horizon_type') or '—'))}</div>
+                <div><b>Next milestone:</b> {html_lib.escape(str(horizon.get('next_milestone') or '—'))}</div>
+                </div>""",unsafe_allow_html=True
+            )
+
+    tabs=st.tabs([
+        "Linked database objects",
+        "Event record",
+        "Network relationships",
+        "Locations",
+        "Sanctions & compliance",
+        "Sources"
+    ])
+
+    with tabs[0]:
+        groups=[
+            ("Companies / entities",ctx.get("entities") or [],["entity_id","name","entity_type","subtype","hq_country","status","description"]),
+            ("Fixed assets",ctx.get("assets") or [],["asset_id","name","asset_type","subtype","country","region_city","status"]),
+            ("Vessels / mobile assets",ctx.get("mobile_assets") or [],["mobile_asset_id","name","asset_type","subtype","imo","mmsi","flag","status"]),
+            ("Routes / corridors",ctx.get("routes") or [],["route_id","route_name","mode","origin_name","destination_name","status"]),
+        ]
+        any_rows=False
+        for label_txt,rows,pref in groups:
+            if rows:
+                any_rows=True
+                st.markdown(f"**{label_txt}**")
+                display_df(_human_record_table(rows,pref),240)
+        if not any_rows:
+            st.caption("No linked canonical objects were returned for this event.")
+
+        links=ctx.get("links") or []
+        if links:
+            st.markdown("**Event-link semantics**")
+            ldf=_human_record_table(
+                links,
+                ["event_link_id","linked_type","linked_id","linked_name","relationship","confidence"]
+            )
+            display_df(ldf,260)
+
+    with tabs[1]:
+        # Human-readable first, complete raw canonical row second.
+        fields=[
+            ("Event ID","event_id"),("Start","start_date"),("End","end_date"),
+            ("Nature","event_nature"),("Domain","event_domain"),("Family","event_family"),
+            ("Type","event_type"),("Severity","severity"),("Status","status"),
+            ("Mode","mode"),("Countries","countries"),("Location","location"),
+            ("Trade relevance","trade_relevance"),("Intelligence relevance","intelligence_relevance"),
+            ("Trade visible","trade_visible"),("Intelligence visible","intelligence_visible"),
+            ("Alert worthy","alert_worthy"),("Record status","record_status")
+        ]
+        rows=[{"Field":label_txt,"Value":_pretty_json_value(ev.get(key))} for label_txt,key in fields if ev.get(key) not in (None,"")]
+        display_df(pd.DataFrame(rows),380)
+        with st.expander("Raw canonical event metadata",expanded=False):
+            st.json(meta)
+
+    with tabs[2]:
+        rels=ctx.get("relationships") or []
+        if rels:
+            display_df(
+                _human_record_table(
+                    rels,
+                    ["relationship_id","source_type","source_id","relationship_type","target_type","target_id","confidence","record_status"]
+                ),
+                360
+            )
+        else:
+            st.caption("No additional canonical relationships touch the linked objects.")
+
+    with tabs[3]:
+        locs=ctx.get("locations") or []
+        if locs:
+            display_df(
+                _human_record_table(
+                    locs,
+                    ["event_location_id","location_name","country","latitude","longitude","accuracy","notes"]
+                ),
+                280
+            )
+        else:
+            st.caption("No canonical event-location rows are attached.")
+
+    with tabs[4]:
+        sanc=ctx.get("sanctions") or []
+        slinks=ctx.get("sanctions_links") or []
+        if sanc:
+            st.markdown("**Sanctions designations affecting linked entities**")
+            display_df(_human_record_table(sanc,["designation_id","designation_date","target_type","target_name","regime_linkage","record_status","source_url"]),320)
+            if slinks:
+                st.markdown("**Sanctions entity links**")
+                display_df(_human_record_table(slinks,["designation_id","entity_id","relationship","confidence","record_status"]),220)
+        else:
+            st.caption("No sanctions designation is currently linked to this event's canonical entities.")
+
+    with tabs[5]:
+        urls=_event_source_urls(ctx)
+        if urls:
+            for i,u in enumerate(urls,1):
+                st.markdown(f"**Source {i}:** [{u}]({u})")
+        else:
+            st.caption("No source URL was found in the event/source metadata.")
+        if ctx.get("sources"):
+            st.markdown("**Canonical source records**")
+            display_df(_human_record_table(ctx["sources"]),260)
+
+    st.markdown("---")
+
+
+def _render_trade_story_cards(df,max_items=8,show_why=True,key_prefix="story"):
     if df is None or df.empty:
         st.caption("No canonical developments in this view.")
         return
-    for _,r in df.head(max_items).iterrows():
+    for card_i,(_,r) in enumerate(df.head(max_items).iterrows()):
+        eid=str(r.get("Event ID") or r.get("event_id") or "").strip()
         title=html_lib.escape(str(r.get("Card Title") or r.get("Title") or "Untitled"))
         cat=html_lib.escape(str(r.get("Story Category") or r.get("Event Family") or "Development"))
         date=str(r.get("Start Date") or "")[:10]
@@ -9205,6 +9724,8 @@ def _render_trade_story_cards(df,max_items=8,show_why=True):
         if horizon: chips.append("TRADE HORIZON")
         if status: chips.append(status.upper())
         chip_html="".join(f"<span class='pc-chip'>{html_lib.escape(str(x))}</span>" for x in chips if x)
+
+        # Card shows the value proposition before the user opens the full graph.
         body=f"""
         <div class='pc-card'>
           <div class='pc-label'>{html_lib.escape(date)}</div>
@@ -9215,15 +9736,22 @@ def _render_trade_story_cards(df,max_items=8,show_why=True):
         if show_why and why:
             body += f"<div style='margin-top:9px'><b style='color:#D8B45A'>Why it matters:</b> {why}</div>"
         if linked:
-            body += f"<div class='pc-small' style='margin-top:8px'><b>Linked:</b> {linked}</div>"
+            body += f"<div class='pc-small' style='margin-top:8px'><b>Database links:</b> {linked}</div>"
         body += "</div>"
         st.markdown(body,unsafe_allow_html=True)
 
+        b1,b2=st.columns([0.55,0.45])
+        if eid:
+            if b1.button("Open database context",key=f"{key_prefix}_db_{eid}_{card_i}",use_container_width=True):
+                st.session_state["trade_story_event_id"]=eid
+                st.rerun()
         sources=r.get("Research Sources") or []
         if isinstance(sources,list) and sources:
             good=[str(x) for x in sources if str(x).startswith(("http://","https://"))]
             if good:
-                st.markdown(" · ".join(f"[Source {i+1}]({u})" for i,u in enumerate(good[:3])))
+                b2.link_button("Primary source ↗",good[0],use_container_width=True)
+                if len(good)>1:
+                    st.caption("Additional sources available inside database context.")
 
 
 def _canonical_trade_disruptions():
@@ -9260,24 +9788,24 @@ def render_trade_developments_home():
         leads=story_rows.head(5)
 
     st.markdown("### Lead developments")
-    _render_trade_story_cards(leads,5)
+    _render_trade_story_cards(leads,5,key_prefix='overview_lead')
 
     companies=story_rows[
         story_rows.get("Linked Companies",pd.Series(index=story_rows.index,dtype=str)).fillna("").astype(str).str.len().gt(0)
     ].copy()
     if not companies.empty:
         st.markdown("### Company & network stories")
-        _render_trade_story_cards(companies[~companies["Event ID"].isin(set(leads.get("Event ID",[])))],6,show_why=False)
+        _render_trade_story_cards(companies[~companies["Event ID"].isin(set(leads.get("Event ID",[])))],6,show_why=False,key_prefix='overview_company')
 
     c1,c2=st.columns(2,gap="large")
     with c1:
         st.markdown("### Disruptions")
         disruptions=_canonical_trade_disruptions()
-        _render_trade_story_cards(disruptions,4)
+        _render_trade_story_cards(disruptions,4,key_prefix='overview_disruption')
     with c2:
         st.markdown("### Trade Horizon")
         horizon=trade_horizon_events(stories)
-        _render_trade_story_cards(horizon,4,show_why=False)
+        _render_trade_story_cards(horizon,4,show_why=False,key_prefix='overview_horizon')
 
     market_pat=r"performance|throughput|market|volume|capacity|reliability|forecast|fleet"
     mask=story_rows.get("Story Category",pd.Series(index=story_rows.index,dtype=str)).fillna("").astype(str).str.contains(
@@ -9286,12 +9814,14 @@ def render_trade_developments_home():
     observations=story_rows[mask].copy()
     if not observations.empty:
         st.markdown("### Market & throughput observations")
-        _render_trade_story_cards(observations,5,show_why=False)
+        _render_trade_story_cards(observations,5,show_why=False,key_prefix='overview_market')
 
 
 
 if page=="Overview":
     header("Trade System","Canonical company developments, disruptions, Trade Horizon, markets, ports, infrastructure, fleets and corridors across the global trade network.")
+
+    render_selected_trade_story_context()
 
     # Canonical developments lead the Trade app. Open-source discovery is supporting evidence,
     # not the primary operating picture.
@@ -9351,33 +9881,8 @@ if page=="Overview":
 
 
 elif page in {"Forward Calendar","Trade Horizon"}:
-    header("Trade Horizon","Upcoming milestones, developing risks, scheduled changes and seasonal events with potential consequences for trade, logistics, transport, energy and business continuity.")
-    base_events=events.copy() if "events" in globals() and isinstance(events,pd.DataFrame) else pd.DataFrame()
-    fdf=trade_horizon_events(base_events)
-    if fdf.empty:
-        st.info("No Trade Horizon items are currently classified in the canonical event universe.")
-    else:
-        today=pd.Timestamp.utcnow().date()
-        c1,c2,c3=st.columns(3)
-        window=c1.selectbox("Window",["Next 7 days","Next 30 days","Next 90 days","All"],index=1,key="trade_horizon_window")
-        mode_values=["All"]+sorted([x for x in fdf.get("Mode",pd.Series(dtype=str)).fillna("").astype(str).unique() if x])
-        country_values=["All"]+sorted([x for x in fdf.get("Country / Countries",pd.Series(dtype=str)).fillna("").astype(str).unique() if x])
-        mode=c2.selectbox("Mode",mode_values,index=0,key="trade_horizon_mode")
-        country=c3.selectbox("Country / region",country_values,index=0,key="trade_horizon_country")
-        if "Start Date" in fdf.columns and window!="All":
-            d=pd.to_datetime(fdf["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
-            days=int(re.search(r"\d+",window).group())
-            fdf=fdf[(d.dt.date>=today)&(d.dt.date<=today+pd.Timedelta(days=days))]
-        if mode!="All" and "Mode" in fdf.columns:
-            fdf=fdf[fdf["Mode"].fillna("").astype(str).eq(mode)]
-        if country!="All" and "Country / Countries" in fdf.columns:
-            fdf=fdf[fdf["Country / Countries"].fillna("").astype(str).eq(country)]
-        d1,d2,d3=st.columns(3)
-        d1.metric("Horizon items",len(fdf))
-        d2.metric("Countries / regions",fdf.get("Country / Countries",pd.Series(dtype=str)).nunique())
-        d3.metric("Modes",fdf.get("Mode",pd.Series(dtype=str)).nunique())
-        cols=[c for c in ["Start Date","End Date","Horizon Type","Next Milestone","Country / Countries","Location","Event Family","Event Type","Title","Severity","Mode","Operational Impact","Trade / Commercial Impact","Confidence"] if c in fdf.columns]
-        display_df(fdf[cols] if cols else fdf,620)
+    render_trade_horizon_workspace()
+
 
 elif page=="Search":
     header("Search P&C","One query across companies, ports, shipyards, vessels, contracts, transactions, news, events and systems.")
@@ -10166,7 +10671,7 @@ elif page=="Watch Areas":
         dev=_canonical_trade_disruptions()
         if q.strip() and not dev.empty:
             dev=_contains_any(dev,[q])
-        _render_trade_story_cards(dev,20)
+        _render_trade_story_cards(dev,20,key_prefix='watch_disruption')
 
         if not disruption.empty:
             with st.expander("Legacy disruption-watch reference",expanded=False):
@@ -10185,7 +10690,7 @@ elif page=="Watch Areas":
             )
             lv=live[mask].copy()
             if q.strip(): lv=_contains_any(lv,[q])
-            _render_trade_story_cards(lv,20)
+            _render_trade_story_cards(lv,20,key_prefix='watch_strategic')
         if not strategic.empty:
             with st.expander("Legacy strategic-event reference",expanded=False):
                 display_df(_contains_any(strategic,[q]) if q.strip() else strategic,200)
@@ -11130,6 +11635,8 @@ elif page in {"News & Signals","News & Developments"}:
         "Canonical company, network, disruption and sanctions developments lead this workspace. Open-source feeds remain a discovery layer for promotion into the canonical model."
     )
 
+    render_selected_trade_story_context()
+
     stories=_canonical_trade_story_frame()
     tabs=st.tabs(["Lead Developments","Company & Network","Disruptions","Sanctions & Compliance","Open-source Discovery"])
 
@@ -11140,7 +11647,7 @@ elif page in {"News & Signals","News & Developments"}:
             lead=stories[stories.get("Lead Story",pd.Series(False,index=stories.index)).fillna(False)]
             if lead.empty:
                 lead=stories[stories.get("Is Story",pd.Series(True,index=stories.index)).fillna(True)].head(20)
-            _render_trade_story_cards(lead,20)
+            _render_trade_story_cards(lead,20,key_prefix='news_lead')
 
     with tabs[1]:
         if stories.empty:
@@ -11152,14 +11659,14 @@ elif page in {"News & Signals","News & Developments"}:
             q=st.text_input("Filter company / network developments",placeholder="DP World, AD Ports, Noatum, Hapag-Lloyd...",key="canonical_company_story_q")
             if q.strip() and not company.empty:
                 company=_contains_any(company,[q])
-            _render_trade_story_cards(company,40)
+            _render_trade_story_cards(company,40,key_prefix='news_company')
 
     with tabs[2]:
         dis=_canonical_trade_disruptions()
         q=st.text_input("Filter disruptions",placeholder="Panama, Rhine, rail, port, aviation...",key="canonical_disruption_story_q")
         if q.strip() and not dis.empty:
             dis=_contains_any(dis,[q])
-        _render_trade_story_cards(dis,40)
+        _render_trade_story_cards(dis,40,key_prefix='news_disruption')
 
     with tabs[3]:
         st.markdown("### Canonical sanctions designations")
@@ -11188,7 +11695,7 @@ elif page in {"News & Signals","News & Developments"}:
             ]
             if not sanc.empty:
                 st.markdown("### Related developments")
-                _render_trade_story_cards(sanc,20)
+                _render_trade_story_cards(sanc,20,key_prefix='news_sanctions')
 
     with tabs[4]:
         api_key=_newsdata_key()
