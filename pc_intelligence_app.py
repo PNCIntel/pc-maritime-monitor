@@ -47,6 +47,15 @@ if str(SHARED_DIR) not in sys.path:
 from pc_data_bridge import load_sheet as bridge_load_sheet, backend_status
 from pc_workspace import save_query as save_workspace_query
 from pc_db import client as pc_db_client, safe_rows as pc_safe_rows
+from pc_display import (
+    clean_text as pc_clean_text,
+    pretty_enum as pc_pretty_enum,
+    pretty_countries as pc_pretty_countries,
+    pretty_date as pc_pretty_date,
+    display_value as pc_display_value,
+    display_dimension as pc_display_dimension,
+    standardize_dataframe as pc_standardize_dataframe,
+)
 from pc_drilldown import render_sidebar_search as pc_render_drilldown_search, render_active_drilldown as pc_render_active_drilldown, drilldown_button as pc_drilldown_button, set_drilldown as pc_set_drilldown
 try:
     from pc_auth import require_login
@@ -596,15 +605,8 @@ def exclude_horizon_calendar_events(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def clean_display_text(v):
-    """Clean transport/database formatting before anything reaches the UI."""
-    if v is None or (isinstance(v, float) and pd.isna(v)):
-        return ""
-    s = str(v)
-    # Remove both escaped and real line breaks/tabs used by source data or earlier renderers.
-    s = s.replace("\\r\\n", " ").replace("\\n", " ").replace("\\r", " ").replace("\\t", " ")
-    s = s.replace("\r\n", " ").replace("\n", " ").replace("\r", " ").replace("\t", " ")
-    s = re.sub(r"\s+", " ", s).strip()
-    return "" if s.lower() in {"nan", "none", "<na>"} else s
+    """Shared P&C text cleaner."""
+    return pc_clean_text(v)
 
 
 RELATIONSHIP_LABELS = {
@@ -624,32 +626,24 @@ RELATIONSHIP_LABELS = {
 
 
 def humanize_relationship(v):
-    s = clean_display_text(v)
+    s=clean_display_text(v)
     if not s:
         return ""
     if s in RELATIONSHIP_LABELS:
         return RELATIONSHIP_LABELS[s]
-    # Internal enums become normal English while preserving slash/hyphen meaning.
-    if re.fullmatch(r"[A-Z0-9_ /-]+", s):
-        s = s.replace("_", " ").lower()
-        return s[:1].upper() + s[1:]
-    return s
+    return pc_pretty_enum(s)
 
 
 def show_df(df, cols=None, height=420):
     if df is None or df.empty:
-        st.markdown('<div class="pc-empty">No matching records in the current Excel model.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="pc-empty">No matching records in the current P&C model.</div>', unsafe_allow_html=True)
         return
-    view = df.copy()
-    if cols:
-        cols = [c for c in cols if c in view.columns]
-        view = view[cols]
+    view=pc_standardize_dataframe(df,cols)
+    # Relationship labels can carry a small set of bespoke wording.
     for c in view.columns:
-        if str(c).lower() in {"relationship", "relationship type", "link type"}:
-            view[c] = view[c].map(humanize_relationship)
-        elif view[c].dtype == object:
-            view[c] = view[c].map(clean_display_text)
-    st.dataframe(view, use_container_width=True, hide_index=True, height=height)
+        if str(c).casefold() in {"relationship","relationship type","link type"}:
+            view[c]=view[c].map(humanize_relationship)
+    st.dataframe(view,use_container_width=True,hide_index=True,height=height)
 
 
 def section(kicker, title, copy=None):
@@ -661,10 +655,13 @@ def section(kicker, title, copy=None):
 
 def event_card(row,key_prefix="event"):
     title = clean_display_text(row.get("Title", "Untitled event"))
-    date = clean_display_text(row.get("Start Date", row.get("Date", "")))
-    etype = clean_display_text(row.get("Event Type", row.get("Event Family", "Event")))
-    sev = clean_display_text(row.get("Severity", ""))
-    loc = clean_display_text(row.get("Location", row.get("Country / Countries", "")))
+    date = pc_pretty_date(row.get("Start Date", row.get("Date", "")))
+    etype = pc_display_value(row.get("Event Type", row.get("Event Family", "Event")),"Event Type")
+    sev = pc_display_value(row.get("Severity", ""),"Severity")
+    loc = (
+        pc_display_value(row.get("Location", ""),"Location")
+        or pc_pretty_countries(row.get("Country / Countries", ""))
+    )
     body = clean_display_text(row.get("Description", ""))
     impact = clean_display_text(row.get("Operational Impact", ""))
     st.markdown(
@@ -1181,6 +1178,102 @@ if not _derived_company_links.empty:
 event_system_links = xl("13_events_hazards.xlsx", "Event System Links")
 impact_chains = xl("13_events_hazards.xlsx", "Impact Chains")
 
+@st.cache_data(show_spinner=False, ttl=60)
+def _intel_live_frame(table, columns="*", limit=10000, order=None):
+    try:
+        sb=pc_db_client(service=True)
+        rows=pc_safe_rows(sb,table,columns,limit,order=order) if sb else []
+        return pd.DataFrame(rows or [])
+    except Exception:
+        return pd.DataFrame()
+
+
+def _intel_filter_any(df,query):
+    if df is None or df.empty or not str(query or "").strip():
+        return df.copy() if isinstance(df,pd.DataFrame) else pd.DataFrame()
+    q=str(query).strip()
+    mask=pd.Series(False,index=df.index)
+    for c in df.columns:
+        try:
+            mask |= df[c].fillna("").astype(str).str.contains(q,case=False,na=False,regex=False)
+        except Exception:
+            pass
+    return df[mask].copy()
+
+
+def render_intelligence_trade_network_exposure():
+    section(
+        "Network intelligence",
+        "Trade Network Exposure",
+        "Scheduled transport services, corridors and commercial network changes viewed through an intelligence lens. The service model is commercial; this page highlights exposure and change rather than duplicating P&C Trade."
+    )
+    services=_intel_live_frame("pc_transport_services","*",10000,"effective_start")
+    network=_intel_live_frame("pc_transport_service_network_links","*",50000)
+    changes=_intel_live_frame("pc_transport_service_changes","*",20000,"effective_date")
+    stops=_intel_live_frame("pc_transport_service_stops","*",50000)
+    assets=_intel_live_frame("pc_assets","asset_id,name,asset_type,subtype,country,region_city,status",30000)
+
+    if services.empty:
+        st.info("No canonical transport-service records are currently loaded.")
+        return
+
+    amap=dict(zip(assets.get("asset_id",pd.Series(dtype=str)).astype(str),
+                  assets.get("name",pd.Series(dtype=str)).astype(str))) if not assets.empty else {}
+
+    q=st.text_input("Find service / route exposure / change",placeholder="Suez, Red Sea, GEX3, Montreal, Hormuz...",key="intel_service_exposure_q")
+    sv=_intel_filter_any(services,q) if q else services.copy()
+    nw=_intel_filter_any(network,q) if q else network.copy()
+    ch=_intel_filter_any(changes,q) if q else changes.copy()
+
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Services",len(sv))
+    m2.metric("Network exposure links",len(nw))
+    m3.metric("Service changes",len(ch))
+    m4.metric("Scheduled stops",len(stops))
+
+    tabs=st.tabs(["Service Directory","Network Exposure","Service Changes"])
+    with tabs[0]:
+        show_df(sv,[c for c in ["service_name","service_code","mode","service_type","trade_lane","status","announced_date","effective_start","effective_end"] if c in sv.columns],440)
+    with tabs[1]:
+        x=nw.copy()
+        if not x.empty and "asset_id" in x.columns:
+            x["Network / Asset"]=x["asset_id"].astype(str).map(amap).fillna(x["asset_id"].astype(str))
+        show_df(x,[c for c in ["transport_service_id","Network / Asset","relationship_type","direction","sequence_no","exposure_required"] if c in x.columns],500)
+    with tabs[2]:
+        show_df(ch,[c for c in ["transport_service_id","change_type","announced_date","effective_date","effective_end_date","title","summary","confidence","source_url"] if c in ch.columns],500)
+
+
+def render_intelligence_canonical_sanctions():
+    des=_intel_live_frame("pc_sanctions_designations","*",15000)
+    links=_intel_live_frame("pc_sanctions_links","*",30000)
+    changes=_intel_live_frame("pc_sanctions_changes","*",20000)
+    restrictions=_intel_live_frame("pc_trade_restrictions","*",15000)
+    rlinks=_intel_live_frame("pc_trade_restriction_links","*",30000)
+    screening=_intel_live_frame("pc_screening_results","*",30000)
+    if all(x.empty for x in [des,links,changes,restrictions,screening]):
+        return False
+
+    st.markdown("### Canonical sanctions and exposure")
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Direct designations",len(des))
+    c2.metric("Designation links",len(links))
+    c3.metric("Trade restrictions",len(restrictions))
+    c4.metric("Screening results",len(screening))
+
+    tabs=st.tabs(["Direct Designations","Linked Exposure","Changes","Trade Restrictions","Screening"])
+    with tabs[0]: show_df(des,None,440)
+    with tabs[1]: show_df(links,None,440)
+    with tabs[2]: show_df(changes,None,360)
+    with tabs[3]:
+        show_df(restrictions,None,340)
+        if not rlinks.empty:
+            st.markdown("#### Restriction links")
+            show_df(rlinks,None,320)
+    with tabs[4]: show_df(screening,None,440)
+    st.markdown("---")
+    return True
+
+
 # Sanctions / compliance
 sanctions_authorities = xl("14_trade_policy_compliance.xlsx", "Sanctions Authorities")
 sanctions_programmes = xl("14_trade_policy_compliance.xlsx", "Sanctions Programmes")
@@ -1224,7 +1317,7 @@ NAV = {
     "PUBLICATIONS": ["Report Studio", "Intelligence Brief Builder"],
     "ACTORS & NETWORKS": ["Actors & Networks"],
     "FORWARD MONITORING": ["Horizon Calendar", "Watch Areas", "Monitoring & Indicators"],
-    "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Disruptions & Event Graph", "Smuggling & Illicit Trade", "Ports & Infrastructure", "Aviation & Movement", "Sanctions & Compliance"],
+    "DOMAIN INTELLIGENCE": ["Regional Security", "Maritime Security", "Disruptions & Event Graph", "Smuggling & Illicit Trade", "Ports & Infrastructure", "Aviation & Movement", "Trade Network Exposure", "Sanctions & Compliance"],
     "DISCOVERY": ["Intelligence Search", "Source Monitor"],
 }
 
@@ -1238,7 +1331,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v4.2 horizon render fixed · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
+st.sidebar.caption(f"v4.4 model coverage · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -2126,23 +2219,9 @@ COUNTRY_REGION_MAP = {
 
 
 def _analytics_country_tokens(v):
-    """Normalize country/countries into displayable country tokens without exposing IDs."""
-    s = clean_display_text(v)
-    if not s:
-        return []
-    s = re.sub(r"[\[\]{}()\"']", "", s)
-    parts = re.split(r"\s*[;,|]+\s*", s)
-    out=[]
-    for part in parts:
-        part=part.strip()
-        if not part:
-            continue
-        # Preserve country names containing spaces; slash is usually a geography separator.
-        subparts=[x.strip() for x in re.split(r"\s+/\s+",part) if x.strip()]
-        for x in subparts:
-            if x and x.casefold() not in {y.casefold() for y in out}:
-                out.append(x)
-    return out
+    """Normalize country/countries using the shared P&C presentation parser."""
+    from pc_display import country_tokens
+    return country_tokens(v)
 
 
 def _analytics_region_for_country(country):
@@ -2250,6 +2329,10 @@ def _analytics_breakdown(df, level):
         x["Breakdown"]=x[field].fillna("Unspecified").astype(str).replace("","Unspecified")
         grp_col="Breakdown"
 
+    # Presentation taxonomy: collapse case/snake/ALL_CAPS variants to one label
+    # before aggregation so charts do not split the same category into duplicates.
+    x["Breakdown"]=x["Breakdown"].map(lambda v: pc_display_dimension(v,level))
+
     # Crosstab aligns its input Series by index.  Normalise the index here as
     # well so all grouping modes (including exploded geography) are safe on
     # pandas 2.x/3.x.
@@ -2306,6 +2389,7 @@ def _analytics_render_chart(df, chart_type, group_by, time_grain="Daily", top_n=
         else:
             field={"Event Type":"Event Type","Event Family":"Event Family","Severity":"Severity","Domain":"Event Domain","Mode":"Mode","Status":"Status"}.get(group_by,group_by)
             x["Series"]=x[field].fillna("Unspecified").astype(str) if field in x.columns else "All events"
+        x["Series"]=x["Series"].map(lambda v: pc_display_dimension(v,group_by))
         top=x["Series"].value_counts().head(max(1,top_n)).index
         x=x[x["Series"].isin(top)]
         if "Event ID" in x.columns:
@@ -4264,8 +4348,14 @@ elif page == "Smuggling & Illicit Trade":
         countries=["All"]+sorted([x for x in text_col(sdf,"Country / Countries").unique() if x])
         types=["All"]+sorted([x for x in text_col(sdf,"Event Type").unique() if x])
         year=s1.selectbox("Year",["All"]+years,index=0,key="smug_year")
-        country=s2.selectbox("Country / corridor",countries,index=0,key="smug_country")
-        typ=s3.selectbox("Type",types,index=0,key="smug_type")
+        country=s2.selectbox(
+            "Country / corridor",countries,index=0,key="smug_country",
+            format_func=lambda v: "All" if v=="All" else (pc_pretty_countries(v) or pc_clean_text(v))
+        )
+        typ=s3.selectbox(
+            "Type",types,index=0,key="smug_type",
+            format_func=lambda v: "All" if v=="All" else pc_display_value(v,"Event Type")
+        )
         minsev=s4.selectbox("Minimum severity",["All","LOW","MODERATE","HIGH","SEVERE","CRITICAL"],index=0,key="smug_sev")
         view=sdf.copy()
         if year!="All":
@@ -4337,7 +4427,7 @@ elif page == "Smuggling & Illicit Trade":
         with tabs[7]:
             detail=view.sort_values("Start Date",ascending=False,na_position="last").reset_index(drop=True) if "Start Date" in view.columns else view.reset_index(drop=True)
             if not detail.empty:
-                pick=st.selectbox("Select smuggling event",range(len(detail)),format_func=lambda i:f"{str(detail.iloc[i].get('Start Date',''))[:10]} · {clean_display_text(detail.iloc[i].get('Title',''))}",key="smug_event_graph_pick")
+                pick=st.selectbox("Select smuggling event",range(len(detail)),format_func=lambda i:f"{pc_pretty_date(detail.iloc[i].get('Start Date',''))} · {clean_display_text(detail.iloc[i].get('Title',''))}",key="smug_event_graph_pick")
                 row=detail.iloc[pick]; eid=clean_display_text(row.get("Event ID",""))
                 event_card(row,key_prefix=f"smug_graph_{eid}")
                 if eid:
@@ -5667,8 +5757,13 @@ elif page == "Aviation & Movement":
 # -----------------------------------------------------------------------------
 # 8. SANCTIONS & COMPLIANCE
 # -----------------------------------------------------------------------------
+elif page == "Trade Network Exposure":
+    render_intelligence_trade_network_exposure()
+
 elif page == "Sanctions & Compliance":
-    section("Economic security", "Sanctions & Compliance", "Government sanctions remain distinct from operational compliance regimes such as PGSA, while both can be analysed against the same canonical vessels and companies.")
+    section("Economic security", "Sanctions & Compliance", "Direct government designations, ownership/control and counterparty exposure, trade restrictions and screening remain distinct from operational compliance regimes such as PGSA.")
+    render_intelligence_canonical_sanctions()
+    st.markdown("### Operational / legacy compliance context")
     t1,t2,t3,t4 = st.tabs(["Government Sanctions", "PGSA / Compliance", "Secondary Exposure", "Taxonomy"])
     with t1:
         c1,c2,c3 = st.columns(3)
@@ -5753,11 +5848,17 @@ elif page == "Intelligence Search":
             ("Compliance", compliance_designations, ["Target Name","IMO / Identifier","Reason / Basis","Notes"]),
             ("Compliance Exposure", compliance_exposure, ["Source Vessel","Counterparty / Related Entity","Exposure Type","Analytical Note"]),
             ("Sources", source_feeds, ["Source Name","Coverage","Default Event Families","Notes"]),
+            ("Transport Services", _intel_live_frame("pc_transport_services","*",10000), ["service_name","service_code","mode","service_type","trade_lane","status"]),
+            ("Service Changes", _intel_live_frame("pc_transport_service_changes","*",10000), ["change_type","title","summary","effective_date","source_url"]),
+            ("Canonical Sanctions", _intel_live_frame("pc_sanctions_designations","*",15000), []),
+            ("Sanctions Exposure", _intel_live_frame("pc_sanctions_links","*",30000), []),
+            ("Trade Restrictions", _intel_live_frame("pc_trade_restrictions","*",15000), []),
         ]
         found = 0
         for name, df, cols in datasets:
             if df.empty: continue
-            mask = contains_any(df, cols, [q.replace("|", "\\|")])
+            use_cols=cols or list(df.columns)
+            mask = contains_any(df, use_cols, [q.replace("|", "\\|")])
             res = df[mask]
             if not res.empty:
                 found += len(res)
