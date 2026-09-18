@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "46-fast-batch-content-intake-2026-09-18"
+LOADER_BUILD = "47-simple-key-first-canonical-loader-2026-09-18"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4004,71 +4004,394 @@ def _prepare_staged_job_for_resolution(sb, job_id):
     return {"updated":updated,"resolvable":resolvable,"relationship_rows":relationship_rows}
 
 
+
+def _simple_hash_id(prefix, *parts):
+    raw="|".join(str(x or "").strip() for x in parts).encode("utf-8")
+    return f"{prefix}_{hashlib.sha1(raw).hexdigest()[:20].upper()}"
+
+
+def _simple_clean_name(v):
+    return re.sub(r"\s+"," ",str(v or "").strip())
+
+
+def _simple_source_id(sb, payload):
+    """Resolve/create a canonical pc_sources row from source URL when possible."""
+    sid=str(payload.get("source_id") or "").strip()
+    if sid:
+        return sid
+    url=str(payload.get("source_url") or payload.get("url") or "").strip()
+    if not url:
+        return None
+    try:
+        hit=(sb.table("pc_sources").select("source_id").eq("url",url).limit(1).execute().data or [])
+        if hit:
+            return hit[0]["source_id"]
+    except Exception:
+        pass
+    sid=_simple_hash_id("SRC_WEB",url)
+    source_name=url
+    try:
+        source_name=urlparse(url).netloc or url
+    except Exception:
+        pass
+    row={
+        "source_id":sid,
+        "source_name":source_name,
+        "publisher":payload.get("publisher") or source_name,
+        "source_type":"web",
+        "url":url,
+        "active":True,
+    }
+    try:
+        writable=set(_table_write_columns_live(sb,"pc_sources"))
+        row={k:v for k,v in row.items() if k in writable and v not in (None,"")}
+        sb.table("pc_sources").upsert(row,on_conflict="source_id").execute()
+    except Exception:
+        # Source creation should not block the fact record.
+        return None
+    return sid
+
+
+def _simple_ensure_entity(sb, name, country=None, entity_type="company", source_id=None, extra=None):
+    """Exact canonical entity lookup; create a minimal source-backed entity if absent."""
+    name=_simple_clean_name(name)
+    if not name:
+        return None
+    try:
+        hits=(sb.table("pc_entities").select("entity_id,name,hq_country,entity_type")
+              .ilike("name",name).limit(25).execute().data or [])
+        if country:
+            ck=str(country).strip().casefold()
+            same=[x for x in hits if not x.get("hq_country") or str(x.get("hq_country")).strip().casefold()==ck]
+            if same: hits=same
+        if hits:
+            eid=hits[0]["entity_id"]
+            patch={}
+            if source_id and not hits[0].get("source_id"): patch["source_id"]=source_id
+            if patch:
+                try: sb.table("pc_entities").update(patch).eq("entity_id",eid).execute()
+                except Exception: pass
+            return eid
+    except Exception:
+        pass
+    eid=_simple_hash_id("ENTITY_AI",name,country or "",entity_type or "entity")
+    row={
+        "entity_id":eid,
+        "name":name,
+        "entity_type":entity_type or "company",
+        "hq_country":country,
+        "record_status":"provisional",
+        "data_quality":"medium",
+        "source_id":source_id,
+        "metadata":{"created_by":"simple_key_first_loader"},
+    }
+    if isinstance(extra,dict):
+        for k,v in extra.items():
+            if v not in (None,""): row[k]=v
+    writable=set(_table_write_columns_live(sb,"pc_entities"))
+    row={k:v for k,v in row.items() if k in writable and v not in (None,"")}
+    sb.table("pc_entities").upsert(row,on_conflict="entity_id").execute()
+    return eid
+
+
+def _simple_ensure_asset(sb, name, country=None, asset_type="asset", subtype=None, source_id=None, operator_entity_id=None, owner_entity_id=None):
+    """Exact canonical asset lookup; create the key when the object is genuinely new."""
+    name=_simple_clean_name(name)
+    if not name:
+        return None
+    try:
+        hits=(sb.table("pc_assets").select("asset_id,name,country,asset_type,subtype")
+              .ilike("name",name).limit(25).execute().data or [])
+        if country:
+            ck=str(country).strip().casefold()
+            same=[x for x in hits if not x.get("country") or str(x.get("country")).strip().casefold()==ck]
+            if same: hits=same
+        if hits:
+            return hits[0]["asset_id"]
+    except Exception:
+        pass
+    aid=_deterministic_asset_id(name,country or "",asset_type or "asset")
+    row={
+        "asset_id":aid,
+        "name":name,
+        "asset_type":asset_type or "asset",
+        "subtype":subtype,
+        "country":country,
+        "operator_entity_id":operator_entity_id,
+        "owner_entity_id":owner_entity_id,
+        "record_status":"provisional",
+        "data_quality":"medium",
+        "source_id":source_id,
+        "metadata":{"created_by":"simple_key_first_loader"},
+    }
+    writable=set(_table_write_columns_live(sb,"pc_assets"))
+    row={k:v for k,v in row.items() if k in writable and v not in (None,"")}
+    sb.table("pc_assets").upsert(row,on_conflict="asset_id").execute()
+    return aid
+
+
+def _simple_ensure_mobile_asset(sb, name=None, imo=None, mmsi=None, flag=None, subtype=None, source_id=None):
+    """IMO -> MMSI -> exact name/flag lookup; otherwise create canonical mobile asset."""
+    name=_simple_clean_name(name)
+    imo=str(imo or "").strip()
+    mmsi=str(mmsi or "").strip()
+    try:
+        if imo:
+            hit=(sb.table("pc_mobile_assets").select("mobile_asset_id").eq("imo",imo).limit(1).execute().data or [])
+            if hit: return hit[0]["mobile_asset_id"]
+        if mmsi:
+            hit=(sb.table("pc_mobile_assets").select("mobile_asset_id").eq("mmsi",mmsi).limit(1).execute().data or [])
+            if hit: return hit[0]["mobile_asset_id"]
+        if name:
+            hits=(sb.table("pc_mobile_assets").select("mobile_asset_id,name,flag").ilike("name",name).limit(25).execute().data or [])
+            if flag:
+                fk=str(flag).strip().casefold()
+                same=[x for x in hits if not x.get("flag") or str(x.get("flag")).strip().casefold()==fk]
+                if same: hits=same
+            if hits: return hits[0]["mobile_asset_id"]
+    except Exception:
+        pass
+    if not (name or imo or mmsi):
+        return None
+    mid=_simple_hash_id("MOBILE_AI",imo or mmsi or name,flag or "")
+    row={
+        "mobile_asset_id":mid,
+        "name":name or (f"IMO {imo}" if imo else f"MMSI {mmsi}"),
+        "asset_type":"vessel",
+        "subtype":subtype,
+        "imo":imo or None,
+        "mmsi":mmsi or None,
+        "flag":flag,
+        "record_status":"provisional",
+        "data_quality":"medium",
+        "source_id":source_id,
+        "metadata":{"created_by":"simple_key_first_loader"},
+    }
+    writable=set(_table_write_columns_live(sb,"pc_mobile_assets"))
+    row={k:v for k,v in row.items() if k in writable and v not in (None,"")}
+    sb.table("pc_mobile_assets").upsert(row,on_conflict="mobile_asset_id").execute()
+    return mid
+
+
+_SIMPLE_ENTITY_REFS = {
+    "owner_entity_name":"owner_entity_id",
+    "operator_entity_name":"operator_entity_id",
+    "manager_entity_name":"manager_entity_id",
+    "buyer_entity_name":"buyer_entity_id",
+    "seller_entity_name":"seller_entity_id",
+    "target_entity_name":"target_entity_id",
+    "participant_entity_name":"entity_id",
+    "entity_name":"entity_id",
+    "authority_entity_name":"authority_entity_id",
+    "company_name":"entity_id",
+}
+
+_SIMPLE_ASSET_REFS = {
+    "asset_name":"asset_id",
+    "port_name":"port_asset_id",
+    "parent_port_name":"parent_port_asset_id",
+    "terminal_name":"terminal_asset_id",
+    "berth_name":"berth_asset_id",
+    "target_asset_name":"target_asset_id",
+    "facility_name":"asset_id",
+}
+
+
+def _simple_primary_id(table, payload, natural_key):
+    """Fill missing record IDs deterministically from natural key/source-backed content."""
+    conflict=APPLY_CONFLICT_KEYS.get(table)
+    if not conflict or "," in conflict:
+        return payload
+    key=conflict.strip()
+    if payload.get(key) not in (None,""):
+        return payload
+    # Extension tables keyed directly by an existing asset/entity should not invent a second key.
+    if key in {"asset_id","entity_id","mobile_asset_id"}:
+        return payload
+    prefix={
+        "event_id":"EVENT_AI","event_link_id":"EVLINK_AI","relationship_id":"REL_AI",
+        "transaction_id":"TX_AI","participant_id":"PART_AI","route_id":"ROUTE_AI",
+        "port_metric_id":"PORTMET_AI","port_call_id":"PORTCALL_AI","observation_id":"OBS_AI",
+        "transport_service_id":"SERVICE_AI","service_operator_id":"SVCOP_AI",
+        "service_schedule_id":"SVCSCH_AI","service_transit_time_id":"SVCTT_AI",
+        "service_mobile_asset_id":"SVCMA_AI","service_network_link_id":"SVCNET_AI",
+        "service_connection_id":"SVCCON_AI","service_change_id":"SVCCHG_AI",
+        "financing_id":"FIN_AI","financing_participant_id":"FINPART_AI","financing_link_id":"FINLINK_AI",
+        "contract_id":"CONTRACT_AI","contract_participant_id":"CONPART_AI","contract_link_id":"CONLINK_AI",
+        "vessel_design_id":"VDESIGN_AI","shipbuilding_order_id":"SHIPORD_AI","shipbuilding_order_unit_id":"SHIPUNIT_AI",
+    }.get(key,key.upper())
+    payload[key]=_simple_hash_id(prefix,natural_key or _record_key(payload,""),table)
+    return payload
+
+
+def _simple_prepare_payload(sb, table, payload, natural_key):
+    """Key-first canonical preparation. Create missing dependency objects, bind IDs, then return schema-safe payload."""
+    p=dict(payload or {})
+    sid=_simple_source_id(sb,p)
+    if sid and not p.get("source_id"):
+        p["source_id"]=sid
+
+    country=p.get("country") or p.get("hq_country") or p.get("jurisdiction")
+
+    # Entity dependencies.
+    for name_field,id_field in _SIMPLE_ENTITY_REFS.items():
+        if p.get(id_field) in (None,"") and p.get(name_field):
+            etype="company"
+            if "authority" in name_field: etype="government_agency"
+            p[id_field]=_simple_ensure_entity(sb,p.get(name_field),country,etype,sid)
+
+    # Core entity record itself.
+    if table=="pc_entities":
+        if not p.get("entity_id"):
+            p["entity_id"]=_simple_ensure_entity(
+                sb,p.get("name"),p.get("hq_country") or country,p.get("entity_type") or "company",sid,
+                extra={k:v for k,v in p.items() if k not in {"entity_id","name"}}
+            )
+
+    # Asset dependencies and specialist asset rows.
+    for name_field,id_field in _SIMPLE_ASSET_REFS.items():
+        if p.get(id_field) in (None,"") and p.get(name_field):
+            atype=(
+                "port" if "port" in name_field else
+                "terminal" if "terminal" in name_field else
+                "berth" if "berth" in name_field else
+                p.get("asset_type") or "asset"
+            )
+            p[id_field]=_simple_ensure_asset(
+                sb,p.get(name_field),country,atype,p.get("subtype"),sid,
+                p.get("operator_entity_id"),p.get("owner_entity_id")
+            )
+
+    if table=="pc_assets" and not p.get("asset_id"):
+        p["asset_id"]=_simple_ensure_asset(
+            sb,p.get("name") or p.get("asset_name") or p.get("facility_name"),country,
+            p.get("asset_type") or "asset",p.get("subtype"),sid,
+            p.get("operator_entity_id"),p.get("owner_entity_id")
+        )
+
+    if table=="pc_terminal_details" and not p.get("asset_id"):
+        tname=p.get("terminal_name") or p.get("name")
+        p["asset_id"]=_simple_ensure_asset(sb,tname,country,"terminal",p.get("terminal_type") or p.get("subtype"),sid,p.get("operator_entity_id"),p.get("owner_entity_id"))
+    if table=="pc_berth_details" and not p.get("asset_id"):
+        bname=p.get("berth_name") or p.get("name") or natural_key
+        p["asset_id"]=_simple_ensure_asset(sb,bname,country,"berth",p.get("berth_type"),sid)
+
+    # Mobile-asset dependencies / vessel identity.
+    if p.get("mobile_asset_id") in (None,"") and any(p.get(k) for k in ("vessel_name","mobile_asset_name","imo","mmsi")):
+        p["mobile_asset_id"]=_simple_ensure_mobile_asset(
+            sb,p.get("vessel_name") or p.get("mobile_asset_name") or p.get("name"),
+            p.get("imo"),p.get("mmsi"),p.get("flag"),p.get("subtype"),sid
+        )
+    if table=="pc_mobile_assets" and not p.get("mobile_asset_id"):
+        p["mobile_asset_id"]=_simple_ensure_mobile_asset(sb,p.get("name"),p.get("imo"),p.get("mmsi"),p.get("flag"),p.get("subtype"),sid)
+
+    # Polymorphic event links: resolve linked_id directly from linked_type + linked_name.
+    if table=="pc_event_links" and not p.get("linked_id") and p.get("linked_name"):
+        lt=str(p.get("linked_type") or "").casefold()
+        if lt in {"entity","company","organization","actor"}:
+            p["linked_type"]="entity"
+            p["linked_id"]=_simple_ensure_entity(sb,p.get("linked_name"),country,"company",sid)
+        elif lt in {"mobile_asset","vessel","ship","aircraft"}:
+            p["linked_type"]="mobile_asset"
+            p["linked_id"]=_simple_ensure_mobile_asset(sb,p.get("linked_name"),p.get("imo"),p.get("mmsi"),p.get("flag"),p.get("subtype"),sid)
+        else:
+            p["linked_type"]="asset"
+            p["linked_id"]=_simple_ensure_asset(sb,p.get("linked_name"),country,p.get("asset_type") or "asset",p.get("subtype"),sid)
+
+    p=_simple_primary_id(table,p,natural_key)
+
+    # Keep only writable fields; helper names that are not real columns go to metadata.
+    try:
+        writable=set(_table_write_columns_live(sb,table))
+        overflow={k:v for k,v in p.items() if k not in writable and v not in (None,"")}
+        clean={k:v for k,v in p.items() if k in writable and v not in (None,"")}
+        if overflow and "metadata" in writable:
+            meta=clean.get("metadata") if isinstance(clean.get("metadata"),dict) else {}
+            meta=dict(meta)
+            meta.setdefault("loader_reference_context",{}).update(_jsonable(overflow))
+            clean["metadata"]=meta
+        p=clean
+    except Exception:
+        pass
+    return p
+
+
 def stage_ai_result(sb, job_id, result):
-    """Stage structured AI result, attach model metadata, and resolve registered entities."""
+    """Simple key-first loader.
+
+    Every record follows one rule:
+      resolve/create canonical dependencies -> bind keys -> stage READY.
+    Complex candidate-resolution workflows are reserved only for genuinely
+    ambiguous identities; normal document/article loads do not depend on them.
+    """
     records=(result or {}).get("records") or []
     staged=[]
     rejected=0
+    errors=[]
     meta_map=_meta_table_map(sb)
 
+    # Dependency-first ordering: identity objects before facts that reference them.
+    priority={
+        "pc_entities":10,"pc_assets":20,"pc_mobile_assets":30,
+        "pc_events":40,"pc_transport_services":45,
+        "pc_terminal_details":50,"pc_berth_details":55,
+        "pc_relationships":70,"pc_event_links":75,
+    }
+    records=sorted(
+        [r for r in records if isinstance(r,dict)],
+        key=lambda r: priority.get(str(r.get("target_table") or ""),60)
+    )
+
     for rec in records:
-        if not isinstance(rec,dict):
+        table=str(rec.get("target_table") or "").strip()
+        payload=rec.get("payload")
+        if table not in AI_ALLOWED_TABLES or not isinstance(payload,dict):
             rejected+=1
             continue
 
-        table=str(rec.get("target_table") or "").strip()
-        payload=rec.get("payload")
-
-        if table not in AI_ALLOWED_TABLES or not isinstance(payload,dict):
+        natural_key=_record_key(payload,rec.get("natural_key") or "")
+        try:
+            payload=_simple_prepare_payload(sb,table,payload,natural_key)
+            payload=_fill_staging_key(payload,table,natural_key)
+        except Exception as exc:
+            errors.append({"table":table,"natural_key":natural_key,"error":str(exc)})
             rejected+=1
             continue
 
         meta=meta_map.get(table) or {}
         logical=meta.get("entity_type")
-        if not logical and table=="pc_event_links":
-            logical="event_link"
-        elif not logical and table=="pc_relationships":
-            logical="relationship"
+        if not logical and table=="pc_event_links": logical="event_link"
+        elif not logical and table=="pc_relationships": logical="relationship"
 
-        natural_key=_record_key(payload,rec.get("natural_key") or "")
-        payload=_fill_staging_key(payload,table,natural_key)
-        direct_ready=table in DIRECT_DOMAIN_TABLES
+        conflict=APPLY_CONFLICT_KEYS.get(table)
+        conflict_keys=[x.strip() for x in conflict.split(",")] if conflict else []
+        key_ready=not conflict_keys or all(payload.get(k) not in (None,"") for k in conflict_keys)
+
         staged.append({
             "ingestion_job_id":job_id,
-            "target_entity_type":logical or ("domain_record" if direct_ready else None),
+            "target_entity_type":logical or "domain_record",
             "target_table":table,
             "source_record_key":natural_key,
             "natural_key":natural_key,
-            "action":"REVIEW",
+            "action":"UPSERT",
             "payload":_jsonable(payload),
             "confidence":rec.get("confidence"),
-            "validation_status":"pending",
+            "validation_status":"pending" if key_ready else "needs_review",
             "review_status":"pending",
-            "resolution_status":"READY" if direct_ready else "UNRESOLVED",
-            "resolution_method":"domain_schema_ready" if direct_ready else None,
+            "resolution_status":"READY" if key_ready else "UNRESOLVED",
+            "resolution_method":"simple_key_first" if key_ready else "missing_required_key",
         })
 
     for i in range(0,len(staged),100):
         sb.table("pc_staged_records").insert(staged[i:i+100]).execute()
 
-    resolution={}
-    if staged:
-        prep=_prepare_staged_job_for_resolution(sb,job_id)
-        resolution["prepared"]=prep
-        # SQL 010 handles registered canonical entity tables.
-        if prep.get("resolvable"):
-            try:
-                resolution["entities"]=_process_job_resolution(sb,job_id)
-            except Exception as exc:
-                resolution["entity_resolution_error"]=str(exc)
-        # SQL 011/012 currently specializes event-link relationships.
-        if any(r.get("target_table")=="pc_event_links" for r in staged):
-            try:
-                resolution["event_relationships"]=_process_relationship_backlog(sb,job_id)
-            except Exception as exc:
-                resolution["relationship_resolution_error"]=str(exc)
-
-    return len(staged),rejected,resolution
+    return len(staged),rejected,{
+        "mode":"simple_key_first",
+        "ready":sum(1 for x in staged if x.get("resolution_status")=="READY"),
+        "unresolved":sum(1 for x in staged if x.get("resolution_status")!="READY"),
+        "dependency_autocreate":True,
+        "errors":errors[:100],
+    }
 
 
 # Canonical columns that this admin is allowed to send to selected tables.
@@ -11067,7 +11390,7 @@ elif page=="Universal Content Intake":
                             st.success(
                                 f"Fast extraction complete: {len(results)} source(s), {fact_total} facts. "
                                 "Staging/resolution was deliberately deferred. Use Fact review & resolution → "
-                                "Build staged proposals + resolve queue when ready."
+                                "Build canonical proposals + keys when ready."
                             )
                         else:
                             st.success(
@@ -11152,7 +11475,7 @@ elif page=="Universal Content Intake":
             a1,a2,a3=st.columns([1.8,1.1,0.9])
             with a1:
                 if st.button(
-                    "Build staged proposals + resolve queue",
+                    "Build canonical proposals + keys",
                     type="primary",
                     use_container_width=True,
                     key="promote_content_fact_queue"
@@ -11176,7 +11499,7 @@ elif page=="Universal Content Intake":
                         st.rerun()
             with a2:
                 if st.button(
-                    "Resolve links only",
+                    "Refresh canonical links",
                     use_container_width=True,
                     key="resolve_content_fact_queue"
                 ):
@@ -11198,9 +11521,9 @@ elif page=="Universal Content Intake":
                 )
 
             st.info(
-                "Move the workflow forward: **Build staged proposals + resolve queue** → "
+                "Move the workflow forward: **Build canonical proposals + keys** → "
                 "open **Review Queue** → approve READY records → apply. "
-                "Use **Resolve links only** after adding or correcting canonical identities."
+                "Use **Refresh canonical links** after adding or correcting canonical identities."
             )
 
             try:
