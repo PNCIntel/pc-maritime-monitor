@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "47-simple-key-first-canonical-loader-2026-09-18"
+LOADER_BUILD = "48-direct-canonical-load-2026-09-18"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -3646,11 +3646,61 @@ def _queue_content_urls(
     return batch,items,failures
 
 
-def _process_queued_content_items(limit_items=10, product_context="TRADE", deep=False):
-    """Process queued/pending URL items in one analyst action.
+def _direct_apply_content_result(res):
+    """Immediately promote safe staged records into canonical tables.
 
-    Fast mode extracts facts from each source without web research or staging.
-    Deep mode keeps the legacy all-in-one research/stage/resolve behaviour.
+    Facts remain provenance only. Missing deterministic dependencies are created/upserted
+    by the canonical job processor. Only genuine ambiguity remains for analyst review.
+    """
+    job_id=(res or {}).get("job_id")
+    if not job_id:
+        return {"applied":0,"blocked":0,"job_id":None}
+    report=_process_job_automatically(str(job_id))
+    try:
+        candidates,blocked=_job_apply_candidates(str(job_id))
+    except Exception:
+        blocked=[]
+    applied=int((report or {}).get("total_applied_this_run",0) or 0)
+    return {
+        "job_id":str(job_id),
+        "applied":applied,
+        "blocked":len(blocked),
+        "report":report,
+    }
+
+
+def _load_content_item_to_canonical(batch_id,item,product_context="TRADE",use_web=False):
+    """One-pass source -> canonical load. No fact-review gate."""
+    res=_run_content_item_extraction(
+        batch_id,
+        item,
+        use_web=bool(use_web),
+        product_context=product_context,
+        extract_only=False,
+        resolve_after=False,
+    )
+    direct=_direct_apply_content_result(res)
+    res["canonical_applied"]=direct.get("applied",0)
+    res["canonical_blocked"]=direct.get("blocked",0)
+    res["canonical_apply_report"]=direct.get("report")
+    try:
+        sb.table("pc_content_ingest_items").update({
+            "resolution_status":(
+                "loaded" if int(direct.get("blocked",0) or 0)==0
+                else "loaded_with_exceptions"
+            ),
+            "updated_at":pd.Timestamp.utcnow().isoformat(),
+        }).eq("content_item_id",item.get("content_item_id")).execute()
+    except Exception:
+        pass
+    return res
+
+
+def _process_queued_content_items(limit_items=10, product_context="TRADE", deep=False):
+    """Load queued URLs directly into canonical tables.
+
+    `deep=True` adds web verification, but both modes write safe canonical records
+    immediately. Review is reserved for genuine ambiguity.
     """
     rows=(sb.table("pc_content_ingest_items")
           .select("*")
@@ -3661,13 +3711,11 @@ def _process_queued_content_items(limit_items=10, product_context="TRADE", deep=
     failures=[]
     for item in rows:
         try:
-            res=_run_content_item_extraction(
+            res=_load_content_item_to_canonical(
                 item.get("content_batch_id"),
                 item,
-                use_web=bool(deep),
                 product_context=product_context,
-                extract_only=not bool(deep),
-                resolve_after=bool(deep),
+                use_web=bool(deep),
             )
             results.append(res)
         except Exception as exc:
@@ -3684,7 +3732,6 @@ def _process_queued_content_items(limit_items=10, product_context="TRADE", deep=
                 }).eq("content_item_id",item.get("content_item_id")).execute()
             except Exception:
                 pass
-
     try:
         _content_review_data.clear()
     except Exception:
@@ -11143,7 +11190,7 @@ Return the normal universal JSON contract with records and source provenance.
 elif page=="Universal Content Intake":
     title(
         "Universal content intake",
-        "Paste article URLs, paste a URL list, or upload a document/spreadsheet containing URLs. Each source is preserved, fact-extracted, primary-source enriched and staged into the canonical P&C model."
+        "Paste article URLs, a URL list, or a file containing URLs. Each source is preserved, resolved against canonical keys, and loaded directly into the P&C model. Facts remain provenance; only genuine ambiguity goes to review."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
 
@@ -11153,7 +11200,7 @@ elif page=="Universal Content Intake":
         st.error("Run the Universal Content / Fact Extraction Foundation SQL first.")
     else:
         intake_tab, queue_tab, facts_tab = st.tabs(
-            ["Add URLs / URL-list document","Content queue","Fact review & resolution"]
+            ["Add URLs / URL-list document","Content queue","Facts / audit trail"]
         )
 
         with intake_tab:
@@ -11221,16 +11268,15 @@ elif page=="Universal Content Intake":
             processing_mode=c2.selectbox(
                 "Processing mode",
                 [
+                    "Load to canonical — recommended",
                     "Queue only — instant",
-                    "Fast extract — recommended",
-                    "Deep research + stage — slow"
+                    "Research + load — web verification"
                 ],
-                index=1,
+                index=0,
                 key="content_processing_mode",
                 help=(
-                    "Queue only stores the URLs immediately. Fast extract reads each source and preserves facts "
-                    "without web research/staging. Deep research performs primary-source web research, staging and "
-                    "resolution per URL and is intentionally much slower."
+                    "Load to canonical reads each source once, resolves or creates canonical keys, upserts safe records, "
+                    "and leaves only genuine ambiguity for review. Queue only stores URLs. Research + load adds web verification."
                 )
             )
             max_items=c3.number_input(
@@ -11239,7 +11285,7 @@ elif page=="Universal Content Intake":
                 key="content_max_items"
             )
 
-            use_web=processing_mode.startswith("Deep")
+            use_web=processing_mode.startswith("Research")
 
             st.caption(
                 f"{len(urls)} unique URL(s) detected. "
@@ -11253,9 +11299,9 @@ elif page=="Universal Content Intake":
             action_label=(
                 "Queue URLs now"
                 if processing_mode.startswith("Queue")
-                else "Fast extract URL batch"
-                if processing_mode.startswith("Fast")
-                else "Deep research → extract → stage"
+                else "Load URLs to canonical model"
+                if processing_mode.startswith("Load")
+                else "Research + load to canonical model"
             )
             if st.button(
                 action_label,
@@ -11306,8 +11352,8 @@ elif page=="Universal Content Intake":
                             batch_name=batch_name,
                             product_context=product_context,
                             research_mode=(
-                                "web_enriched" if processing_mode.startswith("Deep")
-                                else "fast_source_extract"
+                                "web_enriched_direct_load" if processing_mode.startswith("Research")
+                                else "direct_canonical_load"
                             ),
                             item_count=len(selected),
                             metadata={
@@ -11320,10 +11366,10 @@ elif page=="Universal Content Intake":
                         results=[]
                         failures=[]
 
-                        fast_mode=processing_mode.startswith("Fast")
+                        research_mode=processing_mode.startswith("Research")
                         progress=st.progress(0.0)
                         with st.status(
-                            f"{'Fast extracting' if fast_mode else 'Deep researching'} {len(selected)} source URL(s)…",
+                            f"{'Researching and loading' if research_mode else 'Loading'} {len(selected)} source URL(s) to canonical model…",
                             expanded=False
                         ) as status_box:
                             for num,u in enumerate(selected,1):
@@ -11332,13 +11378,11 @@ elif page=="Universal Content Intake":
                                         batch_id,u,manifest_document_id,
                                         "uploaded_url_list" if manifest_upload else "pasted_url"
                                     )
-                                    res=_run_content_item_extraction(
+                                    res=_load_content_item_to_canonical(
                                         batch_id,
                                         item,
-                                        use_web=not fast_mode,
                                         product_context=product_context,
-                                        extract_only=fast_mode,
-                                        resolve_after=not fast_mode,
+                                        use_web=research_mode,
                                     )
                                     results.append(res)
                                 except Exception as exc:
@@ -11375,7 +11419,7 @@ elif page=="Universal Content Intake":
 
                             status_box.update(
                                 label=(
-                                    f"{'Fast extraction' if fast_mode else 'Deep research'} complete · "
+                                    f"{'Research + load' if research_mode else 'Canonical load'} complete · "
                                     f"{len(results)} processed"
                                     + (f" · {len(failures)} failed" if failures else "")
                                 ),
@@ -11384,20 +11428,19 @@ elif page=="Universal Content Intake":
                         progress.empty()
 
                     if results:
-                        fact_total=sum(int(x.get('facts') or 0) for x in results)
-                        staged_total=sum(int(x.get('staged') or 0) for x in results)
-                        if processing_mode.startswith("Fast"):
-                            st.success(
-                                f"Fast extraction complete: {len(results)} source(s), {fact_total} facts. "
-                                "Staging/resolution was deliberately deferred. Use Fact review & resolution → "
-                                "Build canonical proposals + keys when ready."
-                            )
-                        else:
-                            st.success(
-                                f"Processed {len(results)} source(s). "
-                                f"Extracted {fact_total} facts and staged {staged_total} canonical/domain proposal(s)."
-                            )
-                        dataframe(results)
+                        applied_total=sum(int(x.get('canonical_applied') or 0) for x in results)
+                        blocked_total=sum(int(x.get('canonical_blocked') or 0) for x in results)
+                        st.success(
+                            f"Loaded {len(results)} source(s) · {applied_total} canonical record(s) created/updated"
+                            + (f" · {blocked_total} genuine exception(s) need review" if blocked_total else " · no blocking exceptions")
+                            + ". Facts were retained as provenance and do not block the load."
+                        )
+                        dataframe([{
+                            "source":x.get("title") or x.get("content_item_id"),
+                            "canonical_applied":x.get("canonical_applied",0),
+                            "exceptions":x.get("canonical_blocked",0),
+                            "job_id":x.get("job_id"),
+                        } for x in results])
                     if failures:
                         st.warning(f"{len(failures)} source(s) need attention.")
                         dataframe(failures)
@@ -11405,8 +11448,8 @@ elif page=="Universal Content Intake":
         with queue_tab:
             st.markdown("### Content ingestion queue")
             st.caption(
-                "Queue URLs instantly, then process several in one action. "
-                "Fast extraction skips web research and staging; promotion happens later in Fact review & resolution."
+                "Queue URLs instantly, then load them directly into the canonical model in one action. "
+                "Facts remain provenance; only genuine identity ambiguity is held for review."
             )
             q1,q2,q3=st.columns([1,1,1.4])
             queued_limit=q1.number_input(
@@ -11421,7 +11464,7 @@ elif page=="Universal Content Intake":
             )
             queued_mode=q3.selectbox(
                 "Batch mode",
-                ["Fast extract","Deep research + stage"],
+                ["Load canonical","Research + load"],
                 index=0,
                 key="queued_process_mode"
             )
@@ -11435,19 +11478,20 @@ elif page=="Universal Content Intake":
                     st.error("Configure OPENAI_API_KEY and OPENAI_MODEL first.")
                 else:
                     with st.spinner(
-                        "Fast extracting queued sources..."
-                        if queued_mode=="Fast extract"
-                        else "Deep researching queued sources..."
+                        "Loading queued sources to canonical model..."
+                        if queued_mode=="Load canonical"
+                        else "Researching and loading queued sources..."
                     ):
                         qr,qf=_process_queued_content_items(
                             int(queued_limit),
                             product_context=queued_context,
-                            deep=(queued_mode!="Fast extract")
+                            deep=(queued_mode=="Research + load")
                         )
                     if qr:
                         st.success(
-                            f"Processed {len(qr)} queued source(s); "
-                            f"{sum(int(x.get('facts') or 0) for x in qr)} facts extracted."
+                            f"Loaded {len(qr)} queued source(s); "
+                            f"{sum(int(x.get('canonical_applied') or 0) for x in qr)} canonical record(s) created/updated; "
+                            f"{sum(int(x.get('canonical_blocked') or 0) for x in qr)} exception(s) remain."
                         )
                     if qf:
                         st.warning(f"{len(qf)} queued source(s) failed.")
@@ -11705,13 +11749,13 @@ elif page=="Document Loader":
 
                 doc_id=st.session_state.get("_last_document_id")
                 if doc_id:
-                    st.markdown("#### AI fact extraction to staging")
+                    st.markdown("#### Load document into canonical model")
                     extraction_prompt=st.text_area(
                         "Extraction instruction",
                         value="Extract only facts supported by this document into the P&C canonical staging schema. Preserve source-document provenance. Do not invent facts.",
                         height=110
                     )
-                    if st.button("Extract document facts → staging"):
+                    if st.button("Load document → canonical model",type="primary"):
                         if not ai_configured():
                             st.error("Configure OPENAI_API_KEY and OPENAI_MODEL.")
                         else:
@@ -11724,13 +11768,28 @@ elif page=="Document Loader":
                             prompt=extraction_prompt + "\n\nSOURCE DOCUMENT:\n" + text[:60000]
                             result=ai_research(prompt,"DOCUMENT",False,output_contract=AI_OUTPUT_CONTRACT)
                             staged,rejected,resolution=stage_ai_result(sb,job["ingestion_job_id"],result)
-                            auto_result=_run_reconciliation(job["ingestion_job_id"]) if staged else {}
+                            auto_result=_process_job_automatically(job["ingestion_job_id"]) if staged else {"total_applied_this_run":0}
+                            applied=int((auto_result or {}).get("total_applied_this_run",0) or 0)
+                            try:
+                                _,blocked=_job_apply_candidates(job["ingestion_job_id"])
+                            except Exception:
+                                blocked=[]
                             sb.table("pc_ingestion_jobs").update({
                                 "status":"completed","completed_at":pd.Timestamp.utcnow().isoformat(),
-                                "stats":{"document_id":doc_id,"staged_records":staged,"rejected":rejected,"resolution":resolution,"auto_reconcile":auto_result}
+                                "stats":{
+                                    "document_id":doc_id,
+                                    "staged_records":staged,
+                                    "canonical_applied":applied,
+                                    "exceptions":len(blocked),
+                                    "rejected":rejected,
+                                    "resolution":resolution,
+                                    "auto_apply":auto_result
+                                }
                             }).eq("ingestion_job_id",job["ingestion_job_id"]).execute()
-                            st.success(f"{staged} proposal(s) staged and auto-reconciled from the document.")
-                            st.json(auto_result,expanded=False)
+                            st.success(
+                                f"Document loaded: {applied} canonical record(s) created/updated"
+                                + (f" · {len(blocked)} genuine exception(s) remain." if blocked else " · no blocking exceptions.")
+                            )
             except Exception as exc:
                 st.exception(exc)
 
