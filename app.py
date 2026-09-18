@@ -32,8 +32,8 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.3.43-group-vessel-rollup"
-RELEASE_NAME = "Global Trade-System Intelligence Graph · Live Canonical Supabase + Legacy Reference Bridge"
+APP_VERSION = "v3.4.0-story-horizon"
+RELEASE_NAME = "Trade Operating Picture · Canonical Developments, Disruptions, Sanctions & Trade Horizon"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -4866,7 +4866,7 @@ def render_company_profile(entity_id, entity_name):
                 max_items=100
             )
         if not prof.get("canonical_event_news",pd.DataFrame()).empty:
-            st.markdown("### Canonical event-linked reporting")
+            st.markdown("### Canonical company developments")
             show_named_list(
                 prof["canonical_event_news"],
                 "Headline",
@@ -4881,7 +4881,7 @@ def render_company_profile(entity_id, entity_name):
             and prof["strategic_news"].empty
             and prof.get("canonical_event_news",pd.DataFrame()).empty
         ):
-            st.info("No linked news, announcements or canonical event coverage.")
+            st.info("No linked developments, announcements or canonical event coverage.")
 
     with tabs[8]:
         st.markdown("### Corporate & operational relationships")
@@ -6466,7 +6466,11 @@ def render_compliance_exposure_workspace():
 
 
 def _trade_alert_candidates():
-    """Return commercial/operational alerts, excluding routine corporate development."""
+    """Canonical disruption records first; legacy keyword inference only as fallback."""
+    explicit=_canonical_trade_disruptions()
+    if explicit is not None and not explicit.empty:
+        return explicit.copy()
+
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     if events.empty:
         return events
@@ -6475,11 +6479,7 @@ def _trade_alert_candidates():
     for c in cols:
         blob=blob.str.cat(events[c].fillna("").astype(str),sep=" ")
     include=r"strike|labour|weather|typhoon|cyclone|hurricane|flood|earthquake|wildfire|storm|closure|outage|disruption|grounding|collision|allision|capsize|sinking|fire|explosion|attack|missile|drone|piracy|seizure|interdiction|sanction|customs|tariff|border|canal|channel|low water|cyber|fraud|smuggl|crime"
-    corporate=r"new terminal|terminal opening|commissioning|new crane|crane order|equipment order|vessel order|fleet order|acquisition|investment|capex announcement|earnings|dividend|share buyback|service launch|office opening"
-    inc=blob.str.contains(include,case=False,regex=True,na=False)
-    corp=blob.str.contains(corporate,case=False,regex=True,na=False)
-    # A corporate story can still become an alert only when it independently contains disruption language.
-    view=events[inc & (~corp | blob.str.contains(r"closure|outage|strike|attack|weather|fire|explosion|disruption|sanction",case=False,regex=True,na=False))].copy()
+    view=events[blob.str.contains(include,case=False,regex=True,na=False)].copy()
     if "Start Date" in view.columns:
         view["_dt"]=pd.to_datetime(view["Start Date"],errors="coerce")
         view=view.sort_values("_dt",ascending=False)
@@ -6494,7 +6494,7 @@ def render_trade_alerts_workspace():
         return
     a,b,c,d=st.columns(4)
     a.metric("Active alerts",len(ev))
-    fam=ev.get("Event Family",pd.Series(dtype=str)).fillna("").astype(str)
+    fam=ev.get("Disruption Domains",ev.get("Event Family",pd.Series(dtype=str))).fillna("").astype(str)
     b.metric("Weather / natural",int(fam.str.contains("Weather|Natural",case=False,regex=True).sum()))
     c.metric("Labour / civil",int(fam.str.contains("Labour|Industrial|Civil",case=False,regex=True).sum()))
     d.metric("Security spillover",int(fam.str.contains("Security|Conflict|Maritime",case=False,regex=True).sum()))
@@ -6506,7 +6506,7 @@ def render_trade_alerts_workspace():
                 view=ev
             else:
                 blob=pd.Series("",index=ev.index,dtype="string")
-                for col in ["Event Family","Event Type","Title","Description","Operational Impact","Trade / Commercial Impact"]:
+                for col in ["Disruption Domains","Disruption Type","Event Family","Event Type","Title","Description","Operational Impact","Trade / Commercial Impact"]:
                     if col in ev.columns:
                         blob=blob.str.cat(ev[col].fillna("").astype(str),sep=" ")
                 view=ev[blob.str.contains(pat,case=False,regex=True,na=False)]
@@ -7934,11 +7934,11 @@ _bst=backend_status()
 st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend")
 
 NAV_SECTIONS={
-    "OPERATING PICTURE":["Overview","Forward Calendar","Regional Maps","Port Activity","Alerts & Disruptions","Watch Areas"],
+    "OPERATING PICTURE":["Overview","Trade Horizon","Regional Maps","Port Activity","Alerts & Disruptions","Watch Areas"],
     "DOMAINS":["Maritime","Rail","Aviation","Trucking","Government & Security","Defence & Shipbuilding","Energy & Industry"],
     "TRADE NETWORK":["Ports & Terminals","Corridors & Systems","Companies","Vessels","Investments"],
     "MARKETS & POLICY":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Sanctions & Compliance","Trade Policy","Contracts"],
-    "MONITORING & TOOLS":["Hormuz Monitor","Live Feeds","News & Signals","Search","Reference & Benchmarks","Data"],
+    "MONITORING & TOOLS":["Hormuz Monitor","Live Feeds","News & Developments","Search","Reference & Benchmarks","Data"],
 }
 VISIBLE_PAGES=[p for items in NAV_SECTIONS.values() for p in items]
 HIDDEN_ROUTES={"Ports","Shipyards","Network Map","News & Events","Reference Library","Ferries","Cruise","Maritime Security","Maritime Disruptions","Security & Business Risk"}
@@ -9005,35 +9005,303 @@ def canonical_pgsa_vessels_trade():
 
 
 
+
+def _pc_meta_dict(value):
+    """Normalize JSON/dict metadata from Supabase or legacy bridge."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed=json.loads(value)
+            return parsed if isinstance(parsed,dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
 def trade_horizon_events(df):
-    """Forward-looking records with plausible commercial/operational relevance."""
+    """Trade Horizon = explicit canonical horizon items first, then legacy forward-looking rows."""
     if df is None or df.empty:
         return pd.DataFrame()
+
     out=df.copy()
+    explicit=pd.Series(False,index=out.index)
+    if "Metadata" in out.columns:
+        explicit=out["Metadata"].apply(
+            lambda v: bool((_pc_meta_dict(v).get("horizon") or {}).get("show_in_trade_horizon"))
+        )
+
     blob=pd.Series("",index=out.index,dtype="string")
-    for c in ["Event Nature","Event Domain","Event Family","Event Type","Event Temporality","Event Phase","Event Category","Event Subcategory","Title","Description","Operational Impact","Trade / Commercial Impact","Expected Disruption","Country / Countries","Location","Mode"]:
+    for c in [
+        "Event Nature","Event Domain","Event Family","Event Type","Event Temporality",
+        "Event Phase","Event Category","Event Subcategory","Title","Description",
+        "Operational Impact","Trade / Commercial Impact","Expected Disruption",
+        "Country / Countries","Location","Mode","Status"
+    ]:
         if c in out.columns:
             blob=blob.str.cat(out[c].fillna("").astype(str),sep=" ")
+
     meta=pd.Series("",index=out.index,dtype="string")
     if "Metadata" in out.columns:
-        meta=out["Metadata"].apply(
-            lambda v:" ".join(str(v.get(k,"")) for k in ["event_temporality","temporality","event_phase","phase","event_category","category"] if isinstance(v,dict))
-        ).astype("string")
-    horizon_pat=r"scheduled|forecast|recurring|seasonal|upcoming|planned|election|referendum|holiday|summit|conference|festival|sport|games|exercise|deadline|strike|closure|monsoon|hurricane season|cyclone season"
-    commercial_pat=r"port|maritime|shipping|aviation|airport|flight|rail|road|truck|border|customs|energy|oil|gas|lng|trade|logistics|supply|business|bank|closure|congestion|delay|disruption|strike|holiday|sanction|tariff"
-    mask=blob.str.cat(meta,sep=" ").str.contains(horizon_pat,case=False,regex=True,na=False)
-    mask &= blob.str.contains(commercial_pat,case=False,regex=True,na=False)
-    return out[mask].copy()
+        def _meta_horizon_text(v):
+            m=_pc_meta_dict(v)
+            h=m.get("horizon") if isinstance(m.get("horizon"),dict) else {}
+            vals=[
+                m.get("event_temporality"),m.get("temporality"),m.get("event_phase"),
+                m.get("phase"),m.get("event_category"),m.get("category"),
+                h.get("horizon_type"),h.get("next_milestone"),h.get("date_precision"),
+                h.get("target_year")
+            ]
+            return " ".join(str(x) for x in vals if x not in (None,""))
+        meta=out["Metadata"].apply(_meta_horizon_text).astype("string")
+
+    horizon_pat=(
+        r"scheduled|forecast|recurring|seasonal|upcoming|planned|deadline|ballot|"
+        r"milestone|opening|tender|award|approval|expiry|strike|closure|monsoon|"
+        r"hurricane season|cyclone season|chokepoint watch|developing risk|project milestone"
+    )
+    commercial_pat=(
+        r"port|maritime|shipping|aviation|airport|air cargo|rail|road|truck|border|"
+        r"customs|energy|oil|gas|lng|trade|logistics|supply|business|closure|congestion|"
+        r"delay|disruption|strike|sanction|tariff|terminal|corridor|canal"
+    )
+    inferred=blob.str.cat(meta,sep=" ").str.contains(horizon_pat,case=False,regex=True,na=False)
+    inferred &= blob.str.contains(commercial_pat,case=False,regex=True,na=False)
+
+    result=out[explicit | inferred].copy()
+    if result.empty:
+        return result
+
+    if "Metadata" in result.columns:
+        result["Horizon Type"]=result["Metadata"].apply(
+            lambda v: str(((_pc_meta_dict(v).get("horizon") or {}).get("horizon_type")) or "")
+        )
+        result["Next Milestone"]=result["Metadata"].apply(
+            lambda v: str(((_pc_meta_dict(v).get("horizon") or {}).get("next_milestone")) or "")
+        )
+    return result
+
+
+@st.cache_data(show_spinner=False, ttl=60)
+def _canonical_trade_link_labels():
+    """Resolve canonical event links to readable company/asset/vessel/route labels."""
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return {}
+        links=pc_safe_rows(
+            sb,"pc_event_links",
+            "event_id,linked_type,linked_id,linked_name,relationship,confidence,metadata",
+            30000
+        ) or []
+        if not links:
+            return {}
+
+        entities=pc_safe_rows(sb,"pc_entities","entity_id,name",20000) or []
+        assets=pc_safe_rows(sb,"pc_assets","asset_id,name",30000) or []
+        mobile=pc_safe_rows(sb,"pc_mobile_assets","mobile_asset_id,name,imo",30000) or []
+        routes=pc_safe_rows(sb,"pc_transport_routes","route_id,route_name",20000) or []
+
+        names={}
+        names.update({("entity",str(r.get("entity_id") or "")):str(r.get("name") or "") for r in entities})
+        names.update({("asset",str(r.get("asset_id") or "")):str(r.get("name") or "") for r in assets})
+        names.update({("mobile_asset",str(r.get("mobile_asset_id") or "")):str(r.get("name") or "") for r in mobile})
+        names.update({("route",str(r.get("route_id") or "")):str(r.get("route_name") or "") for r in routes})
+
+        out=defaultdict(list)
+        for r in links:
+            eid=str(r.get("event_id") or "").strip()
+            typ=str(r.get("linked_type") or "").strip().casefold()
+            lid=str(r.get("linked_id") or "").strip()
+            if not eid or not lid:
+                continue
+            norm=typ
+            if typ in {"company","organisation","organization"}: norm="entity"
+            elif typ in {"vessel","ship","aircraft"}: norm="mobile_asset"
+            elif typ in {"port","terminal","facility","infrastructure"}: norm="asset"
+            elif typ in {"transport_route","corridor","network"}: norm="route"
+            label_txt=str(r.get("linked_name") or names.get((norm,lid)) or lid).strip()
+            rel=str(r.get("relationship") or "").strip()
+            out[eid].append({
+                "type":norm,"id":lid,"label":label_txt,"relationship":rel,
+                "confidence":r.get("confidence")
+            })
+        return dict(out)
+    except Exception:
+        return {}
+
+
+def _canonical_trade_story_frame():
+    """Presentation view over canonical pc_events; no duplicate news universe."""
+    ev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+    if ev.empty:
+        return ev
+
+    links=_canonical_trade_link_labels()
+    rows=[]
+    for _,r in ev.iterrows():
+        m=_pc_meta_dict(r.get("Metadata"))
+        story=m.get("story") if isinstance(m.get("story"),dict) else {}
+        disruption=m.get("disruption") if isinstance(m.get("disruption"),dict) else {}
+        horizon=m.get("horizon") if isinstance(m.get("horizon"),dict) else {}
+        eid=str(r.get("Event ID") or "")
+        linkrows=links.get(eid,[])
+        labels=[x.get("label") for x in linkrows if x.get("label")]
+        entity_labels=[x.get("label") for x in linkrows if x.get("type")=="entity" and x.get("label")]
+        asset_labels=[x.get("label") for x in linkrows if x.get("type") in {"asset","mobile_asset"} and x.get("label")]
+        route_labels=[x.get("label") for x in linkrows if x.get("type")=="route" and x.get("label")]
+
+        sources=m.get("research_sources") or []
+        if isinstance(sources,str):
+            sources=[sources]
+
+        item=dict(r)
+        item.update({
+            "Is Story":bool(story.get("is_story")),
+            "Lead Story":bool(story.get("lead_story")),
+            "Story Category":str(story.get("story_category") or r.get("Event Family") or ""),
+            "Card Title":str(story.get("card_title") or r.get("Title") or ""),
+            "Card Deck":str(story.get("card_deck") or r.get("Description") or ""),
+            "Why It Matters":str(story.get("why_it_matters") or r.get("Trade / Commercial Impact") or r.get("Operational Impact") or ""),
+            "Linked Objects":" · ".join(dict.fromkeys(labels)),
+            "Linked Companies":" · ".join(dict.fromkeys(entity_labels)),
+            "Linked Assets":" · ".join(dict.fromkeys(asset_labels)),
+            "Linked Routes":" · ".join(dict.fromkeys(route_labels)),
+            "Is Disruption":bool(disruption.get("is_disruption")),
+            "Primary Disruption":bool(disruption.get("primary_disruption")),
+            "Disruption Domains":", ".join(str(x) for x in (disruption.get("disruption_domains") or [])),
+            "Disruption Type":str(disruption.get("disruption_type") or ""),
+            "Disruption Status":str(disruption.get("status") or ""),
+            "Horizon":bool(horizon.get("show_in_trade_horizon")),
+            "Horizon Type":str(horizon.get("horizon_type") or ""),
+            "Next Milestone":str(horizon.get("next_milestone") or ""),
+            "Research Sources":sources,
+        })
+        rows.append(item)
+
+    out=pd.DataFrame(rows)
+    if "Start Date" in out.columns:
+        out["_dt"]=pd.to_datetime(out["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+        out=out.sort_values("_dt",ascending=False,na_position="last")
+    return out
+
+
+def _render_trade_story_cards(df,max_items=8,show_why=True):
+    if df is None or df.empty:
+        st.caption("No canonical developments in this view.")
+        return
+    for _,r in df.head(max_items).iterrows():
+        title=html_lib.escape(str(r.get("Card Title") or r.get("Title") or "Untitled"))
+        cat=html_lib.escape(str(r.get("Story Category") or r.get("Event Family") or "Development"))
+        date=str(r.get("Start Date") or "")[:10]
+        status=html_lib.escape(str(r.get("Status") or ""))
+        deck=html_lib.escape(str(r.get("Card Deck") or r.get("Description") or ""))
+        why=html_lib.escape(str(r.get("Why It Matters") or ""))
+        linked=html_lib.escape(str(r.get("Linked Objects") or ""))
+        dis=bool(r.get("Is Disruption"))
+        horizon=bool(r.get("Horizon"))
+        chips=[cat]
+        if dis: chips.append("DISRUPTION")
+        if horizon: chips.append("TRADE HORIZON")
+        if status: chips.append(status.upper())
+        chip_html="".join(f"<span class='pc-chip'>{html_lib.escape(str(x))}</span>" for x in chips if x)
+        body=f"""
+        <div class='pc-card'>
+          <div class='pc-label'>{html_lib.escape(date)}</div>
+          <div class='pc-big' style='margin-top:3px'>{title}</div>
+          <div style='margin-top:7px'>{chip_html}</div>
+          <div class='pc-search-details'>{deck}</div>
+        """
+        if show_why and why:
+            body += f"<div style='margin-top:9px'><b style='color:#D8B45A'>Why it matters:</b> {why}</div>"
+        if linked:
+            body += f"<div class='pc-small' style='margin-top:8px'><b>Linked:</b> {linked}</div>"
+        body += "</div>"
+        st.markdown(body,unsafe_allow_html=True)
+
+        sources=r.get("Research Sources") or []
+        if isinstance(sources,list) and sources:
+            good=[str(x) for x in sources if str(x).startswith(("http://","https://"))]
+            if good:
+                st.markdown(" · ".join(f"[Source {i+1}]({u})" for i,u in enumerate(good[:3])))
+
+
+def _canonical_trade_disruptions():
+    """Explicit disruption-tagged canonical events only."""
+    stories=_canonical_trade_story_frame()
+    if stories.empty:
+        return stories
+    return stories[stories["Is Disruption"].fillna(False)].copy() if "Is Disruption" in stories.columns else pd.DataFrame()
+
+
+def _canonical_trade_active_monitoring():
+    """Live monitors derived from canonical events so the view updates with ingestion."""
+    stories=_canonical_trade_story_frame()
+    if stories.empty:
+        return stories
+    status=stories.get("Status",pd.Series(index=stories.index,dtype=str)).fillna("").astype(str)
+    horizon=stories.get("Horizon",pd.Series(False,index=stories.index)).fillna(False)
+    disrupt=stories.get("Is Disruption",pd.Series(False,index=stories.index)).fillna(False)
+    phase=status.str.contains(r"monitor|ongoing|develop|watch|active|pending",case=False,regex=True,na=False)
+    out=stories[phase | horizon | disrupt].copy()
+    return out
+
+
+def render_trade_developments_home():
+    """Editorial hierarchy for Trade Home, driven by canonical data."""
+    stories=_canonical_trade_story_frame()
+    if stories.empty:
+        st.info("No canonical trade developments are currently available.")
+        return
+
+    story_rows=stories[stories.get("Is Story",False).fillna(False)].copy() if "Is Story" in stories.columns else stories
+    leads=story_rows[story_rows.get("Lead Story",False).fillna(False)].copy() if "Lead Story" in story_rows.columns else pd.DataFrame()
+    if leads.empty:
+        leads=story_rows.head(5)
+
+    st.markdown("### Lead developments")
+    _render_trade_story_cards(leads,5)
+
+    companies=story_rows[
+        story_rows.get("Linked Companies",pd.Series(index=story_rows.index,dtype=str)).fillna("").astype(str).str.len().gt(0)
+    ].copy()
+    if not companies.empty:
+        st.markdown("### Company & network stories")
+        _render_trade_story_cards(companies[~companies["Event ID"].isin(set(leads.get("Event ID",[])))],6,show_why=False)
+
+    c1,c2=st.columns(2,gap="large")
+    with c1:
+        st.markdown("### Disruptions")
+        disruptions=_canonical_trade_disruptions()
+        _render_trade_story_cards(disruptions,4)
+    with c2:
+        st.markdown("### Trade Horizon")
+        horizon=trade_horizon_events(stories)
+        _render_trade_story_cards(horizon,4,show_why=False)
+
+    market_pat=r"performance|throughput|market|volume|capacity|reliability|forecast|fleet"
+    mask=story_rows.get("Story Category",pd.Series(index=story_rows.index,dtype=str)).fillna("").astype(str).str.contains(
+        market_pat,case=False,regex=True,na=False
+    )
+    observations=story_rows[mask].copy()
+    if not observations.empty:
+        st.markdown("### Market & throughput observations")
+        _render_trade_story_cards(observations,5,show_why=False)
+
+
 
 if page=="Overview":
-    header("Trade System","Live news, markets, port activity, companies, infrastructure, fleets, contracts, investment and corridors across the global trade network.")
+    header("Trade System","Canonical company developments, disruptions, Trade Horizon, markets, ports, infrastructure, fleets and corridors across the global trade network.")
 
-    top_news,top_right=st.columns([1.55,1.0],gap="large")
-    with top_news:
-        render_overview_news()
-    with top_right:
+    # Canonical developments lead the Trade app. Open-source discovery is supporting evidence,
+    # not the primary operating picture.
+    render_trade_developments_home()
+
+    st.markdown("---")
+    op_left,op_right=st.columns([1.2,1.0],gap="large")
+    with op_left:
         _render_operational_brief()
-        st.markdown("---")
+    with op_right:
         st.markdown("### Markets now")
         render_live_market_dashboard(compact=True)
 
@@ -9067,6 +9335,9 @@ if page=="Overview":
     st.markdown("---")
     _render_business_infrastructure()
 
+    with st.expander("Open-source discovery feed",expanded=False):
+        render_overview_news()
+
     with st.expander("Recent operational events — full context",expanded=False):
         events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
         if not events.empty:
@@ -9074,17 +9345,17 @@ if page=="Overview":
             if dc:
                 events['_dt']=pd.to_datetime(events[dc],errors='coerce')
                 events=events.sort_values('_dt',ascending=False,na_position='last')
-            render_event_cards(events,6)
+            render_event_cards(events,10)
         else:
             st.info("No recent operational events.")
 
 
-elif page=="Forward Calendar":
-    header("Forward Calendar","Scheduled, seasonal and anticipated events with potential consequences for trade, logistics, transport, energy and business continuity.")
+elif page in {"Forward Calendar","Trade Horizon"}:
+    header("Trade Horizon","Upcoming milestones, developing risks, scheduled changes and seasonal events with potential consequences for trade, logistics, transport, energy and business continuity.")
     base_events=events.copy() if "events" in globals() and isinstance(events,pd.DataFrame) else pd.DataFrame()
     fdf=trade_horizon_events(base_events)
     if fdf.empty:
-        st.info("No forward-calendar events are currently classified in the shared event universe.")
+        st.info("No Trade Horizon items are currently classified in the canonical event universe.")
     else:
         today=pd.Timestamp.utcnow().date()
         c1,c2,c3=st.columns(3)
@@ -9102,10 +9373,10 @@ elif page=="Forward Calendar":
         if country!="All" and "Country / Countries" in fdf.columns:
             fdf=fdf[fdf["Country / Countries"].fillna("").astype(str).eq(country)]
         d1,d2,d3=st.columns(3)
-        d1.metric("Forward events",len(fdf))
+        d1.metric("Horizon items",len(fdf))
         d2.metric("Countries / regions",fdf.get("Country / Countries",pd.Series(dtype=str)).nunique())
         d3.metric("Modes",fdf.get("Mode",pd.Series(dtype=str)).nunique())
-        cols=[c for c in ["Start Date","End Date","Country / Countries","Location","Event Family","Event Type","Title","Severity","Mode","Operational Impact","Trade / Commercial Impact","Confidence"] if c in fdf.columns]
+        cols=[c for c in ["Start Date","End Date","Horizon Type","Next Milestone","Country / Countries","Location","Event Family","Event Type","Title","Severity","Mode","Operational Impact","Trade / Commercial Impact","Confidence"] if c in fdf.columns]
         display_df(fdf[cols] if cols else fdf,620)
 
 elif page=="Search":
@@ -9860,36 +10131,66 @@ elif page in ["Ports","Ports & Terminals"]:
             with tabs[4]: display_df(pd.DataFrame([row]),20)
 
 elif page=="Watch Areas":
-    header("Watch Areas","Active monitoring, disruption watchlists, weather/labour observations and strategic events in one operational workspace.")
-    monitoring=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame()).copy()
+    header("Watch Areas","Live canonical monitoring, disruption watch, weather/labour observations and strategic events in one operational workspace.")
+
+    canonical_monitor=_canonical_trade_active_monitoring()
+    legacy_monitor=TABLES.get(("Intelligence","Monitoring"),pd.DataFrame()).copy()
     disruption=TABLES.get(("Intelligence","Disruption Watch"),pd.DataFrame()).copy()
     weather=TABLES.get(("Intelligence","Weather Labour Events"),pd.DataFrame()).copy()
     strategic=TABLES.get(("Intelligence","Strategic Events"),pd.DataFrame()).copy()
     corridors=TABLES.get(("Infrastructure","Corridors"),pd.DataFrame()).copy()
+
     m1,m2,m3,m4=st.columns(4)
-    m1.metric("Monitoring",f"{len(monitoring):,}")
-    m2.metric("Disruption watch",f"{len(disruption):,}")
+    m1.metric("Live monitors",f"{len(canonical_monitor):,}")
+    m2.metric("Canonical disruptions",f"{len(_canonical_trade_disruptions()):,}")
     m3.metric("Weather / labour",f"{len(weather):,}")
     m4.metric("Corridors",f"{len(corridors):,}")
+
     wt1,wt2,wt3,wt4=st.tabs(["Active monitoring","Disruption watch","Weather & labour","Strategic events"])
     with wt1:
-        q=st.text_input("Search monitoring",placeholder="Hormuz, Black Sea, Red Sea, port strike...",key="watch_monitor_q")
-        display_df(_contains_any(monitoring,[q]) if q.strip() and not monitoring.empty else monitoring,300)
+        q=st.text_input("Search monitoring",placeholder="Hormuz, Black Sea, Red Sea, port strike, Suez, Panama...",key="watch_monitor_q")
+        view=canonical_monitor.copy()
+        if q.strip() and not view.empty:
+            view=_contains_any(view,[q])
+        if view.empty:
+            st.caption("No live canonical monitoring records matched.")
+            if not legacy_monitor.empty:
+                st.markdown("#### Legacy monitoring reference")
+                display_df(_contains_any(legacy_monitor,[q]) if q.strip() else legacy_monitor,180)
+        else:
+            cols=[c for c in ["Start Date","Status","Story Category","Title","Next Milestone","Disruption Domains","Linked Companies","Linked Assets","Linked Routes","Why It Matters"] if c in view.columns]
+            display_df(view[cols] if cols else view,300)
+
     with wt2:
-        q=st.text_input("Search disruption watch",placeholder="port, rail, aviation, weather, conflict...",key="watch_disrupt_q")
-        dview=_contains_any(disruption,[q]) if q.strip() and not disruption.empty else disruption
-        display_df(dview,300)
-        if not dview.empty:
-            dview=dview.reset_index(drop=True)
-            labels=[f"{r.get('Location / System','')} — {r.get('Issue','')}" for _,r in dview.iterrows()]
-            dpick=st.selectbox("Inspect disruption",range(len(labels)),format_func=lambda i:labels[i],key="watch_disruption_pick")
-            render_trade_disruption_brief(dview.iloc[dpick])
+        q=st.text_input("Search disruption watch",placeholder="port, rail, aviation, weather, conflict...",key="watch_disruption_q")
+        dev=_canonical_trade_disruptions()
+        if q.strip() and not dev.empty:
+            dev=_contains_any(dev,[q])
+        _render_trade_story_cards(dev,20)
+
+        if not disruption.empty:
+            with st.expander("Legacy disruption-watch reference",expanded=False):
+                display_df(_contains_any(disruption,[q]) if q.strip() else disruption,200)
+
     with wt3:
-        q=st.text_input("Search weather / labour",placeholder="typhoon, earthquake, strike, protest...",key="watch_weather_q")
+        q=st.text_input("Search weather / labour",placeholder="storm, strike, typhoon, rail...",key="watch_weather_q")
         display_df(_contains_any(weather,[q]) if q.strip() and not weather.empty else weather,300)
+
     with wt4:
-        q=st.text_input("Search strategic events",placeholder="attack, closure, acquisition, sanctions...",key="watch_strategic_q")
-        display_df(_contains_any(strategic,[q]) if q.strip() and not strategic.empty else strategic,300)
+        q=st.text_input("Search strategic events",placeholder="sanctions, conflict, corridor, policy...",key="watch_strategic_q")
+        live=_canonical_trade_story_frame()
+        if not live.empty:
+            mask=live.get("Story Category",pd.Series(index=live.index,dtype=str)).fillna("").astype(str).str.contains(
+                r"sanction|regulatory|routing|corridor|security|policy|compliance",case=False,regex=True,na=False
+            )
+            lv=live[mask].copy()
+            if q.strip(): lv=_contains_any(lv,[q])
+            _render_trade_story_cards(lv,20)
+        if not strategic.empty:
+            with st.expander("Legacy strategic-event reference",expanded=False):
+                display_df(_contains_any(strategic,[q]) if q.strip() else strategic,200)
+
+
 elif page=="Port Activity":
     header(
         "Global Port Activity",
@@ -10823,76 +11124,126 @@ elif page=="News & Events":
                 max_items=200
             )
 
-elif page=="News & Signals":
+elif page in {"News & Signals","News & Developments"}:
     header(
-        "News & Signals",
-        "Open-source discovery across trade, ports, logistics, maritime, rail, aviation and infrastructure. Results remain leads for verification and entity matching."
+        "News & Developments",
+        "Canonical company, network, disruption and sanctions developments lead this workspace. Open-source feeds remain a discovery layer for promotion into the canonical model."
     )
-    api_key=_newsdata_key()
-    if not api_key:
-        st.markdown("<div class='pc-hero'><div class='pc-hero-title'>NewsData.io connector ready</div><div class='pc-hero-copy'>Add <b>NEWSDATA_API_KEY</b> or grouped <b>[newsdata] api_key</b> to Streamlit Secrets to activate this workspace. No external requests are made until the key is present.</div></div>",unsafe_allow_html=True)
-    else:
-        st.caption("Source: NewsData.io · cached for 10 minutes · discovery layer only · relevance-gated")
-    presets={
-        "Business & trade":"trade business company investment contract acquisition infrastructure logistics shipping freight",
-        "Conflict & geopolitics":"conflict geopolitics war military security sanctions blockade border strait",
-        "Maritime security":"ship vessel tanker attack drone missile seizure piracy maritime security",
-        "Ports & terminals":"port terminal strike closure disruption congestion concession investment",
-        "Logistics & supply chain":"logistics shipping freight supply chain disruption congestion delay shortage",
-        "Energy & commodities":"oil gas LNG refinery pipeline energy commodity crude",
-        "Rail & intermodal":"rail railway freight intermodal derailment strike disruption infrastructure",
-        "Aviation & air cargo":"airport aviation air cargo disruption closure strike logistics",
-        "Trade & sanctions":"trade sanctions export controls customs tariff shipping compliance",
-        "Infrastructure & deals":"port terminal logistics railway acquisition investment concession contract capex",
-        "Custom":""
-    }
-    c1,c2=st.columns([1.2,2.8])
-    with c1: family=st.selectbox("Signal family",list(presets),key="newsdata_family")
-    with c2: query=st.text_input("Search terms",value=presets[family],placeholder="Rotterdam port strike",key="newsdata_query")
-    if st.button("Search news & signals",type="primary",disabled=not bool(api_key),key="newsdata_go"):
-        if len(query.strip())<3:
-            st.warning("Enter a more specific search.")
+
+    stories=_canonical_trade_story_frame()
+    tabs=st.tabs(["Lead Developments","Company & Network","Disruptions","Sanctions & Compliance","Open-source Discovery"])
+
+    with tabs[0]:
+        if stories.empty:
+            st.info("No canonical developments are currently available.")
         else:
-            ndf,nerr=load_newsdata_articles(query.strip(),api_key,"en",10)
-            st.session_state["newsdata_results"]=(ndf,nerr,query.strip())
-    ndf,nerr,lastq=st.session_state.get("newsdata_results",(pd.DataFrame(),"",""))
-    if not ndf.empty:
-        ndf=ndf[ndf.apply(_news_trade_relevant,axis=1)].copy()
+            lead=stories[stories.get("Lead Story",pd.Series(False,index=stories.index)).fillna(False)]
+            if lead.empty:
+                lead=stories[stories.get("Is Story",pd.Series(True,index=stories.index)).fillna(True)].head(20)
+            _render_trade_story_cards(lead,20)
+
+    with tabs[1]:
+        if stories.empty:
+            st.info("No company-linked canonical developments.")
+        else:
+            company=stories[
+                stories.get("Linked Companies",pd.Series(index=stories.index,dtype=str)).fillna("").astype(str).str.len().gt(0)
+            ]
+            q=st.text_input("Filter company / network developments",placeholder="DP World, AD Ports, Noatum, Hapag-Lloyd...",key="canonical_company_story_q")
+            if q.strip() and not company.empty:
+                company=_contains_any(company,[q])
+            _render_trade_story_cards(company,40)
+
+    with tabs[2]:
+        dis=_canonical_trade_disruptions()
+        q=st.text_input("Filter disruptions",placeholder="Panama, Rhine, rail, port, aviation...",key="canonical_disruption_story_q")
+        if q.strip() and not dis.empty:
+            dis=_contains_any(dis,[q])
+        _render_trade_story_cards(dis,40)
+
+    with tabs[3]:
+        st.markdown("### Canonical sanctions designations")
+        try:
+            sb=pc_db_client(service=True)
+            srows=pc_safe_rows(sb,"pc_sanctions_designations","*",5000,order="designation_date") if sb else []
+            slinks=pc_safe_rows(sb,"pc_sanctions_entity_links","*",10000) if sb else []
+        except Exception:
+            srows=[]; slinks=[]
+        if srows:
+            sdf=pd.DataFrame(srows)
+            if "designation_date" in sdf.columns:
+                sdf["_dt"]=pd.to_datetime(sdf["designation_date"],errors="coerce")
+                sdf=sdf.sort_values("_dt",ascending=False,na_position="last")
+            display_df(sdf.drop(columns=["_dt"],errors="ignore"),250)
+        else:
+            st.caption("No live canonical sanctions rows returned; use Sanctions & Compliance for the full policy workspace.")
+        if slinks:
+            with st.expander("Sanctions entity links",expanded=False):
+                display_df(pd.DataFrame(slinks),250)
+        if not stories.empty:
+            sanc=stories[
+                stories.get("Story Category",pd.Series(index=stories.index,dtype=str)).fillna("").astype(str).str.contains(
+                    r"sanction|compliance|regulatory",case=False,regex=True,na=False
+                )
+            ]
+            if not sanc.empty:
+                st.markdown("### Related developments")
+                _render_trade_story_cards(sanc,20)
+
+    with tabs[4]:
+        api_key=_newsdata_key()
+        if not api_key:
+            st.markdown("<div class='pc-hero'><div class='pc-hero-title'>NewsData.io connector ready</div><div class='pc-hero-copy'>Add <b>NEWSDATA_API_KEY</b> or grouped <b>[newsdata] api_key</b> to Streamlit Secrets to activate this discovery workspace.</div></div>",unsafe_allow_html=True)
+        else:
+            st.caption("Source: NewsData.io · cached for 10 minutes · discovery layer only · relevance-gated")
+        presets={
+            "Business & trade":"trade business company investment contract acquisition infrastructure logistics shipping freight",
+            "Conflict & geopolitics":"conflict geopolitics war military security sanctions blockade border strait",
+            "Maritime security":"ship vessel tanker attack drone missile seizure piracy maritime security",
+            "Ports & terminals":"port terminal strike closure disruption congestion concession investment",
+            "Logistics & supply chain":"logistics shipping freight supply chain disruption congestion delay shortage",
+            "Energy & commodities":"oil gas LNG refinery pipeline energy commodity crude",
+            "Rail & intermodal":"rail railway freight intermodal derailment strike disruption infrastructure",
+            "Aviation & air cargo":"airport aviation air cargo disruption closure strike logistics",
+            "Trade & sanctions":"trade sanctions export controls customs tariff shipping compliance",
+            "Infrastructure & deals":"port terminal logistics railway acquisition investment concession contract capex",
+            "Custom":""
+        }
+        c1,c2=st.columns([1.2,2.8])
+        with c1: family=st.selectbox("Signal family",list(presets),key="newsdata_family")
+        with c2: query=st.text_input("Search terms",value=presets[family],placeholder="Rotterdam port strike",key="newsdata_query")
+        if st.button("Search open-source signals",type="primary",disabled=not bool(api_key),key="newsdata_go"):
+            if len(query.strip())<3:
+                st.warning("Enter a more specific search.")
+            else:
+                ndf,nerr=load_newsdata_articles(query.strip(),api_key,"en",10)
+                st.session_state["newsdata_results"]=(ndf,nerr,query.strip())
+
+        ndf,nerr,lastq=st.session_state.get("newsdata_results",(pd.DataFrame(),"",""))
         if not ndf.empty:
-            ndf["_title_key"]=ndf.get("title",pd.Series(index=ndf.index,dtype=str)).fillna("").astype(str).str.casefold().str.replace(r"[^a-z0-9]+"," ",regex=True).str.strip()
-            ndf=ndf.drop_duplicates("_title_key").drop(columns=["_title_key"],errors="ignore")
-    if nerr:
-        st.warning(f"NewsData.io is temporarily unavailable. {nerr}")
-    elif not ndf.empty:
-        m1,m2,m3=st.columns(3)
-        m1.metric("Signals",f"{len(ndf):,}")
-        source_col="source_name" if "source_name" in ndf.columns else ("source_id" if "source_id" in ndf.columns else None)
-        m2.metric("Sources",f"{ndf[source_col].nunique():,}" if source_col else "—")
-        countries=set()
-        if "country" in ndf.columns:
-            for x in ndf["country"].tolist():
-                if isinstance(x,list): countries.update(str(v) for v in x)
-                elif x: countries.add(str(x))
-        m3.metric("Countries",f"{len(countries):,}" if countries else "—")
-        st.markdown(f"### Results for `{lastq}`")
-        for _,row in ndf.head(50).iterrows():
-            title=str(row.get("title","") or "Untitled")
-            url=str(row.get("link","") or "")
-            desc=str(row.get("description","") or "")
-            source=str(row.get("source_name",row.get("source_id","")) or "")
-            pub=str(row.get("pubDate","") or "")
-            country=row.get("country","")
-            if isinstance(country,list): country=", ".join(map(str,country))
-            if url: st.markdown(f"**[{title}]({url})**")
-            else: st.markdown(f"**{title}**")
-            meta=" · ".join(x for x in [source,str(country),pub] if str(x).strip())
-            if meta: st.caption(meta)
-            if desc: st.write(desc[:650] + ("…" if len(desc)>650 else ""))
-            st.markdown("<span class='pc-chip'>OPEN SOURCE</span><span class='pc-chip'>UNVERIFIED SIGNAL</span>",unsafe_allow_html=True)
-            st.markdown("---")
-        st.caption("Corroborate and resolve entities before promoting a signal into the canonical event model.")
-    elif api_key:
-        st.info("Choose a signal family or enter search terms to scan the latest news feed.")
+            ndf=ndf[ndf.apply(_news_trade_relevant,axis=1)].copy()
+            if not ndf.empty:
+                ndf["_title_key"]=ndf.get("title",pd.Series(index=ndf.index,dtype=str)).fillna("").astype(str).str.casefold().str.replace(r"[^a-z0-9]+"," ",regex=True).str.strip()
+                ndf=ndf.drop_duplicates("_title_key").drop(columns=["_title_key"],errors="ignore")
+        if nerr:
+            st.warning(f"NewsData.io is temporarily unavailable. {nerr}")
+        elif not ndf.empty:
+            for _,row in ndf.head(50).iterrows():
+                title=str(row.get("title","") or "Untitled")
+                url=str(row.get("link","") or "")
+                desc=str(row.get("description","") or "")
+                source=str(row.get("source_name",row.get("source_id","")) or "")
+                pub=str(row.get("pubDate","") or "")
+                if url: st.markdown(f"**[{title}]({url})**")
+                else: st.markdown(f"**{title}**")
+                if source or pub: st.caption(" · ".join(x for x in [source,pub] if x))
+                if desc: st.write(desc[:650] + ("…" if len(desc)>650 else ""))
+                st.markdown("<span class='pc-chip'>OPEN SOURCE</span><span class='pc-chip'>UNVERIFIED SIGNAL</span>",unsafe_allow_html=True)
+                st.markdown("---")
+            st.caption("Corroborate and resolve entities before promotion into the canonical event model.")
+        elif api_key:
+            st.info("Choose a signal family or enter search terms.")
+
 
 elif page=="Hormuz Monitor":
     header(
