@@ -4238,18 +4238,98 @@ def _mark_deferred_review(staged_record_id, method, reason, details=None):
 
 
 
-def _v29_package_local_endpoint_map(job_id):
-    """Map package-local/source IDs to canonical IDs already resolved in this ingestion job.
 
-    This is the missing bridge for dependency-safe native packages: parent/object rows may
-    resolve to an existing canonical ID, while deferred graph rows still contain the package
-    source ID. Retry must be able to recover that mapping from staging without re-uploading.
+def _v31_resolve_parent_stage_row(r):
+    """Resolve one staged parent/object row even if resolved_entity_id is blank.
+
+    This is deliberately independent of prior loader status. It derives the canonical
+    endpoint from the staged payload itself: entity name/alias, asset name+country,
+    vessel IMO/name, route name, or event ID.
+    """
+    table=str(r.get("target_table") or "").strip()
+    p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+    existing=str(r.get("resolved_entity_id") or "").strip()
+    if existing:
+        return existing
+
+    try:
+        if table=="pc_entities":
+            eid=str(p.get("entity_id") or "").strip()
+            if eid:
+                hit=(sb.table("pc_entities").select("entity_id").eq("entity_id",eid).limit(1).execute().data or [])
+                if hit: return str(hit[0]["entity_id"])
+            name=str(p.get("name") or "").strip()
+            if name:
+                idx=_canonical_entity_index()
+                hits=idx.get(_canon_name_key(name),[])
+                if len(hits)==1:
+                    return str(hits[0]["entity_id"])
+
+        elif table=="pc_assets":
+            aid=str(p.get("asset_id") or "").strip()
+            if aid:
+                hit=(sb.table("pc_assets").select("asset_id").eq("asset_id",aid).limit(1).execute().data or [])
+                if hit: return str(hit[0]["asset_id"])
+            name=str(p.get("name") or "").strip()
+            country=str(p.get("country") or "").strip()
+            if name:
+                q=sb.table("pc_assets").select("asset_id,name,country").eq("name",name).limit(20)
+                hits=(q.execute().data or [])
+                if country:
+                    narrowed=[h for h in hits if str(h.get("country") or "").strip().casefold()==country.casefold()]
+                    if narrowed: hits=narrowed
+                ids={str(h.get("asset_id") or ""):h for h in hits if h.get("asset_id")}
+                if len(ids)==1:
+                    return next(iter(ids))
+
+        elif table=="pc_mobile_assets":
+            mid=str(p.get("mobile_asset_id") or "").strip()
+            if mid:
+                hit=(sb.table("pc_mobile_assets").select("mobile_asset_id").eq("mobile_asset_id",mid).limit(1).execute().data or [])
+                if hit: return str(hit[0]["mobile_asset_id"])
+            imo=str(p.get("imo") or "").strip()
+            if imo:
+                hits=(sb.table("pc_mobile_assets").select("mobile_asset_id,imo,name").eq("imo",imo).limit(2).execute().data or [])
+                if len(hits)==1: return str(hits[0]["mobile_asset_id"])
+            name=str(p.get("name") or "").strip()
+            if name:
+                hits=(sb.table("pc_mobile_assets").select("mobile_asset_id,name").eq("name",name).limit(3).execute().data or [])
+                ids={str(h.get("mobile_asset_id") or ""):h for h in hits if h.get("mobile_asset_id")}
+                if len(ids)==1: return next(iter(ids))
+
+        elif table=="pc_transport_routes":
+            rid=str(p.get("route_id") or "").strip()
+            if rid:
+                hit=(sb.table("pc_transport_routes").select("route_id").eq("route_id",rid).limit(1).execute().data or [])
+                if hit: return str(hit[0]["route_id"])
+            name=str(p.get("route_name") or "").strip()
+            if name:
+                hits=(sb.table("pc_transport_routes").select("route_id,route_name").eq("route_name",name).limit(3).execute().data or [])
+                ids={str(h.get("route_id") or ""):h for h in hits if h.get("route_id")}
+                if len(ids)==1: return next(iter(ids))
+
+        elif table=="pc_events":
+            eid=str(p.get("event_id") or "").strip()
+            if eid:
+                hit=(sb.table("pc_events").select("event_id").eq("event_id",eid).limit(1).execute().data or [])
+                if hit: return str(hit[0]["event_id"])
+    except Exception:
+        return None
+    return None
+
+
+def _v31_package_local_endpoint_map(job_id):
+    """Reconstruct package-local/source ID -> live canonical ID from staged parents.
+
+    Unlike V29 this works even if the earlier processor applied/created the parent
+    but never wrote resolved_entity_id back to the staged row.
     """
     mapping={}
     try:
         rows=(sb.table("pc_staged_records")
-              .select("target_table,source_record_key,natural_key,payload,resolved_entity_id,review_status,resolution_status")
+              .select("staged_record_id,target_table,source_record_key,natural_key,payload,resolved_entity_id,review_status,resolution_status")
               .eq("ingestion_job_id",str(job_id))
+              .in_("target_table",["pc_entities","pc_assets","pc_mobile_assets","pc_events","pc_transport_routes"])
               .limit(30000).execute().data or [])
     except Exception:
         return mapping
@@ -4261,29 +4341,32 @@ def _v29_package_local_endpoint_map(job_id):
         "pc_events":"event_id",
         "pc_transport_routes":"route_id",
     }
+
     for r in rows:
-        canonical=str(r.get("resolved_entity_id") or "").strip()
+        canonical=_v31_resolve_parent_stage_row(r)
         if not canonical:
             continue
-        table=str(r.get("target_table") or "").strip()
+        table=str(r.get("target_table") or "")
         p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
-        candidates=[
-            r.get("source_record_key"),
-            r.get("natural_key"),
-            p.get(id_fields.get(table,"")) if id_fields.get(table) else None,
-        ]
-        # Preserve explicit package-local IDs recorded by earlier loader stages.
         md=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
-        candidates += [
-            md.get("package_local_entity_id"),
-            md.get("package_local_asset_id"),
-            md.get("package_local_mobile_asset_id"),
-            md.get("package_local_route_id"),
+        candidates=[
+            r.get("source_record_key"), r.get("natural_key"),
+            p.get(id_fields.get(table,"")) if id_fields.get(table) else None,
+            md.get("package_local_entity_id"), md.get("package_local_asset_id"),
+            md.get("package_local_mobile_asset_id"), md.get("package_local_route_id"),
         ]
         for c in candidates:
             c=str(c or "").strip()
             if c:
                 mapping[c]=canonical
+
+        # Heal the staged parent row so subsequent retries become trivial.
+        try:
+            sb.table("pc_staged_records").update({
+                "resolved_entity_id":canonical
+            }).eq("staged_record_id",r["staged_record_id"]).execute()
+        except Exception:
+            pass
     return mapping
 
 
@@ -4336,7 +4419,7 @@ def _v29_resolve_graph_endpoint(job_id, endpoint_type, endpoint_id, endpoint_nam
     metadata=metadata if isinstance(metadata,dict) else {}
 
     # 1) package-local -> canonical map from this exact ingestion job.
-    local_map=_v29_package_local_endpoint_map(job_id)
+    local_map=_v31_package_local_endpoint_map(job_id)
     mapped=local_map.get(raw_id)
     if mapped:
         return mapped, "package_local_map", name
@@ -4867,6 +4950,53 @@ def _v27_repair_relationship_source_endpoints(job_id):
             report["errors"].append(f"{r.get('staged_record_id')}: {exc}")
 
     return report
+
+
+
+def _v31_repair_existing_graph_rows(job_id):
+    """Repair graph rows only, without rerunning the parent V5 ingestion processor.
+
+    This is the correct operation for an already-loaded job after a reboot: parents are
+    already canonical, so do not send them through V5 again. Reconstruct endpoint maps,
+    apply event links and relationships directly, then run the deferred SQL once for any
+    specialist child rows.
+    """
+    result={
+        "loader_build":LOADER_BUILD,
+        "job_id":str(job_id),
+        "endpoint_map_size":0,
+        "event_links":None,
+        "relationships":None,
+        "deferred_rpc":None,
+        "final_summary":None,
+    }
+
+    endpoint_map=_v31_package_local_endpoint_map(job_id)
+    result["endpoint_map_size"]=len(endpoint_map)
+
+    result["event_links"]=_v28_apply_event_links_direct(job_id)
+    result["relationships"]=_v29_apply_relationships_direct(job_id)
+
+    try:
+        result["deferred_rpc"]=(sb.rpc(
+            "pc_apply_deferred_canonical_job_v1",
+            {"p_ingestion_job_id":str(job_id)}
+        ).execute().data or {})
+    except Exception as exc:
+        result["deferred_rpc"]={"error":str(exc)}
+
+    try:
+        _canonical_finalize_existing_rows(job_id)
+    except Exception:
+        pass
+
+    try:
+        summ,by=_canonical_job_summary(job_id)
+        result["final_summary"]=summ
+        result["by_table"]=by
+    except Exception as exc:
+        result["final_summary"]={"error":str(exc)}
+    return result
 
 
 def _canonical_process_job(job_id, deferred_rows=None):
@@ -5815,7 +5945,7 @@ elif page=="Canonical Loader":
         "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
-    st.success("V30: adds persistent Recent ingestion jobs / Resume controls on the Canonical Loader page. Reboots no longer require re-uploading a package: reopen an existing Supabase job and retry unresolved rows directly. V29 graph-endpoint repair remains active.")
+    st.success("V31: Resume now performs graph-only repair. It reconstructs package-local→canonical endpoint mappings from staged parent payloads even when resolved_entity_id was never saved, then applies event links/relationships without rerunning parent ingestion.")
     if not sb:
         st.error("Supabase service connection required.")
     else:
@@ -5913,17 +6043,17 @@ elif page=="Canonical Loader":
                     dataframe(_resume_review)
 
                 if st.button(
-                    "↻ Retry unresolved rows in selected job",
+                    "🛠 Repair unresolved graph rows in selected job",
                     type="primary",
                     use_container_width=True,
                     key=f"canonical_resume_retry_v30_{_selected_jid}"
                 ):
                     try:
                         with st.status(
-                            "Retrying the existing Supabase ingestion job…",
+                            "Repairing existing staged graph rows without rerunning parent ingestion…",
                             expanded=True
                         ) as _status:
-                            _result=_canonical_process_job(_selected_jid)
+                            _result=_v31_repair_existing_graph_rows(_selected_jid)
                             st.write(_result)
                             _status.update(
                                 label="Retry complete — refreshing job status",
@@ -6274,7 +6404,7 @@ elif page=="Canonical Loader":
                                     "Retrying unresolved canonical objects and dependent graph edges…",
                                     expanded=True
                                 ) as status:
-                                    result=_canonical_process_job(last)
+                                    result=_v31_repair_existing_graph_rows(last)
                                     st.write(result)
                                     status.update(
                                         label="Retry complete — refreshing",
