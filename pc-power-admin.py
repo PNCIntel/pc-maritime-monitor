@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "42-fact-review-safe-metadata-2026-09-18"
+LOADER_BUILD = "43-fact-promotion-workflow-2026-09-18"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -2830,6 +2830,30 @@ def _fact_resolution_indexes():
             nm=_fact_norm(r.get("name"))
             if rid: out["entity"]["by_id"][rid]=r
             if nm: out["entity"]["by_name"].setdefault(nm,[]).append(r)
+
+        aliases=safe_rows(sb,"pc_entity_aliases","entity_id,alias,alias_type",50000)
+        for a in aliases:
+            eid=str(a.get("entity_id") or "")
+            alias=_fact_norm(a.get("alias"))
+            row=out["entity"]["by_id"].get(eid)
+            if row and alias:
+                out["entity"]["by_name"].setdefault(alias,[]).append(row)
+
+        identifiers=safe_rows(
+            sb,"pc_entity_identifiers",
+            "entity_id,identifier_type,identifier_value,normalized_value,is_primary",
+            50000
+        )
+        out["entity"]["by_identifier"]={}
+        for ident in identifiers:
+            eid=str(ident.get("entity_id") or "")
+            row=out["entity"]["by_id"].get(eid)
+            if not row:
+                continue
+            for raw in [ident.get("normalized_value"),ident.get("identifier_value")]:
+                key=_fact_norm(raw)
+                if key:
+                    out["entity"]["by_identifier"].setdefault(key,[]).append(row)
     except Exception:
         pass
 
@@ -2866,6 +2890,18 @@ def _fact_resolution_indexes():
             if rid: out["transport_service"]["by_id"][rid]=r
             if nm: out["transport_service"]["by_name"].setdefault(nm,[]).append(r)
             if code: out["transport_service"]["by_code"].setdefault(code,[]).append(r)
+
+        aliases=safe_rows(
+            sb,"pc_transport_service_aliases",
+            "transport_service_id,alias,alias_type,operator_entity_id",
+            30000
+        )
+        for a in aliases:
+            sid=str(a.get("transport_service_id") or "")
+            alias=_fact_norm(a.get("alias"))
+            row=out["transport_service"]["by_id"].get(sid)
+            if row and alias:
+                out["transport_service"]["by_name"].setdefault(alias,[]).append(row)
     except Exception:
         pass
 
@@ -2896,6 +2932,13 @@ def _resolve_fact_reference(kind,name=None,identifier=None):
     # Canonical ID first.
     if ident and ident in idx.get("by_id",{}):
         return {"status":"matched","kind":kind,"match":idx["by_id"][ident],"method":"canonical_id","confidence":1.0}
+
+    if kind=="entity" and ident:
+        hits=idx.get("by_identifier",{}).get(_fact_norm(ident),[])
+        if len(hits)==1:
+            return {"status":"matched","kind":kind,"match":hits[0],"method":"registered_identifier","confidence":0.99}
+        if len(hits)>1:
+            return {"status":"ambiguous","kind":kind,"matches":hits,"method":"registered_identifier"}
 
     # Strong identifiers for mobile assets.
     if kind=="mobile_asset" and ident:
@@ -3189,6 +3232,195 @@ def _resolve_content_item_facts(content_item_id, extraction_run_id=None, ingesti
         pass
 
     return stats
+
+
+
+def _latest_content_extraction_run(content_item_id):
+    rows=(sb.table("pc_extraction_runs")
+          .select("extraction_run_id,ingestion_job_id,status,started_at,metadata")
+          .eq("content_item_id",content_item_id)
+          .order("started_at",desc=True).limit(1).execute().data or [])
+    return rows[0] if rows else {}
+
+
+def _fact_prompt_rows(content_item_id, limit=400):
+    return (sb.table("pc_extracted_facts").select(
+        "fact_id,fact_type,fact_key,subject_type,subject_name,subject_identifier,"
+        "predicate,object_type,object_name,object_identifier,value_text,value_numeric,"
+        "unit,currency,effective_date,start_date,end_date,location_text,country,"
+        "evidence_text,source_url,primary_source_url,confidence,verification_status"
+    ).eq("content_item_id",content_item_id).limit(int(limit)).execute().data or [])
+
+
+def _create_content_promotion_job(item, product_context="TRADE"):
+    return sb.table("pc_ingestion_jobs").insert({
+        "job_type":"CONTENT_FACT_PROMOTION",
+        "title":f"Promote extracted facts · {item.get('title') or item.get('source_url') or item.get('content_item_id')}",
+        "query_text":"Build canonical/domain staged proposals from preserved extracted facts.",
+        "source_scope":{
+            "content_item_id":item.get("content_item_id"),
+            "source_url":item.get("source_url"),
+            "product_context":product_context,
+            "loader_build":LOADER_BUILD,
+        },
+        "status":"running",
+    }).execute().data[0]
+
+
+def _build_staged_proposals_from_content_item(
+    content_item_id,
+    product_context="TRADE",
+    use_web=False,
+    force=False
+):
+    """Second pass: turn preserved atomic facts into normal staged P&C records."""
+    if not ai_configured():
+        raise RuntimeError("AI research is not configured.")
+
+    items=(sb.table("pc_content_ingest_items").select("*")
+           .eq("content_item_id",content_item_id).limit(1).execute().data or [])
+    if not items:
+        raise RuntimeError(f"Content item not found: {content_item_id}")
+    item=items[0]
+    facts=_fact_prompt_rows(content_item_id)
+    if not facts:
+        return {"content_item_id":content_item_id,"facts":0,"staged":0,"message":"No extracted facts"}
+
+    run=_latest_content_extraction_run(content_item_id)
+    prior_job=run.get("ingestion_job_id")
+    if prior_job and not force:
+        prior=(sb.table("pc_staged_records").select("staged_record_id")
+               .eq("ingestion_job_id",str(prior_job)).limit(1).execute().data or [])
+        if prior:
+            stats=_resolve_content_item_facts(
+                content_item_id,
+                extraction_run_id=run.get("extraction_run_id"),
+                ingestion_job_id=prior_job
+            )
+            return {
+                "content_item_id":content_item_id,
+                "title":item.get("title"),
+                "facts":len(facts),
+                "staged":0,
+                "staged_existing":True,
+                "job_id":prior_job,
+                "fact_resolution":stats,
+            }
+
+    job=_create_content_promotion_job(item,product_context)
+    job_id=job["ingestion_job_id"]
+
+    compact=[
+        {k:v for k,v in f.items() if v not in (None,"",[],{})}
+        for f in facts
+    ]
+
+    prompt=f"""
+SECOND-PASS STRUCTURED PROMOTION FOR POWER & CORRIDORS.
+
+The source has already been fetched and fact-extracted. Do not summarize it.
+Build the reviewable canonical/domain `records` needed to represent the facts.
+
+SOURCE
+Title: {item.get('title') or ''}
+Publisher: {item.get('publisher') or ''}
+Publication date: {item.get('publication_date') or ''}
+Source URL: {item.get('source_url') or ''}
+
+RULES
+- Return records for every supported structural fact.
+- Preserve the source URL in metadata.research_sources.
+- Separate entities/assets/mobile assets from relationships/events.
+- Use the specialist tables for transport services, projects, financing,
+  contracts, shipbuilding orders/designs and sanctions when supported.
+- Do not invent internal IDs; omit them when unknown and let the loader fill them.
+- Do not invent IMO numbers, company registrations, amounts, dates, stakes,
+  port calls, route stops, ownership or operators.
+- Prefer structured child/link records over burying useful data in metadata.
+- You may return `facts: []`; the preserved fact layer already exists.
+
+PRESERVED FACTS
+{json.dumps(compact,ensure_ascii=False,default=str,indent=2)}
+"""
+
+    result=ai_research(
+        prompt,
+        product_context,
+        bool(use_web),
+        output_contract=UNIVERSAL_CONTENT_OUTPUT_CONTRACT
+    )
+    result=_prepare_universal_records(
+        result,
+        item.get("source_url"),
+        item.get("publisher"),
+        item.get("title")
+    )
+    result["facts"]=[]
+
+    staged,rejected,resolution=stage_ai_result(sb,job_id,result)
+
+    if run.get("extraction_run_id"):
+        meta=run.get("metadata") if isinstance(run.get("metadata"),dict) else {}
+        meta=dict(meta)
+        meta["promotion_job_id"]=str(job_id)
+        meta["promotion_records_staged"]=staged
+        sb.table("pc_extraction_runs").update({
+            "ingestion_job_id":job_id,
+            "records_proposed":staged,
+            "metadata":meta
+        }).eq("extraction_run_id",run["extraction_run_id"]).execute()
+
+    fact_resolution=_resolve_content_item_facts(
+        content_item_id,
+        extraction_run_id=run.get("extraction_run_id"),
+        ingestion_job_id=job_id
+    )
+
+    sb.table("pc_ingestion_jobs").update({
+        "status":"completed",
+        "completed_at":pd.Timestamp.utcnow().isoformat(),
+        "stats":{
+            "facts_basis":len(facts),
+            "staged_records":staged,
+            "rejected_records":rejected,
+            "resolution":resolution,
+            "fact_resolution":fact_resolution,
+        }
+    }).eq("ingestion_job_id",job_id).execute()
+
+    return {
+        "content_item_id":content_item_id,
+        "title":item.get("title"),
+        "facts":len(facts),
+        "staged":staged,
+        "rejected":rejected,
+        "job_id":job_id,
+        "fact_resolution":fact_resolution,
+    }
+
+
+def _build_proposals_for_fact_queue(limit_items=50, product_context="TRADE"):
+    items=(sb.table("pc_content_ingest_items")
+           .select("content_item_id,title,source_url,resolution_status,created_at")
+           .order("created_at",desc=True).limit(int(limit_items)).execute().data or [])
+    report=[]
+    for item in items:
+        cid=item.get("content_item_id")
+        count=(sb.table("pc_extracted_facts").select("fact_id",count="exact")
+               .eq("content_item_id",cid).limit(1).execute().count or 0)
+        if not count:
+            continue
+        try:
+            report.append(_build_staged_proposals_from_content_item(
+                cid,product_context=product_context,use_web=False,force=False
+            ))
+        except Exception as exc:
+            report.append({
+                "content_item_id":cid,
+                "title":item.get("title"),
+                "error":str(exc)
+            })
+    return report
 
 
 def _resolve_all_pending_content_facts(limit_items=100):
@@ -10343,26 +10575,51 @@ elif page=="Universal Content Intake":
                 "promotion links facts to staged proposals. Nothing here bypasses the normal review/apply workflow."
             )
 
-            a1,a2=st.columns([1.6,1])
+            a1,a2,a3=st.columns([1.8,1.1,0.9])
             with a1:
                 if st.button(
-                    "Resolve / link current fact queue",
+                    "Build staged proposals + resolve queue",
                     type="primary",
+                    use_container_width=True,
+                    key="promote_content_fact_queue"
+                ):
+                    if not ai_configured():
+                        st.error("Configure OPENAI_API_KEY and OPENAI_MODEL first.")
+                    else:
+                        with st.spinner("Building staged records from preserved facts..."):
+                            rep=_build_proposals_for_fact_queue(50,product_context="TRADE")
+                        st.session_state["content_promotion_report"]=rep
+                        ok=[x for x in rep if not x.get("error")]
+                        staged_total=sum(int(x.get("staged") or 0) for x in ok)
+                        st.success(
+                            f"Processed {len(ok)} source(s); {staged_total} new staged proposal(s) created. "
+                            "Next: open Review Queue in the sidebar."
+                        )
+                        st.rerun()
+            with a2:
+                if st.button(
+                    "Resolve links only",
                     use_container_width=True,
                     key="resolve_content_fact_queue"
                 ):
                     with st.spinner("Resolving canonical identities and staged promotions..."):
                         rep=_resolve_all_pending_content_facts(250)
-                    st.success(f"Resolution pass completed for {len(rep)} content item(s).")
                     st.session_state["content_resolution_report"]=rep
+                    st.success(f"Resolution pass completed for {len(rep)} content item(s).")
                     st.rerun()
-            with a2:
+            with a3:
                 review_limit=st.selectbox(
                     "Review window",
                     [500,1000,2500,5000],
                     index=1,
                     key="content_fact_review_limit"
                 )
+
+            st.info(
+                "Move the workflow forward: **Build staged proposals + resolve queue** → "
+                "open **Review Queue** → approve READY records → apply. "
+                "Use **Resolve links only** after adding or correcting canonical identities."
+            )
 
             try:
                 items,facts,links,promotions=_content_review_data(int(review_limit))
@@ -10420,6 +10677,26 @@ elif page=="Universal Content Intake":
                                 expanded=False
                             ):
                                 _review_article_summary(itemrow.to_dict(),ff.to_dict("records"),ll.to_dict("records"),pp.to_dict("records"))
+                                if pp.empty:
+                                    if st.button(
+                                        "Build staged proposals for this source",
+                                        key=f"promote_one_{cid}",
+                                        use_container_width=True
+                                    ):
+                                        if not ai_configured():
+                                            st.error("AI research is not configured.")
+                                        else:
+                                            with st.spinner("Building staged records from these facts..."):
+                                                rep=_build_staged_proposals_from_content_item(
+                                                    cid,product_context="TRADE",use_web=False
+                                                )
+                                            st.success(
+                                                f"Created {int(rep.get('staged') or 0)} staged proposal(s). "
+                                                "Continue in Review Queue."
+                                            )
+                                            st.rerun()
+                                else:
+                                    st.caption("Staged proposals already exist for this source. Continue in Review Queue.")
 
                 with needs_tab:
                     need=fdf[
