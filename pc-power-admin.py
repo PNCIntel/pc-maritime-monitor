@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "44-port-enrichment-workflow-2026-09-18"
+LOADER_BUILD = "45-review-queue-navigation-fix-2026-09-18"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -87,7 +87,8 @@ NAV = {
     "Home": "Canonical Home",
     "Canonical Loader": "Canonical Loader",
     "Identity Hygiene": "Identity Hygiene",
-    "Review Queue": "Canonical Review",
+    "Review Queue": "Review Queue",
+    "Canonical Exceptions": "Canonical Review",
     "AI Research": "AI Research Workflow",
     "Content Intake": "Universal Content Intake",
     "Port Enrichment": "Port Enrichment",
@@ -8625,8 +8626,9 @@ elif page=="Identity Hygiene":
 
 elif page=="Canonical Review":
     title(
-        "Canonical review queue",
-        "Only records the canonical processor could not resolve safely should appear here."
+        "Canonical exceptions",
+        "Only records the canonical identity processor could not resolve safely appear here. "
+        "For normal staged records, approvals and apply actions, use Review Queue."
     )
     if not sb:
         st.error("Supabase service connection required.")
@@ -12174,7 +12176,12 @@ elif page=="Staging Resolution":
 elif page=="Review Queue":
     title(
         "Review & apply queue",
-        "Bulk-review safe records; route ambiguous records to manual review. JSON is available only when you need to edit it."
+        "Review the staged records produced by AI Research, Universal Content Intake, Port Enrichment and bulk loaders. "
+        "Approve safe records here, then apply them to the canonical database."
+    )
+    st.info(
+        "This is the normal workflow queue. **Bulk review** contains pending staged proposals; "
+        "**Manual review** handles exceptions; **Approved — apply** writes approved records to canonical tables."
     )
 
     _show_action_feedback()
