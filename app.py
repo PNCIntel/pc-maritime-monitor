@@ -32,8 +32,8 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.4.2-trade-horizon-fixed"
-RELEASE_NAME = "Trade Operating Picture · Canonical Event Graph, Database Drilldown & Live Trade Horizon"
+APP_VERSION = "v3.4.3-connected-trade-intelligence"
+RELEASE_NAME = "Trade Operating Picture · Connected Trade Intelligence, Effects, Networks & Horizon"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -237,7 +237,7 @@ WORKBOOKS = {
     "Corporate & Markets": "07_corporate_markets.xlsx",
     "Transactions": "08_transactions.xlsx",
     "Intelligence": "09_intelligence.xlsx",
-    "Sources": "10_sources_evidence.xlsx",
+    "Evidence & sources": "10_sources_evidence.xlsx",
     "Systems & Waterways": "11_systems_waterways_governance.xlsx",
     "Defence & Shipbuilding": "12_defence_shipbuilding.xlsx",
     "Events & Hazards": "13_events_hazards.xlsx",
@@ -2364,7 +2364,7 @@ def english_header(c):
     x=x.replace("_"," ").strip()
     x=re.sub(r"\s+"," ",x)
     replacements={
-        "Url":"Source","Urls":"Sources","URL":"Source","URLs":"Sources",
+        "Url":"Source","Urls":"Evidence & sources","URL":"Source","URLs":"Evidence & sources",
         "Ro Ro":"Ro-Ro","Roro":"Ro-Ro","Iso3":"Country Code",
         "Jv":"JV","Imo":"IMO","Mmsi":"MMSI","Teu":"TEU","LNG":"LNG",
     }
@@ -2456,7 +2456,7 @@ def display_df(df, max_rows=150, show_ids=False):
     cfg={}
     for c in show.columns:
         if "url" in str(c).lower():
-            cfg[c]=st.column_config.LinkColumn(str(c).replace("URLs","Sources").replace("URL","Source"),display_text="Open")
+            cfg[c]=st.column_config.LinkColumn(str(c).replace("URLs","Evidence & sources").replace("URL","Source"),display_text="Open")
     st.dataframe(show,use_container_width=True,hide_index=True,column_config=cfg)
 
 def header(title,sub):
@@ -2711,7 +2711,7 @@ SEARCH_PRIORITY={
 @st.cache_data(show_spinner=False)
 def search_index():
     rows=[]
-    skip={"Data Dictionary","Runtime Table Crosswalk","Research Queue","Overview","Sources","Source Feeds"}
+    skip={"Data Dictionary","Runtime Table Crosswalk","Research Queue","Overview","Evidence & sources","Source Feeds"}
     for (wb_label,sheet),df in TABLES.items():
         if sheet in skip: continue
         for i,r in df.iterrows():
@@ -4954,7 +4954,7 @@ def render_company_profile(entity_id, entity_name):
             display_df(prof["assets"],100)
         rels=related_tables(entity_id,entity_name)
         for (wb_label,sheet),sub in rels:
-            if sheet in {"Sources","Overview","Companies","Defence Companies","Shipyards","Programmes","Contracts","Sample Vessels","Announcements","News Registry","Relationships"}:
+            if sheet in {"Evidence & sources","Overview","Companies","Defence Companies","Shipyards","Programmes","Contracts","Sample Vessels","Announcements","News Registry","Relationships"}:
                 continue
             with st.expander(f"{sheet} · {len(sub)} record(s)"):
                 display_df(sub,100)
@@ -6290,7 +6290,7 @@ def render_security_operating_picture():
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     des=TABLES.get(("Trade Policy & Compliance","Compliance Designations"),pd.DataFrame()).copy()
     exposure=TABLES.get(("Trade Policy & Compliance","Compliance Exposure"),pd.DataFrame()).copy()
-    feeds=TABLES.get(("Sources","Source Feeds"),pd.DataFrame()).copy()
+    feeds=TABLES.get(("Evidence & sources","Source Feeds"),pd.DataFrame()).copy()
     active=monitoring[monitoring.get("Status",pd.Series(dtype=str)).astype(str).str.contains("Active",case=False,na=False)] if not monitoring.empty else monitoring
     severe=events[events.get("Severity",pd.Series(dtype=str)).astype(str).str.lower().isin(["high","severe","critical"])] if not events.empty else events
     marsec=events[events.get("Event Family",pd.Series(dtype=str)).astype(str).str.contains("Maritime|Security|Conflict|Port",case=False,regex=True,na=False)] if not events.empty else events
@@ -6376,7 +6376,7 @@ def _canonical_vessel_fallback():
 
 def render_marsec_workspace():
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
-    feeds=TABLES.get(("Sources","Source Feeds"),pd.DataFrame()).copy()
+    feeds=TABLES.get(("Evidence & sources","Source Feeds"),pd.DataFrame()).copy()
 
     if not feeds.empty:
         feed_id=feeds.get("Feed ID")
@@ -6942,7 +6942,7 @@ def render_government_vessel_detail(vrow, prefix="gov_vessel"):
 
     sources=meta.get("research_sources")
     if isinstance(sources,list) and sources:
-        with st.expander("Sources",expanded=False):
+        with st.expander("Evidence & sources",expanded=False):
             for i,s in enumerate(sources,1):
                 if isinstance(s,dict):
                     title=_security_text(s.get("title")) or f"Source {i}"
@@ -9519,7 +9519,7 @@ def _event_source_urls(ctx):
 
 
 def render_selected_trade_story_context():
-    """Full click-through database context for the selected canonical Trade story."""
+    """Full connected trade-intelligence view for the selected canonical Trade story."""
     eid=str(st.session_state.get("trade_story_event_id") or "").strip()
     if not eid:
         return
@@ -9527,7 +9527,7 @@ def render_selected_trade_story_context():
     ctx=_load_trade_event_database_context(eid)
     ev=ctx.get("event") or {}
     if not ev:
-        st.warning("The selected event is no longer available in the canonical database.")
+        st.warning("The selected event is no longer available in the connected trade model.")
         if st.button("Close story context",key="close_missing_trade_story"):
             st.session_state.pop("trade_story_event_id",None)
             st.rerun()
@@ -9549,7 +9549,7 @@ def render_selected_trade_story_context():
             st.session_state.pop("trade_story_event_id",None)
             st.rerun()
     with ctitle:
-        st.markdown("### Database context")
+        st.markdown("### Connected trade intelligence")
 
     st.markdown(
         f"""<div class='pc-hero'>
@@ -9603,12 +9603,12 @@ def render_selected_trade_story_context():
             )
 
     tabs=st.tabs([
-        "Linked database objects",
-        "Event record",
-        "Network relationships",
-        "Locations",
+        "Connected companies & infrastructure",
+        "Event & impact",
+        "Ownership & network",
+        "Affected locations",
         "Sanctions & compliance",
-        "Sources"
+        "Evidence & sources"
     ])
 
     with tabs[0]:
@@ -9736,13 +9736,13 @@ def _render_trade_story_cards(df,max_items=8,show_why=True,key_prefix="story"):
         if show_why and why:
             body += f"<div style='margin-top:9px'><b style='color:#D8B45A'>Why it matters:</b> {why}</div>"
         if linked:
-            body += f"<div class='pc-small' style='margin-top:8px'><b>Database links:</b> {linked}</div>"
+            body += f"<div class='pc-small' style='margin-top:8px'><b>Connected:</b> {linked}</div>"
         body += "</div>"
         st.markdown(body,unsafe_allow_html=True)
 
         b1,b2=st.columns([0.55,0.45])
         if eid:
-            if b1.button("Open database context",key=f"{key_prefix}_db_{eid}_{card_i}",use_container_width=True):
+            if b1.button("Open connected intelligence",key=f"{key_prefix}_db_{eid}_{card_i}",use_container_width=True):
                 st.session_state["trade_story_event_id"]=eid
                 st.rerun()
         sources=r.get("Research Sources") or []
@@ -9751,7 +9751,7 @@ def _render_trade_story_cards(df,max_items=8,show_why=True,key_prefix="story"):
             if good:
                 b2.link_button("Primary source ↗",good[0],use_container_width=True)
                 if len(good)>1:
-                    st.caption("Additional sources available inside database context.")
+                    st.caption("Additional sources available inside connected intelligence.")
 
 
 def _canonical_trade_disruptions():
