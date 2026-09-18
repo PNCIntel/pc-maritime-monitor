@@ -4237,6 +4237,246 @@ def _mark_deferred_review(staged_record_id, method, reason, details=None):
 
 
 
+
+def _v29_package_local_endpoint_map(job_id):
+    """Map package-local/source IDs to canonical IDs already resolved in this ingestion job.
+
+    This is the missing bridge for dependency-safe native packages: parent/object rows may
+    resolve to an existing canonical ID, while deferred graph rows still contain the package
+    source ID. Retry must be able to recover that mapping from staging without re-uploading.
+    """
+    mapping={}
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("target_table,source_record_key,natural_key,payload,resolved_entity_id,review_status,resolution_status")
+              .eq("ingestion_job_id",str(job_id))
+              .limit(30000).execute().data or [])
+    except Exception:
+        return mapping
+
+    id_fields={
+        "pc_entities":"entity_id",
+        "pc_assets":"asset_id",
+        "pc_mobile_assets":"mobile_asset_id",
+        "pc_events":"event_id",
+        "pc_transport_routes":"route_id",
+    }
+    for r in rows:
+        canonical=str(r.get("resolved_entity_id") or "").strip()
+        if not canonical:
+            continue
+        table=str(r.get("target_table") or "").strip()
+        p=r.get("payload") if isinstance(r.get("payload"),dict) else {}
+        candidates=[
+            r.get("source_record_key"),
+            r.get("natural_key"),
+            p.get(id_fields.get(table,"")) if id_fields.get(table) else None,
+        ]
+        # Preserve explicit package-local IDs recorded by earlier loader stages.
+        md=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+        candidates += [
+            md.get("package_local_entity_id"),
+            md.get("package_local_asset_id"),
+            md.get("package_local_mobile_asset_id"),
+            md.get("package_local_route_id"),
+        ]
+        for c in candidates:
+            c=str(c or "").strip()
+            if c:
+                mapping[c]=canonical
+    return mapping
+
+
+def _v29_unique_name_hit(table, id_col, name_col, name, country=None, extra_select=None):
+    """Resolve an endpoint conservatively by exact human-readable name.
+
+    Auto-resolve only when one canonical row remains. Country is used only as a
+    narrowing hint when the target table exposes it.
+    """
+    name=str(name or "").strip()
+    if not name:
+        return None
+    cols=[id_col,name_col]
+    if country:
+        cols.append("country")
+    if extra_select:
+        cols += list(extra_select)
+    # preserve order while removing duplicates
+    sel=",".join(dict.fromkeys(cols))
+    hits=[]
+    try:
+        hits=(sb.table(table).select(sel).eq(name_col,name).limit(20).execute().data or [])
+    except Exception:
+        hits=[]
+    if not hits:
+        try:
+            hits=(sb.table(table).select(sel).ilike(name_col,name).limit(20).execute().data or [])
+        except Exception:
+            hits=[]
+    if country and hits:
+        c=str(country).strip().casefold()
+        narrowed=[
+            h for h in hits
+            if not h.get("country") or str(h.get("country")).strip().casefold()==c
+        ]
+        if narrowed:
+            hits=narrowed
+    # one distinct canonical ID only
+    by_id={str(h.get(id_col) or ""):h for h in hits if h.get(id_col)}
+    if len(by_id)==1:
+        return next(iter(by_id.values()))
+    return None
+
+
+def _v29_resolve_graph_endpoint(job_id, endpoint_type, endpoint_id, endpoint_name=None, metadata=None):
+    """Resolve entity/asset/mobile asset/route/event endpoint to a canonical ID."""
+    et=str(endpoint_type or "").strip().casefold()
+    raw_id=str(endpoint_id or "").strip()
+    name=str(endpoint_name or "").strip()
+    metadata=metadata if isinstance(metadata,dict) else {}
+
+    # 1) package-local -> canonical map from this exact ingestion job.
+    local_map=_v29_package_local_endpoint_map(job_id)
+    mapped=local_map.get(raw_id)
+    if mapped:
+        return mapped, "package_local_map", name
+
+    try:
+        if et in {"mobile_asset","vessel","ship","aircraft"}:
+            if raw_id:
+                hit=(sb.table("pc_mobile_assets")
+                     .select("mobile_asset_id,imo,name")
+                     .eq("mobile_asset_id",raw_id).limit(1).execute().data or [])
+                if hit:
+                    return str(hit[0]["mobile_asset_id"]), "exact_id", name or str(hit[0].get("name") or "")
+            imo=str(metadata.get("imo") or "").strip()
+            if imo:
+                hit=(sb.table("pc_mobile_assets")
+                     .select("mobile_asset_id,imo,name")
+                     .eq("imo",imo).limit(2).execute().data or [])
+                if len(hit)==1:
+                    return str(hit[0]["mobile_asset_id"]), "imo_exact", name or str(hit[0].get("name") or "")
+            h=_v29_unique_name_hit("pc_mobile_assets","mobile_asset_id","name",name,extra_select=["imo"])
+            if h:
+                return str(h["mobile_asset_id"]), "unique_name", name or str(h.get("name") or "")
+
+        elif et in {"entity","company","organisation","organization"}:
+            if raw_id:
+                hit=(sb.table("pc_entities").select("entity_id,name")
+                     .eq("entity_id",raw_id).limit(1).execute().data or [])
+                if hit:
+                    return str(hit[0]["entity_id"]), "exact_id", name or str(hit[0].get("name") or "")
+            h=_v29_unique_name_hit("pc_entities","entity_id","name",name)
+            if h:
+                return str(h["entity_id"]), "unique_name", name or str(h.get("name") or "")
+
+        elif et in {"asset","port","terminal","facility","infrastructure"}:
+            if raw_id:
+                hit=(sb.table("pc_assets").select("asset_id,name,country")
+                     .eq("asset_id",raw_id).limit(1).execute().data or [])
+                if hit:
+                    return str(hit[0]["asset_id"]), "exact_id", name or str(hit[0].get("name") or "")
+            country=metadata.get("country") or metadata.get("linked_country")
+            h=_v29_unique_name_hit("pc_assets","asset_id","name",name,country=country)
+            if h:
+                return str(h["asset_id"]), "unique_name", name or str(h.get("name") or "")
+
+        elif et in {"route","transport_route","corridor","network"}:
+            if raw_id:
+                hit=(sb.table("pc_transport_routes").select("route_id,route_name")
+                     .eq("route_id",raw_id).limit(1).execute().data or [])
+                if hit:
+                    return str(hit[0]["route_id"]), "exact_id", name or str(hit[0].get("route_name") or "")
+            h=_v29_unique_name_hit("pc_transport_routes","route_id","route_name",name)
+            if h:
+                return str(h["route_id"]), "unique_name", name or str(h.get("route_name") or "")
+
+        elif et=="event":
+            if raw_id:
+                hit=(sb.table("pc_events").select("event_id,title")
+                     .eq("event_id",raw_id).limit(1).execute().data or [])
+                if hit:
+                    return str(hit[0]["event_id"]), "exact_id", name or str(hit[0].get("title") or "")
+    except Exception:
+        pass
+    return None, "unresolved", name
+
+
+def _v29_apply_relationships_direct(job_id):
+    """Repair/apply staged canonical relationships after parent objects are resolved.
+
+    This is intentionally analogous to the event-link fast path. It makes Retry
+    useful for existing jobs whose package-local entity/asset/route IDs were
+    canonicalized during Phase 1.
+    """
+    report={"scanned":0,"applied":0,"already_applied":0,"unresolved":0,"errors":[]}
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,target_table,payload,review_status,source_id")
+              .eq("ingestion_job_id",str(job_id))
+              .eq("target_table","pc_relationships")
+              .limit(20000).execute().data or [])
+    except Exception as exc:
+        report["errors"].append(f"relationship staging read: {exc}")
+        return report
+
+    try:
+        writable=set(_table_write_columns_live(sb,"pc_relationships"))
+    except Exception:
+        writable={
+            "relationship_id","source_type","source_id","relationship_type",
+            "target_type","target_id","ownership_percent","operating_control",
+            "valid_from","valid_to","confidence","record_status",
+            "evidence_source_id","notes","source_url","metadata"
+        }
+
+    for r in rows:
+        if str(r.get("review_status") or "").lower()=="applied":
+            report["already_applied"]+=1
+            continue
+        report["scanned"]+=1
+        p=dict(r.get("payload") if isinstance(r.get("payload"),dict) else {})
+        meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+        sid,smethod,sname=_v29_resolve_graph_endpoint(
+            job_id,p.get("source_type"),p.get("source_id"),p.get("source_name"),meta
+        )
+        tid,tmethod,tname=_v29_resolve_graph_endpoint(
+            job_id,p.get("target_type"),p.get("target_id"),p.get("target_name"),meta
+        )
+        if not sid or not tid or not p.get("relationship_type"):
+            report["unresolved"]+=1
+            continue
+
+        p["source_id"]=sid
+        p["target_id"]=tid
+        p["relationship_id"]=_canonical_semantic_relationship_id(p)
+        p.setdefault("record_status","active")
+        p.setdefault("confidence","high")
+        # provenance stays in metadata/evidence_source_id, never overwrites graph source_id
+        if r.get("source_id") and not p.get("evidence_source_id"):
+            p["evidence_source_id"]=r.get("source_id")
+
+        row={k:v for k,v in p.items() if k in writable and v is not None}
+        try:
+            sb.table("pc_relationships").upsert(
+                _jsonable(row),on_conflict="relationship_id"
+            ).execute()
+            _mark_deferred_applied(
+                r["staged_record_id"],
+                "v29_direct_relationship_apply",
+                {
+                    "source_id":sid,"target_id":tid,
+                    "source_resolution":smethod,"target_resolution":tmethod,
+                    "source_name":sname,"target_name":tname
+                },
+                p["relationship_id"]
+            )
+            report["applied"]+=1
+        except Exception as exc:
+            report["errors"].append(f"{r.get('staged_record_id')}: direct relationship upsert failed: {exc}")
+    return report
+
+
 def _v28_apply_event_links_direct(job_id):
     """Apply canonical event links directly when both endpoints already exist.
 
@@ -4292,56 +4532,18 @@ def _v28_apply_event_links_direct(job_id):
             report["unresolved"]+=1
             continue
 
-        # Resolve/validate linked endpoint.
-        endpoint_ok=False
-        canonical_linked_id=linked_id
-        try:
-            if linked_type in {"mobile_asset","vessel"}:
-                hit=(sb.table("pc_mobile_assets")
-                     .select("mobile_asset_id,imo,name")
-                     .eq("mobile_asset_id",linked_id)
-                     .limit(1).execute().data or [])
-                if not hit:
-                    meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
-                    imo=str(meta.get("imo") or p.get("imo") or "").strip()
-                    if imo:
-                        hit=(sb.table("pc_mobile_assets")
-                             .select("mobile_asset_id,imo,name")
-                             .eq("imo",imo).limit(2).execute().data or [])
-                if len(hit)==1:
-                    canonical_linked_id=str(hit[0]["mobile_asset_id"])
-                    endpoint_ok=True
-                    p.setdefault("linked_name",hit[0].get("name"))
-            elif linked_type=="entity":
-                hit=(sb.table("pc_entities").select("entity_id,name")
-                     .eq("entity_id",linked_id).limit(1).execute().data or [])
-                if hit:
-                    endpoint_ok=True
-                    p.setdefault("linked_name",hit[0].get("name"))
-            elif linked_type=="asset":
-                hit=(sb.table("pc_assets").select("asset_id,name")
-                     .eq("asset_id",linked_id).limit(1).execute().data or [])
-                if hit:
-                    endpoint_ok=True
-                    p.setdefault("linked_name",hit[0].get("name"))
-            elif linked_type=="event":
-                hit=(sb.table("pc_events").select("event_id,title")
-                     .eq("event_id",linked_id).limit(1).execute().data or [])
-                if hit:
-                    endpoint_ok=True
-                    p.setdefault("linked_name",hit[0].get("title"))
-            else:
-                # Unsupported polymorphic endpoint: leave for specialist processor.
-                endpoint_ok=False
-        except Exception as exc:
-            report["errors"].append(f"{r.get('staged_record_id')}: endpoint lookup failed: {exc}")
-            continue
-
-        if not endpoint_ok:
+        # V29: resolve exact IDs, package-local IDs, IMO, unique names, and routes.
+        meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+        canonical_linked_id, endpoint_method, resolved_name = _v29_resolve_graph_endpoint(
+            job_id, linked_type, linked_id, p.get("linked_name"), meta
+        )
+        if not canonical_linked_id:
             report["unresolved"]+=1
             continue
 
         p["linked_id"]=canonical_linked_id
+        if resolved_name and not p.get("linked_name"):
+            p["linked_name"]=resolved_name
 
         # Deterministic event-link id if the package did not supply one.
         if not p.get("event_link_id"):
@@ -4372,7 +4574,10 @@ def _v28_apply_event_links_direct(job_id):
                 "resolution_details":{
                     "event_id":event_id,
                     "linked_type":linked_type,
-                    "linked_id":canonical_linked_id,
+                    "submitted_linked_id":linked_id,
+                    "canonical_linked_id":canonical_linked_id,
+                    "linked_name":p.get("linked_name"),
+                    "endpoint_resolution":endpoint_method,
                 }
             }).eq("staged_record_id",r["staged_record_id"]).execute()
             report["applied"]+=1
@@ -4403,8 +4608,9 @@ def _apply_deferred_package_rows(job_id, deferred_rows):
         except Exception as exc:
             report["errors"].append(f"deferred staging failed: {exc}")
 
-    # V28: straightforward canonical event links should not depend on the deferred SQL resolver.
+    # V29: repair graph rows directly after parent canonicalization.
     report["event_link_fast_path"]=_v28_apply_event_links_direct(job_id)
+    report["relationship_fast_path"]=_v29_apply_relationships_direct(job_id)
 
     try:
         report["rpc"]=(sb.rpc(
@@ -5609,7 +5815,7 @@ elif page=="Canonical Loader":
         "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
-    st.success("V28: fixes event-link loads too. Canonical event↔vessel/entity/asset links are applied directly when both endpoints exist; they no longer wait on the deferred SQL resolver. V27 relationship/source semantics remain in place.")
+    st.success("V30: adds persistent Recent ingestion jobs / Resume controls on the Canonical Loader page. Reboots no longer require re-uploading a package: reopen an existing Supabase job and retry unresolved rows directly. V29 graph-endpoint repair remains active.")
     if not sb:
         st.error("Supabase service connection required.")
     else:
@@ -5621,6 +5827,122 @@ elif page=="Canonical Loader":
                 "Small test packages can still be run, but clean these before large reloads."
             )
             dataframe(blockers)
+
+
+        # ------------------------------------------------------------------
+        # V30 — persistent job recovery. This panel is intentionally ABOVE
+        # the uploader so a Streamlit reboot never forces a package re-upload.
+        # Jobs/staged rows live in Supabase, not Streamlit session state.
+        # ------------------------------------------------------------------
+        st.markdown("### Resume an existing ingestion job")
+        st.caption(
+            "Recent canonical jobs are stored in Supabase. Select a job below to inspect or retry it "
+            "without uploading the original package again."
+        )
+
+        _recent_jobs=_canonical_jobs(50)
+        if _recent_jobs:
+            _job_options=[]
+            _job_summaries={}
+            _first_unresolved_idx=None
+
+            for _i,_j in enumerate(_recent_jobs):
+                _jid=str(_j.get("ingestion_job_id") or "")
+                _summ,_by=_canonical_job_summary(_jid)
+                _job_summaries[_jid]=(_summ,_by)
+                _created=str(_j.get("created_at") or "")[:19].replace("T"," ")
+                _title=str(_j.get("title") or _j.get("job_type") or "Canonical ingestion")
+                _status=str(_j.get("status") or "unknown")
+                _label=(
+                    f"{_created} · {_title} · {_status} · "
+                    f"{_summ.get('applied',0)}/{_summ.get('total',0)} applied · "
+                    f"{_summ.get('review',0)} review"
+                )
+                _job_options.append((_label,_jid))
+                if _first_unresolved_idx is None and int(_summ.get("review") or 0)>0:
+                    _first_unresolved_idx=_i
+
+            # Default to the newest job that still needs work; otherwise newest job.
+            _default_idx=_first_unresolved_idx if _first_unresolved_idx is not None else 0
+            _selected_label=st.selectbox(
+                "Recent ingestion job",
+                [x[0] for x in _job_options],
+                index=_default_idx,
+                key="canonical_resume_job_selector_v30"
+            )
+            _selected_jid=dict(_job_options).get(_selected_label)
+            _selected_job=next(
+                (x for x in _recent_jobs if str(x.get("ingestion_job_id") or "")==str(_selected_jid)),
+                {}
+            )
+            _selected_summary,_selected_by_table=_job_summaries.get(
+                str(_selected_jid),
+                ({"total":0,"applied":0,"review":0,"invalid":0,"broken":0},[])
+            )
+
+            _c1,_c2,_c3,_c4=st.columns(4)
+            _c1.metric("Total",_selected_summary.get("total",0))
+            _c2.metric("Applied",_selected_summary.get("applied",0))
+            _c3.metric("Review",_selected_summary.get("review",0))
+            _c4.metric("Broken refs",_selected_summary.get("broken",0))
+
+            if _selected_by_table:
+                with st.expander("Job table/status breakdown",expanded=False):
+                    dataframe(_selected_by_table)
+
+            _resume_review=_canonical_review_rows(_selected_jid,3000)
+            if _resume_review:
+                _reason_counts={}
+                for _rr in _resume_review:
+                    _reason=str(
+                        _rr.get("resolution_method")
+                        or _rr.get("resolution_status")
+                        or "UNKNOWN"
+                    )
+                    _key=(_rr.get("target_table") or "unknown",_reason)
+                    _reason_counts[_key]=_reason_counts.get(_key,0)+1
+
+                with st.expander("Unresolved reasons / records",expanded=False):
+                    dataframe([
+                        {"target_table":k[0],"reason":k[1],"count":v}
+                        for k,v in sorted(
+                            _reason_counts.items(),
+                            key=lambda x:(x[0][0],-x[1],x[0][1])
+                        )
+                    ])
+                    dataframe(_resume_review)
+
+                if st.button(
+                    "↻ Retry unresolved rows in selected job",
+                    type="primary",
+                    use_container_width=True,
+                    key=f"canonical_resume_retry_v30_{_selected_jid}"
+                ):
+                    try:
+                        with st.status(
+                            "Retrying the existing Supabase ingestion job…",
+                            expanded=True
+                        ) as _status:
+                            _result=_canonical_process_job(_selected_jid)
+                            st.write(_result)
+                            _status.update(
+                                label="Retry complete — refreshing job status",
+                                state="complete",
+                                expanded=False
+                            )
+                        st.rerun()
+                    except Exception as _exc:
+                        st.exception(_exc)
+            else:
+                st.success("Selected ingestion job has no unresolved staged rows.")
+
+            with st.expander("Selected job metadata",expanded=False):
+                st.json(_selected_job)
+        else:
+            st.info("No canonical ingestion jobs are currently stored in Supabase.")
+
+        st.divider()
+        st.markdown("### Load a new package")
 
         up=st.file_uploader(
             "Canonical package — Excel / CSV / JSON / JSONL",
