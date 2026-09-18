@@ -2,6 +2,7 @@ from __future__ import annotations
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import os, sys, json, uuid, hashlib, re, io, zipfile, mimetypes, urllib.parse
+import uuid
 from datetime import date, datetime
 from decimal import Decimal
 import pandas as pd
@@ -4718,13 +4719,26 @@ def _apply_deferred_package_rows(job_id, deferred_rows):
     report["event_link_fast_path"]=_v28_apply_event_links_direct(job_id)
     report["relationship_fast_path"]=_v29_apply_relationships_direct(job_id)
 
-    try:
-        report["rpc"]=(sb.rpc(
-            "pc_apply_deferred_canonical_job_v1",
-            {"p_ingestion_job_id":str(job_id)}
-        ).execute().data or {})
-    except Exception as exc:
-        report["errors"].append(f"pc_apply_deferred_canonical_job_v1: {exc}")
+    # V33: graph edges are handled above in Python. Do not send them back through
+    # the older SQL v21 polymorphic resolver, which is the source of the
+    # sql_v21_deferred_apply_error seen in the Trade package.
+    specialist=[
+        r for r in (deferred_rows or [])
+        if str(r.get("target_table") or "") not in {"pc_event_links","pc_relationships"}
+    ]
+    if specialist:
+        try:
+            report["rpc"]=(sb.rpc(
+                "pc_apply_deferred_canonical_job_v1",
+                {"p_ingestion_job_id":str(job_id)}
+            ).execute().data or {})
+        except Exception as exc:
+            report["errors"].append(f"pc_apply_deferred_canonical_job_v1: {exc}")
+    else:
+        report["rpc"]={
+            "skipped":True,
+            "reason":"Graph-only deferred package; event links and relationships applied directly by V33."
+        }
 
     return report
 
@@ -5016,6 +5030,141 @@ def _v32_mark_graph_resolution_failure(staged_record_id, method, reason, details
         pass
 
 
+
+def _v33_repair_pending_observations(job_id):
+    """Repair already-staged pc_observations whose primary key was supplied as text."""
+    report={"scanned":0,"applied":0,"already_applied":0,"errors":[],"id_map":{}}
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("staged_record_id,payload,review_status,resolution_status,natural_key")
+              .eq("ingestion_job_id",str(job_id))
+              .eq("target_table","pc_observations")
+              .limit(10000).execute().data or [])
+    except Exception as exc:
+        report["errors"].append(f"staging read failed: {exc}")
+        return report
+
+    try:
+        writable=set(_table_write_columns_live(sb,"pc_observations"))
+    except Exception:
+        writable={
+            "observation_id","source_id","source_name","source_url","source_type",
+            "retrieved_at","published_at","observation_date","license_name",
+            "redistribution_status","attribution_required","raw_value","derived_value",
+            "methodology","confidence","review_status","record_status","metadata"
+        }
+
+    for r in rows:
+        if str(r.get("review_status") or "").lower()=="applied":
+            report["already_applied"]+=1
+            continue
+        report["scanned"]+=1
+        p=dict(r.get("payload") if isinstance(r.get("payload"),dict) else {})
+        submitted=str(p.get("observation_id") or r.get("natural_key") or "").strip()
+        canonical=_v33_observation_uuid(submitted)
+        p["observation_id"]=canonical
+        # Canonical DB row should be approved/verified if package says so.
+        p.setdefault("review_status","approved")
+        p.setdefault("record_status","verified")
+        row={k:v for k,v in p.items() if k in writable and v is not None}
+        try:
+            sb.table("pc_observations").upsert(
+                _jsonable(row),on_conflict="observation_id"
+            ).execute()
+            # Heal staged payload so future retries are clean.
+            sb.table("pc_staged_records").update({
+                "payload":_jsonable(p),
+                "resolved_entity_id":canonical,
+                "resolution_status":"READY",
+                "resolution_method":"v33_observation_uuid_repair",
+                "resolution_confidence":1.0,
+                "candidate_count":1,
+                "validation_status":"reviewed",
+                "review_status":"applied",
+                "resolution_details":{
+                    "submitted_observation_id":submitted,
+                    "canonical_observation_id":canonical
+                }
+            }).eq("staged_record_id",r["staged_record_id"]).execute()
+            report["id_map"][submitted]=canonical
+            report["applied"]+=1
+        except Exception as exc:
+            report["errors"].append(f"{r.get('staged_record_id')}: {exc}")
+    return report
+
+
+def _v33_pending_non_graph_deferred(job_id):
+    """Return pending deferred rows other than event-links / generic relationships."""
+    try:
+        rows=(sb.table("pc_staged_records")
+              .select("target_table,review_status")
+              .eq("ingestion_job_id",str(job_id))
+              .limit(30000).execute().data or [])
+    except Exception:
+        return []
+    return [
+        r for r in rows
+        if str(r.get("review_status") or "").lower()!="applied"
+        and str(r.get("target_table") or "") not in {"pc_event_links","pc_relationships"}
+        and str(r.get("target_table") or "") in {"pc_transaction_participants"}
+    ]
+
+
+def _v33_repair_existing_job(job_id):
+    """Repair the exact failure pattern visible in the current Trade package.
+
+    1) fixes text observation IDs -> deterministic UUIDs;
+    2) reconstructs parent canonical mappings;
+    3) applies event links and relationships directly;
+    4) does NOT send graph rows back through the legacy SQL v21 deferred resolver.
+    """
+    result={
+        "loader_build":LOADER_BUILD,
+        "job_id":str(job_id),
+        "observations":None,
+        "endpoint_map_size":0,
+        "event_links":None,
+        "relationships":None,
+        "specialist_deferred_rpc":"skipped",
+        "final_summary":None,
+    }
+    result["observations"]=_v33_repair_pending_observations(job_id)
+
+    endpoint_map=_v31_package_local_endpoint_map(job_id)
+    result["endpoint_map_size"]=len(endpoint_map)
+
+    result["event_links"]=_v28_apply_event_links_direct(job_id)
+    result["relationships"]=_v29_apply_relationships_direct(job_id)
+
+    specialist=_v33_pending_non_graph_deferred(job_id)
+    if specialist:
+        try:
+            result["specialist_deferred_rpc"]=(sb.rpc(
+                "pc_apply_deferred_canonical_job_v1",
+                {"p_ingestion_job_id":str(job_id)}
+            ).execute().data or {})
+        except Exception as exc:
+            result["specialist_deferred_rpc"]={"error":str(exc)}
+    else:
+        result["specialist_deferred_rpc"]={
+            "skipped":True,
+            "reason":"No specialist deferred rows remain; graph rows were handled directly."
+        }
+
+    try:
+        _canonical_finalize_existing_rows(job_id)
+    except Exception:
+        pass
+
+    try:
+        summ,by=_canonical_job_summary(job_id)
+        result["final_summary"]=summ
+        result["by_table"]=by
+    except Exception as exc:
+        result["final_summary"]={"error":str(exc)}
+    return result
+
+
 def _v32_repair_existing_graph_rows(job_id):
     """Repair unresolved graph rows directly and preserve visible diagnostics.
 
@@ -5116,13 +5265,19 @@ def _canonical_process_job(job_id, deferred_rows=None):
     # Apply newly deferred children/graph; when retrying an existing job, the RPC
     # also processes any already-staged pending child/edge rows.
     deferred_result=_apply_deferred_package_rows(job_id,deferred)
-    try:
-        retry_pending_rpc=(sb.rpc(
-            "pc_apply_deferred_canonical_job_v1",
-            {"p_ingestion_job_id":str(job_id)}
-        ).execute().data or {})
-    except Exception as exc:
-        retry_pending_rpc={"error":str(exc)}
+    # V33: only call legacy deferred RPC when a specialist child row actually remains.
+    # Generic graph edges are resolved/applied directly and must not be re-stamped
+    # with sql_v21_deferred_apply_error.
+    if _v33_pending_non_graph_deferred(job_id):
+        try:
+            retry_pending_rpc=(sb.rpc(
+                "pc_apply_deferred_canonical_job_v1",
+                {"p_ingestion_job_id":str(job_id)}
+            ).execute().data or {})
+        except Exception as exc:
+            retry_pending_rpc={"error":str(exc)}
+    else:
+        retry_pending_rpc={"skipped":True,"reason":"No specialist deferred rows remain."}
 
     finalized_after=_canonical_finalize_existing_rows(job_id)
 
@@ -5182,6 +5337,18 @@ def _normalize_excel_serial_date_value(value):
         pass
     return value
 
+def _v33_observation_uuid(value):
+    """Return a deterministic UUID for pc_observations primary keys."""
+    raw=str(value or "").strip()
+    if not raw:
+        return str(uuid.uuid4())
+    try:
+        return str(uuid.UUID(raw))
+    except Exception:
+        # Stable across reloads/retries for the same source key.
+        return str(uuid.uuid5(uuid.UUID("6f39df76-7d4c-4d70-a92e-7ca37f72fa31"),raw))
+
+
 def _normalize_canonical_payload_dates(payload,target_table):
     payload=dict(payload or {})
     if target_table=="pc_events":
@@ -5192,6 +5359,8 @@ def _normalize_canonical_payload_dates(payload,target_table):
         for fld in ("valid_from","valid_to"):
             if fld in payload:
                 payload[fld]=_normalize_excel_serial_date_value(payload.get(fld))
+    elif target_table=="pc_observations":
+        payload["observation_id"]=_v33_observation_uuid(payload.get("observation_id"))
     return payload
 
 
@@ -6017,7 +6186,7 @@ elif page=="Canonical Loader":
         "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
-    st.success("V32: route-aware graph repair. Python now treats pc_transport_routes as canonical graph endpoints, does not rerun the legacy deferred SQL resolver when route support is missing, and keeps repair diagnostics visible after the button is pressed.")
+    st.success("V33: repairs the current Trade job in place. Text observation IDs are converted to deterministic UUIDs; event links and relationships are applied directly; generic graph rows are no longer sent back through the legacy SQL v21 deferred resolver.")
     if not sb:
         st.error("Supabase service connection required.")
     else:
@@ -6115,17 +6284,17 @@ elif page=="Canonical Loader":
                     dataframe(_resume_review)
 
                 if st.button(
-                    "🛠 Repair unresolved graph rows in selected job",
+                    "🛠 Repair unresolved rows in selected job",
                     type="primary",
                     use_container_width=True,
                     key=f"canonical_resume_retry_v30_{_selected_jid}"
                 ):
                     try:
                         with st.status(
-                            "Repairing existing staged graph rows without rerunning parent ingestion…",
+                            "Repairing observation IDs, event links and relationships in the existing job…",
                             expanded=True
                         ) as _status:
-                            _result=_v32_repair_existing_graph_rows(_selected_jid)
+                            _result=_v33_repair_existing_job(_selected_jid)
                             st.session_state[f"graph_repair_result_{_selected_jid}"]=_result
                             st.write(_result)
                             _status.update(
@@ -6484,7 +6653,7 @@ elif page=="Canonical Loader":
                                     "Retrying unresolved canonical objects and dependent graph edges…",
                                     expanded=True
                                 ) as status:
-                                    result=_v32_repair_existing_graph_rows(last)
+                                    result=_v33_repair_existing_job(last)
                                     st.write(result)
                                     status.update(
                                         label="Retry complete — refreshing",
