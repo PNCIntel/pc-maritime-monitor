@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "40-universal-content-fact-router-2026-09-18"
+LOADER_BUILD = "41-fact-resolution-review-2026-09-18"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -1640,9 +1640,12 @@ def _canonical_link_candidates(kind, query="",limit=100):
     config={
         "entity":("pc_entities","entity_id,name,entity_type,hq_country","name"),
         "asset":("pc_assets","asset_id,name,asset_type,country","name"),
-        "mobile_asset":("pc_mobile_assets","mobile_asset_id,name,asset_type,imo,flag","name"),
+        "mobile_asset":("pc_mobile_assets","mobile_asset_id,name,asset_type,imo,mmsi,flag","name"),
         "event":("pc_events","event_id,title,event_type,start_date","title"),
+        "transport_service":("pc_transport_services","transport_service_id,service_name,service_code,mode,service_type,status","service_name"),
     }
+    if kind not in config:
+        return []
     table,cols,display=config[kind]
     try:
         q=sb.table(table).select(cols).limit(limit)
@@ -1663,7 +1666,7 @@ def _table_exists(name):
 
 selected_page=st.sidebar.radio("",PAGES,label_visibility="collapsed")
 page=NAV[selected_page]
-st.sidebar.caption("Ingest → resolve/upsert objects → link graph → QA")
+st.sidebar.caption("Ingest → extract facts → resolve/link → review → apply")
 
 if sb is None:
     st.warning("Supabase service connection is not configured yet. The app is valid and can be deployed now; add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to secrets before using database actions.")
@@ -2782,6 +2785,514 @@ def _persist_primary_source_relationships(source_item_id,primary_sources,batch_i
             pass
     return created
 
+
+def _fact_norm(value):
+    s=str(value or "").strip().casefold()
+    s=re.sub(r"&"," and ",s)
+    s=re.sub(r"[^a-z0-9]+"," ",s)
+    return re.sub(r"\s+"," ",s).strip()
+
+
+def _fact_object_kind(value):
+    raw=_fact_norm(value).replace(" ","_")
+    aliases={
+        "company":"entity","organisation":"entity","organization":"entity",
+        "authority":"entity","government":"entity","operator":"entity","owner":"entity",
+        "shipyard_company":"entity","builder":"entity","designer":"entity",
+        "port":"asset","terminal":"asset","airport":"asset","facility":"asset",
+        "project":"asset","infrastructure":"asset","rail_node":"asset",
+        "vessel":"mobile_asset","ship":"mobile_asset","aircraft":"mobile_asset",
+        "truck":"mobile_asset","rolling_stock":"mobile_asset",
+        "service":"transport_service","transport_service":"transport_service",
+        "liner_service":"transport_service","shipping_service":"transport_service",
+        "route":"route","corridor":"route",
+    }
+    return aliases.get(raw,raw)
+
+
+@st.cache_data(show_spinner=False, ttl=60)
+def _fact_resolution_indexes():
+    """Small live indexes used to resolve extracted fact subjects/objects."""
+    out={
+        "entity":{"by_id":{},"by_name":{}},
+        "asset":{"by_id":{},"by_name":{}},
+        "mobile_asset":{"by_id":{},"by_name":{},"by_imo":{},"by_mmsi":{}},
+        "transport_service":{"by_id":{},"by_name":{},"by_code":{}},
+        "route":{"by_id":{},"by_name":{}},
+    }
+    if not sb:
+        return out
+
+    try:
+        rows=safe_rows(sb,"pc_entities","entity_id,name,entity_type,hq_country",30000)
+        for r in rows:
+            rid=str(r.get("entity_id") or "")
+            nm=_fact_norm(r.get("name"))
+            if rid: out["entity"]["by_id"][rid]=r
+            if nm: out["entity"]["by_name"].setdefault(nm,[]).append(r)
+    except Exception:
+        pass
+
+    try:
+        rows=safe_rows(sb,"pc_assets","asset_id,name,asset_type,subtype,country,region_city",50000)
+        for r in rows:
+            rid=str(r.get("asset_id") or "")
+            nm=_fact_norm(r.get("name"))
+            if rid: out["asset"]["by_id"][rid]=r
+            if nm: out["asset"]["by_name"].setdefault(nm,[]).append(r)
+    except Exception:
+        pass
+
+    try:
+        rows=safe_rows(sb,"pc_mobile_assets","mobile_asset_id,name,asset_type,subtype,imo,mmsi,flag",50000)
+        for r in rows:
+            rid=str(r.get("mobile_asset_id") or "")
+            nm=_fact_norm(r.get("name"))
+            imo=re.sub(r"\\D","",str(r.get("imo") or ""))
+            mmsi=re.sub(r"\\D","",str(r.get("mmsi") or ""))
+            if rid: out["mobile_asset"]["by_id"][rid]=r
+            if nm: out["mobile_asset"]["by_name"].setdefault(nm,[]).append(r)
+            if imo: out["mobile_asset"]["by_imo"].setdefault(imo,[]).append(r)
+            if mmsi: out["mobile_asset"]["by_mmsi"].setdefault(mmsi,[]).append(r)
+    except Exception:
+        pass
+
+    try:
+        rows=safe_rows(sb,"pc_transport_services","transport_service_id,service_name,service_code,mode,service_type,status",20000)
+        for r in rows:
+            rid=str(r.get("transport_service_id") or "")
+            nm=_fact_norm(r.get("service_name"))
+            code=_fact_norm(r.get("service_code"))
+            if rid: out["transport_service"]["by_id"][rid]=r
+            if nm: out["transport_service"]["by_name"].setdefault(nm,[]).append(r)
+            if code: out["transport_service"]["by_code"].setdefault(code,[]).append(r)
+    except Exception:
+        pass
+
+    try:
+        rows=safe_rows(sb,"pc_transport_routes","route_id,route_name,mode,current_status",20000)
+        for r in rows:
+            rid=str(r.get("route_id") or "")
+            nm=_fact_norm(r.get("route_name"))
+            if rid: out["route"]["by_id"][rid]=r
+            if nm: out["route"]["by_name"].setdefault(nm,[]).append(r)
+    except Exception:
+        pass
+
+    return out
+
+
+def _resolve_fact_reference(kind,name=None,identifier=None):
+    """Deterministic exact resolution only. Ambiguity remains reviewable."""
+    kind=_fact_object_kind(kind)
+    indexes=_fact_resolution_indexes()
+    idx=indexes.get(kind)
+    if not idx:
+        return {"status":"unsupported","kind":kind,"matches":[]}
+
+    ident=str(identifier or "").strip()
+    name_key=_fact_norm(name)
+
+    # Canonical ID first.
+    if ident and ident in idx.get("by_id",{}):
+        return {"status":"matched","kind":kind,"match":idx["by_id"][ident],"method":"canonical_id","confidence":1.0}
+
+    # Strong identifiers for mobile assets.
+    if kind=="mobile_asset" and ident:
+        digits=re.sub(r"\\D","",ident)
+        if len(digits)==7:
+            hits=idx.get("by_imo",{}).get(digits,[])
+            if len(hits)==1:
+                return {"status":"matched","kind":kind,"match":hits[0],"method":"imo","confidence":1.0}
+            if len(hits)>1:
+                return {"status":"ambiguous","kind":kind,"matches":hits,"method":"imo"}
+        if len(digits)==9:
+            hits=idx.get("by_mmsi",{}).get(digits,[])
+            if len(hits)==1:
+                return {"status":"matched","kind":kind,"match":hits[0],"method":"mmsi","confidence":0.99}
+            if len(hits)>1:
+                return {"status":"ambiguous","kind":kind,"matches":hits,"method":"mmsi"}
+
+    # Service code can be stronger than service name.
+    if kind=="transport_service" and ident:
+        hits=idx.get("by_code",{}).get(_fact_norm(ident),[])
+        if len(hits)==1:
+            return {"status":"matched","kind":kind,"match":hits[0],"method":"service_code","confidence":0.99}
+        if len(hits)>1:
+            return {"status":"ambiguous","kind":kind,"matches":hits,"method":"service_code"}
+
+    if name_key:
+        hits=idx.get("by_name",{}).get(name_key,[])
+        if len(hits)==1:
+            return {"status":"matched","kind":kind,"match":hits[0],"method":"exact_normalized_name","confidence":0.96}
+        if len(hits)>1:
+            return {"status":"ambiguous","kind":kind,"matches":hits,"method":"exact_normalized_name"}
+
+    return {"status":"unresolved","kind":kind,"matches":[]}
+
+
+def _fact_match_id(kind,row):
+    kind=_fact_object_kind(kind)
+    if kind=="entity": return row.get("entity_id")
+    if kind=="asset": return row.get("asset_id")
+    if kind=="mobile_asset": return row.get("mobile_asset_id")
+    if kind=="transport_service": return row.get("transport_service_id")
+    if kind=="route": return row.get("route_id")
+    return None
+
+
+def _fact_match_name(kind,row):
+    kind=_fact_object_kind(kind)
+    if kind=="transport_service": return row.get("service_name")
+    if kind=="route": return row.get("route_name")
+    return row.get("name")
+
+
+_FACT_TABLE_HINTS={
+    "entity_identity":{"pc_entities"},
+    "asset_identity":{"pc_assets"},
+    "mobile_asset_identity":{"pc_mobile_assets"},
+    "relationship":{"pc_relationships"},
+    "event":{"pc_events"},
+    "security_incident":{"pc_events"},
+    "transaction":{"pc_transactions"},
+    "ownership_change":{"pc_transactions","pc_relationships"},
+    "project":{"pc_assets","pc_project_details"},
+    "financing":{"pc_financing_facilities","pc_financing_participants","pc_financing_links"},
+    "contract":{"pc_contracts","pc_contract_participants","pc_contract_links"},
+    "shipbuilding_order":{"pc_shipbuilding_orders","pc_shipbuilding_order_units","pc_contracts"},
+    "vessel_design":{"pc_vessel_designs"},
+    "transport_service":{"pc_transport_services","pc_transport_service_operators","pc_transport_service_stops","pc_transport_service_sources"},
+    "service_change":{"pc_transport_service_changes","pc_transport_services"},
+    "route":{"pc_transport_routes","pc_transport_service_network_links"},
+    "sanctions":{"pc_sanctions_designations","pc_sanctions_links","pc_trade_restrictions"},
+}
+
+
+def _payload_blob(payload):
+    try:
+        return _fact_norm(json.dumps(payload or {},ensure_ascii=False,default=str))
+    except Exception:
+        return _fact_norm(payload)
+
+
+def _backfill_fact_promotions(content_item_id, extraction_run_id=None, ingestion_job_id=None):
+    """Attach extracted facts to already-staged proposals for the same extraction job."""
+    if not sb:
+        return 0
+    if not ingestion_job_id and extraction_run_id:
+        run=(sb.table("pc_extraction_runs")
+             .select("ingestion_job_id")
+             .eq("extraction_run_id",extraction_run_id).limit(1).execute().data or [])
+        if run:
+            ingestion_job_id=run[0].get("ingestion_job_id")
+    if not ingestion_job_id:
+        return 0
+
+    facts=(sb.table("pc_extracted_facts").select("*")
+           .eq("content_item_id",content_item_id).limit(5000).execute().data or [])
+    staged=(sb.table("pc_staged_records")
+            .select("staged_record_id,target_table,natural_key,payload,resolution_status,review_status")
+            .eq("ingestion_job_id",str(ingestion_job_id)).limit(5000).execute().data or [])
+    if not facts or not staged:
+        return 0
+
+    created=0
+    for f in facts:
+        fact_id=f.get("fact_id")
+        ftype=str(f.get("fact_type") or "other")
+        hinted=_FACT_TABLE_HINTS.get(ftype,set())
+        subj=_fact_norm(f.get("subject_name"))
+        obj=_fact_norm(f.get("object_name"))
+        pred=_fact_norm(f.get("predicate"))
+
+        candidates=[]
+        for sr in staged:
+            table=str(sr.get("target_table") or "")
+            payload=sr.get("payload") if isinstance(sr.get("payload"),dict) else {}
+            blob=_payload_blob(payload)
+            score=0
+            if table in hinted: score+=5
+            if subj and subj in blob: score+=3
+            if obj and obj in blob: score+=2
+            if pred and pred in blob: score+=1
+            if score>0:
+                candidates.append((score,sr))
+
+        if not candidates:
+            continue
+
+        best=max(x[0] for x in candidates)
+        # Keep all equally strong specialist rows, e.g. order + unit/design rows.
+        for score,sr in candidates:
+            if score < best:
+                continue
+            row={
+                "fact_id":fact_id,
+                "ingestion_job_id":str(ingestion_job_id),
+                "staged_record_id":sr.get("staged_record_id"),
+                "target_table":sr.get("target_table"),
+                "target_record_id":None,
+                "promotion_action":"stage",
+                "status":"staged",
+                "promoted_at":pd.Timestamp.utcnow().isoformat(),
+                "metadata":{
+                    "match_score":score,
+                    "natural_key":sr.get("natural_key"),
+                    "staged_resolution_status":sr.get("resolution_status"),
+                    "staged_review_status":sr.get("review_status"),
+                }
+            }
+            try:
+                exists=(sb.table("pc_extracted_fact_promotions")
+                        .select("fact_promotion_id")
+                        .eq("fact_id",fact_id)
+                        .eq("staged_record_id",str(sr.get("staged_record_id")))
+                        .limit(1).execute().data or [])
+                if not exists:
+                    sb.table("pc_extracted_fact_promotions").insert(row).execute()
+                    created+=1
+            except Exception:
+                pass
+    return created
+
+
+def _resolve_content_item_facts(content_item_id, extraction_run_id=None, ingestion_job_id=None):
+    """Resolve fact subjects/objects, link canonical matches and classify readiness."""
+    if not sb:
+        return {"facts":0,"matched":0,"ready":0,"partial":0,"ambiguous":0,"unresolved":0,"links":0,"promotions":0}
+
+    _fact_resolution_indexes.clear()
+
+    if not extraction_run_id:
+        runs=(sb.table("pc_extraction_runs")
+              .select("extraction_run_id,ingestion_job_id,started_at")
+              .eq("content_item_id",content_item_id)
+              .order("started_at",desc=True).limit(1).execute().data or [])
+        if runs:
+            extraction_run_id=runs[0].get("extraction_run_id")
+            ingestion_job_id=ingestion_job_id or runs[0].get("ingestion_job_id")
+
+    promotions=_backfill_fact_promotions(
+        content_item_id,
+        extraction_run_id=extraction_run_id,
+        ingestion_job_id=ingestion_job_id
+    )
+
+    facts=(sb.table("pc_extracted_facts").select("*")
+           .eq("content_item_id",content_item_id).limit(5000).execute().data or [])
+    stats={"facts":len(facts),"matched":0,"ready":0,"partial":0,"ambiguous":0,"unresolved":0,"links":0,"promotions":promotions}
+
+    for f in facts:
+        fid=f.get("fact_id")
+        refs=[]
+        ambiguous=False
+        unresolved_named=False
+        named_slots=0
+
+        for role,tcol,ncol,icol in [
+            ("subject","subject_type","subject_name","subject_identifier"),
+            ("object","object_type","object_name","object_identifier"),
+        ]:
+            typ=f.get(tcol)
+            name=f.get(ncol)
+            ident=f.get(icol)
+            if not typ or (not name and not ident):
+                continue
+            named_slots+=1
+            res=_resolve_fact_reference(typ,name,ident)
+            if res.get("status")=="matched":
+                row=res["match"]
+                kind=res["kind"]
+                linked_id=_fact_match_id(kind,row)
+                linked_name=_fact_match_name(kind,row) or name
+                if linked_id:
+                    refs.append({
+                        "fact_id":fid,
+                        "linked_type":kind,
+                        "linked_id":str(linked_id),
+                        "linked_name":linked_name,
+                        "role":role,
+                        "match_method":res.get("method"),
+                        "confidence":res.get("confidence") or 0.95,
+                        "analyst_reviewed":False,
+                        "metadata":{"input_name":name,"input_identifier":ident},
+                    })
+            elif res.get("status")=="ambiguous":
+                ambiguous=True
+            else:
+                unresolved_named=True
+
+        for link in refs:
+            try:
+                sb.table("pc_extracted_fact_links").upsert(
+                    link,on_conflict="fact_id,linked_type,linked_id,role"
+                ).execute()
+                stats["links"]+=1
+            except Exception:
+                pass
+
+        try:
+            promo_rows=(sb.table("pc_extracted_fact_promotions")
+                        .select("fact_promotion_id,status,target_table,staged_record_id")
+                        .eq("fact_id",fid).limit(100).execute().data or [])
+        except Exception:
+            promo_rows=[]
+
+        matched_count=len(refs)
+        if ambiguous:
+            status="ambiguous"
+        elif promo_rows:
+            status="ready"
+        elif named_slots and matched_count==named_slots:
+            status="matched"
+        elif matched_count>0:
+            status="partial"
+        else:
+            status="unresolved"
+
+        stats[status]=stats.get(status,0)+1
+
+        try:
+            sb.table("pc_extracted_facts").update({
+                "resolution_status":status,
+                "updated_at":pd.Timestamp.utcnow().isoformat(),
+                "metadata":{
+                    **(f.get("metadata") if isinstance(f.get("metadata"),dict) else {}),
+                    "resolution":{
+                        "canonical_links":matched_count,
+                        "named_slots":named_slots,
+                        "has_staged_promotion":bool(promo_rows),
+                        "resolved_at":pd.Timestamp.utcnow().isoformat(),
+                    }
+                }
+            }).eq("fact_id",fid).execute()
+        except Exception:
+            pass
+
+    # Overall content item status
+    if stats["facts"]==0:
+        overall="unresolved"
+    elif stats["unresolved"]==0 and stats["ambiguous"]==0 and stats["partial"]==0:
+        overall="ready"
+    elif stats["ready"] or stats["matched"]:
+        overall="partial"
+    else:
+        overall="unresolved"
+
+    try:
+        sb.table("pc_content_ingest_items").update({
+            "resolution_status":overall,
+            "updated_at":pd.Timestamp.utcnow().isoformat()
+        }).eq("content_item_id",content_item_id).execute()
+    except Exception:
+        pass
+
+    return stats
+
+
+def _resolve_all_pending_content_facts(limit_items=100):
+    """Backfill the current unresolved queue after deploying Loader v4.1."""
+    items=(sb.table("pc_content_ingest_items")
+           .select("content_item_id,title,source_url,resolution_status,created_at")
+           .order("created_at",desc=True).limit(int(limit_items)).execute().data or [])
+    report=[]
+    for item in items:
+        cid=item.get("content_item_id")
+        try:
+            stats=_resolve_content_item_facts(cid)
+            report.append({"content_item_id":cid,"title":item.get("title"),**stats})
+        except Exception as exc:
+            report.append({"content_item_id":cid,"title":item.get("title"),"error":str(exc)})
+    return report
+
+
+def _content_review_data(limit=5000):
+    """Return content items, facts, links and promotions for analyst review."""
+    items=(sb.table("pc_content_ingest_items").select(
+        "content_item_id,title,publisher,publication_date,source_url,primary_source_candidate,primary_source_verified,fetch_status,extraction_status,resolution_status,created_at"
+    ).order("created_at",desc=True).limit(1000).execute().data or [])
+
+    facts=(sb.table("pc_extracted_facts").select(
+        "fact_id,content_item_id,fact_type,subject_type,subject_name,subject_identifier,predicate,object_type,object_name,object_identifier,value_text,value_numeric,unit,currency,effective_date,source_url,primary_source_url,confidence,verification_status,review_status,resolution_status,created_at"
+    ).order("created_at",desc=True).limit(int(limit)).execute().data or [])
+
+    links=(sb.table("pc_extracted_fact_links").select(
+        "fact_id,linked_type,linked_id,linked_name,role,match_method,confidence,analyst_reviewed"
+    ).limit(int(limit)*2).execute().data or [])
+
+    promotions=(sb.table("pc_extracted_fact_promotions").select(
+        "fact_id,target_table,staged_record_id,target_record_id,promotion_action,status,promoted_at"
+    ).limit(int(limit)*2).execute().data or [])
+
+    return items,facts,links,promotions
+
+
+def _review_article_summary(item,fact_rows,link_rows,promo_rows):
+    """Render one analyst-friendly article review block."""
+    title_txt=item.get("title") or item.get("source_url") or "Untitled source"
+    publisher=item.get("publisher") or ""
+    pubdate=item.get("publication_date") or ""
+    source_url=item.get("source_url") or ""
+
+    st.markdown(f"### {title_txt}")
+    meta=" · ".join(x for x in [publisher,str(pubdate)] if x)
+    if meta:
+        st.caption(meta)
+    if source_url:
+        st.markdown(f"[Open source article]({source_url})")
+
+    facts_df=pd.DataFrame(fact_rows)
+    links_df=pd.DataFrame(link_rows)
+    promo_df=pd.DataFrame(promo_rows)
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Facts",len(facts_df))
+    c2.metric("Canonical links",len(links_df))
+    c3.metric("Staged proposals",len(promo_df))
+    verified=0
+    if not facts_df.empty and "verification_status" in facts_df.columns:
+        verified=int(facts_df["verification_status"].astype(str).isin(["primary_source_supported","corroborated"]).sum())
+    c4.metric("Primary-source supported",verified)
+
+    if facts_df.empty:
+        st.caption("No extracted facts.")
+        return
+
+    for _,f in facts_df.head(80).iterrows():
+        left=str(f.get("subject_name") or f.get("subject_identifier") or "Fact")
+        predicate=str(f.get("predicate") or "")
+        right=str(f.get("object_name") or f.get("value_text") or "")
+        if not right and pd.notna(f.get("value_numeric")):
+            right=f"{f.get('value_numeric')} {f.get('unit') or ''}".strip()
+        status=str(f.get("resolution_status") or "unresolved")
+        conf=f.get("confidence")
+        try:
+            conf_txt=f"{float(conf)*100:.0f}%"
+        except Exception:
+            conf_txt=""
+
+        flinks=links_df[links_df["fact_id"].astype(str).eq(str(f.get("fact_id")))] if not links_df.empty else pd.DataFrame()
+        fp=promo_df[promo_df["fact_id"].astype(str).eq(str(f.get("fact_id")))] if not promo_df.empty else pd.DataFrame()
+
+        icon={"ready":"✓","matched":"✓","partial":"◐","ambiguous":"?","unresolved":"○"}.get(status,"○")
+        st.markdown(f"**{icon} {left} — {predicate} → {right or '—'}**")
+        detail=[]
+        if conf_txt: detail.append(f"Confidence {conf_txt}")
+        detail.append(f"Status {status}")
+        if not flinks.empty:
+            names=[str(x) for x in flinks.get("linked_name",pd.Series(dtype=str)).dropna().tolist() if str(x)]
+            if names: detail.append("Matched: "+", ".join(dict.fromkeys(names)))
+        if not fp.empty:
+            tables=[str(x) for x in fp.get("target_table",pd.Series(dtype=str)).dropna().tolist() if str(x)]
+            if tables: detail.append("Staged: "+", ".join(dict.fromkeys(tables)))
+        st.caption(" · ".join(detail))
+        ps=str(f.get("primary_source_url") or "")
+        if ps:
+            st.markdown(f"[Primary source]({ps})")
+        st.markdown("")
+
+
 def _run_content_item_extraction(batch_id,item,use_web=True,product_context="TRADE"):
     """Fetch one URL, extract facts, persist evidence and stage canonical proposals."""
     item_id=item["content_item_id"]
@@ -2899,6 +3410,12 @@ SOURCE TEXT:
 
     staged,rejected,resolution=stage_ai_result(sb,job_id,result)
 
+    fact_resolution=_resolve_content_item_facts(
+        item_id,
+        extraction_run_id=extraction_run["extraction_run_id"],
+        ingestion_job_id=job_id
+    )
+
     sb.table("pc_extraction_runs").update({
         "status":"completed",
         "facts_extracted":len(facts),
@@ -2908,13 +3425,18 @@ SOURCE TEXT:
         "metadata":{
             "source_url":url,
             "primary_sources_discovered":primary_count,
-            "rejected_records":rejected
+            "rejected_records":rejected,
+            "fact_resolution":fact_resolution
         }
     }).eq("extraction_run_id",extraction_run["extraction_run_id"]).execute()
 
     sb.table("pc_content_ingest_items").update({
         "extraction_status":"completed",
-        "resolution_status":"staged" if staged else "facts_only",
+        "resolution_status":(
+            "ready" if fact_resolution.get("unresolved",0)==0 and fact_resolution.get("ambiguous",0)==0 and fact_resolution.get("partial",0)==0
+            else "partial" if (fact_resolution.get("ready",0) or fact_resolution.get("matched",0))
+            else "unresolved"
+        ),
         "updated_at":pd.Timestamp.utcnow().isoformat()
     }).eq("content_item_id",item_id).execute()
 
@@ -2941,6 +3463,7 @@ SOURCE TEXT:
         "primary_sources":primary_count,
         "job_id":job_id,
         "resolution":resolution,
+        "fact_resolution":fact_resolution,
     }
 
 
@@ -9596,7 +10119,7 @@ elif page=="Universal Content Intake":
         st.error("Run the Universal Content / Fact Extraction Foundation SQL first.")
     else:
         intake_tab, queue_tab, facts_tab = st.tabs(
-            ["Add URLs / URL-list document","Content queue","Extracted facts"]
+            ["Add URLs / URL-list document","Content queue","Fact review & resolution"]
         )
 
         with intake_tab:
@@ -9803,17 +10326,125 @@ elif page=="Universal Content Intake":
 
         with facts_tab:
             st.markdown("### Extracted fact review")
+            st.caption(
+                "Facts are preserved independently of canonical records. Resolution links existing P&C objects; "
+                "promotion links facts to staged proposals. Nothing here bypasses the normal review/apply workflow."
+            )
+
+            a1,a2=st.columns([1.6,1])
+            with a1:
+                if st.button(
+                    "Resolve / link current fact queue",
+                    type="primary",
+                    use_container_width=True,
+                    key="resolve_content_fact_queue"
+                ):
+                    with st.spinner("Resolving canonical identities and staged promotions..."):
+                        rep=_resolve_all_pending_content_facts(250)
+                    st.success(f"Resolution pass completed for {len(rep)} content item(s).")
+                    st.session_state["content_resolution_report"]=rep
+                    st.rerun()
+            with a2:
+                review_limit=st.selectbox(
+                    "Review window",
+                    [500,1000,2500,5000],
+                    index=1,
+                    key="content_fact_review_limit"
+                )
+
             try:
-                facts=safe_rows(
-                    sb,"pc_v_extracted_fact_review","*",1000,order="fact_id"
+                items,facts,links,promotions=_content_review_data(int(review_limit))
+            except Exception as exc:
+                st.error(f"Could not load content review data: {exc}")
+                items=[]; facts=[]; links=[]; promotions=[]
+
+            idf=pd.DataFrame(items)
+            fdf=pd.DataFrame(facts)
+            ldf=pd.DataFrame(links)
+            pdf=pd.DataFrame(promotions)
+
+            if fdf.empty:
+                st.info("No extracted facts yet.")
+            else:
+                # Headline analyst metrics.
+                m1,m2,m3,m4,m5,m6=st.columns(6)
+                m1.metric("Sources",fdf["content_item_id"].nunique() if "content_item_id" in fdf.columns else 0)
+                m2.metric("Facts",len(fdf))
+                verified=(
+                    fdf["verification_status"].astype(str).isin(["primary_source_supported","corroborated"]).sum()
+                    if "verification_status" in fdf.columns else 0
                 )
-            except Exception:
-                facts=safe_rows(
-                    sb,"pc_extracted_facts",
-                    "fact_id,content_item_id,fact_type,subject_name,predicate,object_name,value_text,value_numeric,unit,currency,effective_date,source_url,primary_source_url,confidence,verification_status,review_status,resolution_status",
-                    1000,order="created_at"
+                m3.metric("Primary supported",int(verified))
+                m4.metric("Canonical links",len(ldf))
+                m5.metric("Staged proposals",len(pdf))
+                needs=(
+                    fdf["resolution_status"].astype(str).isin(["unresolved","ambiguous","partial"]).sum()
+                    if "resolution_status" in fdf.columns else 0
                 )
-            dataframe(facts)
+                m6.metric("Needs review",int(needs))
+
+                by_article,needs_tab,ready_tab,raw_tab=st.tabs([
+                    "By Article",
+                    "Needs Resolution",
+                    "Ready / Staged",
+                    "Raw Facts"
+                ])
+
+                with by_article:
+                    if idf.empty:
+                        st.info("No source-item metadata available.")
+                    else:
+                        # Only show source items represented in the fact window.
+                        represented=set(fdf["content_item_id"].astype(str)) if "content_item_id" in fdf.columns else set()
+                        articles=idf[idf["content_item_id"].astype(str).isin(represented)].copy()
+                        for _,itemrow in articles.head(100).iterrows():
+                            cid=str(itemrow.get("content_item_id"))
+                            ff=fdf[fdf["content_item_id"].astype(str).eq(cid)].copy()
+                            fact_ids=set(ff["fact_id"].astype(str)) if not ff.empty else set()
+                            ll=ldf[ldf["fact_id"].astype(str).isin(fact_ids)].copy() if not ldf.empty else pd.DataFrame()
+                            pp=pdf[pdf["fact_id"].astype(str).isin(fact_ids)].copy() if not pdf.empty else pd.DataFrame()
+                            with st.expander(
+                                f"{itemrow.get('title') or itemrow.get('source_url') or 'Untitled source'} · {len(ff)} fact(s)",
+                                expanded=False
+                            ):
+                                _review_article_summary(itemrow.to_dict(),ff.to_dict("records"),ll.to_dict("records"),pp.to_dict("records"))
+
+                with needs_tab:
+                    need=fdf[
+                        fdf["resolution_status"].astype(str).isin(["unresolved","ambiguous","partial"])
+                    ].copy()
+                    if need.empty:
+                        st.success("No unresolved or ambiguous facts in the current review window.")
+                    else:
+                        showcols=[
+                            "fact_type","subject_name","subject_identifier","predicate",
+                            "object_name","object_identifier","value_text","value_numeric",
+                            "unit","currency","effective_date","confidence",
+                            "verification_status","resolution_status","source_url"
+                        ]
+                        dataframe(need[[c for c in showcols if c in need.columns]].to_dict("records"))
+
+                with ready_tab:
+                    ready=fdf[
+                        fdf["resolution_status"].astype(str).isin(["ready","matched"])
+                    ].copy()
+                    if ready.empty:
+                        st.info("No facts are currently classified as ready/matched.")
+                    else:
+                        showcols=[
+                            "fact_type","subject_name","predicate","object_name",
+                            "value_text","value_numeric","unit","currency","effective_date",
+                            "confidence","verification_status","resolution_status","primary_source_url"
+                        ]
+                        dataframe(ready[[c for c in showcols if c in ready.columns]].to_dict("records"))
+                        st.caption(
+                            "Ready facts with staged promotions are already in the normal Review Queue. "
+                            "Approve/apply them there; this fact layer remains the provenance/audit trail."
+                        )
+
+                with raw_tab:
+                    st.caption("Administrative/debug view.")
+                    dataframe(fdf.to_dict("records"))
 
 elif page=="Document Loader":
     title("Document / report loader","Upload and preserve a source document. For documents containing lists of article URLs, use Universal Content Intake so every URL is fetched, fact-extracted and routed.")
