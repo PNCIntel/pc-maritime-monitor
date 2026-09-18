@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "43-fact-promotion-workflow-2026-09-18"
+LOADER_BUILD = "44-port-enrichment-workflow-2026-09-18"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -90,6 +90,7 @@ NAV = {
     "Review Queue": "Canonical Review",
     "AI Research": "AI Research Workflow",
     "Content Intake": "Universal Content Intake",
+    "Port Enrichment": "Port Enrichment",
     "Documents": "Document Loader",
     "Email & Distribution": "Distribution Lists",
     "System": "Governance & Quality",
@@ -118,6 +119,13 @@ REQUIRED_BY_TABLE = {
     "pc_supply_series": ["supply_series_id"],
     "pc_transport_routes": ["route_id","route_name","mode"],
     "pc_chokepoints": ["chokepoint_id","name"],
+
+    # Port / terminal / berth layer
+    "pc_port_capabilities": ["port_asset_id"],
+    "pc_port_metrics": ["port_metric_id","port_asset_id","metric_name"],
+    "pc_terminal_details": ["asset_id"],
+    "pc_berth_details": ["asset_id"],
+    "pc_port_calls": ["port_call_id","mobile_asset_id","port_asset_id"],
 
     # Transport-service layer
     "pc_transport_services": ["transport_service_id","service_name","mode"],
@@ -174,6 +182,35 @@ FK_RULES = {
         ("market_instrument_id","pc_market_instruments","market_instrument_id"),
     ],
 
+    "pc_port_capabilities": [
+        ("port_asset_id","pc_assets","asset_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_port_metrics": [
+        ("port_asset_id","pc_assets","asset_id"),
+        ("source_id","pc_sources","source_id"),
+        ("observation_id","pc_observations","observation_id"),
+    ],
+    "pc_terminal_details": [
+        ("asset_id","pc_assets","asset_id"),
+        ("parent_port_asset_id","pc_assets","asset_id"),
+        ("owner_entity_id","pc_entities","entity_id"),
+        ("operator_entity_id","pc_entities","entity_id"),
+        ("concession_holder_entity_id","pc_entities","entity_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_berth_details": [
+        ("asset_id","pc_assets","asset_id"),
+        ("terminal_asset_id","pc_terminal_details","asset_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_port_calls": [
+        ("mobile_asset_id","pc_mobile_assets","mobile_asset_id"),
+        ("port_asset_id","pc_assets","asset_id"),
+        ("terminal_asset_id","pc_terminal_details","asset_id"),
+        ("berth_asset_id","pc_berth_details","asset_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
     "pc_project_details": [
         ("asset_id","pc_assets","asset_id"),
         ("sponsor_entity_id","pc_entities","entity_id"),
@@ -985,6 +1022,8 @@ ID_FIELDS = {
 }
 
 UUID_ID_FIELDS = {
+    "pc_port_metrics":"port_metric_id",
+    "pc_port_calls":"port_call_id",
     "pc_transport_service_aliases":"service_alias_id",
     "pc_transport_service_operators":"service_operator_id",
     "pc_transport_service_stops":"service_stop_id",
@@ -2161,6 +2200,9 @@ AI_ALLOWED_TABLES = {
     "pc_supply_series",
     "pc_port_metrics",
     "pc_port_capabilities",
+    "pc_terminal_details",
+    "pc_berth_details",
+    "pc_port_calls",
     "pc_transport_routes",
     "pc_chokepoints",
     "pc_macro_indicators",
@@ -2193,6 +2235,11 @@ AI_ALLOWED_TABLES = {
 }
 
 DIRECT_DOMAIN_TABLES = {
+    "pc_port_capabilities",
+    "pc_port_metrics",
+    "pc_terminal_details",
+    "pc_berth_details",
+    "pc_port_calls",
     "pc_transport_services",
     "pc_transport_service_aliases",
     "pc_transport_service_operators",
@@ -2236,7 +2283,10 @@ APPLY_CONFLICT_KEYS = {
     "pc_trade_flows": "trade_flow_id",
     "pc_supply_series": "supply_series_id",
     "pc_port_metrics": "port_metric_id",
-    "pc_port_capabilities": "port_capability_id",
+    "pc_port_capabilities": "port_asset_id",
+    "pc_terminal_details": "asset_id",
+    "pc_berth_details": "asset_id",
+    "pc_port_calls": "port_call_id",
     "pc_transport_routes": "route_id",
     "pc_chokepoints": "chokepoint_id",
     "pc_macro_indicators": "macro_indicator_id",
@@ -4309,7 +4359,12 @@ def _apply_safe_candidates_priority(job_id):
         "pc_mobile_assets":20,
         "pc_events":30,
 
+        "pc_port_capabilities":32,
+        "pc_port_metrics":34,
+        "pc_terminal_details":34,
+        "pc_berth_details":36,
         "pc_transport_services":35,
+        "pc_port_calls":58,
         "pc_transactions":40,
         "pc_financing_facilities":40,
         "pc_contracts":40,
@@ -10349,6 +10404,264 @@ elif page=="Reconciliation Center":
             st.markdown("Install these SQL migrations in order:")
             st.code("027_workflow_orchestration.sql\n028_document_ingestion.sql\n029_intelligence_authoring.sql\n030_distribution_lists.sql\n031_reconciliation_cleanup.sql\n032_event_first_dependency_engine.sql\n033_dependency_autocreate_engine.sql\n034_ingestion_quality_checks.sql\n035_dependency_regression_checks.sql\n036_compact_workflow_views.sql")
             st.caption("The cleanup functions are job-scoped and operate on staging before canonical apply.")
+
+elif page=="Port Enrichment":
+    title(
+        "Port enrichment",
+        "Research and stage a connected port update: canonical port attributes, terminals, berths, capabilities, throughput, projects, contracts, financing, services and evidence."
+    )
+    st.caption(f"Loader build: `{LOADER_BUILD}`")
+
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        try:
+            ports=safe_rows(
+                sb,"pc_assets",
+                "asset_id,name,asset_type,subtype,country,region_city,status,source_id,metadata",
+                20000
+            )
+        except Exception:
+            ports=[]
+
+        pdf=pd.DataFrame(ports)
+        if not pdf.empty:
+            mask=(
+                pdf.get("asset_type",pd.Series(index=pdf.index,dtype=str)).fillna("").astype(str).str.contains("port",case=False,na=False)
+                | pdf.get("subtype",pd.Series(index=pdf.index,dtype=str)).fillna("").astype(str).str.contains("port|harbour|harbor|seaport",case=False,na=False,regex=True)
+            )
+            pdf=pdf[mask].copy()
+
+        if pdf.empty:
+            st.info("No canonical port assets found.")
+        else:
+            q=st.text_input("Find port",placeholder="Rotterdam, Montreal, Jebel Ali...",key="port_enrichment_q")
+            pview=pdf.copy()
+            if q.strip():
+                m=pd.Series(False,index=pview.index)
+                for c in ["name","country","region_city","asset_id"]:
+                    if c in pview.columns:
+                        m |= pview[c].fillna("").astype(str).str.contains(q,case=False,na=False,regex=False)
+                pview=pview[m].copy()
+
+            options=pview.reset_index(drop=True)
+            pick=st.selectbox(
+                "Canonical port",
+                range(len(options)),
+                format_func=lambda i:(
+                    f"{options.iloc[i].get('name','')} · "
+                    f"{options.iloc[i].get('country','')} · "
+                    f"{options.iloc[i].get('asset_id','')}"
+                ),
+                key="port_enrichment_pick"
+            )
+            port=options.iloc[pick].to_dict()
+            pid=str(port.get("asset_id") or "")
+            pname=str(port.get("name") or "")
+            pcountry=str(port.get("country") or "")
+
+            # Existing connected records.
+            existing_terminals=safe_rows(
+                sb,"pc_terminal_details","*",5000
+            )
+            tdf=pd.DataFrame(existing_terminals)
+            if not tdf.empty and "parent_port_asset_id" in tdf.columns:
+                tdf=tdf[tdf["parent_port_asset_id"].astype(str).eq(pid)].copy()
+
+            tids=set(tdf.get("asset_id",pd.Series(dtype=str)).dropna().astype(str))
+            bdf=pd.DataFrame(safe_rows(sb,"pc_berth_details","*",10000))
+            if not bdf.empty and "terminal_asset_id" in bdf.columns and tids:
+                bdf=bdf[bdf["terminal_asset_id"].astype(str).isin(tids)].copy()
+            else:
+                bdf=bdf.iloc[0:0].copy()
+
+            cap=pd.DataFrame(safe_rows(sb,"pc_port_capabilities","*",2000))
+            if not cap.empty and "port_asset_id" in cap.columns:
+                cap=cap[cap["port_asset_id"].astype(str).eq(pid)].copy()
+
+            metrics=pd.DataFrame(safe_rows(sb,"pc_port_metrics","*",10000))
+            if not metrics.empty and "port_asset_id" in metrics.columns:
+                metrics=metrics[metrics["port_asset_id"].astype(str).eq(pid)].copy()
+
+            st.markdown(f"### {pname}")
+            st.caption(f"{pcountry} · `{pid}`")
+
+            c1,c2,c3,c4=st.columns(4)
+            c1.metric("Known terminals",len(tdf))
+            c2.metric("Known berths",len(bdf))
+            c3.metric("Capability records",len(cap))
+            c4.metric("Port metrics",len(metrics))
+
+            official_urls=st.text_area(
+                "Official / authoritative URLs",
+                placeholder=(
+                    "Paste port authority website, terminal map/factsheet, annual report, "
+                    "operator pages, statistics pages, project/tender pages — one URL per line."
+                ),
+                height=130,
+                key="port_enrichment_urls"
+            )
+            url_list=_extract_urls_from_text(official_urls)
+
+            research_scope=st.multiselect(
+                "Update scope",
+                [
+                    "Port capabilities",
+                    "Terminals",
+                    "Berths",
+                    "Throughput / metrics",
+                    "Projects & development",
+                    "Contracts / concessions",
+                    "Financing",
+                    "Transport services / routes",
+                    "Operators / ownership",
+                ],
+                default=[
+                    "Port capabilities","Terminals","Berths","Throughput / metrics",
+                    "Projects & development","Contracts / concessions","Operators / ownership"
+                ],
+                key="port_enrichment_scope"
+            )
+
+            with st.expander("Existing canonical port data"):
+                st.markdown("#### Port asset")
+                dataframe([port])
+                if not cap.empty:
+                    st.markdown("#### Capabilities")
+                    dataframe(cap.to_dict("records"))
+                if not tdf.empty:
+                    st.markdown("#### Terminals")
+                    dataframe(tdf.to_dict("records"))
+                if not bdf.empty:
+                    st.markdown("#### Berths")
+                    dataframe(bdf.to_dict("records"))
+
+            if st.button(
+                "Research port → build staged update",
+                type="primary",
+                use_container_width=True,
+                key="port_enrichment_run"
+            ):
+                if not ai_configured():
+                    st.error("Configure OPENAI_API_KEY and OPENAI_MODEL first.")
+                else:
+                    job=sb.table("pc_ingestion_jobs").insert({
+                        "job_type":"PORT_ENRICHMENT",
+                        "title":f"Port enrichment · {pname}",
+                        "query_text":"Connected port/terminal/berth enrichment",
+                        "source_scope":{
+                            "port_asset_id":pid,
+                            "port_name":pname,
+                            "country":pcountry,
+                            "scope":research_scope,
+                            "seed_urls":url_list,
+                        },
+                        "status":"running",
+                    }).execute().data[0]
+                    jid=job["ingestion_job_id"]
+
+                    canonical_context={
+                        "port":port,
+                        "terminals":tdf.to_dict("records") if not tdf.empty else [],
+                        "berths":bdf.to_dict("records") if not bdf.empty else [],
+                        "capabilities":cap.to_dict("records") if not cap.empty else [],
+                        "metrics":metrics.tail(50).to_dict("records") if not metrics.empty else [],
+                    }
+
+                    prompt=f"""
+Perform a connected PORT UPDATE for Power & Corridors.
+
+CANONICAL PORT
+asset_id: {pid}
+name: {pname}
+country: {pcountry}
+
+REQUESTED SCOPE
+{json.dumps(research_scope,ensure_ascii=False)}
+
+SEED / OFFICIAL URLS
+{json.dumps(url_list,ensure_ascii=False)}
+
+CURRENT CANONICAL CONTEXT
+{json.dumps(canonical_context,ensure_ascii=False,default=str,indent=2)}
+
+Use current authoritative web research. Prefer the port authority, terminal
+operators, government/municipal authorities, official annual/statistical reports,
+tender/concession documents, terminal maps/factsheets and official carrier/service
+announcements.
+
+Build reviewable records for supported facts using:
+- pc_assets for any genuinely missing terminal or berth identities;
+- pc_port_capabilities for port-wide capacity/connectivity/commodity attributes;
+- pc_terminal_details for terminal type/code, owner/operator/concession,
+  berth_count, quay length, max draught, capacity and equipment;
+- pc_berth_details for named/numbered berth length, depth, max vessel length and status;
+- pc_port_metrics for dated throughput/cargo/container statistics;
+- pc_project_details for port/terminal expansion or development projects;
+- pc_contracts / pc_contract_participants / pc_contract_links for concessions,
+  construction, dredging, cranes/equipment and service awards;
+- pc_financing_* for loans, grants and project financing;
+- pc_transport_services / operators / stops / changes only when authoritative
+  service information supports them;
+- pc_relationships for ownership/operator/terminal relationships when useful.
+
+IMPORTANT
+1. Preserve the canonical parent port ID `{pid}`. Do not create another port.
+2. Do not create duplicate terminals/berths when the canonical context already
+   contains the same facility.
+3. Every new terminal/berth must have a pc_assets parent identity as well as its
+   specialist detail record.
+4. pc_terminal_details.parent_port_asset_id must be `{pid}`.
+5. For a NEW terminal or berth, give the pc_assets proposal and its specialist
+   detail proposal the SAME exact `natural_key` under
+   metadata.asset_natural_key so the loader can bind them after staging.
+6. For a berth, include metadata.terminal_name and/or terminal_asset_id only when
+   the terminal match is deterministic.
+7. Do not fabricate berth counts, depths, capacities, quay lengths, operators,
+   concessions or throughput figures. Leave unsupported fields blank.
+8. Port calls belong in pc_port_calls only when the source reports a specific
+   vessel call; do not infer calls from route/service membership.
+9. Do not write to pc_port_reference; it remains a source-reference layer.
+10. Preserve research sources on every proposal.
+
+Return the normal universal JSON contract with records and source provenance.
+"""
+
+                    with st.spinner(f"Researching {pname} and building staged records..."):
+                        result=ai_research(
+                            prompt,
+                            "TRADE",
+                            True,
+                            output_contract=UNIVERSAL_CONTENT_OUTPUT_CONTRACT
+                        )
+                        result=_prepare_universal_records(
+                            result,
+                            url_list[0] if url_list else "",
+                            None,
+                            f"Port enrichment · {pname}"
+                        )
+                        staged,rejected,resolution=stage_ai_result(sb,jid,result)
+
+                    sb.table("pc_ingestion_jobs").update({
+                        "status":"completed",
+                        "completed_at":pd.Timestamp.utcnow().isoformat(),
+                        "stats":{
+                            "staged_records":staged,
+                            "rejected_records":rejected,
+                            "resolution":resolution,
+                            "port_asset_id":pid,
+                        }
+                    }).eq("ingestion_job_id",jid).execute()
+
+                    st.success(
+                        f"Port update staged: {staged} proposal(s), {rejected} rejected. "
+                        "Next: open Review Queue → reconcile → approve READY records → apply."
+                    )
+                    st.session_state["pc_last_port_enrichment_job"]=str(jid)
+
+            last_job=st.session_state.get("pc_last_port_enrichment_job")
+            if last_job:
+                st.info(f"Latest port enrichment job: `{last_job}`")
 
 elif page=="Universal Content Intake":
     title(
