@@ -4039,14 +4039,22 @@ def _canonical_finalize_existing_rows(job_id):
 
 
 def _canonical_object_spec(object_type):
+    kind=str(object_type or "").casefold()
+    aliases={
+        "company":"entity","organisation":"entity","organization":"entity",
+        "vessel":"mobile_asset","ship":"mobile_asset","aircraft":"mobile_asset",
+        "transport_route":"route","corridor":"route","network":"route",
+        "deal":"transaction",
+    }
+    kind=aliases.get(kind,kind)
     return {
         "entity":("pc_entities","entity_id"),
         "asset":("pc_assets","asset_id"),
         "mobile_asset":("pc_mobile_assets","mobile_asset_id"),
         "event":("pc_events","event_id"),
+        "route":("pc_transport_routes","route_id"),
         "transaction":("pc_transactions","transaction_id"),
-        "deal":("pc_transactions","transaction_id"),
-    }.get(str(object_type or "").casefold())
+    }.get(kind)
 
 
 def _canonical_row_exists(object_type, object_id):
@@ -4111,6 +4119,20 @@ def _resolve_package_object_id(target_table,payload,resolved_id=None):
         if eid and _canonical_row_exists("event",eid):
             return str(eid)
 
+    elif target_table=="pc_transport_routes":
+        rid=payload.get("route_id")
+        if rid and _canonical_row_exists("route",rid):
+            return str(rid)
+        name=str(payload.get("route_name") or payload.get("name") or "").strip()
+        if name:
+            try:
+                hits=(sb.table("pc_transport_routes").select("route_id,route_name")
+                      .eq("route_name",name).limit(3).execute().data or [])
+                if len(hits)==1:
+                    return str(hits[0]["route_id"])
+            except Exception:
+                pass
+
     elif target_table=="pc_transactions":
         tid=payload.get("transaction_id")
         if tid and _canonical_row_exists("transaction",tid):
@@ -4136,6 +4158,7 @@ def _build_package_id_map(job_id):
         "pc_assets":"asset_id",
         "pc_mobile_assets":"mobile_asset_id",
         "pc_events":"event_id",
+        "pc_transport_routes":"route_id",
         "pc_transactions":"transaction_id",
     }
     for r in rows:
@@ -4953,21 +4976,61 @@ def _v27_repair_relationship_source_endpoints(job_id):
 
 
 
-def _v31_repair_existing_graph_rows(job_id):
-    """Repair graph rows only, without rerunning the parent V5 ingestion processor.
 
-    This is the correct operation for an already-loaded job after a reboot: parents are
-    already canonical, so do not send them through V5 again. Reconstruct endpoint maps,
-    apply event links and relationships directly, then run the deferred SQL once for any
-    specialist child rows.
+def _v32_graph_support_preflight():
+    """Explain whether database-side polymorphic helpers understand route endpoints."""
+    report={"route_table":False,"route_count":0,"pc_object_exists_route":None,"errors":[]}
+    try:
+        rows=(sb.table("pc_transport_routes").select("route_id").limit(1).execute().data or [])
+        report["route_table"]=True
+        report["route_count"]=len(rows)
+        if rows:
+            rid=str(rows[0].get("route_id") or "")
+            try:
+                # postgrest RPC positional names depend on SQL signature.
+                val=sb.rpc("pc_object_exists",{"p_object_type":"route","p_id":rid}).execute().data
+                report["pc_object_exists_route"]=bool(val)
+            except Exception as exc:
+                report["pc_object_exists_route"]=False
+                report["errors"].append(
+                    "Database helper pc_object_exists does not support route endpoints yet: "+str(exc)
+                )
+    except Exception as exc:
+        report["errors"].append("pc_transport_routes preflight failed: "+str(exc))
+    return report
+
+
+def _v32_mark_graph_resolution_failure(staged_record_id, method, reason, details=None):
+    try:
+        payload={"reason":str(reason)[:1800]}
+        if isinstance(details,dict):
+            payload.update(details)
+        sb.table("pc_staged_records").update({
+            "resolution_status":"BROKEN_REFERENCE",
+            "resolution_method":method,
+            "validation_status":"needs_review",
+            "review_status":"pending",
+            "resolution_details":payload,
+        }).eq("staged_record_id",staged_record_id).execute()
+    except Exception:
+        pass
+
+
+def _v32_repair_existing_graph_rows(job_id):
+    """Repair unresolved graph rows directly and preserve visible diagnostics.
+
+    Important: do NOT call the legacy deferred SQL resolver when its object helper
+    does not understand route endpoints, because that RPC re-stamps successfully
+    recoverable rows with EDGE_PROCESS_ERROR / sql_v21_deferred_apply_error.
     """
     result={
         "loader_build":LOADER_BUILD,
         "job_id":str(job_id),
+        "preflight":_v32_graph_support_preflight(),
         "endpoint_map_size":0,
         "event_links":None,
         "relationships":None,
-        "deferred_rpc":None,
+        "deferred_rpc":"skipped",
         "final_summary":None,
     }
 
@@ -4977,13 +5040,21 @@ def _v31_repair_existing_graph_rows(job_id):
     result["event_links"]=_v28_apply_event_links_direct(job_id)
     result["relationships"]=_v29_apply_relationships_direct(job_id)
 
-    try:
-        result["deferred_rpc"]=(sb.rpc(
-            "pc_apply_deferred_canonical_job_v1",
-            {"p_ingestion_job_id":str(job_id)}
-        ).execute().data or {})
-    except Exception as exc:
-        result["deferred_rpc"]={"error":str(exc)}
+    # Run legacy deferred SQL only if database route support is actually installed.
+    # Otherwise it is known to reject target_type='route'.
+    if result["preflight"].get("pc_object_exists_route") is True:
+        try:
+            result["deferred_rpc"]=(sb.rpc(
+                "pc_apply_deferred_canonical_job_v1",
+                {"p_ingestion_job_id":str(job_id)}
+            ).execute().data or {})
+        except Exception as exc:
+            result["deferred_rpc"]={"error":str(exc)}
+    else:
+        result["deferred_rpc"]={
+            "skipped":True,
+            "reason":"Database pc_object_exists/pc_object_name route support is not installed. Apply migration 054_route_graph_endpoint_support.sql."
+        }
 
     try:
         _canonical_finalize_existing_rows(job_id)
@@ -4997,6 +5068,7 @@ def _v31_repair_existing_graph_rows(job_id):
     except Exception as exc:
         result["final_summary"]={"error":str(exc)}
     return result
+
 
 
 def _canonical_process_job(job_id, deferred_rows=None):
@@ -5945,7 +6017,7 @@ elif page=="Canonical Loader":
         "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
-    st.success("V31: Resume now performs graph-only repair. It reconstructs package-local→canonical endpoint mappings from staged parent payloads even when resolved_entity_id was never saved, then applies event links/relationships without rerunning parent ingestion.")
+    st.success("V32: route-aware graph repair. Python now treats pc_transport_routes as canonical graph endpoints, does not rerun the legacy deferred SQL resolver when route support is missing, and keeps repair diagnostics visible after the button is pressed.")
     if not sb:
         st.error("Supabase service connection required.")
     else:
@@ -6053,18 +6125,26 @@ elif page=="Canonical Loader":
                             "Repairing existing staged graph rows without rerunning parent ingestion…",
                             expanded=True
                         ) as _status:
-                            _result=_v31_repair_existing_graph_rows(_selected_jid)
+                            _result=_v32_repair_existing_graph_rows(_selected_jid)
+                            st.session_state[f"graph_repair_result_{_selected_jid}"]=_result
                             st.write(_result)
                             _status.update(
-                                label="Retry complete — refreshing job status",
+                                label="Graph repair complete",
                                 state="complete",
-                                expanded=False
+                                expanded=True
                             )
-                        st.rerun()
                     except Exception as _exc:
                         st.exception(_exc)
-            else:
-                st.success("Selected ingestion job has no unresolved staged rows.")
+            _last_repair=st.session_state.get(f"graph_repair_result_{_selected_jid}")
+            if _last_repair:
+                st.markdown("#### Last graph-repair diagnostics")
+                st.json(_last_repair)
+                _pf=_last_repair.get("preflight") if isinstance(_last_repair,dict) else {}
+                if isinstance(_pf,dict) and _pf.get("pc_object_exists_route") is False:
+                    st.warning(
+                        "Database route endpoint support is still missing. "
+                        "Run migration `054_route_graph_endpoint_support.sql`, then run graph repair again."
+                    )
 
             with st.expander("Selected job metadata",expanded=False):
                 st.json(_selected_job)
@@ -6404,7 +6484,7 @@ elif page=="Canonical Loader":
                                     "Retrying unresolved canonical objects and dependent graph edges…",
                                     expanded=True
                                 ) as status:
-                                    result=_v31_repair_existing_graph_rows(last)
+                                    result=_v32_repair_existing_graph_rows(last)
                                     st.write(result)
                                     status.update(
                                         label="Retry complete — refreshing",
