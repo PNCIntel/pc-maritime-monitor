@@ -42,7 +42,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.6.2-canonical-port-model"
+APP_VERSION = "v3.6.3-live-canonical-port-registry"
 RELEASE_NAME = "Trade Operating Picture · Connected Trade Intelligence, Effects, Networks & Horizon"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2036,29 +2036,177 @@ def enrich_ports_from_reference(ports):
             out.at[idx,"Geo Source"]="Global Port Reference (name match)"
     return out
 
+
+@st.cache_data(show_spinner=False, ttl=60)
+def live_canonical_port_view():
+    """Project live pc_assets port records into the Trade port explorer schema.
+
+    The canonical DB is authoritative. Exclude airports/airbases so the substring
+    'port' in 'airport' never contaminates the port explorer.
+    """
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame()
+
+        rows=pc_safe_rows(
+            sb,
+            "pc_assets",
+            "asset_id,name,asset_type,subtype,country,region_city,latitude,longitude,"
+            "operator_entity_id,owner_entity_id,status,record_status,data_quality,source_id,metadata",
+            50000
+        )
+        if not rows:
+            return pd.DataFrame()
+
+        df=pd.DataFrame(rows)
+
+        def _is_portish(row):
+            at=str(row.get("asset_type") or "").casefold()
+            stp=str(row.get("subtype") or "").casefold()
+            name=str(row.get("name") or "").casefold()
+
+            # Explicitly exclude aviation contamination.
+            bad=("airport","airbase","aviation","airfield","runway")
+            if any(x in at or x in stp or x in name for x in bad):
+                return False
+
+            good_tokens=(
+                "port","seaport","harbour","harbor","marine_terminal",
+                "container_terminal","cruise_terminal","multipurpose_terminal",
+                "dry_port","river_port","commercial_port"
+            )
+            return any(
+                t in at or t in stp
+                for t in good_tokens
+            ) or (
+                ("port" in name or "harbour" in name or "harbor" in name)
+                and not any(x in name for x in bad)
+            )
+
+        df=df[df.apply(_is_portish,axis=1)].copy()
+        if df.empty:
+            return pd.DataFrame()
+
+        # Resolve operator names when available.
+        entity_ids=set(df.get("operator_entity_id",pd.Series(dtype=str)).dropna().astype(str))
+        entity_ids |= set(df.get("owner_entity_id",pd.Series(dtype=str)).dropna().astype(str))
+        emap={}
+        if entity_ids:
+            erows=pc_safe_rows(sb,"pc_entities","entity_id,name",50000)
+            emap={str(r.get("entity_id")):r.get("name") for r in erows if r.get("entity_id")}
+
+        out=pd.DataFrame({
+            "Port ID":df["asset_id"].astype(str),
+            "Port / Facility":df["name"].fillna("").astype(str),
+            "Country":df.get("country",pd.Series(index=df.index,dtype=str)).fillna("").astype(str),
+            "City / Area":df.get("region_city",pd.Series(index=df.index,dtype=str)).fillna("").astype(str),
+            "Latitude":pd.to_numeric(df.get("latitude"),errors="coerce"),
+            "Longitude":pd.to_numeric(df.get("longitude"),errors="coerce"),
+            "Operator Company ID":df.get("operator_entity_id",pd.Series(index=df.index,dtype=str)).fillna("").astype(str),
+            "Operator":df.get("operator_entity_id",pd.Series(index=df.index,dtype=str)).fillna("").astype(str).map(emap).fillna(""),
+            "Owner Company ID":df.get("owner_entity_id",pd.Series(index=df.index,dtype=str)).fillna("").astype(str),
+            "Owner":df.get("owner_entity_id",pd.Series(index=df.index,dtype=str)).fillna("").astype(str).map(emap).fillna(""),
+            "Facility Type":df.get("subtype",pd.Series(index=df.index,dtype=str)).fillna(
+                df.get("asset_type",pd.Series(index=df.index,dtype=str))
+            ).astype(str),
+            "Status":df.get("status",pd.Series(index=df.index,dtype=str)).fillna("").astype(str),
+            "Record Status":df.get("record_status",pd.Series(index=df.index,dtype=str)).fillna("").astype(str),
+            "Data Quality":df.get("data_quality",pd.Series(index=df.index,dtype=str)).fillna("").astype(str),
+            "Source ID":df.get("source_id",pd.Series(index=df.index,dtype=str)).fillna("").astype(str),
+            "Canonical Source":"pc_assets",
+            "Metadata":df.get("metadata",pd.Series(index=df.index,dtype=object)),
+        })
+        return out
+    except Exception:
+        return pd.DataFrame()
+
+
 def unified_ports_with_reference(ports):
-    """Canonical ports plus geocoded reference-only seeds, so the explorer starts with port name + location and can be enriched later."""
-    canonical=enrich_ports_from_reference(ports)
+    """Live canonical ports + legacy port rows + geocoded reference-only seeds.
+
+    pc_assets is authoritative. Legacy/reference rows only fill genuine gaps.
+    """
+    legacy=enrich_ports_from_reference(ports)
+    live=live_canonical_port_view()
+
+    frames=[]
+    if not live.empty:
+        frames.append(live)
+    if not legacy.empty:
+        frames.append(legacy)
+
+    if frames:
+        canonical=pd.concat(frames,ignore_index=True,sort=False)
+    else:
+        canonical=pd.DataFrame()
+
+    # Prefer the live canonical pc_assets row when a duplicate ID/name exists.
+    if not canonical.empty:
+        canonical["_priority"]=canonical.get(
+            "Canonical Source",pd.Series(index=canonical.index,dtype=str)
+        ).fillna("").astype(str).eq("pc_assets").astype(int)
+
+        if "Port ID" in canonical.columns:
+            canonical=canonical.sort_values("_priority",ascending=False).drop_duplicates(
+                subset=["Port ID"],keep="first"
+            )
+
+        canonical["_name_key"]=canonical.get(
+            "Port / Facility",pd.Series(index=canonical.index,dtype=str)
+        ).map(_port_match_key)
+        canonical["_country_key"]=canonical.get(
+            "Country",pd.Series(index=canonical.index,dtype=str)
+        ).map(_port_match_key)
+
+        # Treat UAE and United Arab Emirates as the same country for dedupe.
+        canonical["_country_key"]=canonical["_country_key"].replace({
+            "uae":"united arab emirates"
+        })
+
+        canonical=canonical.sort_values("_priority",ascending=False).drop_duplicates(
+            subset=["_name_key","_country_key"],keep="first"
+        ).drop(columns=["_priority","_name_key","_country_key"],errors="ignore")
+
     ref=global_port_reference_view()
-    if ref.empty: return canonical
+    if ref.empty:
+        return canonical
+
     existing=set()
     if not canonical.empty:
         for _,r in canonical.iterrows():
-            existing.add((_port_match_key(r.get("Port / Facility","")),_port_match_key(r.get("Country",""))))
+            ck=_port_match_key(r.get("Country",""))
+            if ck=="uae":
+                ck="united arab emirates"
+            existing.add((_port_match_key(r.get("Port / Facility","")),ck))
+
     rows=[]
     for _,r in ref.iterrows():
-        key=(_port_match_key(r.get("Port Name","")),_port_match_key(r.get("Country Name","")))
-        if key in existing: continue
+        ck=_port_match_key(r.get("Country Name",""))
+        if ck=="uae":
+            ck="united arab emirates"
+        key=(_port_match_key(r.get("Port Name","")),ck)
+        if key in existing:
+            continue
         rows.append({
-            "Port ID":f"REF_{r.get('id','')}","Port / Facility":r.get("Port Name",""),"Country":r.get("Country Name",""),
-            "Latitude":r.get("Latitude",""),"Longitude":r.get("Longitude",""),"Operator Company ID":"","Operator":"",
-            "Facility Type":"Reference port seed","Key Role":"Global trade / port reference",
+            "Port ID":f"REF_{r.get('id','')}",
+            "Port / Facility":r.get("Port Name",""),
+            "Country":r.get("Country Name",""),
+            "Latitude":r.get("Latitude",""),
+            "Longitude":r.get("Longitude",""),
+            "Operator Company ID":"",
+            "Operator":"",
+            "Facility Type":"Reference port seed",
+            "Key Role":"Global trade / port reference",
             "Coverage Note":"Geocoded reference seed — canonical operator, terminal and ownership enrichment pending.",
-            "Source ID":"GLOBAL_PORT_REFERENCE","Geo Source":"Global Port Reference"
+            "Source ID":"GLOBAL_PORT_REFERENCE",
+            "Geo Source":"Global Port Reference"
         })
     if rows:
         canonical=pd.concat([canonical,pd.DataFrame(rows)],ignore_index=True,sort=False)
+
     return canonical
+
 
 @st.cache_data(show_spinner=False, ttl=1800)
 def join_portwatch_to_pc_ports(live, ports):
@@ -11598,7 +11746,14 @@ elif page in ["Ports","Ports & Terminals"]:
         q=st.text_input("Find port",placeholder="Rotterdam, Shanghai, Odesa, Vancouver, Constanța...",key="port_search_text")
         p=ports.copy()
 
-        if q: p=_contains_any(p,[q],["Port / Facility","Country","Operator"])
+        if q:
+            p=_contains_any(
+                p,[q],
+                [c for c in [
+                    "Port / Facility","Country","City / Area","Operator",
+                    "Owner","Facility Type","Port ID"
+                ] if c in p.columns]
+            )
         p=p.sort_values("Port / Facility").reset_index(drop=True)
         if p.empty:
             st.warning("No matching port.")
@@ -11621,6 +11776,10 @@ elif page in ["Ports","Ports & Terminals"]:
             )
             row=p.iloc[pick]; pid=str(row.get("Port ID","")); pname=str(row.get("Port / Facility",""))
             st.markdown(f"## {pname}")
+            if str(row.get("Canonical Source",""))=="pc_assets":
+                st.caption(f"Canonical live asset · `{pid}`")
+            elif str(pid).startswith("REF_"):
+                st.caption("Reference-only port seed · canonical enrichment pending")
             c1,c2,c3=st.columns(3)
             pt_raw=terms[terms["Port ID"].astype(str).eq(pid)].copy() if not terms.empty and "Port ID" in terms.columns else pd.DataFrame()
 
