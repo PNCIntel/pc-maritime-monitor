@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "45-review-queue-navigation-fix-2026-09-18"
+LOADER_BUILD = "46-fast-batch-content-intake-2026-09-18"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -3490,8 +3490,13 @@ def _resolve_all_pending_content_facts(limit_items=100):
     return report
 
 
+@st.cache_data(show_spinner=False, ttl=20)
 def _content_review_data(limit=5000):
-    """Return content items, facts, links and promotions for analyst review."""
+    """Return content items, facts, links and promotions for analyst review.
+
+    Cached briefly so ordinary Streamlit clicks do not re-scan the fact/link
+    tables on every rerun. Mutating workflows clear this cache explicitly.
+    """
     items=(sb.table("pc_content_ingest_items").select(
         "content_item_id,title,publisher,publication_date,source_url,primary_source_candidate,primary_source_verified,fetch_status,extraction_status,resolution_status,created_at"
     ).order("created_at",desc=True).limit(1000).execute().data or [])
@@ -3588,8 +3593,119 @@ def _review_article_summary(item,fact_rows,link_rows,promo_rows):
         st.markdown("")
 
 
-def _run_content_item_extraction(batch_id,item,use_web=True,product_context="TRADE"):
-    """Fetch one URL, extract facts, persist evidence and stage canonical proposals."""
+
+def _queue_content_urls(
+    urls,
+    input_mode,
+    product_context="TRADE",
+    manifest_document_id=None,
+    batch_name=None,
+    discovery_method="pasted_url",
+):
+    """Persist URL items without fetching or invoking AI. Intended to be near-instant."""
+    batch=_create_content_batch(
+        input_mode=input_mode,
+        batch_name=batch_name or f"Queued URL intake · {len(urls)} source(s)",
+        product_context=product_context,
+        research_mode="queued",
+        item_count=len(urls),
+        metadata={
+            "manifest_document_id":str(manifest_document_id) if manifest_document_id else None,
+            "loader_build":LOADER_BUILD,
+            "queued_only":True,
+        }
+    )
+    bid=batch["content_batch_id"]
+    items=[]
+    failures=[]
+    for u in urls:
+        try:
+            items.append(_upsert_content_url_item(
+                bid,u,manifest_document_id,discovery_method
+            ))
+        except Exception as exc:
+            failures.append({"url":u,"error":str(exc)})
+
+    sb.table("pc_content_ingest_batches").update({
+        "status":"queued" if not failures else "queued_with_errors",
+        "processed_count":0,
+        "failed_count":len(failures),
+        "updated_at":pd.Timestamp.utcnow().isoformat(),
+        "metadata":{
+            "manifest_document_id":str(manifest_document_id) if manifest_document_id else None,
+            "loader_build":LOADER_BUILD,
+            "queued_only":True,
+            "failures":failures[:100],
+        }
+    }).eq("content_batch_id",bid).execute()
+
+    try:
+        _content_review_data.clear()
+    except Exception:
+        pass
+    return batch,items,failures
+
+
+def _process_queued_content_items(limit_items=10, product_context="TRADE", deep=False):
+    """Process queued/pending URL items in one analyst action.
+
+    Fast mode extracts facts from each source without web research or staging.
+    Deep mode keeps the legacy all-in-one research/stage/resolve behaviour.
+    """
+    rows=(sb.table("pc_content_ingest_items")
+          .select("*")
+          .in_("extraction_status",["pending","failed"])
+          .order("created_at",desc=False)
+          .limit(int(limit_items)).execute().data or [])
+    results=[]
+    failures=[]
+    for item in rows:
+        try:
+            res=_run_content_item_extraction(
+                item.get("content_batch_id"),
+                item,
+                use_web=bool(deep),
+                product_context=product_context,
+                extract_only=not bool(deep),
+                resolve_after=bool(deep),
+            )
+            results.append(res)
+        except Exception as exc:
+            failures.append({
+                "content_item_id":item.get("content_item_id"),
+                "url":item.get("source_url"),
+                "error":str(exc)
+            })
+            try:
+                sb.table("pc_content_ingest_items").update({
+                    "extraction_status":"failed",
+                    "extraction_error":str(exc),
+                    "updated_at":pd.Timestamp.utcnow().isoformat()
+                }).eq("content_item_id",item.get("content_item_id")).execute()
+            except Exception:
+                pass
+
+    try:
+        _content_review_data.clear()
+    except Exception:
+        pass
+    return results,failures
+
+
+def _run_content_item_extraction(
+    batch_id,
+    item,
+    use_web=False,
+    product_context="TRADE",
+    extract_only=False,
+    resolve_after=True
+):
+    """Fetch one URL and extract structured content.
+
+    Fast mode (`extract_only=True`) preserves atomic facts only and deliberately
+    defers staging/resolution to the batch promotion step. This is materially
+    faster than doing web research + staging + canonical resolution per URL.
+    """
     item_id=item["content_item_id"]
     url=item.get("source_url") or item.get("normalized_url")
     fetched=None
@@ -3674,6 +3790,8 @@ Do not create a generic news/event record merely because an article exists.
 Create pc_events only when the article describes a real event/milestone/
 disruption/announcement that belongs in the event layer.
 
+{"FAST EXTRACTION MODE: Return atomic facts only. Set records=[] and primary_sources=[] unless the source text itself explicitly contains an authoritative primary-source URL. Do not spend tokens constructing staged records in this pass." if extract_only else "FULL EXTRACTION MODE: Return facts and supported canonical/domain record proposals."}
+
 SOURCE TEXT:
 {article_text}
 """
@@ -3703,13 +3821,41 @@ SOURCE TEXT:
         batch_id
     )
 
-    staged,rejected,resolution=stage_ai_result(sb,job_id,result)
-
-    fact_resolution=_resolve_content_item_facts(
-        item_id,
-        extraction_run_id=extraction_run["extraction_run_id"],
-        ingestion_job_id=job_id
-    )
+    if extract_only:
+        staged=0
+        rejected=0
+        resolution={"mode":"deferred_fast_extract"}
+        fact_resolution={
+            "facts":len(facts),
+            "matched":0,
+            "ready":0,
+            "partial":0,
+            "ambiguous":0,
+            "unresolved":len(facts),
+            "links":0,
+            "promotions":0,
+            "deferred":True,
+        }
+    else:
+        staged,rejected,resolution=stage_ai_result(sb,job_id,result)
+        if resolve_after:
+            fact_resolution=_resolve_content_item_facts(
+                item_id,
+                extraction_run_id=extraction_run["extraction_run_id"],
+                ingestion_job_id=job_id
+            )
+        else:
+            fact_resolution={
+                "facts":len(facts),
+                "matched":0,
+                "ready":0,
+                "partial":0,
+                "ambiguous":0,
+                "unresolved":len(facts),
+                "links":0,
+                "promotions":0,
+                "deferred":True,
+            }
 
     sb.table("pc_extraction_runs").update({
         "status":"completed",
@@ -3728,7 +3874,8 @@ SOURCE TEXT:
     sb.table("pc_content_ingest_items").update({
         "extraction_status":"completed",
         "resolution_status":(
-            "ready" if fact_resolution.get("unresolved",0)==0 and fact_resolution.get("ambiguous",0)==0 and fact_resolution.get("partial",0)==0
+            "facts_only" if extract_only
+            else "ready" if fact_resolution.get("unresolved",0)==0 and fact_resolution.get("ambiguous",0)==0 and fact_resolution.get("partial",0)==0
             else "partial" if (fact_resolution.get("ready",0) or fact_resolution.get("matched",0))
             else "unresolved"
         ),
@@ -3747,6 +3894,11 @@ SOURCE TEXT:
             "resolution":resolution
         }
     }).eq("ingestion_job_id",job_id).execute()
+
+    try:
+        _content_review_data.clear()
+    except Exception:
+        pass
 
     return {
         "content_item_id":item_id,
@@ -10737,23 +10889,34 @@ elif page=="Universal Content Intake":
                     dedup.append(u)
             urls=dedup
 
-            c1,c2,c3=st.columns(3)
+            c1,c2,c3=st.columns([1,1.5,1])
             product_context=c1.selectbox(
                 "Product context",
                 ["TRADE","INTELLIGENCE"],
                 key="content_product_context"
             )
-            use_web=c2.checkbox(
-                "Find/verify primary sources",
-                True,
-                key="content_use_web",
-                help="Allows the AI researcher to locate official/company/regulatory sources supporting the article."
+            processing_mode=c2.selectbox(
+                "Processing mode",
+                [
+                    "Queue only — instant",
+                    "Fast extract — recommended",
+                    "Deep research + stage — slow"
+                ],
+                index=1,
+                key="content_processing_mode",
+                help=(
+                    "Queue only stores the URLs immediately. Fast extract reads each source and preserves facts "
+                    "without web research/staging. Deep research performs primary-source web research, staging and "
+                    "resolution per URL and is intentionally much slower."
+                )
             )
             max_items=c3.number_input(
                 "Max URLs this run",
                 min_value=1,max_value=100,value=25,step=1,
                 key="content_max_items"
             )
+
+            use_web=processing_mode.startswith("Deep")
 
             st.caption(
                 f"{len(urls)} unique URL(s) detected. "
@@ -10764,8 +10927,15 @@ elif page=="Universal Content Intake":
                     for u in urls[:100]:
                         st.write(u)
 
+            action_label=(
+                "Queue URLs now"
+                if processing_mode.startswith("Queue")
+                else "Fast extract URL batch"
+                if processing_mode.startswith("Fast")
+                else "Deep research → extract → stage"
+            )
             if st.button(
-                "Ingest URLs → extract facts → stage records",
+                action_label,
                 type="primary",
                 disabled=not bool(urls),
                 use_container_width=True,
@@ -10786,84 +10956,124 @@ elif page=="Universal Content Intake":
                     input_mode="document_url_list" if manifest_upload else (
                         "single_url" if len(selected)==1 else "url_list"
                     )
-                    batch=_create_content_batch(
-                        input_mode=input_mode,
-                        batch_name=(
-                            Path(manifest_upload.name).stem
-                            if manifest_upload
-                            else f"URL intake · {len(selected)} source(s)"
-                        ),
-                        product_context=product_context,
-                        research_mode="web_enriched" if use_web else "source_only",
-                        item_count=len(selected),
-                        metadata={
-                            "manifest_document_id":str(manifest_document_id) if manifest_document_id else None,
-                            "loader_build":LOADER_BUILD,
-                        }
+
+                    batch_name=(
+                        Path(manifest_upload.name).stem
+                        if manifest_upload
+                        else f"URL intake · {len(selected)} source(s)"
                     )
-                    batch_id=batch["content_batch_id"]
-                    results=[]
-                    failures=[]
 
-                    with st.status(
-                        f"Processing {len(selected)} source URL(s)…",
-                        expanded=True
-                    ) as status_box:
-                        for num,u in enumerate(selected,1):
-                            st.write(f"{num}/{len(selected)} · {u}")
-                            try:
-                                item=_upsert_content_url_item(
-                                    batch_id,u,manifest_document_id,
-                                    "uploaded_url_list" if manifest_upload else "pasted_url"
-                                )
-                                res=_run_content_item_extraction(
-                                    batch_id,item,use_web,product_context
-                                )
-                                results.append(res)
-                            except Exception as exc:
-                                failures.append({"url":u,"error":str(exc)})
-                                try:
-                                    n=_normalize_content_url(u)
-                                    if n:
-                                        existing=(sb.table("pc_content_ingest_items")
-                                                  .select("content_item_id")
-                                                  .eq("normalized_url",n).limit(1).execute().data or [])
-                                        if existing:
-                                            sb.table("pc_content_ingest_items").update({
-                                                "extraction_status":"failed",
-                                                "extraction_error":str(exc),
-                                                "updated_at":pd.Timestamp.utcnow().isoformat()
-                                            }).eq("content_item_id",existing[0]["content_item_id"]).execute()
-                                except Exception:
-                                    pass
-
-                        sb.table("pc_content_ingest_batches").update({
-                            "status":"completed" if not failures else "completed_with_errors",
-                            "processed_count":len(results),
-                            "failed_count":len(failures),
-                            "completed_at":pd.Timestamp.utcnow().isoformat(),
-                            "updated_at":pd.Timestamp.utcnow().isoformat(),
-                            "metadata":{
+                    if processing_mode.startswith("Queue"):
+                        batch,items,failures=_queue_content_urls(
+                            selected,
+                            input_mode=input_mode,
+                            product_context=product_context,
+                            manifest_document_id=manifest_document_id,
+                            batch_name=batch_name,
+                            discovery_method="uploaded_url_list" if manifest_upload else "pasted_url",
+                        )
+                        results=[]
+                        st.success(
+                            f"Queued {len(items)} URL(s) immediately. "
+                            "Open Content queue and process them in a batch when convenient."
+                        )
+                    else:
+                        batch=_create_content_batch(
+                            input_mode=input_mode,
+                            batch_name=batch_name,
+                            product_context=product_context,
+                            research_mode=(
+                                "web_enriched" if processing_mode.startswith("Deep")
+                                else "fast_source_extract"
+                            ),
+                            item_count=len(selected),
+                            metadata={
                                 "manifest_document_id":str(manifest_document_id) if manifest_document_id else None,
                                 "loader_build":LOADER_BUILD,
-                                "failures":failures[:100],
+                                "processing_mode":processing_mode,
                             }
-                        }).eq("content_batch_id",batch_id).execute()
-
-                        status_box.update(
-                            label=(
-                                f"Content intake complete · {len(results)} processed"
-                                + (f" · {len(failures)} failed" if failures else "")
-                            ),
-                            state="complete" if not failures else "error"
                         )
+                        batch_id=batch["content_batch_id"]
+                        results=[]
+                        failures=[]
+
+                        fast_mode=processing_mode.startswith("Fast")
+                        progress=st.progress(0.0)
+                        with st.status(
+                            f"{'Fast extracting' if fast_mode else 'Deep researching'} {len(selected)} source URL(s)…",
+                            expanded=False
+                        ) as status_box:
+                            for num,u in enumerate(selected,1):
+                                try:
+                                    item=_upsert_content_url_item(
+                                        batch_id,u,manifest_document_id,
+                                        "uploaded_url_list" if manifest_upload else "pasted_url"
+                                    )
+                                    res=_run_content_item_extraction(
+                                        batch_id,
+                                        item,
+                                        use_web=not fast_mode,
+                                        product_context=product_context,
+                                        extract_only=fast_mode,
+                                        resolve_after=not fast_mode,
+                                    )
+                                    results.append(res)
+                                except Exception as exc:
+                                    failures.append({"url":u,"error":str(exc)})
+                                    try:
+                                        n=_normalize_content_url(u)
+                                        if n:
+                                            existing=(sb.table("pc_content_ingest_items")
+                                                      .select("content_item_id")
+                                                      .eq("normalized_url",n).limit(1).execute().data or [])
+                                            if existing:
+                                                sb.table("pc_content_ingest_items").update({
+                                                    "extraction_status":"failed",
+                                                    "extraction_error":str(exc),
+                                                    "updated_at":pd.Timestamp.utcnow().isoformat()
+                                                }).eq("content_item_id",existing[0]["content_item_id"]).execute()
+                                    except Exception:
+                                        pass
+                                progress.progress(num/max(1,len(selected)))
+
+                            sb.table("pc_content_ingest_batches").update({
+                                "status":"completed" if not failures else "completed_with_errors",
+                                "processed_count":len(results),
+                                "failed_count":len(failures),
+                                "completed_at":pd.Timestamp.utcnow().isoformat(),
+                                "updated_at":pd.Timestamp.utcnow().isoformat(),
+                                "metadata":{
+                                    "manifest_document_id":str(manifest_document_id) if manifest_document_id else None,
+                                    "loader_build":LOADER_BUILD,
+                                    "processing_mode":processing_mode,
+                                    "failures":failures[:100],
+                                }
+                            }).eq("content_batch_id",batch_id).execute()
+
+                            status_box.update(
+                                label=(
+                                    f"{'Fast extraction' if fast_mode else 'Deep research'} complete · "
+                                    f"{len(results)} processed"
+                                    + (f" · {len(failures)} failed" if failures else "")
+                                ),
+                                state="complete" if not failures else "error"
+                            )
+                        progress.empty()
 
                     if results:
-                        st.success(
-                            f"Processed {len(results)} source(s). "
-                            f"Extracted {sum(int(x.get('facts') or 0) for x in results)} facts and "
-                            f"staged {sum(int(x.get('staged') or 0) for x in results)} canonical/domain proposal(s)."
-                        )
+                        fact_total=sum(int(x.get('facts') or 0) for x in results)
+                        staged_total=sum(int(x.get('staged') or 0) for x in results)
+                        if processing_mode.startswith("Fast"):
+                            st.success(
+                                f"Fast extraction complete: {len(results)} source(s), {fact_total} facts. "
+                                "Staging/resolution was deliberately deferred. Use Fact review & resolution → "
+                                "Build staged proposals + resolve queue when ready."
+                            )
+                        else:
+                            st.success(
+                                f"Processed {len(results)} source(s). "
+                                f"Extracted {fact_total} facts and staged {staged_total} canonical/domain proposal(s)."
+                            )
                         dataframe(results)
                     if failures:
                         st.warning(f"{len(failures)} source(s) need attention.")
@@ -10871,6 +11081,55 @@ elif page=="Universal Content Intake":
 
         with queue_tab:
             st.markdown("### Content ingestion queue")
+            st.caption(
+                "Queue URLs instantly, then process several in one action. "
+                "Fast extraction skips web research and staging; promotion happens later in Fact review & resolution."
+            )
+            q1,q2,q3=st.columns([1,1,1.4])
+            queued_limit=q1.number_input(
+                "Process next",
+                min_value=1,max_value=50,value=10,step=1,
+                key="queued_process_limit"
+            )
+            queued_context=q2.selectbox(
+                "Context",
+                ["TRADE","INTELLIGENCE"],
+                key="queued_process_context"
+            )
+            queued_mode=q3.selectbox(
+                "Batch mode",
+                ["Fast extract","Deep research + stage"],
+                index=0,
+                key="queued_process_mode"
+            )
+            if st.button(
+                "Process queued URLs",
+                type="primary",
+                use_container_width=True,
+                key="process_queued_urls"
+            ):
+                if not ai_configured():
+                    st.error("Configure OPENAI_API_KEY and OPENAI_MODEL first.")
+                else:
+                    with st.spinner(
+                        "Fast extracting queued sources..."
+                        if queued_mode=="Fast extract"
+                        else "Deep researching queued sources..."
+                    ):
+                        qr,qf=_process_queued_content_items(
+                            int(queued_limit),
+                            product_context=queued_context,
+                            deep=(queued_mode!="Fast extract")
+                        )
+                    if qr:
+                        st.success(
+                            f"Processed {len(qr)} queued source(s); "
+                            f"{sum(int(x.get('facts') or 0) for x in qr)} facts extracted."
+                        )
+                    if qf:
+                        st.warning(f"{len(qf)} queued source(s) failed.")
+                        dataframe(qf)
+
             try:
                 rows=safe_rows(
                     sb,"pc_v_content_ingest_queue","*",500,order="created_at"
@@ -10904,6 +11163,10 @@ elif page=="Universal Content Intake":
                         with st.spinner("Building staged records from preserved facts..."):
                             rep=_build_proposals_for_fact_queue(50,product_context="TRADE")
                         st.session_state["content_promotion_report"]=rep
+                        try:
+                            _content_review_data.clear()
+                        except Exception:
+                            pass
                         ok=[x for x in rep if not x.get("error")]
                         staged_total=sum(int(x.get("staged") or 0) for x in ok)
                         st.success(
@@ -10920,6 +11183,10 @@ elif page=="Universal Content Intake":
                     with st.spinner("Resolving canonical identities and staged promotions..."):
                         rep=_resolve_all_pending_content_facts(250)
                     st.session_state["content_resolution_report"]=rep
+                    try:
+                        _content_review_data.clear()
+                    except Exception:
+                        pass
                     st.success(f"Resolution pass completed for {len(rep)} content item(s).")
                     st.rerun()
             with a3:
@@ -11005,6 +11272,10 @@ elif page=="Universal Content Intake":
                                                 rep=_build_staged_proposals_from_content_item(
                                                     cid,product_context="TRADE",use_web=False
                                                 )
+                                            try:
+                                                _content_review_data.clear()
+                                            except Exception:
+                                                pass
                                             st.success(
                                                 f"Created {int(rep.get('staged') or 0)} staged proposal(s). "
                                                 "Continue in Review Queue."
