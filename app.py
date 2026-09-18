@@ -42,7 +42,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.6.0-connected-industry-dossiers"
+APP_VERSION = "v3.6.1-live-port-event-linking"
 RELEASE_NAME = "Trade Operating Picture · Connected Trade Intelligence, Effects, Networks & Horizon"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -7671,6 +7671,153 @@ def render_company_operating_footprint(entity_id):
     with tabs[6]: display_df(footprint,380)
 
 
+
+def _port_event_bundle_live(port_id, terminal_ids, port_name, country=""):
+    """Resolve port events across canonical links, locations and explicit port mentions.
+
+    Direct canonical links are preferred.  Name/location fallback is intentionally
+    conservative: it requires the port/city name, not merely the country.
+    """
+    pid=str(port_id or "").strip()
+    tids={str(x).strip() for x in (terminal_ids or []) if str(x).strip()}
+    relevant_ids={pid}|tids if pid else tids
+
+    # Start with existing/legacy linked events so nothing regresses.
+    legacy_ev,legacy_loc,legacy_ch=event_bundle_for_entities(
+        asset_ids=list(relevant_ids)
+    )
+
+    events=_CANON_EVENTS.copy() if isinstance(_CANON_EVENTS,pd.DataFrame) else pd.DataFrame()
+    locs=_CANON_EVENT_LOCS.copy() if isinstance(_CANON_EVENT_LOCS,pd.DataFrame) else pd.DataFrame()
+    if events.empty:
+        events,_loc=_canonical_db_event_frames()
+        if locs.empty:
+            locs=_loc
+
+    ids=set()
+    reasons={}
+
+    def add_event(eid, reason):
+        eid=str(eid or "").strip()
+        if not eid:
+            return
+        ids.add(eid)
+        reasons.setdefault(eid,[]).append(reason)
+
+    # 1) Canonical event links by port / terminal canonical IDs.
+    live_links=_live_frame(
+        "pc_event_links",
+        "event_id,linked_type,linked_id,linked_name,relationship,confidence",
+        50000
+    )
+    if not live_links.empty:
+        lid=live_links.get("linked_id",pd.Series(index=live_links.index,dtype=str)).fillna("").astype(str)
+        exact=live_links[lid.isin(relevant_ids)]
+        for _,r in exact.iterrows():
+            add_event(r.get("event_id"),f"canonical {r.get('relationship') or 'asset'} link")
+
+    # Build conservative name aliases.  "Port of Rotterdam" -> Rotterdam.
+    aliases=set()
+    p=str(port_name or "").strip()
+    if p:
+        aliases.add(p)
+        short=re.sub(r"(?i)^port of\\s+","",p).strip()
+        short=re.sub(r"(?i)\\s+port$","",short).strip()
+        if len(short)>=4:
+            aliases.add(short)
+
+    # Add canonical terminal names as aliases too.
+    assets=_live_frame("pc_assets","asset_id,name,asset_type,subtype,country,region_city",30000)
+    if not assets.empty and tids:
+        term_names=assets[
+            assets.get("asset_id",pd.Series(index=assets.index,dtype=str)).astype(str).isin(tids)
+        ].get("name",pd.Series(dtype=str)).dropna().astype(str).tolist()
+        for n in term_names:
+            n=n.strip()
+            if len(n)>=4:
+                aliases.add(n)
+
+    # 2) Canonical event links whose linked_name explicitly names the port/terminal.
+    if not live_links.empty and aliases and "linked_name" in live_links.columns:
+        nm=live_links["linked_name"].fillna("").astype(str)
+        name_mask=pd.Series(False,index=live_links.index)
+        for a in aliases:
+            name_mask |= nm.str.contains(re.escape(a),case=False,na=False,regex=True)
+        for _,r in live_links[name_mask].iterrows():
+            add_event(r.get("event_id"),"canonical linked-name match")
+
+    # 3) Canonical event-location records naming the port/city.
+    if not locs.empty and aliases:
+        lmask=pd.Series(False,index=locs.index)
+        for c in ["Location","location_name"]:
+            if c in locs.columns:
+                s=locs[c].fillna("").astype(str)
+                for a in aliases:
+                    lmask |= s.str.contains(re.escape(a),case=False,na=False,regex=True)
+        for _,r in locs[lmask].iterrows():
+            add_event(r.get("Event ID") or r.get("event_id"),"event-location match")
+
+    # 4) Explicit event text mention.  This catches correctly-ingested Rotterdam
+    # strikes/fires that were not yet linked to the canonical port asset.
+    if not events.empty and aliases:
+        search_cols=[
+            c for c in [
+                "Title","Description","Location","Operational Impact",
+                "Trade / Commercial Impact","Event Type","Event Family"
+            ] if c in events.columns
+        ]
+        tmask=pd.Series(False,index=events.index)
+        for c in search_cols:
+            s=events[c].fillna("").astype(str)
+            for a in aliases:
+                tmask |= s.str.contains(re.escape(a),case=False,na=False,regex=True)
+
+        # If country is known, use it as a disambiguator, not as a primary match.
+        if country and "Country / Countries" in events.columns:
+            cmask=events["Country / Countries"].fillna("").astype(str).str.contains(
+                re.escape(str(country)),case=False,na=False,regex=True
+            )
+            tmask &= cmask | ~cmask  # preserve explicit name match; country remains informational
+
+        for _,r in events[tmask].iterrows():
+            add_event(r.get("Event ID"),"explicit port/location mention")
+
+    # Merge legacy event IDs.
+    if isinstance(legacy_ev,pd.DataFrame) and not legacy_ev.empty and "Event ID" in legacy_ev.columns:
+        for eid in legacy_ev["Event ID"].dropna().astype(str):
+            add_event(eid,"legacy asset link")
+
+    if not ids or events.empty or "Event ID" not in events.columns:
+        return legacy_ev,legacy_loc,legacy_ch,pd.DataFrame()
+
+    ev=events[events["Event ID"].astype(str).isin(ids)].copy()
+    if "Start Date" in ev.columns:
+        ev["_sort_date"]=pd.to_datetime(ev["Start Date"],errors="coerce",utc=True)
+        ev=ev.sort_values("_sort_date",ascending=False).drop(columns=["_sort_date"])
+
+    # Locations for all resolved events.
+    if not locs.empty and "Event ID" in locs.columns:
+        eloc=locs[locs["Event ID"].astype(str).isin(ids)].copy()
+    else:
+        eloc=legacy_loc
+
+    # Existing impact-chain frame where available.
+    chains=TABLES.get(("Events & Hazards","Impact Chains"),pd.DataFrame())
+    if not chains.empty and "Event ID" in chains.columns:
+        ech=chains[chains["Event ID"].astype(str).isin(ids)].copy()
+    else:
+        ech=legacy_ch
+
+    reason_rows=[]
+    for eid in sorted(ids):
+        reason_rows.append({
+            "Event ID":eid,
+            "Why linked":"; ".join(dict.fromkeys(reasons.get(eid,[])))
+        })
+    audit=pd.DataFrame(reason_rows)
+    return ev,eloc,ech,audit
+
+
 def render_port_connected_dossier(port_row, terminals):
     """Selected port as a connected commercial / operational dossier."""
     pid=str(port_row.get("Port ID") or port_row.get("asset_id") or "")
@@ -7731,7 +7878,9 @@ def render_port_connected_dossier(port_row, terminals):
         mmap=dict(zip(mobile["mobile_asset_id"].astype(str),mobile["name"].astype(str)))
         calls["Vessel / Mobile Asset"]=calls["mobile_asset_id"].astype(str).map(mmap).fillna(calls["mobile_asset_id"].astype(str))
 
-    ev,loc,chains=event_bundle_for_entities(asset_ids=[pid]+list(terminal_ids))
+    ev,loc,chains,event_link_audit=_port_event_bundle_live(
+        pid,terminal_ids,pname,country
+    )
 
     projects=_live_frame("pc_project_details","*",12000,"announced_date")
     relationships=_live_frame("pc_relationships","*",30000)
@@ -7801,11 +7950,29 @@ def render_port_connected_dossier(port_row, terminals):
 
     with tabs[3]:
         if ev.empty:
-            st.info("No linked events or disruptions.")
+            st.info(
+                "No port-specific events were resolved through canonical links, "
+                "event locations or explicit port-name mentions."
+            )
         else:
+            c1,c2,c3=st.columns(3)
+            c1.metric("Linked events",len(ev))
+            if "Event Family" in ev.columns:
+                c2.metric("Event families",ev["Event Family"].fillna("").astype(str).replace("",pd.NA).dropna().nunique())
+            else:
+                c2.metric("Event families",0)
+            if "Severity" in ev.columns:
+                c3.metric("High / critical",int(ev["Severity"].fillna("").astype(str).str.casefold().isin(["high","critical"]).sum()))
+            else:
+                c3.metric("High / critical",0)
+
             render_event_cards(ev,60)
             if not loc.empty:
                 render_event_map(ev,loc,f"Events affecting {pname}")
+
+            if isinstance(event_link_audit,pd.DataFrame) and not event_link_audit.empty:
+                with st.expander("Why these events are linked to this port"):
+                    display_df(event_link_audit,260)
 
     with tabs[4]:
         display_df(projects,420)
@@ -7826,7 +7993,11 @@ def render_port_connected_dossier(port_row, terminals):
 
     with tabs[8]:
         if not chains.empty:
+            st.markdown("#### Impact chains")
             display_df(chains,260)
+        if isinstance(event_link_audit,pd.DataFrame) and not event_link_audit.empty:
+            st.markdown("#### Event-link resolution")
+            display_df(event_link_audit,260)
         st.markdown("#### Port source record")
         display_df(pd.DataFrame([port_row]),160)
 
