@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "41-fact-resolution-review-2026-09-18"
+LOADER_BUILD = "42-fact-review-safe-metadata-2026-09-18"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -3230,13 +3230,25 @@ def _content_review_data(limit=5000):
 
 def _review_article_summary(item,fact_rows,link_rows,promo_rows):
     """Render one analyst-friendly article review block."""
-    title_txt=item.get("title") or item.get("source_url") or "Untitled source"
-    publisher=item.get("publisher") or ""
-    pubdate=item.get("publication_date") or ""
-    source_url=item.get("source_url") or ""
+
+    def _safe_display(v):
+        if v is None:
+            return ""
+        try:
+            if pd.isna(v):
+                return ""
+        except Exception:
+            pass
+        s=str(v).strip()
+        return "" if s.casefold() in {"nan","none","<na>","nat","null"} else s
+
+    title_txt=_safe_display(item.get("title")) or _safe_display(item.get("source_url")) or "Untitled source"
+    publisher=_safe_display(item.get("publisher"))
+    pubdate=_safe_display(item.get("publication_date"))
+    source_url=_safe_display(item.get("source_url"))
 
     st.markdown(f"### {title_txt}")
-    meta=" · ".join(x for x in [publisher,str(pubdate)] if x)
+    meta=" · ".join(x for x in [publisher,pubdate] if x)
     if meta:
         st.caption(meta)
     if source_url:
@@ -3260,9 +3272,9 @@ def _review_article_summary(item,fact_rows,link_rows,promo_rows):
         return
 
     for _,f in facts_df.head(80).iterrows():
-        left=str(f.get("subject_name") or f.get("subject_identifier") or "Fact")
-        predicate=str(f.get("predicate") or "")
-        right=str(f.get("object_name") or f.get("value_text") or "")
+        left=_safe_display(f.get("subject_name")) or _safe_display(f.get("subject_identifier")) or "Fact"
+        predicate=_safe_display(f.get("predicate"))
+        right=_safe_display(f.get("object_name")) or _safe_display(f.get("value_text"))
         if not right and pd.notna(f.get("value_numeric")):
             right=f"{f.get('value_numeric')} {f.get('unit') or ''}".strip()
         status=str(f.get("resolution_status") or "unresolved")
@@ -3287,7 +3299,7 @@ def _review_article_summary(item,fact_rows,link_rows,promo_rows):
             tables=[str(x) for x in fp.get("target_table",pd.Series(dtype=str)).dropna().tolist() if str(x)]
             if tables: detail.append("Staged: "+", ".join(dict.fromkeys(tables)))
         st.caption(" · ".join(detail))
-        ps=str(f.get("primary_source_url") or "")
+        ps=_safe_display(f.get("primary_source_url"))
         if ps:
             st.markdown(f"[Primary source]({ps})")
         st.markdown("")

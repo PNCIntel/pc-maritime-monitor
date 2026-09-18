@@ -31,6 +31,8 @@ from pc_display import (
     pretty_date as pc_pretty_date,
     display_value as pc_display_value,
     standardize_dataframe as pc_standardize_dataframe,
+    standardize_event_dataframe as pc_standardize_event_dataframe,
+    format_filter_option as pc_format_filter_option,
 )
 from pc_drilldown import render_sidebar_search as pc_render_drilldown_search, render_active_drilldown as pc_render_active_drilldown, drilldown_button as pc_drilldown_button, set_drilldown as pc_set_drilldown
 from pc_trade_system import render_energy_industry, render_trade_flows_supply, render_country_macro, render_market_instruments
@@ -40,7 +42,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.5.0-model-coverage"
+APP_VERSION = "v3.5.1-display-normalization"
 RELEASE_NAME = "Trade Operating Picture · Connected Trade Intelligence, Effects, Networks & Horizon"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2464,7 +2466,7 @@ def display_df(df, max_rows=150, show_ids=False):
         st.info("No matching records.")
         return
     show=humanize_df(df,show_internal_ids=show_ids).head(max_rows)
-    show=pc_standardize_dataframe(show)
+    show=pc_standardize_event_dataframe(show)
     cfg={}
     for c in show.columns:
         if "url" in str(c).lower():
@@ -7326,7 +7328,8 @@ def render_security_business_risk():
     countries=sorted([x for x in df["Country"].fillna("").astype(str).unique() if x.strip()])
     country=f2.selectbox("Country / geography",["All"]+countries,key="sbr_country")
     severity_opts=sorted([x for x in df["Severity"].fillna("").astype(str).unique() if x.strip()])
-    sev=f3.selectbox("Severity",["All"]+severity_opts,key="sbr_severity")
+    sev=f3.selectbox("Severity",["All"]+severity_opts,key="sbr_severity",
+                     format_func=lambda v:pc_format_filter_option(v,"Severity"))
 
     x=df.copy()
     if q.strip():
@@ -9550,10 +9553,13 @@ def render_trade_horizon_workspace():
     mode_values=["All"]+sorted(
         [x for x in fdf.get("Mode",pd.Series(dtype=str)).fillna("").astype(str).unique() if x]
     )
-    country_values=["All"]+sorted(
-        [x for x in fdf.get("Country / Countries",pd.Series(dtype=str)).fillna("").astype(str).unique() if x]
-    )
-    mode=c2.selectbox("Mode",mode_values,key="trade_horizon_mode_v342")
+    from pc_display import country_tokens as _pc_country_tokens
+    country_values=["All"]+sorted({
+        c for raw in fdf.get("Country / Countries",pd.Series(dtype=str)).fillna("").astype(str)
+        for c in _pc_country_tokens(raw) if c
+    })
+    mode=c2.selectbox("Mode",mode_values,key="trade_horizon_mode_v342",
+                      format_func=lambda v:pc_format_filter_option(v,"Mode"))
     country=c3.selectbox("Country / region",country_values,key="trade_horizon_country_v342")
 
     view=fdf.copy()
@@ -9578,7 +9584,9 @@ def render_trade_horizon_workspace():
     if mode!="All" and "Mode" in view.columns:
         view=view[view["Mode"].fillna("").astype(str).eq(mode)]
     if country!="All" and "Country / Countries" in view.columns:
-        view=view[view["Country / Countries"].fillna("").astype(str).eq(country)]
+        view=view[view["Country / Countries"].fillna("").astype(str).map(
+            lambda raw: country in _pc_country_tokens(raw)
+        )]
 
     if view.empty:
         st.warning("No Horizon items match this filter window. Try **All horizon**.")

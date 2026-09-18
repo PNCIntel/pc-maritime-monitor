@@ -257,7 +257,12 @@ def standardize_dataframe(df, columns=None):
         # Keep URLs untouched.
         if "url" in str(c).casefold():
             out[c]=out[c].map(clean_text)
-        elif out[c].dtype == object or pd.api.types.is_datetime64_any_dtype(out[c]):
+        elif (
+            out[c].dtype == object
+            or pd.api.types.is_string_dtype(out[c])
+            or isinstance(out[c].dtype, pd.CategoricalDtype)
+            or pd.api.types.is_datetime64_any_dtype(out[c])
+        ):
             out[c]=display_series(out[c],c)
         elif pd.api.types.is_bool_dtype(out[c]):
             out[c]=out[c].map(pretty_bool)
@@ -270,3 +275,44 @@ def display_dimension(value, dimension=""):
         vals=country_tokens(value)
         return vals[0] if vals else "Unspecified"
     return display_value(value,dimension) or "Unspecified"
+
+
+_EVENT_COLUMNS = {
+    "Start Date","End Date","Event Date","Date",
+    "Event Family","Event Type","Event Domain","Event Nature",
+    "Severity","Status","Mode","Confidence",
+    "Country / Countries","Country","Countries",
+    "Relationship","Actor Role","Entity Type","Asset Type","Subtype"
+}
+
+def standardize_event_dataframe(df, columns=None):
+    """Stronger event/intelligence display pass used by both P&C apps."""
+    out=standardize_dataframe(df,columns)
+    if out.empty:
+        return out
+    for c in out.columns:
+        cstr=str(c)
+        if cstr in {"Start Date","End Date","Event Date","Date"}:
+            out[c]=out[c].map(lambda v: pretty_date(v,include_time=False))
+        elif cstr in {"Country / Countries","Countries"}:
+            out[c]=out[c].map(pretty_countries)
+        elif cstr in {
+            "Event Family","Event Type","Event Domain","Event Nature",
+            "Severity","Status","Mode","Relationship","Actor Role",
+            "Entity Type","Asset Type","Subtype"
+        }:
+            out[c]=out[c].map(pretty_enum)
+    return out
+
+def format_filter_option(value, dimension=""):
+    """Readable selectbox label while keeping the raw option value for filtering."""
+    if value in (None,""):
+        return ""
+    if str(value)=="All":
+        return "All"
+    d=clean_text(dimension).casefold()
+    if "country" in d or "countries" in d or "region" in d:
+        return pretty_countries(value) or clean_text(value)
+    if "date" in d:
+        return pretty_date(value,include_time=False)
+    return pretty_enum(value)
