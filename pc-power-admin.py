@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, date, timedelta
 from pathlib import Path
-import os, sys, json, uuid, hashlib, re, io, zipfile, mimetypes, urllib.parse
+import os, sys, json, uuid, hashlib, re, io, zipfile, mimetypes, urllib.parse, urllib.request, urllib.error, html
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "28-event-link-fast-path-2026-09-17"
+LOADER_BUILD = "40-universal-content-fact-router-2026-09-18"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -89,6 +89,7 @@ NAV = {
     "Identity Hygiene": "Identity Hygiene",
     "Review Queue": "Canonical Review",
     "AI Research": "AI Research Workflow",
+    "Content Intake": "Universal Content Intake",
     "Documents": "Document Loader",
     "Email & Distribution": "Distribution Lists",
     "System": "Governance & Quality",
@@ -117,6 +118,31 @@ REQUIRED_BY_TABLE = {
     "pc_supply_series": ["supply_series_id"],
     "pc_transport_routes": ["route_id","route_name","mode"],
     "pc_chokepoints": ["chokepoint_id","name"],
+
+    # Transport-service layer
+    "pc_transport_services": ["transport_service_id","service_name","mode"],
+    "pc_transport_service_aliases": ["transport_service_id","alias","alias_type"],
+    "pc_transport_service_operators": ["transport_service_id","entity_id","operator_role"],
+    "pc_transport_service_stops": ["transport_service_id","direction","sequence_no","asset_id"],
+    "pc_transport_service_schedules": ["service_schedule_id","transport_service_id"],
+    "pc_transport_service_transit_times": ["transport_service_id","direction","from_asset_id","to_asset_id"],
+    "pc_transport_service_mobile_assets": ["transport_service_id","mobile_asset_id","service_role"],
+    "pc_transport_service_network_links": ["transport_service_id","asset_id","relationship_type"],
+    "pc_transport_service_connections": ["from_transport_service_id","to_transport_service_id","connection_type"],
+    "pc_transport_service_changes": ["service_change_id","transport_service_id","change_type"],
+    "pc_transport_service_sources": ["transport_service_id","source_url"],
+
+    # Universal fact/domain extensions
+    "pc_project_details": ["asset_id"],
+    "pc_financing_facilities": ["financing_id","financing_type"],
+    "pc_financing_participants": ["financing_id","role"],
+    "pc_financing_links": ["financing_id","linked_type","linked_id","relationship_type"],
+    "pc_contracts": ["contract_id","contract_type"],
+    "pc_contract_participants": ["contract_id","role"],
+    "pc_contract_links": ["contract_id","linked_type","linked_id","relationship_type"],
+    "pc_vessel_designs": ["vessel_design_id"],
+    "pc_shipbuilding_orders": ["shipbuilding_order_id"],
+    "pc_shipbuilding_order_units": ["shipbuilding_order_unit_id","shipbuilding_order_id","unit_number"],
 }
 
 FK_RULES = {
@@ -146,6 +172,109 @@ FK_RULES = {
     ],
     "pc_market_exposure_links": [
         ("market_instrument_id","pc_market_instruments","market_instrument_id"),
+    ],
+
+    "pc_project_details": [
+        ("asset_id","pc_assets","asset_id"),
+        ("sponsor_entity_id","pc_entities","entity_id"),
+        ("developer_entity_id","pc_entities","entity_id"),
+        ("delivery_entity_id","pc_entities","entity_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_financing_participants": [
+        ("financing_id","pc_financing_facilities","financing_id"),
+        ("entity_id","pc_entities","entity_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_financing_links": [
+        ("financing_id","pc_financing_facilities","financing_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_contract_participants": [
+        ("contract_id","pc_contracts","contract_id"),
+        ("entity_id","pc_entities","entity_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_contract_links": [
+        ("contract_id","pc_contracts","contract_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_vessel_designs": [
+        ("designer_entity_id","pc_entities","entity_id"),
+        ("builder_entity_id","pc_entities","entity_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_shipbuilding_orders": [
+        ("contract_id","pc_contracts","contract_id"),
+        ("buyer_entity_id","pc_entities","entity_id"),
+        ("builder_entity_id","pc_entities","entity_id"),
+        ("shipyard_asset_id","pc_assets","asset_id"),
+        ("vessel_design_id","pc_vessel_designs","vessel_design_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_shipbuilding_order_units": [
+        ("shipbuilding_order_id","pc_shipbuilding_orders","shipbuilding_order_id"),
+        ("mobile_asset_id","pc_mobile_assets","mobile_asset_id"),
+        ("vessel_design_id","pc_vessel_designs","vessel_design_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_transport_services": [
+        ("origin_asset_id","pc_assets","asset_id"),
+        ("destination_asset_id","pc_assets","asset_id"),
+        ("primary_operator_entity_id","pc_entities","entity_id"),
+        ("alliance_entity_id","pc_entities","entity_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_transport_service_aliases": [
+        ("transport_service_id","pc_transport_services","transport_service_id"),
+        ("operator_entity_id","pc_entities","entity_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_transport_service_operators": [
+        ("transport_service_id","pc_transport_services","transport_service_id"),
+        ("entity_id","pc_entities","entity_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_transport_service_stops": [
+        ("transport_service_id","pc_transport_services","transport_service_id"),
+        ("asset_id","pc_assets","asset_id"),
+        ("terminal_asset_id","pc_assets","asset_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_transport_service_schedules": [
+        ("transport_service_id","pc_transport_services","transport_service_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_transport_service_transit_times": [
+        ("transport_service_id","pc_transport_services","transport_service_id"),
+        ("from_asset_id","pc_assets","asset_id"),
+        ("to_asset_id","pc_assets","asset_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_transport_service_mobile_assets": [
+        ("transport_service_id","pc_transport_services","transport_service_id"),
+        ("mobile_asset_id","pc_mobile_assets","mobile_asset_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_transport_service_network_links": [
+        ("transport_service_id","pc_transport_services","transport_service_id"),
+        ("asset_id","pc_assets","asset_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_transport_service_connections": [
+        ("from_transport_service_id","pc_transport_services","transport_service_id"),
+        ("to_transport_service_id","pc_transport_services","transport_service_id"),
+        ("connection_asset_id","pc_assets","asset_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_transport_service_changes": [
+        ("transport_service_id","pc_transport_services","transport_service_id"),
+        ("event_id","pc_events","event_id"),
+        ("source_id","pc_sources","source_id"),
+    ],
+    "pc_transport_service_sources": [
+        ("transport_service_id","pc_transport_services","transport_service_id"),
+        ("source_id","pc_sources","source_id"),
     ],
 }
 
@@ -846,6 +975,30 @@ ID_FIELDS = {
     "pc_trade_flows": ("trade_flow_id","FLOW_",20),
     "pc_supply_series": ("supply_series_id","SUPPLY_",20),
     "pc_observations": ("observation_id","OBS_",20),
+
+    "pc_transport_services": ("transport_service_id","SERVICE_",20),
+    "pc_financing_facilities": ("financing_id","FIN_",20),
+    "pc_contracts": ("contract_id","CONTRACT_",20),
+    "pc_vessel_designs": ("vessel_design_id","VDESIGN_",20),
+    "pc_shipbuilding_orders": ("shipbuilding_order_id","SHIPORDER_",20),
+    "pc_shipbuilding_order_units": ("shipbuilding_order_unit_id","SHIPUNIT_",20),
+}
+
+UUID_ID_FIELDS = {
+    "pc_transport_service_aliases":"service_alias_id",
+    "pc_transport_service_operators":"service_operator_id",
+    "pc_transport_service_stops":"service_stop_id",
+    "pc_transport_service_schedules":"service_schedule_id",
+    "pc_transport_service_transit_times":"service_transit_time_id",
+    "pc_transport_service_mobile_assets":"service_mobile_asset_id",
+    "pc_transport_service_network_links":"service_network_link_id",
+    "pc_transport_service_connections":"service_connection_id",
+    "pc_transport_service_changes":"service_change_id",
+    "pc_transport_service_sources":"service_source_id",
+    "pc_financing_participants":"financing_participant_id",
+    "pc_financing_links":"financing_link_id",
+    "pc_contract_participants":"contract_participant_id",
+    "pc_contract_links":"contract_link_id",
 }
 
 FIELD_ALIASES = {
@@ -993,22 +1146,30 @@ def _natural_key_global(payload,target_table,index):
     for key in (
         "entity_id","asset_id","mobile_asset_id","relationship_id","event_id","event_link_id",
         "transaction_id","participant_id","route_id","chokepoint_id","market_instrument_id","trade_flow_id",
-        "supply_series_id","observation_id","imo","mmsi","name","title","route_name"
+        "supply_series_id","observation_id","transport_service_id","financing_id","contract_id","vessel_design_id","shipbuilding_order_id","shipbuilding_order_unit_id","service_alias_id","service_operator_id","service_stop_id","service_schedule_id","service_transit_time_id","service_mobile_asset_id","service_network_link_id","service_connection_id","service_change_id","service_source_id","imo","mmsi","name","title","route_name","service_name","financing_name","contract_name","design_name"
     ):
         if payload.get(key):
             return str(payload[key])
     return f"{target_table}:{index}"
 
 def _fill_staging_key(payload,target_table,natural_key):
+    """Fill stable text or UUID primary keys for staged records when omitted."""
     payload=dict(payload or {})
+
     spec=ID_FIELDS.get(target_table)
-    if not spec:
+    if spec:
+        field,prefix,n=spec
+        if not payload.get(field):
+            digest=hashlib.sha256(f"{target_table}|{natural_key}".encode("utf-8")).hexdigest().upper()[:n]
+            payload[field]=prefix+digest
         return payload
-    field,prefix,n=spec
-    if payload.get(field):
-        return payload
-    digest=hashlib.sha256(f"{target_table}|{natural_key}".encode("utf-8")).hexdigest().upper()[:n]
-    payload[field]=prefix+digest
+
+    uuid_field=UUID_ID_FIELDS.get(target_table)
+    if uuid_field and not payload.get(uuid_field):
+        payload[uuid_field]=str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"power-corridors|{target_table}|{natural_key}"
+        ))
     return payload
 
 def _parse_multitable_upload(upload):
@@ -2001,6 +2162,55 @@ AI_ALLOWED_TABLES = {
     "pc_chokepoints",
     "pc_macro_indicators",
     "pc_observations",
+
+    # Transport services / routes
+    "pc_transport_services",
+    "pc_transport_service_aliases",
+    "pc_transport_service_operators",
+    "pc_transport_service_stops",
+    "pc_transport_service_schedules",
+    "pc_transport_service_transit_times",
+    "pc_transport_service_mobile_assets",
+    "pc_transport_service_network_links",
+    "pc_transport_service_connections",
+    "pc_transport_service_changes",
+    "pc_transport_service_sources",
+
+    # Universal content-derived domain records
+    "pc_project_details",
+    "pc_financing_facilities",
+    "pc_financing_participants",
+    "pc_financing_links",
+    "pc_contracts",
+    "pc_contract_participants",
+    "pc_contract_links",
+    "pc_vessel_designs",
+    "pc_shipbuilding_orders",
+    "pc_shipbuilding_order_units",
+}
+
+DIRECT_DOMAIN_TABLES = {
+    "pc_transport_services",
+    "pc_transport_service_aliases",
+    "pc_transport_service_operators",
+    "pc_transport_service_stops",
+    "pc_transport_service_schedules",
+    "pc_transport_service_transit_times",
+    "pc_transport_service_mobile_assets",
+    "pc_transport_service_network_links",
+    "pc_transport_service_connections",
+    "pc_transport_service_changes",
+    "pc_transport_service_sources",
+    "pc_project_details",
+    "pc_financing_facilities",
+    "pc_financing_participants",
+    "pc_financing_links",
+    "pc_contracts",
+    "pc_contract_participants",
+    "pc_contract_links",
+    "pc_vessel_designs",
+    "pc_shipbuilding_orders",
+    "pc_shipbuilding_order_units",
 }
 
 # Conflict keys used only when a staged record has enough information to upsert safely.
@@ -2028,9 +2238,39 @@ APPLY_CONFLICT_KEYS = {
     "pc_chokepoints": "chokepoint_id",
     "pc_macro_indicators": "macro_indicator_id",
     "pc_observations": "observation_id",
+
+    "pc_transport_services": "transport_service_id",
+    "pc_transport_service_aliases": "transport_service_id,alias,alias_type",
+    "pc_transport_service_operators": "service_operator_id",
+    "pc_transport_service_stops": "transport_service_id,direction,sequence_no",
+    "pc_transport_service_schedules": "service_schedule_id",
+    "pc_transport_service_transit_times": "service_transit_time_id",
+    "pc_transport_service_mobile_assets": "service_mobile_asset_id",
+    "pc_transport_service_network_links": "service_network_link_id",
+    "pc_transport_service_connections": "service_connection_id",
+    "pc_transport_service_changes": "service_change_id",
+    "pc_transport_service_sources": "transport_service_id,source_url",
+
+    "pc_project_details": "asset_id",
+    "pc_financing_facilities": "financing_id",
+    "pc_financing_participants": "financing_participant_id",
+    "pc_financing_links": "financing_link_id",
+    "pc_contracts": "contract_id",
+    "pc_contract_participants": "contract_participant_id",
+    "pc_contract_links": "contract_link_id",
+    "pc_vessel_designs": "vessel_design_id",
+    "pc_shipbuilding_orders": "shipbuilding_order_id",
+    "pc_shipbuilding_order_units": "shipbuilding_order_unit_id",
 }
 
 AI_CAMPAIGNS = {
+    "Article / URL fact extraction": (
+        "Research the supplied article(s) and extract all material structured facts: "
+        "companies, assets, ownership, transactions, financing, contracts, projects, "
+        "shipbuilding, transport services/routes, sanctions and operational events. "
+        "Locate authoritative primary sources, preserve provenance and do not reduce "
+        "the result to a news summary."
+    ),
     "Resolve ReCAAP vessel links": (
         "Resolve the supplied unresolved ReCAAP event vessel identities. Link events to existing "
         "pc_mobile_assets when confidently matched; create missing vessel records only with reliable "
@@ -2115,6 +2355,593 @@ For pc_relationships records specifically, ALWAYS include human-readable endpoin
 - target_id: canonical P&C ID only when supplied in canonical context and deterministically matched; otherwise omit/null
 Do not return a pc_relationships proposal without source_name and target_name.
 """
+
+
+FACT_TYPES = {
+    "entity_identity","asset_identity","mobile_asset_identity","relationship",
+    "event","transaction","ownership_change","project","financing","contract",
+    "shipbuilding_order","vessel_design","transport_service","service_change",
+    "route","capacity","financial_metric","schedule","regulatory","sanctions",
+    "security_incident","operational_status","source_reference","other"
+}
+
+UNIVERSAL_CONTENT_OUTPUT_CONTRACT = """
+Return one JSON object with this shape:
+{
+  "facts": [
+    {
+      "fact_type": "one allowed fact type",
+      "fact_key": "short stable key",
+      "subject_type": "entity|asset|mobile_asset|service|project|contract|financing|other",
+      "subject_name": "...",
+      "subject_identifier": "... or null",
+      "predicate": "atomic relationship or property",
+      "object_type": "... or null",
+      "object_name": "... or null",
+      "object_identifier": "... or null",
+      "value_text": "... or null",
+      "value_numeric": null,
+      "value_boolean": null,
+      "unit": "... or null",
+      "currency": "... or null",
+      "effective_date": "YYYY-MM-DD or null",
+      "start_date": "YYYY-MM-DD or null",
+      "end_date": "YYYY-MM-DD or null",
+      "location_text": "... or null",
+      "country": "... or null",
+      "evidence_text": "short source-supported evidence excerpt/paraphrase",
+      "confidence": 0.0,
+      "primary_source_url": "... or null",
+      "metadata": {}
+    }
+  ],
+  "records": [
+    {
+      "target_table": "one allowed P&C canonical/domain table",
+      "natural_key": "stable key",
+      "action": "REVIEW",
+      "confidence": 0.0,
+      "payload": {
+        "...": "schema-supported fields only",
+        "metadata": {
+          "research_sources": [
+            {"url": "...", "publisher": "...", "title": "..."}
+          ]
+        }
+      }
+    }
+  ],
+  "primary_sources": [
+    {
+      "url": "...",
+      "title": "...",
+      "publisher": "...",
+      "relationship_type": "primary_supports_secondary",
+      "confidence": 0.0
+    }
+  ],
+  "conflicts": [],
+  "notes": []
+}
+
+Allowed fact types:
+""" + ", ".join(sorted(FACT_TYPES)) + """
+
+Allowed target tables:
+""" + ", ".join(sorted(AI_ALLOWED_TABLES)) + """
+
+Rules:
+1. Extract atomic facts from the supplied article/document, not merely a summary.
+2. One article may create many records across entities, assets, mobile assets,
+   events, transactions, projects, financing, contracts, shipbuilding and
+   transport-service tables.
+3. Reuse canonical IDs supplied in database context only when deterministic.
+4. Do not invent IDs for unknown existing canonical records. The loader fills
+   missing internal IDs deterministically during staging.
+5. Every proposed record must preserve source provenance under
+   metadata.research_sources. Include the input URL.
+6. When the article cites an official/company/regulatory source, locate and
+   return it under primary_sources when web research is enabled.
+7. Distinguish the secondary article from the underlying canonical fact.
+8. For transport services, create the service plus operators/stops/changes only
+   when the article supports them. Ordered calls belong in
+   pc_transport_service_stops.
+9. For financing, separate the facility from participants and target links.
+10. For shipbuilding, separate generic contract, vessel design, order and order
+    units where supported.
+11. Do not guess missing vessel IMO numbers, ownership, stakes, dates, values or
+    route calls.
+"""
+
+def _normalize_content_url(value):
+    """Normalize a URL for dedupe while preserving the retrievable destination."""
+    s=str(value or "").strip()
+    if not s:
+        return None
+    if not re.match(r"^https?://",s,re.I):
+        s="https://"+s
+    try:
+        p=urllib.parse.urlsplit(s)
+        if not p.netloc:
+            return None
+        q=urllib.parse.parse_qsl(p.query,keep_blank_values=True)
+        drop_prefixes=("utm_","fbclid","gclid","mc_cid","mc_eid")
+        q=[(k,v) for k,v in q if not any(k.lower().startswith(x) for x in drop_prefixes)]
+        query=urllib.parse.urlencode(q,doseq=True)
+        return urllib.parse.urlunsplit((
+            p.scheme.lower(),
+            p.netloc.lower(),
+            p.path or "/",
+            query,
+            ""
+        ))
+    except Exception:
+        return None
+
+def _extract_urls_from_text(value):
+    text=str(value or "")
+    hits=re.findall(r'https?://[^\s<>"\'\]\)]+',text,re.I)
+    out=[]
+    seen=set()
+    for u in hits:
+        u=u.rstrip(".,;:!?")
+        n=_normalize_content_url(u)
+        if n and n not in seen:
+            seen.add(n)
+            out.append(u)
+    return out
+
+def _extract_urls_from_upload(upload):
+    """Extract URL candidates from TXT/MD/CSV/XLSX/DOCX/PDF documents."""
+    lname=upload.name.lower()
+    raw=upload.getvalue()
+    urls=[]
+
+    if lname.endswith((".xlsx",".xls")):
+        xf=pd.ExcelFile(io.BytesIO(raw))
+        for sheet in xf.sheet_names:
+            df=pd.read_excel(io.BytesIO(raw),sheet_name=sheet,dtype=object)
+            for col in df.columns:
+                for v in df[col].tolist():
+                    urls.extend(_extract_urls_from_text(v))
+    elif lname.endswith(".csv"):
+        text=raw.decode("utf-8-sig",errors="replace")
+        urls.extend(_extract_urls_from_text(text))
+    else:
+        text=_extract_document_text(upload)
+        urls.extend(_extract_urls_from_text(text))
+
+    dedup=[]
+    seen=set()
+    for u in urls:
+        n=_normalize_content_url(u)
+        if n and n not in seen:
+            seen.add(n)
+            dedup.append(u)
+    return dedup
+
+def _strip_html_to_text(raw_html):
+    """Article-friendly HTML text extraction with an optional BeautifulSoup path."""
+    try:
+        from bs4 import BeautifulSoup
+        soup=BeautifulSoup(raw_html,"html.parser")
+        for tag in soup(["script","style","noscript","svg","nav","footer"]):
+            tag.decompose()
+        title=None
+        if soup.title and soup.title.string:
+            title=" ".join(soup.title.string.split())
+        og=soup.find("meta",attrs={"property":"og:title"})
+        if og and og.get("content"):
+            title=str(og.get("content")).strip()
+        site=soup.find("meta",attrs={"property":"og:site_name"})
+        publisher=str(site.get("content")).strip() if site and site.get("content") else None
+        pub=soup.find("meta",attrs={"property":"article:published_time"})
+        published=str(pub.get("content")).strip() if pub and pub.get("content") else None
+        text="\n".join(x.strip() for x in soup.stripped_strings if x.strip())
+        return text,title,publisher,published
+    except Exception:
+        cleaned=re.sub(r"(?is)<(script|style|noscript|svg|nav|footer).*?>.*?</\1>"," ",raw_html)
+        mt=re.search(r"(?is)<title[^>]*>(.*?)</title>",raw_html)
+        title=html.unescape(re.sub(r"<[^>]+>"," ",mt.group(1))).strip() if mt else None
+        cleaned=re.sub(r"(?s)<[^>]+>"," ",cleaned)
+        cleaned=html.unescape(cleaned)
+        cleaned=re.sub(r"[ \t\r\f\v]+"," ",cleaned)
+        cleaned=re.sub(r"\n\s*\n+","\n",cleaned)
+        return cleaned.strip(),title,None,None
+
+def _fetch_content_url(url, timeout=30, max_bytes=6_000_000):
+    """Fetch a public URL and return article/document text plus basic metadata."""
+    req=urllib.request.Request(
+        url,
+        headers={
+            "User-Agent":"PowerAndCorridorsResearch/1.0 (+https://www.powerncorridors.com)",
+            "Accept":"text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.7",
+        }
+    )
+    with urllib.request.urlopen(req,timeout=timeout) as resp:
+        status=getattr(resp,"status",200)
+        ctype=(resp.headers.get("Content-Type") or "").lower()
+        final_url=resp.geturl()
+        raw=resp.read(max_bytes+1)
+        if len(raw)>max_bytes:
+            raw=raw[:max_bytes]
+        mime=ctype.split(";",1)[0].strip() or None
+
+    if "pdf" in ctype or final_url.lower().endswith(".pdf"):
+        text=_extract_pdf_text(raw)
+        return {
+            "url":final_url,"status":status,"mime_type":"application/pdf",
+            "raw_text":None,"extracted_text":text,"title":Path(urllib.parse.urlsplit(final_url).path).name or None,
+            "publisher":urllib.parse.urlsplit(final_url).netloc,"publication_date":None,
+            "content_hash":hashlib.sha256(raw).hexdigest()
+        }
+
+    charset="utf-8"
+    cm=re.search(r"charset=([A-Za-z0-9._-]+)",ctype)
+    if cm:
+        charset=cm.group(1)
+    raw_text=raw.decode(charset,errors="replace")
+
+    if "html" in ctype or "<html" in raw_text[:1000].lower():
+        text,title,publisher,published=_strip_html_to_text(raw_text)
+    else:
+        text=raw_text
+        title=Path(urllib.parse.urlsplit(final_url).path).name or None
+        publisher=urllib.parse.urlsplit(final_url).netloc
+        published=None
+
+    pub_date=None
+    if published:
+        try:
+            pub_date=str(pd.to_datetime(published,utc=True).date())
+        except Exception:
+            pub_date=None
+
+    return {
+        "url":final_url,"status":status,"mime_type":mime,
+        "raw_text":raw_text[:250000],
+        "extracted_text":text[:500000],
+        "title":title,
+        "publisher":publisher or urllib.parse.urlsplit(final_url).netloc,
+        "publication_date":pub_date,
+        "content_hash":hashlib.sha256(raw).hexdigest()
+    }
+
+def _create_content_batch(input_mode,batch_name=None,product_context=None,research_mode=None,item_count=0,metadata=None):
+    payload={
+        "input_mode":input_mode,
+        "batch_name":batch_name or f"Content intake {pd.Timestamp.utcnow().strftime('%Y-%m-%d %H:%M')}",
+        "product_context":product_context,
+        "research_mode":research_mode,
+        "status":"running",
+        "item_count":int(item_count or 0),
+        "started_at":pd.Timestamp.utcnow().isoformat(),
+        "metadata":metadata or {},
+    }
+    return sb.table("pc_content_ingest_batches").insert(payload).execute().data[0]
+
+def _upsert_content_url_item(batch_id,url,document_id=None,discovery_method="manual_url"):
+    normalized=_normalize_content_url(url)
+    if not normalized:
+        raise ValueError(f"Invalid URL: {url}")
+    existing=(sb.table("pc_content_ingest_items")
+              .select("*").eq("normalized_url",normalized).limit(1).execute().data or [])
+    patch={
+        "content_batch_id":batch_id,
+        "input_type":"url",
+        "source_url":url,
+        "normalized_url":normalized,
+        "document_id":document_id,
+        "discovery_method":discovery_method,
+        "fetch_status":"pending",
+        "extraction_status":"pending",
+        "resolution_status":"pending",
+        "updated_at":pd.Timestamp.utcnow().isoformat(),
+    }
+    patch={k:v for k,v in patch.items() if v is not None}
+    if existing:
+        item_id=existing[0]["content_item_id"]
+        sb.table("pc_content_ingest_items").update(patch).eq("content_item_id",item_id).execute()
+        return {**existing[0],**patch}
+    return sb.table("pc_content_ingest_items").insert(patch).execute().data[0]
+
+def _save_url_manifest_document(upload,urls):
+    """Preserve an uploaded URL-list document in pc_documents when available."""
+    if not _table_exists("pc_documents"):
+        return None
+    raw=upload.getvalue()
+    sha=hashlib.sha256(raw).hexdigest()
+    existing=(sb.table("pc_documents").select("document_id").eq("file_sha256",sha).limit(1).execute().data or [])
+    payload={
+        "title":Path(upload.name).stem,
+        "document_type":"url_list",
+        "file_name":upload.name,
+        "file_sha256":sha,
+        "mime_type":mimetypes.guess_type(upload.name)[0],
+        "extracted_text":"\n".join(urls),
+        "extraction_status":"completed",
+        "metadata":{"url_count":len(urls),"ingested_via":"UNIVERSAL_CONTENT_INTAKE"}
+    }
+    if existing:
+        doc_id=existing[0]["document_id"]
+        sb.table("pc_documents").update(payload).eq("document_id",doc_id).execute()
+        return doc_id
+    return sb.table("pc_documents").insert(payload).execute().data[0]["document_id"]
+
+def _persist_extracted_facts(content_item_id,extraction_run_id,result,source_url,document_id=None):
+    facts=(result or {}).get("facts") or []
+    rows=[]
+    for idx,f in enumerate(facts):
+        if not isinstance(f,dict) or not f.get("predicate"):
+            continue
+        fact_type=str(f.get("fact_type") or "other").strip()
+        if fact_type not in FACT_TYPES:
+            fact_type="other"
+        try:
+            conf=float(f.get("confidence") if f.get("confidence") is not None else 0.70)
+        except Exception:
+            conf=0.70
+        conf=max(0.0,min(1.0,conf))
+        primary=f.get("primary_source_url")
+        row={
+            "extraction_run_id":extraction_run_id,
+            "content_item_id":content_item_id,
+            "document_id":document_id,
+            "fact_type":fact_type,
+            "fact_key":f.get("fact_key") or f"{fact_type}:{idx+1}",
+            "subject_type":f.get("subject_type"),
+            "subject_name":f.get("subject_name"),
+            "subject_identifier":f.get("subject_identifier"),
+            "predicate":str(f.get("predicate")),
+            "object_type":f.get("object_type"),
+            "object_name":f.get("object_name"),
+            "object_identifier":f.get("object_identifier"),
+            "value_text":f.get("value_text"),
+            "value_numeric":f.get("value_numeric"),
+            "value_boolean":f.get("value_boolean"),
+            "unit":f.get("unit"),
+            "currency":f.get("currency"),
+            "effective_date":f.get("effective_date"),
+            "start_date":f.get("start_date"),
+            "end_date":f.get("end_date"),
+            "location_text":f.get("location_text"),
+            "country":f.get("country"),
+            "evidence_text":f.get("evidence_text"),
+            "source_url":source_url,
+            "primary_source_url":primary,
+            "confidence":conf,
+            "verification_status":"primary_source_supported" if primary else "secondary_source",
+            "review_status":"pending",
+            "resolution_status":"unresolved",
+            "metadata":f.get("metadata") if isinstance(f.get("metadata"),dict) else {},
+        }
+        rows.append({k:v for k,v in row.items() if v is not None})
+    inserted=[]
+    for i in range(0,len(rows),100):
+        inserted.extend(sb.table("pc_extracted_facts").insert(rows[i:i+100]).execute().data or [])
+    return inserted
+
+def _prepare_universal_records(result,input_url,publisher=None,title=None):
+    """Attach source provenance and stable IDs to canonical/domain proposals."""
+    result=dict(result or {})
+    records=[]
+    for rec in result.get("records") or []:
+        if not isinstance(rec,dict):
+            continue
+        table=str(rec.get("target_table") or "")
+        payload=rec.get("payload") if isinstance(rec.get("payload"),dict) else {}
+        if table not in AI_ALLOWED_TABLES:
+            continue
+        meta=payload.get("metadata") if isinstance(payload.get("metadata"),dict) else {}
+        sources=meta.get("research_sources") if isinstance(meta.get("research_sources"),list) else []
+        if not any((isinstance(x,str) and x==input_url) or (isinstance(x,dict) and x.get("url")==input_url) for x in sources):
+            sources.insert(0,{
+                "url":input_url,
+                "publisher":publisher,
+                "title":title,
+                "source_role":"input_article"
+            })
+        meta["research_sources"]=sources
+        meta.setdefault("ingested_via","UNIVERSAL_CONTENT_INTAKE")
+        payload["metadata"]=meta
+        if "source_url" not in payload:
+            payload["source_url"]=input_url
+        nk=str(rec.get("natural_key") or _record_key(payload,""))
+        payload=_fill_staging_key(payload,table,nk)
+        rec=dict(rec)
+        rec["payload"]=payload
+        rec["natural_key"]=nk
+        records.append(rec)
+    result["records"]=records
+    return result
+
+def _persist_primary_source_relationships(source_item_id,primary_sources,batch_id):
+    created=0
+    for p in primary_sources or []:
+        if not isinstance(p,dict) or not p.get("url"):
+            continue
+        try:
+            related=_upsert_content_url_item(
+                batch_id,p["url"],None,"ai_primary_source_discovery"
+            )
+            sb.table("pc_content_ingest_items").update({
+                "title":p.get("title"),
+                "publisher":p.get("publisher"),
+                "primary_source_candidate":True,
+                "updated_at":pd.Timestamp.utcnow().isoformat()
+            }).eq("content_item_id",related["content_item_id"]).execute()
+            sb.table("pc_content_source_relationships").upsert({
+                "source_content_item_id":source_item_id,
+                "related_content_item_id":related["content_item_id"],
+                "relationship_type":p.get("relationship_type") or "primary_supports_secondary",
+                "confidence":p.get("confidence") or 0.85,
+                "metadata":{"discovered_by":"AI_RESEARCH"}
+            },on_conflict="source_content_item_id,related_content_item_id,relationship_type").execute()
+            created+=1
+        except Exception:
+            pass
+    return created
+
+def _run_content_item_extraction(batch_id,item,use_web=True,product_context="TRADE"):
+    """Fetch one URL, extract facts, persist evidence and stage canonical proposals."""
+    item_id=item["content_item_id"]
+    url=item.get("source_url") or item.get("normalized_url")
+    fetched=None
+    try:
+        fetched=_fetch_content_url(url)
+        sb.table("pc_content_ingest_items").update({
+            "source_url":fetched.get("url") or url,
+            "title":fetched.get("title"),
+            "publisher":fetched.get("publisher"),
+            "publication_date":fetched.get("publication_date"),
+            "retrieved_at":pd.Timestamp.utcnow().isoformat(),
+            "raw_text":fetched.get("raw_text"),
+            "extracted_text":fetched.get("extracted_text"),
+            "content_hash":fetched.get("content_hash"),
+            "mime_type":fetched.get("mime_type"),
+            "http_status":fetched.get("status"),
+            "fetch_status":"completed",
+            "extraction_status":"running",
+            "updated_at":pd.Timestamp.utcnow().isoformat(),
+        }).eq("content_item_id",item_id).execute()
+    except Exception as exc:
+        sb.table("pc_content_ingest_items").update({
+            "fetch_status":"failed",
+            "fetch_error":str(exc),
+            "extraction_status":"running",
+            "updated_at":pd.Timestamp.utcnow().isoformat(),
+        }).eq("content_item_id",item_id).execute()
+        fetched={
+            "url":url,"title":None,
+            "publisher":urllib.parse.urlsplit(url).netloc,
+            "extracted_text":"",
+            "publication_date":None
+        }
+
+    job=sb.table("pc_ingestion_jobs").insert({
+        "job_type":"CONTENT_INGEST",
+        "title":fetched.get("title") or url,
+        "query_text":"Universal URL/article fact extraction",
+        "source_scope":{
+            "content_batch_id":batch_id,
+            "content_item_id":item_id,
+            "source_url":url,
+            "product_context":product_context
+        },
+        "status":"running",
+    }).execute().data[0]
+    job_id=job["ingestion_job_id"]
+
+    sb.table("pc_content_ingest_batches").update({
+        "ingestion_job_id":job_id,
+        "updated_at":pd.Timestamp.utcnow().isoformat()
+    }).eq("content_batch_id",batch_id).execute()
+
+    extraction_run=sb.table("pc_extraction_runs").insert({
+        "content_item_id":item_id,
+        "ingestion_job_id":job_id,
+        "extraction_type":"article_fact_extraction",
+        "status":"running",
+        "prompt_version":"universal-v4",
+        "metadata":{"source_url":url}
+    }).execute().data[0]
+
+    article_text=(fetched.get("extracted_text") or "")[:80000]
+    prompt=f"""
+Analyze this source for Power & Corridors. Extract ALL material structured facts
+supported by the source: entities, ownership/control, transactions, financing,
+contracts, infrastructure projects, ports/terminals, vessels, shipbuilding,
+scheduled transport services/routes, sanctions, security incidents, operational
+changes, dates, monetary values, quantities and specifications.
+
+INPUT URL: {url}
+TITLE: {fetched.get('title') or ''}
+PUBLISHER: {fetched.get('publisher') or ''}
+PUBLICATION DATE: {fetched.get('publication_date') or ''}
+
+If current web research is enabled, verify material facts and locate the most
+authoritative primary sources (company release, exchange filing, regulator,
+government source, shipyard/carrier release, etc.). Do not overwrite the
+secondary article: return the primary source separately and preserve both.
+
+Do not create a generic news/event record merely because an article exists.
+Create pc_events only when the article describes a real event/milestone/
+disruption/announcement that belongs in the event layer.
+
+SOURCE TEXT:
+{article_text}
+"""
+    if not ai_configured():
+        raise RuntimeError("AI research is not configured.")
+
+    result=ai_research(
+        prompt,
+        product_context,
+        bool(use_web),
+        output_contract=UNIVERSAL_CONTENT_OUTPUT_CONTRACT
+    )
+    result=_prepare_universal_records(
+        result,url,fetched.get("publisher"),fetched.get("title")
+    )
+
+    facts=_persist_extracted_facts(
+        item_id,
+        extraction_run["extraction_run_id"],
+        result,
+        url,
+        item.get("document_id")
+    )
+    primary_count=_persist_primary_source_relationships(
+        item_id,
+        (result or {}).get("primary_sources") or [],
+        batch_id
+    )
+
+    staged,rejected,resolution=stage_ai_result(sb,job_id,result)
+
+    sb.table("pc_extraction_runs").update({
+        "status":"completed",
+        "facts_extracted":len(facts),
+        "records_proposed":staged,
+        "conflicts_count":len((result or {}).get("conflicts") or []),
+        "completed_at":pd.Timestamp.utcnow().isoformat(),
+        "metadata":{
+            "source_url":url,
+            "primary_sources_discovered":primary_count,
+            "rejected_records":rejected
+        }
+    }).eq("extraction_run_id",extraction_run["extraction_run_id"]).execute()
+
+    sb.table("pc_content_ingest_items").update({
+        "extraction_status":"completed",
+        "resolution_status":"staged" if staged else "facts_only",
+        "updated_at":pd.Timestamp.utcnow().isoformat()
+    }).eq("content_item_id",item_id).execute()
+
+    sb.table("pc_ingestion_jobs").update({
+        "status":"completed",
+        "completed_at":pd.Timestamp.utcnow().isoformat(),
+        "stats":{
+            "content_item_id":item_id,
+            "facts":len(facts),
+            "staged_records":staged,
+            "rejected_records":rejected,
+            "primary_sources":primary_count,
+            "resolution":resolution
+        }
+    }).eq("ingestion_job_id",job_id).execute()
+
+    return {
+        "content_item_id":item_id,
+        "url":url,
+        "title":fetched.get("title"),
+        "facts":len(facts),
+        "staged":staged,
+        "rejected":rejected,
+        "primary_sources":primary_count,
+        "job_id":job_id,
+        "resolution":resolution,
+    }
 
 
 def _jsonable(v):
@@ -2234,9 +3061,11 @@ def stage_ai_result(sb, job_id, result):
             logical="relationship"
 
         natural_key=_record_key(payload,rec.get("natural_key") or "")
+        payload=_fill_staging_key(payload,table,natural_key)
+        direct_ready=table in DIRECT_DOMAIN_TABLES
         staged.append({
             "ingestion_job_id":job_id,
-            "target_entity_type":logical,
+            "target_entity_type":logical or ("domain_record" if direct_ready else None),
             "target_table":table,
             "source_record_key":natural_key,
             "natural_key":natural_key,
@@ -2245,7 +3074,8 @@ def stage_ai_result(sb, job_id, result):
             "confidence":rec.get("confidence"),
             "validation_status":"pending",
             "review_status":"pending",
-            "resolution_status":"UNRESOLVED",
+            "resolution_status":"READY" if direct_ready else "UNRESOLVED",
+            "resolution_method":"domain_schema_ready" if direct_ready else None,
         })
 
     for i in range(0,len(staged),100):
@@ -2711,9 +3541,33 @@ def _apply_safe_candidates_priority(job_id):
         "pc_assets":20,
         "pc_mobile_assets":20,
         "pc_events":30,
+
+        "pc_transport_services":35,
         "pc_transactions":40,
-        "pc_transaction_participants":50,
+        "pc_financing_facilities":40,
+        "pc_contracts":40,
+        "pc_vessel_designs":40,
+        "pc_shipbuilding_orders":45,
         "pc_transport_routes":45,
+        "pc_project_details":45,
+
+        "pc_transaction_participants":50,
+        "pc_financing_participants":50,
+        "pc_contract_participants":50,
+        "pc_shipbuilding_order_units":50,
+        "pc_transport_service_aliases":50,
+        "pc_transport_service_operators":50,
+        "pc_transport_service_stops":52,
+        "pc_transport_service_schedules":52,
+        "pc_transport_service_transit_times":54,
+        "pc_transport_service_mobile_assets":54,
+        "pc_transport_service_network_links":55,
+        "pc_transport_service_connections":55,
+        "pc_transport_service_sources":56,
+        "pc_transport_service_changes":58,
+        "pc_financing_links":60,
+        "pc_contract_links":60,
+
         "pc_relationships":80,
         "pc_event_links":90,
     }
@@ -3014,6 +3868,11 @@ def _repair_staged_payloads_from_source(job_id):
         "pc_events":["event_id","event_type","event_domain","event_family","severity","status","mode","countries","location","title","description","operational_impact","commercial_impact","confidence","source_url"],
         "pc_event_links":["event_link_id","event_id","linked_type","linked_id","relationship","source_url"],
         "pc_relationships":["relationship_id","source_type","source_id","relationship_type","target_type","target_id","confidence","source_url","notes"],
+        "pc_transport_services":["transport_service_id","service_name","service_code","mode","service_type","trade_lane","status","announced_date","effective_start","effective_end","primary_operator_entity_id","source_id","source_url"],
+        "pc_financing_facilities":["financing_id","financing_name","financing_type","announced_date","amount","currency","programme_name","facility_status","source_id","source_url","primary_source_url"],
+        "pc_contracts":["contract_id","contract_name","contract_type","announced_date","status","reported_value","currency","quantity","quantity_unit","source_id","source_url","primary_source_url"],
+        "pc_vessel_designs":["vessel_design_id","design_name","designer_entity_id","builder_entity_id","vessel_type","teu_capacity","dwt","loa_m","beam_m","depth_m","draft_m","design_speed_knots","source_id","source_url"],
+        "pc_shipbuilding_orders":["shipbuilding_order_id","contract_id","buyer_entity_id","builder_entity_id","shipyard_asset_id","vessel_design_id","order_date","announced_date","firm_quantity","option_quantity","vessel_type","teu_capacity_each","status","source_id","source_url","primary_source_url"],
     }
 
     for r in rows:
@@ -8724,8 +9583,240 @@ elif page=="Reconciliation Center":
             st.code("027_workflow_orchestration.sql\n028_document_ingestion.sql\n029_intelligence_authoring.sql\n030_distribution_lists.sql\n031_reconciliation_cleanup.sql\n032_event_first_dependency_engine.sql\n033_dependency_autocreate_engine.sql\n034_ingestion_quality_checks.sql\n035_dependency_regression_checks.sql\n036_compact_workflow_views.sql")
             st.caption("The cleanup functions are job-scoped and operate on staging before canonical apply.")
 
+elif page=="Universal Content Intake":
+    title(
+        "Universal content intake",
+        "Paste article URLs, paste a URL list, or upload a document/spreadsheet containing URLs. Each source is preserved, fact-extracted, primary-source enriched and staged into the canonical P&C model."
+    )
+    st.caption(f"Loader build: `{LOADER_BUILD}`")
+
+    if not sb:
+        st.error("Supabase service connection required.")
+    elif not _table_exists("pc_content_ingest_items"):
+        st.error("Run the Universal Content / Fact Extraction Foundation SQL first.")
+    else:
+        intake_tab, queue_tab, facts_tab = st.tabs(
+            ["Add URLs / URL-list document","Content queue","Extracted facts"]
+        )
+
+        with intake_tab:
+            st.markdown("### Add source material")
+            mode=st.radio(
+                "Input",
+                ["Paste URL(s)","Upload file containing URLs"],
+                horizontal=True,
+                key="content_intake_mode"
+            )
+
+            urls=[]
+            manifest_document_id=None
+            manifest_upload=None
+
+            if mode=="Paste URL(s)":
+                raw_urls=st.text_area(
+                    "URL or URL list",
+                    height=180,
+                    placeholder=(
+                        "https://www.porttechnology.org/...\n"
+                        "https://gulfnews.com/...\n"
+                        "https://www.seatrade-maritime.com/..."
+                    ),
+                    key="content_url_text"
+                )
+                urls=_extract_urls_from_text(raw_urls)
+            else:
+                manifest_upload=st.file_uploader(
+                    "Upload TXT, MD, CSV, XLSX, DOCX or PDF containing URLs",
+                    type=["txt","md","csv","xlsx","xls","docx","pdf"],
+                    key="content_url_manifest"
+                )
+                if manifest_upload:
+                    try:
+                        urls=_extract_urls_from_upload(manifest_upload)
+                    except Exception as exc:
+                        st.error(f"Could not read URL list: {exc}")
+
+            # Manual URLs without protocol can be entered one per line.
+            if mode=="Paste URL(s)" and not urls:
+                for line in (st.session_state.get("content_url_text") or "").splitlines():
+                    line=line.strip()
+                    if line and "." in line and " " not in line:
+                        n=_normalize_content_url(line)
+                        if n:
+                            urls.append(line)
+
+            # Dedupe preview.
+            dedup=[]
+            seen=set()
+            for u in urls:
+                n=_normalize_content_url(u)
+                if n and n not in seen:
+                    seen.add(n)
+                    dedup.append(u)
+            urls=dedup
+
+            c1,c2,c3=st.columns(3)
+            product_context=c1.selectbox(
+                "Product context",
+                ["TRADE","INTELLIGENCE"],
+                key="content_product_context"
+            )
+            use_web=c2.checkbox(
+                "Find/verify primary sources",
+                True,
+                key="content_use_web",
+                help="Allows the AI researcher to locate official/company/regulatory sources supporting the article."
+            )
+            max_items=c3.number_input(
+                "Max URLs this run",
+                min_value=1,max_value=100,value=25,step=1,
+                key="content_max_items"
+            )
+
+            st.caption(
+                f"{len(urls)} unique URL(s) detected. "
+                "The source article remains evidence; structured facts are routed separately."
+            )
+            if urls:
+                with st.expander("URL preview",expanded=False):
+                    for u in urls[:100]:
+                        st.write(u)
+
+            if st.button(
+                "Ingest URLs → extract facts → stage records",
+                type="primary",
+                disabled=not bool(urls),
+                use_container_width=True,
+                key="content_ingest_run"
+            ):
+                if not ai_configured():
+                    st.error("Configure OPENAI_API_KEY and OPENAI_MODEL first.")
+                else:
+                    selected=urls[:int(max_items)]
+                    if manifest_upload:
+                        try:
+                            manifest_document_id=_save_url_manifest_document(
+                                manifest_upload,selected
+                            )
+                        except Exception as exc:
+                            st.warning(f"URL-list file could not be preserved in pc_documents: {exc}")
+
+                    input_mode="document_url_list" if manifest_upload else (
+                        "single_url" if len(selected)==1 else "url_list"
+                    )
+                    batch=_create_content_batch(
+                        input_mode=input_mode,
+                        batch_name=(
+                            Path(manifest_upload.name).stem
+                            if manifest_upload
+                            else f"URL intake · {len(selected)} source(s)"
+                        ),
+                        product_context=product_context,
+                        research_mode="web_enriched" if use_web else "source_only",
+                        item_count=len(selected),
+                        metadata={
+                            "manifest_document_id":str(manifest_document_id) if manifest_document_id else None,
+                            "loader_build":LOADER_BUILD,
+                        }
+                    )
+                    batch_id=batch["content_batch_id"]
+                    results=[]
+                    failures=[]
+
+                    with st.status(
+                        f"Processing {len(selected)} source URL(s)…",
+                        expanded=True
+                    ) as status_box:
+                        for num,u in enumerate(selected,1):
+                            st.write(f"{num}/{len(selected)} · {u}")
+                            try:
+                                item=_upsert_content_url_item(
+                                    batch_id,u,manifest_document_id,
+                                    "uploaded_url_list" if manifest_upload else "pasted_url"
+                                )
+                                res=_run_content_item_extraction(
+                                    batch_id,item,use_web,product_context
+                                )
+                                results.append(res)
+                            except Exception as exc:
+                                failures.append({"url":u,"error":str(exc)})
+                                try:
+                                    n=_normalize_content_url(u)
+                                    if n:
+                                        existing=(sb.table("pc_content_ingest_items")
+                                                  .select("content_item_id")
+                                                  .eq("normalized_url",n).limit(1).execute().data or [])
+                                        if existing:
+                                            sb.table("pc_content_ingest_items").update({
+                                                "extraction_status":"failed",
+                                                "extraction_error":str(exc),
+                                                "updated_at":pd.Timestamp.utcnow().isoformat()
+                                            }).eq("content_item_id",existing[0]["content_item_id"]).execute()
+                                except Exception:
+                                    pass
+
+                        sb.table("pc_content_ingest_batches").update({
+                            "status":"completed" if not failures else "completed_with_errors",
+                            "processed_count":len(results),
+                            "failed_count":len(failures),
+                            "completed_at":pd.Timestamp.utcnow().isoformat(),
+                            "updated_at":pd.Timestamp.utcnow().isoformat(),
+                            "metadata":{
+                                "manifest_document_id":str(manifest_document_id) if manifest_document_id else None,
+                                "loader_build":LOADER_BUILD,
+                                "failures":failures[:100],
+                            }
+                        }).eq("content_batch_id",batch_id).execute()
+
+                        status_box.update(
+                            label=(
+                                f"Content intake complete · {len(results)} processed"
+                                + (f" · {len(failures)} failed" if failures else "")
+                            ),
+                            state="complete" if not failures else "error"
+                        )
+
+                    if results:
+                        st.success(
+                            f"Processed {len(results)} source(s). "
+                            f"Extracted {sum(int(x.get('facts') or 0) for x in results)} facts and "
+                            f"staged {sum(int(x.get('staged') or 0) for x in results)} canonical/domain proposal(s)."
+                        )
+                        dataframe(results)
+                    if failures:
+                        st.warning(f"{len(failures)} source(s) need attention.")
+                        dataframe(failures)
+
+        with queue_tab:
+            st.markdown("### Content ingestion queue")
+            try:
+                rows=safe_rows(
+                    sb,"pc_v_content_ingest_queue","*",500,order="created_at"
+                )
+            except Exception:
+                rows=safe_rows(
+                    sb,"pc_content_ingest_items",
+                    "content_item_id,content_batch_id,input_type,title,publisher,publication_date,source_url,fetch_status,extraction_status,resolution_status,fetch_error,extraction_error,created_at",
+                    500,order="created_at"
+                )
+            dataframe(rows)
+
+        with facts_tab:
+            st.markdown("### Extracted fact review")
+            try:
+                facts=safe_rows(
+                    sb,"pc_v_extracted_fact_review","*",1000,order="fact_id"
+                )
+            except Exception:
+                facts=safe_rows(
+                    sb,"pc_extracted_facts",
+                    "fact_id,content_item_id,fact_type,subject_name,predicate,object_name,value_text,value_numeric,unit,currency,effective_date,source_url,primary_source_url,confidence,verification_status,review_status,resolution_status",
+                    1000,order="created_at"
+                )
+            dataframe(facts)
+
 elif page=="Document Loader":
-    title("Document / report loader","Upload a source document, link it to a company/event/vessel/asset, preserve extracted text, and optionally stage AI-extracted facts.")
+    title("Document / report loader","Upload and preserve a source document. For documents containing lists of article URLs, use Universal Content Intake so every URL is fetched, fact-extracted and routed.")
     if not sb:
         st.error("Supabase required.")
     elif not _table_exists("pc_documents"):
@@ -9401,7 +10492,7 @@ elif page=="Batch Staging":
                     if meta.get(k): return str(meta[k])
         for key in ("entity_id","asset_id","mobile_asset_id","relationship_id","event_id","event_link_id",
                     "transaction_id","route_id","chokepoint_id","market_instrument_id","trade_flow_id",
-                    "supply_series_id","observation_id","imo","mmsi","name","title","route_name"):
+                    "supply_series_id","observation_id","transport_service_id","financing_id","contract_id","vessel_design_id","shipbuilding_order_id","shipbuilding_order_unit_id","service_alias_id","service_operator_id","service_stop_id","service_schedule_id","service_transit_time_id","service_mobile_asset_id","service_network_link_id","service_connection_id","service_change_id","service_source_id","imo","mmsi","name","title","route_name","service_name","financing_name","contract_name","design_name"):
             if r.get(key): return str(r[key])
         return str(index)
 
