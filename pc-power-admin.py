@@ -4294,6 +4294,82 @@ def _simple_direct_write_records(sb, result):
     }
 
 
+
+# ---------------------------------------------------------------------------
+# V5.1.2 load-report exports
+# ---------------------------------------------------------------------------
+
+def _research_load_report_exports(report, workbook_name="research_workbook"):
+    """Return export-ready JSON/CSV/XLSX bytes for a structured workbook load report.
+
+    The export is deliberately diagnostics-first: summary, successful writes by
+    table, failures by table, grouped database errors and every row-level failure.
+    """
+    report=report if isinstance(report,dict) else {}
+    base=Path(str(workbook_name or "research_workbook")).stem
+    safe=re.sub(r"[^A-Za-z0-9._-]+","_",base).strip("_") or "research_workbook"
+    stamp=pd.Timestamp.utcnow().strftime("%Y%m%d_%H%M%S")
+    prefix=f"{safe}_canonical_load_report_{stamp}"
+
+    json_bytes=json.dumps(_jsonable(report),ensure_ascii=False,indent=2,default=str).encode("utf-8")
+
+    failures=report.get("failures") or []
+    fail_rows=[]
+    for f in failures:
+        if not isinstance(f,dict):
+            fail_rows.append({"error":str(f)})
+            continue
+        fail_rows.append({
+            "target_table":f.get("table"),
+            "record":f.get("record"),
+            "error":f.get("error"),
+            "payload_keys":", ".join(f.get("payload_keys") or []),
+        })
+    fail_df=pd.DataFrame(fail_rows,columns=["target_table","record","error","payload_keys"])
+    csv_bytes=fail_df.to_csv(index=False).encode("utf-8-sig")
+
+    xlsx_bytes=None
+    try:
+        buf=io.BytesIO()
+        with pd.ExcelWriter(buf,engine="openpyxl") as writer:
+            summary_rows=[]
+            for key in ["workbook_type","file_sha256","records_generated","attempted","applied","blocked","failed","mode"]:
+                if key in report:
+                    summary_rows.append({"metric":key,"value":report.get(key)})
+            pd.DataFrame(summary_rows).to_excel(writer,sheet_name="Summary",index=False)
+
+            by_table=report.get("by_table") or {}
+            attempted_by=report.get("attempted_by_table") or {}
+            failed_by=report.get("failed_by_table") or {}
+            all_tables=sorted(set(by_table)|set(attempted_by)|set(failed_by))
+            pd.DataFrame([
+                {
+                    "target_table":t,
+                    "attempted":attempted_by.get(t,0),
+                    "applied":by_table.get(t,0),
+                    "failed":failed_by.get(t,0),
+                }
+                for t in all_tables
+            ]).to_excel(writer,sheet_name="Table Results",index=False)
+
+            pd.DataFrame(report.get("error_summary") or [],columns=["error","count"]).to_excel(
+                writer,sheet_name="Error Summary",index=False
+            )
+            fail_df.to_excel(writer,sheet_name="Row Failures",index=False)
+            pd.DataFrame([{"full_report_json":json.dumps(_jsonable(report),ensure_ascii=False,default=str)}]).to_excel(
+                writer,sheet_name="Raw Report",index=False
+            )
+        xlsx_bytes=buf.getvalue()
+    except Exception:
+        xlsx_bytes=None
+
+    return {
+        "prefix":prefix,
+        "json":json_bytes,
+        "csv":csv_bytes,
+        "xlsx":xlsx_bytes,
+    }
+
 # ---------------------------------------------------------------------------
 # V5.1 research-workbook normalizer
 # ---------------------------------------------------------------------------
@@ -11092,6 +11168,7 @@ elif page=="Canonical Loader":
                     ):
                         with st.status("Writing structured workbook to canonical tables…",expanded=True) as _rwb_status:
                             _rwb_report=_load_research_workbook_direct(up.name,sections,file_hash)
+                            st.session_state[f"research_workbook_report_{str(file_hash)}"]=_rwb_report
                             if int(_rwb_report.get("blocked") or 0)==0:
                                 _rwb_status.update(
                                     label=f"Workbook complete — {_rwb_report.get('applied',0)} canonical/domain rows written",
@@ -11136,6 +11213,47 @@ elif page=="Canonical Loader":
                                     dataframe(_fail_rows)
                             with st.expander("Full load report",expanded=False):
                                 st.json(_rwb_report)
+
+                    # Keep the most recent report available after Streamlit reruns so
+                    # download buttons do not disappear when the user clicks them.
+                    _saved_rwb_report=st.session_state.get(f"research_workbook_report_{str(file_hash)}")
+                    if isinstance(_saved_rwb_report,dict):
+                        _exports=_research_load_report_exports(_saved_rwb_report,up.name)
+                        st.markdown("#### Export load report")
+                        st.caption("Export the complete diagnostic report for audit, troubleshooting or sharing.")
+                        _ec1,_ec2,_ec3=st.columns(3)
+                        _ec1.download_button(
+                            "⬇ Excel report",
+                            data=_exports.get("xlsx") or _exports.get("json"),
+                            file_name=(
+                                f"{_exports.get('prefix')}.xlsx"
+                                if _exports.get("xlsx") is not None
+                                else f"{_exports.get('prefix')}.json"
+                            ),
+                            mime=(
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                if _exports.get("xlsx") is not None
+                                else "application/json"
+                            ),
+                            use_container_width=True,
+                            key=f"rwb_report_xlsx_{str(file_hash)[:16]}",
+                        )
+                        _ec2.download_button(
+                            "⬇ Row failures CSV",
+                            data=_exports.get("csv") or b"",
+                            file_name=f"{_exports.get('prefix')}_failures.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                            key=f"rwb_report_csv_{str(file_hash)[:16]}",
+                        )
+                        _ec3.download_button(
+                            "⬇ Full JSON",
+                            data=_exports.get("json") or b"{}",
+                            file_name=f"{_exports.get('prefix')}.json",
+                            mime="application/json",
+                            use_container_width=True,
+                            key=f"rwb_report_json_{str(file_hash)[:16]}",
+                        )
                     st.stop()
 
                 # V23: bind the result panel to the CURRENT upload, not a prior job
