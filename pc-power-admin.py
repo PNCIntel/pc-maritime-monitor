@@ -4631,7 +4631,7 @@ def _rw_sources_records(kind,sections):
             sid=_simple_hash_id("SRC_WEB",url)
             records.append(_rw_record("pc_sources",f"source:{url}",{
                 "source_id":sid,
-                "source_name":row.get("source_name") or row.get("source_title") or urlparse(str(url)).netloc,
+                "source_name":row.get("source_name") or row.get("source_title") or urllib.parse.urlparse(str(url)).netloc,
                 "publisher":row.get("source_name") or row.get("source_title"),
                 "source_type":row.get("source_type") or "web",
                 "url":url,
@@ -5518,8 +5518,8 @@ def _normalized_trade_maritime_workbook_records(sections):
         if not url: continue
         records.append(_rw_record("pc_sources",f"source:{url}",{
             "source_id":_simple_hash_id("SRC_WEB",url),
-            "source_name":urlparse(str(url)).netloc,
-            "publisher":urlparse(str(url)).netloc,
+            "source_name":urllib.parse.urlparse(str(url)).netloc,
+            "publisher":urllib.parse.urlparse(str(url)).netloc,
             "source_type":"web","url":url,
             "ingestion_method":"normalized_trade_workbook","active":True,
             "metadata":_rw_metadata(kind,"Sources",row),
@@ -6061,7 +6061,7 @@ def _simple_source_id(sb, payload):
     sid=_simple_hash_id("SRC_WEB",url)
     source_name=url
     try:
-        source_name=urlparse(url).netloc or url
+        source_name=urllib.parse.urlparse(url).netloc or url
     except Exception:
         pass
     row={
