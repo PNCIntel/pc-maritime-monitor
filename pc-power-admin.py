@@ -4612,7 +4612,12 @@ def _research_workbook_kind(sections,filename=""):
     # fall back to the generic three-sheet reconciliation path.
     normalized_required={"events","entities","locations","assets","event_entity_links","event_location_links","event_asset_links"}
     normalized_domain={"route_port_calls","vessel_orders","infrastructure_projects","ownership_transactions","labour_events","sources"}
-    if normalized_required.issubset(names) and len(normalized_domain.intersection(names)) >= 3:
+    # Any workbook that carries the normalized event/entity/asset/location graph is
+    # already a structured canonical package. Do not force it through the generic
+    # three-sheet reconciliation path merely because its domain-specific tabs differ.
+    # This covers Korea/security/public-safety workbooks as well as the broader
+    # trade/maritime package. Domain-specific tabs are preserved as observations below.
+    if normalized_required.issubset(names):
         return "normalized_trade_maritime"
     if "normalized_trade_maritime_entity_location_loader" in fname:
         return "normalized_trade_maritime"
@@ -5505,10 +5510,12 @@ def _normalized_trade_maritime_workbook_records(sections):
 
     def ename(eid):
         r=entity_by_id.get(str(eid or ""),{})
-        return r.get("canonical_name") or r.get("name") or (str(eid) if eid else None)
+        return (r.get("canonical_name") or r.get("entity_name") or r.get("name")
+                or (str(eid) if eid else None))
     def aname(aid):
         r=asset_by_id.get(str(aid or ""),{})
-        return r.get("asset_name") or r.get("name") or (str(aid) if aid else None)
+        return (r.get("asset_name") or r.get("canonical_name") or r.get("name")
+                or (str(aid) if aid else None))
     def loc(lid):
         return location_by_id.get(str(lid or ""),{})
 
@@ -5527,7 +5534,7 @@ def _normalized_trade_maritime_workbook_records(sections):
 
     # Canonical entities. Workbook IDs are preserved only as metadata aliases.
     for row in entity_rows:
-        name=row.get("canonical_name")
+        name=row.get("canonical_name") or row.get("entity_name") or row.get("name")
         if not name: continue
         url=row.get("website_or_primary_source")
         records.append(_rw_record("pc_entities",f"entity:{name}:{row.get('country')}",{
@@ -5546,7 +5553,7 @@ def _normalized_trade_maritime_workbook_records(sections):
 
     # Canonical assets/facilities/vessels/projects represented by the normalized asset sheet.
     for row in asset_rows:
-        name=row.get("asset_name")
+        name=row.get("asset_name") or row.get("canonical_name") or row.get("name")
         if not name: continue
         owner=ename(row.get("owner_operator_entity_id"))
         url=row.get("source_url")
@@ -5600,7 +5607,7 @@ def _normalized_trade_maritime_workbook_records(sections):
     for row in _rw_rows(sections.get("Event_Location_Links",pd.DataFrame())):
         eid=row.get("event_id"); lr=loc(row.get("location_id"))
         if not eid or not lr: continue
-        lname=lr.get("canonical_name") or row.get("location_id")
+        lname=lr.get("canonical_name") or lr.get("location_name") or lr.get("name") or row.get("location_id")
         records.append(_rw_record("pc_event_locations",f"event-location:{eid}:{lname}",{
             "event_location_id":_simple_hash_id("EVLOC_RWB",eid,lname,row.get("relationship")),
             "event_id":eid,"location_name":lname,"country":lr.get("country"),
@@ -5684,6 +5691,40 @@ def _normalized_trade_maritime_workbook_records(sections):
             "source_type":"labour_event","source_url":url,"confidence":"high","review_status":"approved","record_status":"verified",
             "raw_value":_jsonable(row),"metadata":_rw_metadata(kind,"Labour_Events",row,{"employer":ename(row.get("employer_entity_id")),"union":ename(row.get("union_entity_id"))}),
         },1.0))
+
+    # Preserve normalized domain-detail sheets that do not yet have a dedicated
+    # first-class table mapping. Korea/security/public-safety packages commonly use
+    # tabs such as Maritime_Enforcement and Public_Safety_Incident. These rows are
+    # valuable operational context and must never be silently dropped. Store them as
+    # approved canonical observations, retaining the complete source row and event id.
+    handled={
+        "sources","entities","assets","events","locations","event_entity_links",
+        "event_asset_links","event_location_links","route_port_calls","vessel_orders",
+        "infrastructure_projects","ownership_transactions","labour_events",
+        "readme","summary","loader_notes","data_quality"
+    }
+    for sheet,df in (sections or {}).items():
+        sn=_norm_field(sheet)
+        if sn in handled or df is None or df.empty:
+            continue
+        for idx,row in enumerate(_rw_rows(df),start=1):
+            eid=row.get("event_id") or row.get("linked_event_id")
+            url=(row.get("source_url") or row.get("verification_url") or row.get("url")
+                 or (event_source.get(str(eid)) if eid else None))
+            od=_rw_date(row.get("event_date") or row.get("date") or row.get("incident_date")
+                        or row.get("observation_date"))
+            obs_key=f"{sn}:{eid or idx}:{row.get('record_id') or row.get('incident_id') or row.get('case_id') or idx}"
+            records.append(_rw_record("pc_observations",f"normalized-detail:{obs_key}",{
+                "observation_id":_simple_hash_id("OBS_AI",kind,sn,obs_key),
+                "observation_date":od,
+                "source_type":sn or "normalized_detail",
+                "source_url":url,
+                "confidence":row.get("confidence") or "high",
+                "review_status":"approved",
+                "record_status":"verified",
+                "raw_value":_jsonable(row),
+                "metadata":_rw_metadata(kind,sheet,row,{"linked_event_id":eid,"normalized_domain_detail":True}),
+            },1.0))
 
     return records
 
