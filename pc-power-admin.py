@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "502-simple-direct-content-loader-2026-09-19"
+LOADER_BUILD = "504-true-direct-apply-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -3880,25 +3880,114 @@ def _queue_content_urls(
     return batch,items,failures
 
 
-def _direct_apply_content_result(res):
-    """Immediately promote safe staged records into canonical tables.
+def _apply_simple_direct_job(job_id):
+    """Apply a simple content-load job directly.
 
-    Facts remain provenance only. Missing deterministic dependencies are created/upserted
-    by the canonical job processor. Only genuine ambiguity remains for analyst review.
+    This deliberately bypasses the legacy reconciliation/promotion machinery.
+    `_simple_prepare_payload()` has already resolved/created deterministic parent
+    dependencies and bound their IDs. READY rows can therefore be written in
+    dependency order. A row becomes an exception only when the canonical write
+    itself fails or when staging explicitly marked it unresolved.
+    """
+    if not sb or not job_id:
+        return {"applied":0,"blocked":0,"failed":0,"failures":[],"job_id":job_id}
+
+    rows=(sb.table("pc_staged_records")
+          .select("staged_record_id,ingestion_job_id,target_entity_type,target_table,natural_key,source_record_key,action,confidence,validation_status,review_status,resolution_status,resolved_entity_id,resolution_method,resolution_confidence,candidate_count,payload,current_record,source_id,created_at")
+          .eq("ingestion_job_id",str(job_id))
+          .limit(10000).execute().data or [])
+
+    priority={
+        "pc_entities":10,"pc_assets":20,"pc_mobile_assets":20,"pc_events":30,
+        "pc_port_capabilities":32,"pc_port_metrics":34,"pc_terminal_details":34,
+        "pc_berth_details":36,"pc_transport_services":35,"pc_transactions":40,
+        "pc_financing_facilities":40,"pc_contracts":40,"pc_vessel_designs":40,
+        "pc_shipbuilding_orders":45,"pc_transport_routes":45,"pc_project_details":45,
+        "pc_transaction_participants":50,"pc_financing_participants":50,
+        "pc_contract_participants":50,"pc_shipbuilding_order_units":50,
+        "pc_transport_service_aliases":50,"pc_transport_service_operators":50,
+        "pc_transport_service_stops":52,"pc_transport_service_schedules":52,
+        "pc_transport_service_transit_times":54,"pc_transport_service_mobile_assets":54,
+        "pc_transport_service_network_links":55,"pc_transport_service_connections":55,
+        "pc_transport_service_sources":56,"pc_transport_service_changes":58,
+        "pc_financing_links":60,"pc_contract_links":60,"pc_relationships":80,
+        "pc_event_links":90,
+    }
+    rows=sorted(rows,key=lambda r:(priority.get(str(r.get("target_table") or ""),60),str(r.get("natural_key") or "")))
+
+    applied=0
+    blocked=[]
+    failed=[]
+    for r in rows:
+        review=str(r.get("review_status") or "pending").lower()
+        if review=="applied":
+            continue
+        resolution=str(r.get("resolution_status") or "UNRESOLVED").upper()
+        if resolution not in {"READY","MATCHED","NEW","ALREADY_EXISTS"}:
+            blocked.append({
+                "record":r.get("natural_key"),
+                "table":r.get("target_table"),
+                "resolution_status":resolution,
+                "reason":"staging marked unresolved",
+            })
+            continue
+        if resolution=="ALREADY_EXISTS":
+            try:
+                sb.table("pc_staged_records").update({
+                    "review_status":"applied",
+                    "validation_status":"reviewed",
+                }).eq("staged_record_id",r["staged_record_id"]).execute()
+            except Exception:
+                pass
+            continue
+        try:
+            if review!="approved":
+                sb.table("pc_staged_records").update({
+                    "review_status":"approved",
+                    "validation_status":"reviewed",
+                }).eq("staged_record_id",r["staged_record_id"]).execute()
+                r["review_status"]="approved"
+            apply_staged_record(sb,r,r.get("payload") or {})
+            applied+=1
+        except Exception as exc:
+            failed.append({
+                "record":r.get("natural_key"),
+                "table":r.get("target_table"),
+                "error":str(exc),
+            })
+            try:
+                sb.table("pc_staged_records").update({
+                    "review_status":"needs_changes",
+                    "validation_status":"failed",
+                    "resolution_status":"UNRESOLVED",
+                }).eq("staged_record_id",r["staged_record_id"]).execute()
+            except Exception:
+                pass
+
+    return {
+        "job_id":str(job_id),
+        "applied":applied,
+        "blocked":len(blocked)+len(failed),
+        "failed":len(failed),
+        "failures":failed[:200],
+        "blocked_rows":blocked[:200],
+        "mode":"true_direct_apply",
+    }
+
+
+def _direct_apply_content_result(res):
+    """Write a simple content load directly to canonical tables.
+
+    No reconciliation pass, fact promotion, or proposal resolver is involved.
     """
     job_id=(res or {}).get("job_id")
     if not job_id:
         return {"applied":0,"blocked":0,"job_id":None}
-    report=_process_job_automatically(str(job_id))
-    try:
-        candidates,blocked=_job_apply_candidates(str(job_id))
-    except Exception:
-        blocked=[]
-    applied=int((report or {}).get("total_applied_this_run",0) or 0)
+    report=_apply_simple_direct_job(str(job_id))
     return {
         "job_id":str(job_id),
-        "applied":applied,
-        "blocked":len(blocked),
+        "applied":int(report.get("applied",0) or 0),
+        "blocked":int(report.get("blocked",0) or 0),
         "report":report,
     }
 
