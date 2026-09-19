@@ -42,7 +42,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.7.0-end-to-end-logistics"
+APP_VERSION = "v3.7.1-connected-logistics-network"
 RELEASE_NAME = "End-to-End Logistics Operating Picture · Companies, Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -2694,6 +2694,40 @@ def label(x):
     return str(live.get(s) or static or s).strip()
 
 
+@st.cache_data(show_spinner=False, ttl=60)
+def _live_entity_registry():
+    out={}
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None: return out
+        rows=pc_safe_rows(sb,"pc_entities","entity_id,name,entity_type,subtype,hq_country,status,record_status",50000,order="name")
+        for r in rows or []:
+            eid=str(r.get("entity_id") or "").strip()
+            if eid:
+                out[eid]={
+                    "name":str(r.get("name") or "").strip(),
+                    "entity_type":str(r.get("entity_type") or "").strip(),
+                    "subtype":str(r.get("subtype") or "").strip(),
+                    "hq_country":str(r.get("hq_country") or "").strip(),
+                }
+    except Exception:
+        pass
+    return out
+
+def _canonical_entity_info(entity_id):
+    return _live_entity_registry().get(str(entity_id or "").strip(),{})
+
+def _entity_kind(entity_id, fallback_type=""):
+    info=_canonical_entity_info(entity_id)
+    raw=(info.get("entity_type") or fallback_type or "").strip().casefold()
+    subtype=(info.get("subtype") or "").strip().casefold()
+    joined=f"{raw} {subtype}"
+    if any(k in joined for k in ("person","individual","executive","leader","director","officer")): return "person"
+    if any(k in joined for k in ("company","corporation","business","operator","carrier","subsidiary","joint venture","jv")): return "company"
+    if any(k in joined for k in ("government","authority","agency","ministry","regulator")): return "organisation"
+    return raw or str(fallback_type or "").strip().casefold() or "entity"
+
+
 
 def humanize_internal_object_id(value):
     """Last-resort UI fallback: never expose implementation IDs to end users."""
@@ -2704,7 +2738,7 @@ def humanize_internal_object_id(value):
     # Strip known internal prefixes.  More-specific prefixes must come first.
     prefixes=(
         "VES_ADM_","VES_ATL_","VES_NMDC_","VES_","VESSEL_",
-        "MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_","EVENT_"
+        "MOB_","MOBILE_","ASSET_","ENTITY_AI_","ENTITY_","ENT_","PERSON_AI_","PERSON_","COMP_","PORT_","TERM_","EVT_","EVENT_"
     )
     core=s
     matched=False
@@ -2719,6 +2753,8 @@ def humanize_internal_object_id(value):
 
     core=core.replace("_"," ").replace("-"," ")
     core=re.sub(r"\s+"," ",core).strip()
+    if re.fullmatch(r"(?:AI\s+)?[A-F0-9]{12,}",core,re.I):
+        return "Unresolved entity"
 
     # Preserve common acronyms while making identifiers human-readable.
     keep={"AD","UAE","UK","US","USA","MSC","CMA","CGM","NMDC","IMO","LNG","LPG","COSCO"}
@@ -2741,6 +2777,10 @@ def relationship_endpoint_label(endpoint_id, endpoint_type=""):
 
     if not eid:
         return ""
+
+    info=_canonical_entity_info(eid)
+    if info.get("name"):
+        return str(info["name"]).strip()
 
     # 1) Canonical vessel/mobile-asset frame already loaded from Supabase.
     try:
@@ -2770,7 +2810,7 @@ def relationship_endpoint_label(endpoint_id, endpoint_type=""):
 
     # 3) Canonical company/entity catalogue.
     try:
-        if et in {"entity","company","organisation","organization"} or eid.startswith(("ENT_","COMP")):
+        if et in {"entity","company","organisation","organization"} or eid.startswith(("ENTITY_","ENT_","COMP","PERSON_")):
             nm=label(eid)
             if nm and nm != eid:
                 return nm
@@ -2798,7 +2838,7 @@ def relationship_endpoint_label(endpoint_id, endpoint_type=""):
 
     # 5) Global live/static resolver as final named fallback.
     nm=label(eid)
-    if nm and nm != eid and not str(nm).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
+    if nm and nm != eid and not str(nm).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENTITY_","ENT_","PERSON_","COMP_","PORT_","TERM_","EVT_")):
         return nm
 
     # Absolute UI safety net: internal IDs must never be visible.
@@ -4237,13 +4277,17 @@ def readable_relationships(df, entity_id):
         src_name=relationship_endpoint_label(src,src_type)
         tgt_name=relationship_endpoint_label(tgt,tgt_type)
 
-        if str(src_name).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
+        if str(src_name).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENTITY_","ENT_","PERSON_","COMP_","PORT_","TERM_","EVT_")):
             src_name=humanize_internal_object_id(src_name)
-        if str(tgt_name).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
+        if str(tgt_name).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENTITY_","ENT_","PERSON_","COMP_","PORT_","TERM_","EVT_")):
             tgt_name=humanize_internal_object_id(tgt_name)
 
+        sk=_entity_kind(src,src_type) if str(src_type).casefold() in {"entity","company","person","individual","organisation","organization"} else pretty_enum(src_type)
+        tk=_entity_kind(tgt,tgt_type) if str(tgt_type).casefold() in {"entity","company","person","individual","organisation","organization"} else pretty_enum(tgt_type)
+        type_line=" · ".join(x for x in [pretty_enum(sk),pretty_enum(tk)] if x)
         st.markdown(
-            f"<div class='pc-rel'><b>{src_name}</b> → {rel} → <b>{tgt_name}</b></div>",
+            f"<div class='pc-rel'><div class='pc-small'>{html_lib.escape(type_line)}</div>"
+            f"<b>{html_lib.escape(str(src_name))}</b> → {html_lib.escape(str(rel))} → <b>{html_lib.escape(str(tgt_name))}</b></div>",
             unsafe_allow_html=True
         )
 
@@ -4822,8 +4866,22 @@ def _company_live_logistics_bundle(entity_id, entity_name):
     else: ops=pd.DataFrame()
     out["service_operators"]=ops
     sids=set(ops.get("transport_service_id",pd.Series(dtype=str)).dropna().astype(str)) if not ops.empty else set()
-    services=_live_frame("pc_transport_services","*",25000,"effective_start")
-    out["services"]=services[services.get("transport_service_id",pd.Series(index=services.index,dtype=str)).astype(str).isin(sids)].copy() if sids and not services.empty else pd.DataFrame()
+    services=_live_frame("pc_transport_services","*",50000,"effective_start")
+    if not services.empty:
+        smask=services.get("transport_service_id",pd.Series(index=services.index,dtype=str)).fillna("").astype(str).isin(sids)
+        if "primary_operator_entity_id" in services.columns:
+            smask |= services["primary_operator_entity_id"].fillna("").astype(str).isin(scope)
+        services=services[smask].copy()
+    else: services=pd.DataFrame()
+    out["services"]=services
+    service_ids=set(services.get("transport_service_id",pd.Series(dtype=str)).dropna().astype(str)) if not services.empty else set()
+    stops=_live_frame("pc_transport_service_stops","*",60000)
+    if service_ids and not stops.empty and "transport_service_id" in stops.columns:
+        stops=stops[stops["transport_service_id"].fillna("").astype(str).isin(service_ids)].copy()
+        if "asset_id" in stops.columns:
+            stops["asset_name"]=stops["asset_id"].fillna("").astype(str).map(lambda x: relationship_endpoint_label(x,"asset"))
+    else: stops=pd.DataFrame()
+    out["service_stops"]=stops
 
     # Rail network hierarchy.
     rn=_live_frame("pc_rail_networks","*",10000)
@@ -5000,11 +5058,11 @@ def render_company_profile(entity_id, entity_name):
 
     company_view=st.selectbox(
         "Company section",
-        ["Logistics Profile","Connected Model","Investments","Financials","Share Price","Security & Risk"],
+        ["Logistics Profile","Connected Network","Investments","Financials","Share Price","Security & Risk"],
         key=f"company_section_{entity_id}"
     )
-    if company_view=="Connected Model":
-        st.markdown("### Connected commercial model")
+    if company_view=="Connected Network":
+        st.markdown("### Connected logistics network")
         render_company_connected_model(entity_id,entity_name)
         return
     if company_view=="Investments":
@@ -5099,6 +5157,9 @@ def render_company_profile(entity_id, entity_name):
             display_df(bundle["services"],460)
             if not bundle.get("service_operators",pd.DataFrame()).empty:
                 with st.expander("Service operator roles",expanded=False): display_df(bundle["service_operators"],300)
+            if not bundle.get("service_stops",pd.DataFrame()).empty:
+                st.markdown("### Service rotations / stops")
+                display_df(bundle["service_stops"],700)
         if not bundle.get("road_corridors",pd.DataFrame()).empty:
             st.markdown("### Road corridors")
             display_df(bundle["road_corridors"],420)
@@ -5563,67 +5624,48 @@ def request_nav(page_name, object_key=None, object_id=None, object_name=None):
         st.session_state["object_name_hint"]=str(object_name)
 
 def object_route(entity_type, entity_id, entity_name):
-    et=str(entity_type).lower()
-    eid=str(entity_id).strip()
-    name=str(entity_name).strip()
-
-    if "port" in et or eid.startswith("PORT"):
-        return ("Ports","port_pick_id",eid)
-    if "terminal" in et or eid.startswith("TERM"):
-        # A terminal opens the Ports page; Ports will resolve its parent port.
-        return ("Ports","terminal_pick_id",eid)
-    if "shipyard" in et or eid.startswith("YARD"):
-        return ("Shipyards","yard_pick_id",eid)
-    if "company" in et or "entity" in et or eid.startswith("COMP") or eid.startswith("ENT_"):
-        return ("Companies","company_pick_id",eid)
-    if "system" in et or eid.startswith("SYS") or eid.startswith("CORR"):
-        return ("Corridors & Systems","system_pick_id",eid)
-    if et == "asset" or eid.startswith("ASSET_"):
-        return ("Infrastructure","asset_pick_id",eid)
-    if "vessel" in et or eid.startswith("VESSEL") or eid.startswith("VES"):
-        return ("Vessels","vessel_pick_id",eid)
+    et=str(entity_type or "").lower(); eid=str(entity_id or "").strip(); name=str(entity_name or "").strip()
+    if et in {"entity","organisation","organization","company","person","individual"} or eid.startswith(("ENTITY_","ENT_","COMP","PERSON_")):
+        if _entity_kind(eid,et)=="company": return ("Companies","company_pick_id",eid)
+        return (None,None,None)
+    if "port" in et or eid.startswith("PORT"): return ("Ports","port_pick_id",eid)
+    if "terminal" in et or eid.startswith("TERM"): return ("Ports","terminal_pick_id",eid)
+    if "shipyard" in et or eid.startswith("YARD"): return ("Shipyards","yard_pick_id",eid)
+    if "system" in et or "corridor" in et or eid.startswith(("SYS","CORR")): return ("Corridors & Systems","system_pick_id",eid)
+    if "rail" in et: return ("Rail","rail_pick_id",eid)
+    if et=="asset" or eid.startswith("ASSET_"): return ("Infrastructure","asset_pick_id",eid)
+    if "vessel" in et or "mobile_asset" in et or eid.startswith(("VESSEL","VES","MOBILE_","MOB_")): return ("Vessels","vessel_pick_id",eid)
     return (None,None,None)
+
 
 def render_relationship_actions(
     source_id, target_id, row_key, current_entity_id=None,
     source_name=None, target_name=None, source_type=None, target_type=None
 ):
-    """Show canonical drill-down actions while keeping internal IDs out of labels."""
-    actions=[]
-    seen=set()
-    endpoints=[
-        (source_id,source_name,source_type),
-        (target_id,target_name,target_type),
-    ]
-    for endpoint_id,resolved_name,endpoint_type in endpoints:
+    actions=[]; seen=set()
+    for endpoint_id,resolved_name,endpoint_type in [(source_id,source_name,source_type),(target_id,target_name,target_type)]:
         eid=str(endpoint_id or "").strip()
-        if not eid or eid in seen or (current_entity_id and eid==str(current_entity_id)):
-            continue
+        if not eid or eid in seen or (current_entity_id and eid==str(current_entity_id)): continue
         seen.add(eid)
-        # Always resolve from canonical registries; a supplied migration-era
-        # resolved_name may itself still be an internal ID.
         name=relationship_endpoint_label(eid,endpoint_type)
-        if str(name).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
-            name=humanize_internal_object_id(name)
+        if not name or name=="Unresolved entity": continue
         page,key,route_id=object_route(endpoint_type or '',eid,name)
-        if not page:
-            continue
+        if not page: continue
         if page=='Companies': kind='Company'
-        elif page=='Ports' and eid.startswith('TERM'): kind='Terminal'
+        elif page=='Ports' and ("terminal" in str(endpoint_type or '').lower() or eid.startswith('TERM')): kind='Terminal'
         elif page=='Ports': kind='Port'
         elif page=='Vessels': kind='Vessel'
         elif page=='Shipyards': kind='Shipyard'
-        elif page=='Corridors & Systems': kind='System'
-        else: kind='Entity'
+        elif page=='Corridors & Systems': kind='System / corridor'
+        elif page=='Rail': kind='Rail object'
+        else: kind='Object'
         actions.append((f"View {kind}: {name}",page,key,route_id,name,eid))
-
     if actions:
         cols=st.columns(min(len(actions),3))
         for j,(caption,page,key,route_id,name,eid) in enumerate(actions):
             with cols[j % len(cols)]:
                 if st.button(caption,key=f"rel_action_{row_key}_{j}_{eid}",use_container_width=True):
-                    request_nav(page,key,route_id,name)
-                    st.rerun()
+                    request_nav(page,key,route_id,name); st.rerun()
 
 
 def render_linked_objects(df, object_type_col, object_id_col, object_name_col, relationship_col=None, confidence_col=None, max_items=100):
@@ -8566,77 +8608,47 @@ def render_canonical_sanctions_model():
 
 
 def render_company_connected_model(entity_id,entity_name):
-    """New-model company view: services, deals/projects, contracts and sanctions."""
-    eid=str(entity_id)
-    service_ops=_live_frame("pc_transport_service_operators","*",20000)
-    services=_live_frame("pc_transport_services","*",10000)
-    service_ops=service_ops[service_ops.get("entity_id",pd.Series(index=service_ops.index,dtype=str)).astype(str).eq(eid)].copy() if not service_ops.empty else pd.DataFrame()
-    sids=set(service_ops.get("transport_service_id",pd.Series(dtype=str)).astype(str)) if not service_ops.empty else set()
-    services=services[services.get("transport_service_id",pd.Series(index=services.index,dtype=str)).astype(str).isin(sids)].copy() if sids and not services.empty else pd.DataFrame()
-
-    tx=_live_frame("pc_transactions","*",10000)
-    if not tx.empty:
-        cols=[c for c in ["buyer_entity_id","seller_entity_id","target_entity_id"] if c in tx.columns]
-        mask=pd.Series(False,index=tx.index)
-        for c in cols: mask |= tx[c].astype(str).eq(eid)
-        tx=tx[mask].copy()
-
-    fparts=_live_frame("pc_financing_participants","*",20000)
-    fin=_live_frame("pc_financing_facilities","*",10000)
-    fparts=fparts[fparts.get("entity_id",pd.Series(index=fparts.index,dtype=str)).astype(str).eq(eid)].copy() if not fparts.empty else pd.DataFrame()
-    fids=set(fparts.get("financing_id",pd.Series(dtype=str)).astype(str)) if not fparts.empty else set()
-    fin=fin[fin.get("financing_id",pd.Series(index=fin.index,dtype=str)).astype(str).isin(fids)].copy() if fids and not fin.empty else pd.DataFrame()
-
-    cparts=_live_frame("pc_contract_participants","*",20000)
-    contracts=_live_frame("pc_contracts","*",10000)
-    cparts=cparts[cparts.get("entity_id",pd.Series(index=cparts.index,dtype=str)).astype(str).eq(eid)].copy() if not cparts.empty else pd.DataFrame()
-    cids=set(cparts.get("contract_id",pd.Series(dtype=str)).astype(str)) if not cparts.empty else set()
-    contracts=contracts[contracts.get("contract_id",pd.Series(index=contracts.index,dtype=str)).astype(str).isin(cids)].copy() if cids and not contracts.empty else pd.DataFrame()
-
-    slinks=_live_frame("pc_sanctions_links","*",30000)
-    slinks=slinks[
-        slinks.get("linked_type",pd.Series(index=slinks.index,dtype=str)).astype(str).str.casefold().eq("entity")
-        & slinks.get("linked_id",pd.Series(index=slinks.index,dtype=str)).astype(str).eq(eid)
-    ].copy() if not slinks.empty else pd.DataFrame()
-
-    events=_live_related_events("entity",[eid],5000)
-
-    t1,t2,t3,t4,t5,t6=st.tabs([
-        "Operating Footprint",
-        "Transport Services",
-        "Transactions",
-        "Projects / Financing / Contracts",
-        "Events & Disruptions",
-        "Sanctions & Exposure"
-    ])
-    with t1:
+    bundle=_company_live_logistics_bundle(entity_id,entity_name)
+    scope={str(x) for x in bundle.get("scope_ids",set()) if str(x)}; eid=str(entity_id); scope.add(eid)
+    st.caption("Connected Network shows how the company sits inside the logistics cycle: ownership and leadership, operating companies, services and routes, physical infrastructure, projects/contracts/finance, events and risk. It is mode-neutral.")
+    relationships=bundle.get("live_relationships",pd.DataFrame()); services=bundle.get("services",pd.DataFrame()); stops=bundle.get("service_stops",pd.DataFrame()); footprint=bundle.get("footprint",pd.DataFrame()); assets=bundle.get("live_assets",pd.DataFrame()); events=bundle.get("events",pd.DataFrame())
+    metrics=[]
+    for lab,df in [("Relationships",relationships),("Services / routes",services),("Service stops",stops),("Footprint records",footprint),("Physical assets",assets),("Linked events",events)]:
+        if isinstance(df,pd.DataFrame) and not df.empty: metrics.append((lab,len(df)))
+    if metrics:
+        cols=st.columns(min(len(metrics),6))
+        for c,(lab,val) in zip(cols,metrics[:6]): c.metric(lab,val)
+    tabs=st.tabs(["Relationships","Services & Routes","Operating Network","Deals / Projects / Finance","Events & Disruptions","Sanctions & Exposure"])
+    with tabs[0]:
+        st.markdown("### Corporate, leadership & operating relationships"); readable_relationships(relationships,eid)
+        if isinstance(relationships,pd.DataFrame) and not relationships.empty:
+            with st.expander("Canonical relationship rows",expanded=False): display_df(relationships,600)
+    with tabs[1]:
+        if isinstance(services,pd.DataFrame) and not services.empty: st.markdown("### Transport services"); display_df(services,700)
+        else: st.info("No canonical service records are linked to this company yet.")
+        if isinstance(stops,pd.DataFrame) and not stops.empty: st.markdown("### Rotations / stops"); display_df(stops,1200)
+        ops=bundle.get("service_operators",pd.DataFrame())
+        if isinstance(ops,pd.DataFrame) and not ops.empty:
+            with st.expander("Operator / partner roles",expanded=False): display_df(ops,500)
+    with tabs[2]:
         render_company_operating_footprint(eid)
-    with t2:
-        display_df(services,360)
-        if not service_ops.empty:
-            st.markdown("#### Service roles")
-            display_df(service_ops,260)
-    with t3:
-        display_df(tx,360)
-    with t4:
-        projects=_live_frame("pc_project_details","*",10000)
-        if not projects.empty:
-            pmask=pd.Series(False,index=projects.index)
-            for c in ["sponsor_entity_id","developer_entity_id","delivery_entity_id"]:
-                if c in projects.columns:
-                    pmask |= projects[c].fillna("").astype(str).eq(eid)
-            projects=projects[pmask].copy()
-        display_df(projects,320)
-        if not fin.empty:
-            st.markdown("#### Financing")
-            display_df(fin,320)
-        if not contracts.empty:
-            st.markdown("#### Contracts")
-            display_df(contracts,320)
-    with t5:
-        display_df(events,420)
-    with t6:
-        display_df(slinks,360)
+        if isinstance(assets,pd.DataFrame) and not assets.empty: st.markdown("### Physical infrastructure"); display_df(assets,700)
+        for title,key in [("Road corridors","road_corridors"),("Rail networks","rail_networks"),("Rail nodes","rail_nodes"),("Rail links","rail_links")]:
+            df=bundle.get(key,pd.DataFrame())
+            if isinstance(df,pd.DataFrame) and not df.empty: st.markdown(f"### {title}"); display_df(df,700)
+    with tabs[3]:
+        any_rows=False
+        for title,key in [("Transactions","transactions"),("Projects","projects"),("Financing","financing"),("Contracts","contracts")]:
+            df=bundle.get(key,pd.DataFrame())
+            if isinstance(df,pd.DataFrame) and not df.empty: any_rows=True; st.markdown(f"### {title}"); display_df(df,600)
+        if not any_rows: st.info("No linked deal, project, financing or contract records yet.")
+    with tabs[4]:
+        display_df(events,800) if isinstance(events,pd.DataFrame) and not events.empty else st.info("No canonical linked events yet.")
+    with tabs[5]:
+        slinks=_live_frame("pc_sanctions_links","*",30000)
+        if not slinks.empty:
+            slinks=slinks[slinks.get("linked_type",pd.Series(index=slinks.index,dtype=str)).astype(str).str.casefold().eq("entity") & slinks.get("linked_id",pd.Series(index=slinks.index,dtype=str)).astype(str).isin(scope)].copy()
+        display_df(slinks,600)
 
 
 def render_vessel_connected_model(vessel_id):
