@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "511-strict-schema-ocean-carriers-diagnostics-2026-09-19"
+LOADER_BUILD = "515-bulk-carriers-persistent-report-exports-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4411,11 +4411,37 @@ def _research_load_report_exports(report, workbook_name="research_workbook"):
     except Exception:
         xlsx_bytes=None
 
+    # Compact table-level result CSV for quick review outside Excel.
+    result_rows=[]
+    by_table=report.get("by_table") or {}
+    attempted_by=report.get("attempted_by_table") or {}
+    failed_by=report.get("failed_by_table") or {}
+    for t in sorted(set(by_table)|set(attempted_by)|set(failed_by)):
+        result_rows.append({
+            "target_table":t,
+            "attempted":attempted_by.get(t,0),
+            "applied":by_table.get(t,0),
+            "failed":failed_by.get(t,0),
+        })
+    results_csv=pd.DataFrame(result_rows,columns=["target_table","attempted","applied","failed"]).to_csv(index=False).encode("utf-8-sig")
+
+    # One-click bundle: full JSON, Excel workbook when available, table results and row failures.
+    zip_buf=io.BytesIO()
+    with zipfile.ZipFile(zip_buf,"w",compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{prefix}.json",json_bytes)
+        zf.writestr(f"{prefix}_table_results.csv",results_csv)
+        zf.writestr(f"{prefix}_row_failures.csv",csv_bytes)
+        if xlsx_bytes is not None:
+            zf.writestr(f"{prefix}.xlsx",xlsx_bytes)
+    bundle_bytes=zip_buf.getvalue()
+
     return {
         "prefix":prefix,
         "json":json_bytes,
         "csv":csv_bytes,
+        "results_csv":results_csv,
         "xlsx":xlsx_bytes,
+        "zip":bundle_bytes,
     }
 
 # ---------------------------------------------------------------------------
@@ -11431,11 +11457,16 @@ elif page=="Canonical Loader":
                     _saved_rwb_report=st.session_state.get(f"research_workbook_report_{str(file_hash)}")
                     if isinstance(_saved_rwb_report,dict):
                         _exports=_research_load_report_exports(_saved_rwb_report,up.name)
-                        st.markdown("#### Export load report")
-                        st.caption("Export the complete diagnostic report for audit, troubleshooting or sharing.")
+                        st.markdown("#### Load result & export")
+                        _sr1,_sr2,_sr3,_sr4=st.columns(4)
+                        _sr1.metric("Attempted",int(_saved_rwb_report.get("attempted") or 0))
+                        _sr2.metric("Applied",int(_saved_rwb_report.get("applied") or 0))
+                        _sr3.metric("Blocked",int(_saved_rwb_report.get("blocked") or 0))
+                        _sr4.metric("Failed",int(_saved_rwb_report.get("failed") or 0))
+                        st.caption("Exports stay available after Streamlit reruns and include the summary, table results, grouped issues and row-level failures.")
                         _ec1,_ec2,_ec3=st.columns(3)
                         _ec1.download_button(
-                            "⬇ Excel report",
+                            "⬇ Excel summary + issues",
                             data=_exports.get("xlsx") or _exports.get("json"),
                             file_name=(
                                 f"{_exports.get('prefix')}.xlsx"
@@ -11451,21 +11482,40 @@ elif page=="Canonical Loader":
                             key=f"rwb_report_xlsx_{str(file_hash)[:16]}",
                         )
                         _ec2.download_button(
-                            "⬇ Row failures CSV",
-                            data=_exports.get("csv") or b"",
-                            file_name=f"{_exports.get('prefix')}_failures.csv",
-                            mime="text/csv",
-                            use_container_width=True,
-                            key=f"rwb_report_csv_{str(file_hash)[:16]}",
-                        )
-                        _ec3.download_button(
-                            "⬇ Full JSON",
+                            "⬇ Full JSON report",
                             data=_exports.get("json") or b"{}",
                             file_name=f"{_exports.get('prefix')}.json",
                             mime="application/json",
                             use_container_width=True,
                             key=f"rwb_report_json_{str(file_hash)[:16]}",
                         )
+                        _ec3.download_button(
+                            "⬇ Complete report bundle",
+                            data=_exports.get("zip") or b"",
+                            file_name=f"{_exports.get('prefix')}_bundle.zip",
+                            mime="application/zip",
+                            use_container_width=True,
+                            key=f"rwb_report_zip_{str(file_hash)[:16]}",
+                        )
+                        _ec4,_ec5=st.columns(2)
+                        _ec4.download_button(
+                            "⬇ Table results CSV",
+                            data=_exports.get("results_csv") or b"",
+                            file_name=f"{_exports.get('prefix')}_table_results.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                            key=f"rwb_report_results_csv_{str(file_hash)[:16]}",
+                        )
+                        _ec5.download_button(
+                            "⬇ Row issues CSV",
+                            data=_exports.get("csv") or b"",
+                            file_name=f"{_exports.get('prefix')}_row_issues.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                            key=f"rwb_report_csv_{str(file_hash)[:16]}",
+                        )
+                        with st.expander("View saved load report",expanded=False):
+                            st.json(_saved_rwb_report)
                     st.stop()
 
                 # V23: bind the result panel to the CURRENT upload, not a prior job
