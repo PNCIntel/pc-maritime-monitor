@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "504-true-direct-apply-2026-09-19"
+LOADER_BUILD = "505-no-fake-exceptions-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -3922,15 +3922,10 @@ def _apply_simple_direct_job(job_id):
         review=str(r.get("review_status") or "pending").lower()
         if review=="applied":
             continue
-        resolution=str(r.get("resolution_status") or "UNRESOLVED").upper()
-        if resolution not in {"READY","MATCHED","NEW","ALREADY_EXISTS"}:
-            blocked.append({
-                "record":r.get("natural_key"),
-                "table":r.get("target_table"),
-                "resolution_status":resolution,
-                "reason":"staging marked unresolved",
-            })
-            continue
+        resolution=str(r.get("resolution_status") or "READY").upper()
+        # Simple content loads do not stop at staging-state labels. Attempt the
+        # canonical write and let the database decide whether the row is valid.
+        # Only an actual canonical write failure becomes an exception.
         if resolution=="ALREADY_EXISTS":
             try:
                 sb.table("pc_staged_records").update({
@@ -4109,10 +4104,10 @@ def _run_content_item_extraction(
     new_hash=str((fetched or {}).get("content_hash") or "")
     if prior_hash and new_hash and prior_hash==new_hash:
         runs=(sb.table("pc_extraction_runs")
-              .select("extraction_run_id,ingestion_job_id,status,created_at,records_proposed")
+              .select("extraction_run_id,ingestion_job_id,status,started_at,records_proposed")
               .eq("content_item_id",item_id)
               .eq("status","completed")
-              .order("created_at",desc=True).limit(1).execute().data or [])
+              .order("started_at",desc=True).limit(1).execute().data or [])
         if runs and runs[0].get("ingestion_job_id"):
             job_id=runs[0]["ingestion_job_id"]
             staged_count=(sb.table("pc_staged_records")
@@ -4725,18 +4720,21 @@ def stage_ai_result(sb, job_id, result):
         conflict_keys=[x.strip() for x in conflict.split(",")] if conflict else []
         key_ready=not conflict_keys or all(payload.get(k) not in (None,"") for k in conflict_keys)
 
+        # Missing an optional/upsert conflict key is not, by itself, a review exception.
+        # apply_staged_record() already falls back to INSERT when an upsert key is absent;
+        # the database itself is the final validator. This keeps ordinary news loads simple.
         staged_row={
             "ingestion_job_id":job_id,
             "target_table":table,
             "source_record_key":natural_key,
             "natural_key":natural_key,
-            "action":"UPSERT",
+            "action":"UPSERT" if key_ready else "INSERT",
             "payload":_jsonable(payload),
             "confidence":rec.get("confidence"),
-            "validation_status":"pending" if key_ready else "needs_review",
+            "validation_status":"pending",
             "review_status":"pending",
-            "resolution_status":"READY" if key_ready else "UNRESOLVED",
-            "resolution_method":"simple_key_first" if key_ready else "missing_required_key",
+            "resolution_status":"READY",
+            "resolution_method":"simple_key_first" if key_ready else "simple_direct_insert",
         }
         # pc_staged_records.target_entity_type is FK-backed by the registered
         # canonical entity-type registry. Direct/domain tables (projects, contracts,
