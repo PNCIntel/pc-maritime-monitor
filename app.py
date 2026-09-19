@@ -42,8 +42,8 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.6.3-live-canonical-port-registry"
-RELEASE_NAME = "Trade Operating Picture · Connected Trade Intelligence, Effects, Networks & Horizon"
+APP_VERSION = "v3.7.0-end-to-end-logistics"
+RELEASE_NAME = "End-to-End Logistics Operating Picture · Companies, Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -4772,48 +4772,235 @@ def render_company_financials(entity_id):
     st.markdown("### Share-price history")
     render_share_price_history(entity_id)
 
+
+def _company_live_logistics_bundle(entity_id, entity_name):
+    """Live, cross-modal company intelligence from the expanded canonical schema.
+
+    Company pages should describe the business that actually exists. A road carrier
+    should lead with trucking, fleet, services and inland corridors; a rail operator
+    should lead with networks/nodes; a port group should expose ports and terminals.
+    Maritime is one mode in the logistics cycle, not the default company template.
+    """
+    live=_live_canonical_company_rollup(entity_id,entity_name)
+    scope={str(x) for x in live.get("scope_ids",set()) if str(x)}
+    if str(entity_id): scope.add(str(entity_id))
+
+    # Resolve canonical IDs by name too, because migration-era workbook IDs can still
+    # be used to open a profile while new enrichment lands under ENT_* identifiers.
+    entities=_live_frame("pc_entities","entity_id,name,entity_type,subtype,hq_city,hq_country,status,record_status,metadata",25000)
+    root=_company_name_key(entity_name)
+    if not entities.empty and root:
+        keys=entities.get("name",pd.Series(index=entities.index,dtype=str)).fillna("").astype(str).map(_company_name_key)
+        mask=keys.eq(root) | keys.str.startswith(root+" ",na=False)
+        scope.update(entities.loc[mask,"entity_id"].fillna("").astype(str).tolist())
+    scope={x for x in scope if x}
+
+    def by_entity(table, limit=20000):
+        df=_live_frame(table,"*",limit)
+        if df.empty or "entity_id" not in df.columns: return pd.DataFrame()
+        return df[df["entity_id"].fillna("").astype(str).isin(scope)].copy()
+
+    out={
+        "scope_ids":scope,
+        "profile":by_entity("pc_company_profiles",10000),
+        "registrations":by_entity("pc_company_registrations",10000),
+        "footprint":by_entity("pc_company_operating_footprint",20000),
+        "trucking":by_entity("pc_trucking_company_details",5000),
+        "rail_operator":by_entity("pc_rail_operator_details",5000),
+        "financials":by_entity("pc_financial_records",20000),
+        "live_assets":live.get("assets",pd.DataFrame()),
+        "live_ports":live.get("ports",pd.DataFrame()),
+        "live_terminals":live.get("terminals",pd.DataFrame()),
+        "live_mobile":live.get("vessels",pd.DataFrame()),
+        "live_relationships":live.get("relationships",pd.DataFrame()),
+    }
+
+    # Transport services are linked through operator rows, not inferred from mode names.
+    ops=_live_frame("pc_transport_service_operators","*",30000)
+    if not ops.empty and "entity_id" in ops.columns:
+        ops=ops[ops["entity_id"].fillna("").astype(str).isin(scope)].copy()
+    else: ops=pd.DataFrame()
+    out["service_operators"]=ops
+    sids=set(ops.get("transport_service_id",pd.Series(dtype=str)).dropna().astype(str)) if not ops.empty else set()
+    services=_live_frame("pc_transport_services","*",25000,"effective_start")
+    out["services"]=services[services.get("transport_service_id",pd.Series(index=services.index,dtype=str)).astype(str).isin(sids)].copy() if sids and not services.empty else pd.DataFrame()
+
+    # Rail network hierarchy.
+    rn=_live_frame("pc_rail_networks","*",10000)
+    if not rn.empty:
+        rm=pd.Series(False,index=rn.index)
+        for c in ["owner_entity_id","operator_entity_id","authority_entity_id"]:
+            if c in rn.columns: rm |= rn[c].fillna("").astype(str).isin(scope)
+        rn=rn[rm].copy()
+    out["rail_networks"]=rn
+    rids=set(rn.get("rail_network_id",pd.Series(dtype=str)).dropna().astype(str)) if not rn.empty else set()
+    nodes=_live_frame("pc_rail_nodes","*",20000)
+    out["rail_nodes"]=nodes[nodes.get("rail_network_id",pd.Series(index=nodes.index,dtype=str)).astype(str).isin(rids)].copy() if rids and not nodes.empty else pd.DataFrame()
+    links=_live_frame("pc_rail_links","*",25000)
+    out["rail_links"]=links[links.get("rail_network_id",pd.Series(index=links.index,dtype=str)).astype(str).isin(rids)].copy() if rids and not links.empty else pd.DataFrame()
+
+    # Road corridors can be linked through owned/operated physical assets or source metadata.
+    road=_live_frame("pc_road_corridors","*",15000)
+    asset_ids=set()
+    if isinstance(out["live_assets"],pd.DataFrame) and not out["live_assets"].empty:
+        asset_ids.update(out["live_assets"].get("Asset ID",pd.Series(dtype=str)).dropna().astype(str))
+    if not road.empty:
+        mask=pd.Series(False,index=road.index)
+        for c in ["origin_asset_id","destination_asset_id"]:
+            if c in road.columns and asset_ids:
+                mask |= road[c].fillna("").astype(str).isin(asset_ids)
+        # Retain explicit source metadata matches for carriers whose corridors have no terminal IDs.
+        if entity_name:
+            for c in ["metadata","corridor_name"]:
+                if c in road.columns:
+                    mask |= road[c].fillna("").astype(str).str.contains(str(entity_name),case=False,na=False,regex=False)
+        road=road[mask].copy()
+    out["road_corridors"]=road
+
+    # Corporate transactions / projects / contracts / financing across the whole group scope.
+    tx=_live_frame("pc_transactions","*",15000)
+    if not tx.empty:
+        mask=pd.Series(False,index=tx.index)
+        for c in ["buyer_entity_id","seller_entity_id","target_entity_id"]:
+            if c in tx.columns: mask |= tx[c].fillna("").astype(str).isin(scope)
+        tx=tx[mask].copy()
+    out["transactions"]=tx
+
+    projects=_live_frame("pc_project_details","*",15000)
+    if not projects.empty:
+        mask=pd.Series(False,index=projects.index)
+        for c in ["sponsor_entity_id","developer_entity_id","delivery_entity_id","operator_entity_id","owner_entity_id"]:
+            if c in projects.columns: mask |= projects[c].fillna("").astype(str).isin(scope)
+        projects=projects[mask].copy()
+    out["projects"]=projects
+
+    cp=_live_frame("pc_contract_participants","*",30000)
+    if not cp.empty and "entity_id" in cp.columns: cp=cp[cp["entity_id"].fillna("").astype(str).isin(scope)].copy()
+    cids=set(cp.get("contract_id",pd.Series(dtype=str)).dropna().astype(str)) if not cp.empty else set()
+    contracts=_live_frame("pc_contracts","*",15000,"announced_date")
+    out["contract_participants"]=cp
+    out["contracts"]=contracts[contracts.get("contract_id",pd.Series(index=contracts.index,dtype=str)).astype(str).isin(cids)].copy() if cids and not contracts.empty else pd.DataFrame()
+
+    fp=_live_frame("pc_financing_participants","*",30000)
+    if not fp.empty and "entity_id" in fp.columns: fp=fp[fp["entity_id"].fillna("").astype(str).isin(scope)].copy()
+    fids=set(fp.get("financing_id",pd.Series(dtype=str)).dropna().astype(str)) if not fp.empty else set()
+    finance=_live_frame("pc_financing_facilities","*",15000,"announced_date")
+    out["financing_participants"]=fp
+    out["financing"]=finance[finance.get("financing_id",pd.Series(index=finance.index,dtype=str)).astype(str).isin(fids)].copy() if fids and not finance.empty else pd.DataFrame()
+
+    # Compliance and security records can name the company even before canonical target_id is populated.
+    sec=_live_frame("pc_security_compliance","*",20000)
+    if not sec.empty:
+        mask=pd.Series(False,index=sec.index)
+        if "target_id" in sec.columns: mask |= sec["target_id"].fillna("").astype(str).isin(scope)
+        if "target_name" in sec.columns and entity_name:
+            mask |= sec["target_name"].fillna("").astype(str).map(_company_name_key).eq(root)
+        sec=sec[mask].copy()
+    out["security_compliance"]=sec
+
+    # Direct entity-linked canonical events.
+    event_frames=[]
+    for sid in sorted(scope):
+        ev=_live_related_events("entity",[sid],5000)
+        if not ev.empty: event_frames.append(ev)
+    if event_frames:
+        ev=pd.concat(event_frames,ignore_index=True,sort=False)
+        if "event_id" in ev.columns: ev=ev.drop_duplicates("event_id",keep="last")
+    else: ev=pd.DataFrame()
+    out["events"]=ev
+
+    return out
+
+
+def _company_mode_summary(bundle, prof):
+    """Return relevant logistics modes for adaptive company presentation."""
+    modes=set()
+    trucking=bundle.get("trucking",pd.DataFrame())
+    rail=bundle.get("rail_operator",pd.DataFrame())
+    services=bundle.get("services",pd.DataFrame())
+    assets=bundle.get("live_assets",pd.DataFrame())
+    mobile=bundle.get("live_mobile",pd.DataFrame())
+    if isinstance(trucking,pd.DataFrame) and not trucking.empty: modes.add("Road")
+    if isinstance(rail,pd.DataFrame) and not rail.empty: modes.add("Rail")
+    if isinstance(bundle.get("rail_networks"),pd.DataFrame) and not bundle["rail_networks"].empty: modes.add("Rail")
+    if isinstance(services,pd.DataFrame) and not services.empty and "mode" in services.columns:
+        for v in services["mode"].fillna("").astype(str):
+            x=v.casefold()
+            if "road" in x or "truck" in x: modes.add("Road")
+            if "rail" in x: modes.add("Rail")
+            if "sea" in x or "maritime" in x or "ocean" in x: modes.add("Maritime")
+            if "air" in x or "aviation" in x: modes.add("Aviation")
+            if "ferry" in x: modes.add("Ferry")
+    if isinstance(assets,pd.DataFrame) and not assets.empty:
+        txt=" ".join(assets.fillna("").astype(str).values.flatten()).casefold()
+        if any(k in txt for k in ["warehouse","logistics facility","crossdock","depot","distribution"]): modes.add("Warehousing")
+        if any(k in txt for k in ["port","terminal","berth"]): modes.add("Ports")
+        if "airport" in txt: modes.add("Aviation")
+    if profile_count(prof,"ports") or profile_count(prof,"port_terminals"): modes.add("Ports")
+    if profile_count(prof,"maritime_vessels"): modes.add("Maritime")
+    return sorted(modes,key=lambda x:["Road","Rail","Warehousing","Aviation","Maritime","Ports","Ferry"].index(x) if x in ["Road","Rail","Warehousing","Aviation","Maritime","Ports","Ferry"] else 99)
+
+
 def render_company_profile(entity_id, entity_name):
     prof=build_company_profile(entity_id,entity_name)
     rec=company_record(entity_id)
+    bundle=_company_live_logistics_bundle(entity_id,entity_name)
+    modes=_company_mode_summary(bundle,prof)
 
-    # Top summary
     st.markdown(f"## {entity_name}")
-    if rec is not None:
+    if modes:
+        st.markdown(" ".join(f"<span class='pc-chip'>{html_lib.escape(m)}</span>" for m in modes),unsafe_allow_html=True)
+
+    # Prefer the new canonical company profile over older workbook summary fields.
+    live_profile=bundle.get("profile",pd.DataFrame())
+    if isinstance(live_profile,pd.DataFrame) and not live_profile.empty:
+        pr=live_profile.iloc[0]
         summary=[]
-        for c in ["Entity Type","Industrial Model","HQ Country","Country / Geography","Business Segments","Markets","Ownership","Ownership / Role Note","Scale / Network Notes"]:
-            if c in rec.index and str(rec.get(c,"")).strip():
-                summary.append(f"**{c}:** {rec.get(c)}")
+        for col,label_txt in [
+            ("company_class","Company class"),("sector","Sector"),("industry","Industry"),
+            ("incorporation_country","Incorporation"),("publicly_traded","Publicly traded"),
+            ("business_description","Business"),("products_services","Products / services"),
+            ("operating_countries","Operating countries")]:
+            val=pr.get(col)
+            if val not in (None,"",[],{}) and str(val).lower() not in {"nan","none"}:
+                summary.append(f"**{label_txt}:** {pc_display_value(val)}")
+        if summary: st.markdown("  \n".join(summary[:7]))
+    elif rec is not None:
+        summary=[]
+        for c in ["Entity Type","Industrial Model","HQ Country","Country / Geography","Business Segments","Markets","Ownership","Scale / Network Notes"]:
+            if c in rec.index and str(rec.get(c,"")).strip(): summary.append(f"**{c}:** {rec.get(c)}")
         if summary: st.markdown("  \n".join(summary[:6]))
 
+    # Group scope remains visible, but not as a substitute for operational content.
     if len(prof.get("scope_ids",[]))>1:
         group_names=[x for x in prof.get("scope_names",[]) if x != entity_name]
-        if group_names:
-            st.markdown("**Included group / controlled entities:** " + " · ".join(group_names))
+        if group_names: st.caption("Included group / controlled entities: " + " · ".join(group_names[:20]))
 
-    investment_names=[x for x in prof.get("investment_names",[]) if x and x != entity_name]
-    if investment_names:
-        st.markdown("**Portfolio / investment exposure:** " + " · ".join(investment_names))
-
-    c1,c2,c3,c4,c5,c6,c7=st.columns(7)
-    c1.metric("Terminals",profile_count(prof,"port_terminals"))
-    c2.metric("Ports",profile_count(prof,"ports"))
-    c3.metric("Shipyards",profile_count(prof,"yards"))
-    total_v=profile_count(prof,"defence_vessels")+profile_count(prof,"maritime_vessels")
-    c4.metric("Linked vessels",total_v)
-    c5.metric("Programmes",profile_count(prof,"programmes"))
-    c6.metric("Events",profile_count(prof,"events"))
-    c7.metric(
-        "News",
-        profile_count(prof,"news")
-        + profile_count(prof,"announcements")
-        + profile_count(prof,"port_news")
-        + profile_count(prof,"strategic_news")
-        + profile_count(prof,"canonical_event_news")
-    )
+    # Adaptive metrics: only show a mode when this company actually has that mode.
+    metrics=[]
+    trucking=bundle.get("trucking",pd.DataFrame())
+    if isinstance(trucking,pd.DataFrame) and not trucking.empty:
+        trucks=pd.to_numeric(trucking.get("fleet_size_power_units",pd.Series(dtype=float)),errors="coerce").max()
+        trailers=pd.to_numeric(trucking.get("fleet_size_trailers",pd.Series(dtype=float)),errors="coerce").max()
+        if pd.notna(trucks): metrics.append(("Trucks / power units",f"{int(trucks):,}"))
+        if pd.notna(trailers): metrics.append(("Trailers",f"{int(trailers):,}"))
+    if not bundle.get("rail_networks",pd.DataFrame()).empty: metrics.append(("Rail networks",len(bundle["rail_networks"])))
+    if not bundle.get("rail_nodes",pd.DataFrame()).empty: metrics.append(("Rail nodes",len(bundle["rail_nodes"])))
+    if not bundle.get("services",pd.DataFrame()).empty: metrics.append(("Services / routes",len(bundle["services"])))
+    if not bundle.get("footprint",pd.DataFrame()).empty: metrics.append(("Operating footprint",len(bundle["footprint"])))
+    if profile_count(prof,"ports"): metrics.append(("Ports",profile_count(prof,"ports")))
+    if profile_count(prof,"port_terminals"): metrics.append(("Terminals",profile_count(prof,"port_terminals")))
+    if profile_count(prof,"maritime_vessels"): metrics.append(("Vessels",profile_count(prof,"maritime_vessels")))
+    if not bundle.get("events",pd.DataFrame()).empty or profile_count(prof,"events"):
+        metrics.append(("Events",max(len(bundle.get("events",pd.DataFrame())),profile_count(prof,"events"))))
+    metrics=metrics[:7]
+    if metrics:
+        cols=st.columns(len(metrics))
+        for c,(lab,val) in zip(cols,metrics): c.metric(lab,val)
 
     company_view=st.selectbox(
         "Company section",
-        ["Profile & Assets","Connected Model","Investments","Financials","Share Price","Security & Risk"],
+        ["Logistics Profile","Connected Model","Investments","Financials","Share Price","Security & Risk"],
         key=f"company_section_{entity_id}"
     )
     if company_view=="Connected Model":
@@ -4825,6 +5012,10 @@ def render_company_profile(entity_id, entity_name):
         render_investment_dashboard(company_id=entity_id)
         return
     if company_view=="Financials":
+        # New financial records first, then the legacy/market renderer.
+        if not bundle.get("financials",pd.DataFrame()).empty:
+            st.markdown("### Canonical financial records")
+            display_df(bundle["financials"],420)
         render_company_financials(entity_id)
         return
     if company_view=="Share Price":
@@ -4832,271 +5023,200 @@ def render_company_profile(entity_id, entity_name):
         render_share_price_history(entity_id)
         return
     if company_view=="Security & Risk":
-        st.markdown("### Security & risk")
+        if not bundle.get("security_compliance",pd.DataFrame()).empty:
+            st.markdown("### Security / compliance records")
+            display_df(bundle["security_compliance"],360)
         render_company_security_risk(entity_id,entity_name)
         return
 
-    tabs=st.tabs(["Overview","Port Assets","Shipyards & Facilities","Vessels","Programmes & Contracts","Sales Routes","Events & Impact","News","Relationships & Systems","Policy & Compliance","Evidence"])
+    tabs=st.tabs([
+        "Overview","Operations & Footprint","Services & Routes","Assets & Fleet",
+        "Projects / Contracts","Events & News","Corporate & Financial","Risk & Compliance",
+        "Relationships","Evidence"
+    ])
+
     with tabs[0]:
-        # Visual intelligence first
-        if not prof["port_terminals"].empty or not prof["ports"].empty:
-            render_port_visuals(prof)
-        if not prof["yards"].empty:
-            render_shipyard_visuals(prof)
-        render_market_visuals(entity_id)
-        if not prof["events"].empty:
-            render_event_map(prof["events"],prof["event_locations"],"Linked events & announced activity")
-
-        if not prof["ports"].empty:
-            st.markdown("### Ports")
+        st.markdown("### End-to-end operating picture")
+        st.caption("This profile follows the company's actual logistics role. Maritime sections appear only when maritime assets or services are linked.")
+        if not trucking.empty:
+            st.markdown("#### Road / trucking")
+            display_df(trucking,260)
+        if not bundle.get("rail_operator",pd.DataFrame()).empty:
+            st.markdown("#### Rail operator profile")
+            display_df(bundle["rail_operator"],260)
+        if not bundle.get("services",pd.DataFrame()).empty:
+            st.markdown("#### Core transport services")
+            display_df(bundle["services"].head(20),320)
+        if not bundle.get("footprint",pd.DataFrame()).empty:
+            st.markdown("#### Geographic operating footprint")
+            display_df(bundle["footprint"].head(30),320)
+        if not bundle.get("rail_networks",pd.DataFrame()).empty:
+            st.markdown("#### Rail networks")
+            display_df(bundle["rail_networks"].head(20),300)
+        if not bundle.get("road_corridors",pd.DataFrame()).empty:
+            st.markdown("#### Road corridors")
+            display_df(bundle["road_corridors"].head(20),300)
+        if not prof.get("ports",pd.DataFrame()).empty:
+            st.markdown("#### Ports")
             show_named_list(prof["ports"],"Port / Facility",["Country","Operator","Facility Type","Key Role"])
+        if not prof.get("maritime_vessels",pd.DataFrame()).empty:
+            st.markdown("#### Maritime fleet")
+            display_df(prof["maritime_vessels"].head(25),280)
 
-        if not prof["port_terminals"].empty:
-            st.markdown("### Port terminals / facilities")
-            t=prof["port_terminals"].copy()
-            show_named_list(t,"Terminal / Facility",["Parent Port","Country","City / Area","Primary Operator","Status","Ownership / Structure"])
-        if not prof["yards"].empty:
-            st.markdown("### Shipyards")
-            y=prof["yards"].copy()
-            if "Company Entity ID" in y.columns: y["Operating Company"]=y["Company Entity ID"].map(label)
-            show_named_list(y,"Shipyard",["Operating Company","Country","Yard Model","Current / Representative Work"])
-        if not prof["programmes"].empty:
-            st.markdown("### Active / relevant programmes")
-            show_named_list(prof["programmes"],"Programme",["Customer","Platform / Class","Status","Build / Sales Route"])
-
-        # A profile should never hide relevant linked reporting merely because the
-        # company is connected through a vessel, consortium or project entity.
         latest_frames=[]
-        if not prof["news"].empty:
-            x=prof["news"].copy()
-            x["_source_kind"]="News"
-            latest_frames.append(x)
-        if not prof["strategic_news"].empty:
-            x=prof["strategic_news"].copy()
-            x["_source_kind"]="Strategic event"
-            latest_frames.append(x)
-        if not prof.get("canonical_event_news",pd.DataFrame()).empty:
-            x=prof["canonical_event_news"].copy()
-            x["_source_kind"]="Canonical event"
-            latest_frames.append(x)
+        for key,kind in [("news","News"),("strategic_news","Strategic event"),("canonical_event_news","Canonical event")]:
+            x=prof.get(key,pd.DataFrame())
+            if isinstance(x,pd.DataFrame) and not x.empty:
+                y=x.copy(); y["_source_kind"]=kind; latest_frames.append(y)
         if latest_frames:
             latest=pd.concat(latest_frames,ignore_index=True,sort=False)
-            date_col="Published Date" if "Published Date" in latest.columns else None
-            if date_col:
-                latest["_dt"]=pd.to_datetime(latest[date_col],errors="coerce")
+            if "Published Date" in latest.columns:
+                latest["_dt"]=pd.to_datetime(latest["Published Date"],errors="coerce")
                 latest=latest.sort_values("_dt",ascending=False)
-            st.markdown("### Latest linked reporting")
-            show_named_list(latest.head(5),"Headline",["Published Date","Publisher","Event Type"],source_col="URL",max_items=5)
-
-        if prof["port_terminals"].empty and prof["ports"].empty and prof["yards"].empty and prof["programmes"].empty:
-            st.info("No mapped asset, shipyard or programme profile yet for this entity.")
+            st.markdown("#### Latest linked reporting")
+            show_named_list(latest.head(8),"Headline",["Published Date","Publisher","Event Type"],source_col="URL",max_items=8)
 
     with tabs[1]:
-        st.markdown("### Terminals / port facilities")
-        if not prof["port_terminals"].empty:
-            t=prof["port_terminals"].copy()
-            display_df(t,250)
-        else:
-            st.info("No terminal assets currently linked.")
-        if not prof["ports"].empty:
-            st.markdown("### Parent ports")
-            display_df(prof["ports"],150)
-        if not prof["port_ownership"].empty:
-            st.markdown("### Ownership / JV / operating-control relationships")
-            display_df(prof["port_ownership"],250)
-        if not prof["port_berths"].empty:
-            st.markdown("### Berths / marine interfaces")
-            display_df(prof["port_berths"],250)
-        if not prof["port_equipment"].empty:
-            st.markdown("### Terminal equipment")
-            display_df(prof["port_equipment"],300)
+        st.markdown("### Operating footprint")
+        if not bundle.get("footprint",pd.DataFrame()).empty: display_df(bundle["footprint"],420)
+        if not bundle.get("trucking",pd.DataFrame()).empty:
+            st.markdown("#### Trucking operating profile")
+            display_df(bundle["trucking"],300)
+        if not bundle.get("rail_operator",pd.DataFrame()).empty:
+            st.markdown("#### Rail operating profile")
+            display_df(bundle["rail_operator"],300)
+        assets=bundle.get("live_assets",pd.DataFrame())
+        if isinstance(assets,pd.DataFrame) and not assets.empty:
+            st.markdown("#### Physical facilities / infrastructure")
+            display_df(assets,420)
+        if not prof.get("port_terminals",pd.DataFrame()).empty:
+            st.markdown("#### Port terminals / facilities")
+            display_df(prof["port_terminals"],350)
 
     with tabs[2]:
-        st.markdown("### Shipyards")
-        y=prof["yards"].copy()
-        if "Company Entity ID" in y.columns: y["Operating Company"]=y["Company Entity ID"].map(label)
-        show_named_list(y,"Shipyard",["Operating Company","Location","Country","Yard Model","Status"])
-        if not prof["yard_capabilities"].empty:
-            st.markdown("### Yard capabilities")
-            cap=prof["yard_capabilities"].copy()
-            if "Yard ID" in cap.columns: cap["Shipyard"]=cap["Yard ID"].map(label)
-            display_df(cap,100)
-        if not prof["yard_facilities"].empty:
-            st.markdown("### Yard facilities")
-            fac=prof["yard_facilities"].copy()
-            if "Yard ID" in fac.columns: fac["Shipyard"]=fac["Yard ID"].map(label)
-            display_df(fac,100)
-        if not prof["infrastructure_facilities"].empty:
-            st.markdown("### Other infrastructure facilities")
-            display_df(prof["infrastructure_facilities"],100)
+        if not bundle.get("services",pd.DataFrame()).empty:
+            st.markdown("### Transport services")
+            display_df(bundle["services"],460)
+            if not bundle.get("service_operators",pd.DataFrame()).empty:
+                with st.expander("Service operator roles",expanded=False): display_df(bundle["service_operators"],300)
+        if not bundle.get("road_corridors",pd.DataFrame()).empty:
+            st.markdown("### Road corridors")
+            display_df(bundle["road_corridors"],420)
+        if not bundle.get("rail_networks",pd.DataFrame()).empty:
+            st.markdown("### Rail networks")
+            display_df(bundle["rail_networks"],360)
+        if not bundle.get("rail_nodes",pd.DataFrame()).empty:
+            st.markdown("### Rail terminals / nodes")
+            display_df(bundle["rail_nodes"],420)
+        if not bundle.get("rail_links",pd.DataFrame()).empty:
+            st.markdown("### Rail links")
+            display_df(bundle["rail_links"],420)
+        if not prof.get("sales_routes",pd.DataFrame()).empty:
+            st.markdown("### Commercial / sales routes")
+            display_df(prof["sales_routes"],300)
+        if (bundle.get("services",pd.DataFrame()).empty and bundle.get("road_corridors",pd.DataFrame()).empty
+            and bundle.get("rail_networks",pd.DataFrame()).empty and prof.get("sales_routes",pd.DataFrame()).empty):
+            st.info("No structured services or route records are linked yet.")
 
     with tabs[3]:
-        if not prof["defence_vessels"].empty:
-            st.markdown("### Defence / Coast Guard / Government vessels")
-            dv=prof["defence_vessels"].copy()
-            if "Build Yard ID" in dv.columns: dv["Shipyard"]=dv["Build Yard ID"].map(label)
-            display_df(dv,150)
-        if not prof["maritime_vessels"].empty:
-            st.markdown("### Commercial / maritime vessels")
-            mv=prof["maritime_vessels"].copy()
-            preferred=[
-                "Vessel Name","IMO","Vessel Type","Subtype / Class","Flag",
-                "Link Path","Linked Company","Relationship / Role",
-                "Status","Year Built","DWT","MMSI","Call Sign","Vessel ID"
-            ]
-            show=[c for c in preferred if c in mv.columns]
-            remainder=[c for c in mv.columns if c not in show and c not in {"Metadata"}]
-            display_df(mv[show+remainder],250)
-        if not prof["vessel_build_records"].empty:
-            st.markdown("### Vessel build records tied to these yards")
-            display_df(prof["vessel_build_records"],150)
-        if prof["defence_vessels"].empty and prof["maritime_vessels"].empty and prof["vessel_build_records"].empty:
-            st.info("No vessel records currently linked to this entity. This is now shown explicitly rather than hidden in other tables.")
+        mobile=bundle.get("live_mobile",pd.DataFrame())
+        if isinstance(mobile,pd.DataFrame) and not mobile.empty:
+            st.markdown("### Mobile assets / fleet")
+            display_df(mobile,460)
+        if not prof.get("defence_vessels",pd.DataFrame()).empty:
+            st.markdown("### Defence / government vessels")
+            display_df(prof["defence_vessels"],320)
+        if not prof.get("maritime_vessels",pd.DataFrame()).empty:
+            st.markdown("### Maritime vessels")
+            display_df(prof["maritime_vessels"],420)
+        assets=bundle.get("live_assets",pd.DataFrame())
+        if isinstance(assets,pd.DataFrame) and not assets.empty:
+            st.markdown("### Fixed assets")
+            display_df(assets,420)
+        if ((not isinstance(mobile,pd.DataFrame) or mobile.empty) and prof.get("maritime_vessels",pd.DataFrame()).empty
+            and (not isinstance(assets,pd.DataFrame) or assets.empty)):
+            st.info("No individual asset or fleet records linked yet. Aggregate fleet/network data may still appear under Operations & Footprint.")
 
     with tabs[4]:
-        st.markdown("### Programmes")
-        pg=prof["programmes"].copy()
-        if not pg.empty and "Prime / Lead Entity ID" in pg.columns:
-            pg["Prime / Lead"]=pg["Prime / Lead Entity ID"].map(label)
-        display_df(pg,150)
-        if not prof["programme_participants"].empty:
-            st.markdown("### Programme roles")
-            display_df(prof["programme_participants"],100)
-        st.markdown("### Contracts")
-        display_df(prof["contracts"],150)
+        if not bundle.get("projects",pd.DataFrame()).empty:
+            st.markdown("### Projects")
+            display_df(bundle["projects"],400)
+        if not bundle.get("contracts",pd.DataFrame()).empty:
+            st.markdown("### Contracts")
+            display_df(bundle["contracts"],400)
+        if not bundle.get("financing",pd.DataFrame()).empty:
+            st.markdown("### Financing")
+            display_df(bundle["financing"],400)
+        if not bundle.get("transactions",pd.DataFrame()).empty:
+            st.markdown("### Transactions")
+            display_df(bundle["transactions"],400)
+        if not prof.get("programmes",pd.DataFrame()).empty:
+            st.markdown("### Programmes")
+            display_df(prof["programmes"],300)
 
     with tabs[5]:
-        display_df(prof["sales_routes"],150)
-
-    with tabs[6]:
-        render_event_map(prof["events"],prof["event_locations"],"Event / activity map")
-        st.markdown("### Linked events")
-        render_event_cards(prof["events"],50)
-        if not prof["impact_chains"].empty:
-            st.markdown("### Impact propagation")
-            display_df(prof["impact_chains"],100)
-
-        if not prof["events"].empty:
-            event_ids=set(prof["events"]["Event ID"].astype(str).tolist())
-            eal=TABLES.get(("Events & Hazards","Event Asset Links"),pd.DataFrame())
-            if not eal.empty and "Event ID" in eal.columns:
-                eal=eal[eal["Event ID"].astype(str).isin(event_ids)]
-                if not eal.empty:
-                    st.markdown("### Affected / connected assets")
-                    render_linked_objects(eal,"Asset Type","Asset ID","Asset","Relationship","Confidence",100)
-
-    with tabs[7]:
-        if not prof["announcements"].empty:
-            st.markdown("### Announced activity")
-            show_named_list(prof["announcements"],"Headline",["Date","Event Type"])
-        if not prof["news"].empty:
+        ev=bundle.get("events",pd.DataFrame())
+        if isinstance(ev,pd.DataFrame) and not ev.empty:
+            st.markdown("### Canonical linked events")
+            display_df(ev,460)
+        if not prof.get("events",pd.DataFrame()).empty:
+            st.markdown("### Event / operational activity")
+            render_event_cards(prof["events"],60)
+        if not prof.get("news",pd.DataFrame()).empty:
             st.markdown("### News")
             show_named_list(prof["news"],"Headline",["Published Date","Publisher","Country","Event Type"],source_col="URL")
-        if not prof["port_news"].empty:
-            st.markdown("### Port / terminal news")
-            show_named_list(prof["port_news"],"Headline",["Date","Port","Terminal","Event Type"],source_col="URL")
-        if not prof["strategic_news"].empty:
-            st.markdown("### Strategic event / incident coverage")
-            show_named_list(
-                prof["strategic_news"],
-                "Headline",
-                ["Published Date","Publisher","Event Type","Region"],
-                source_col="URL",
-                max_items=100
-            )
+        if not prof.get("strategic_news",pd.DataFrame()).empty:
+            st.markdown("### Strategic developments")
+            show_named_list(prof["strategic_news"],"Headline",["Published Date","Publisher","Event Type","Region"],source_col="URL",max_items=100)
         if not prof.get("canonical_event_news",pd.DataFrame()).empty:
             st.markdown("### Canonical company developments")
-            show_named_list(
-                prof["canonical_event_news"],
-                "Headline",
-                ["Published Date","Event Type","Event Family","Region","Relationship"],
-                source_col="URL",
-                max_items=100
-            )
-        if (
-            prof["announcements"].empty
-            and prof["news"].empty
-            and prof["port_news"].empty
-            and prof["strategic_news"].empty
-            and prof.get("canonical_event_news",pd.DataFrame()).empty
-        ):
-            st.info("No linked developments, announcements or canonical event coverage.")
+            show_named_list(prof["canonical_event_news"],"Headline",["Published Date","Event Type","Event Family","Region","Relationship"],source_col="URL",max_items=100)
+
+    with tabs[6]:
+        if not live_profile.empty:
+            st.markdown("### Company profile")
+            display_df(live_profile,300)
+        if not bundle.get("registrations",pd.DataFrame()).empty:
+            st.markdown("### Registrations / legal entities")
+            display_df(bundle["registrations"],340)
+        if not bundle.get("financials",pd.DataFrame()).empty:
+            st.markdown("### Financial records")
+            display_df(bundle["financials"],420)
+        if not prof.get("announcements",pd.DataFrame()).empty:
+            st.markdown("### Announcements")
+            show_named_list(prof["announcements"],"Headline",["Date","Event Type"])
+
+    with tabs[7]:
+        if not bundle.get("security_compliance",pd.DataFrame()).empty:
+            st.markdown("### Security / compliance")
+            display_df(bundle["security_compliance"],420)
+        if not prof.get("sanctions_links",pd.DataFrame()).empty:
+            st.markdown("### Sanctions / designation-linked exposure")
+            display_df(prof["sanctions_links"],350)
+        if not prof.get("sanctions_designations",pd.DataFrame()).empty:
+            st.markdown("### Related designation records")
+            display_df(humanize_sanctions_df(prof["sanctions_designations"]),350)
+        if not prof.get("trade_agreements",pd.DataFrame()).empty:
+            st.markdown("### Trade agreements / market access")
+            display_df(prof["trade_agreements"],320)
 
     with tabs[8]:
         st.markdown("### Corporate & operational relationships")
-        readable_relationships(prof["relationships"],entity_id)
-
-        if not prof["relationships"].empty:
-            _rdf=prof["relationships"].copy().head(120)
-            _dot=[
-                'digraph CompanyRelations {',
-                'rankdir=LR;',
-                'graph [bgcolor="transparent", pad="0.2", nodesep="0.35", ranksep="0.7"];',
-                'node [shape=box, style="rounded,filled", fillcolor="#111827", fontcolor="white", color="#4b5563", fontname="Arial", fontsize=10];',
-                'edge [color="#9ca3af", fontcolor="#d1d5db", fontname="Arial", fontsize=9];'
-            ]
-            _seen=set()
-            for _i,(_, _rr) in enumerate(_rdf.iterrows(),1):
-                _sid=str(_rr.get("Source Entity") or f"s{_i}")
-                _tid=str(_rr.get("Target Entity") or f"t{_i}")
-                _stype=str(_rr.get("Source Type") or "").strip()
-                _ttype=str(_rr.get("Target Type") or "").strip()
-                _sname=relationship_endpoint_label(_sid,_stype)
-                _tname=relationship_endpoint_label(_tid,_ttype)
-                if str(_sname).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
-                    _sname=humanize_internal_object_id(_sname)
-                if str(_tname).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENT_","COMP_","PORT_","TERM_","EVT_")):
-                    _tname=humanize_internal_object_id(_tname)
-                _rel=pretty_relationship(_rr.get("Relationship","related_to"))
-                _sn="n"+hashlib.sha1(("s|"+_sid).encode("utf-8")).hexdigest()[:12]
-                _tn="n"+hashlib.sha1(("t|"+_tid).encode("utf-8")).hexdigest()[:12]
-                def _esc(v):
-                    return str(v).replace("\\","\\\\").replace('"','\\"').replace("\n"," ")
-                if _sn not in _seen:
-                    _dot.append(f'{_sn} [label="{_esc(_sname)}"];')
-                    _seen.add(_sn)
-                if _tn not in _seen:
-                    _dot.append(f'{_tn} [label="{_esc(_tname)}"];')
-                    _seen.add(_tn)
-                _dot.append(f'{_sn} -> {_tn} [label="{_esc(_rel)}"];')
-            _dot.append('}')
-            st.markdown("### Relationship network")
-            st.graphviz_chart("\n".join(_dot),use_container_width=True)
-
-        if not prof["systems"].empty:
-            st.markdown("### Trade systems / corridors")
-            display_df(prof["systems"],50)
+        readable_relationships(prof.get("relationships",pd.DataFrame()),entity_id)
+        if not bundle.get("live_relationships",pd.DataFrame()).empty:
+            with st.expander("Live canonical relationship rows",expanded=False):
+                display_df(bundle["live_relationships"],420)
+        if not prof.get("systems",pd.DataFrame()).empty:
+            st.markdown("### Connected systems / corridors")
+            display_df(prof["systems"],300)
 
     with tabs[9]:
-        if not prof["trade_agreements"].empty:
-            st.markdown("### Trade agreements / market-access exposure")
-            display_df(prof["trade_agreements"],100)
-        if not prof["agreement_company_links"].empty:
-            st.markdown("### Company exposure")
-            display_df(prof["agreement_company_links"],100)
-        if not prof["agreement_asset_links"].empty:
-            st.markdown("### Asset / corridor exposure")
-            display_df(prof["agreement_asset_links"],100)
-        if not prof["sanctions_links"].empty:
-            st.markdown("### Sanctions / designation-linked exposure")
-            st.caption("A linked company may be an owner, operator or manager named in a designation record; this does not automatically mean every linked party is itself separately designated.")
-            display_df(prof["sanctions_links"],100)
-        if not prof["sanctions_designations"].empty:
-            st.markdown("### Related government designation records")
-            display_df(humanize_sanctions_df(prof["sanctions_designations"]),100)
-        if prof["trade_agreements"].empty and prof["sanctions_designations"].empty and prof["sanctions_links"].empty:
-            st.info("No direct trade-policy or sanctions link has been mapped for this entity yet.")
-
-    with tabs[10]:
-        if not prof["assets"].empty:
-            st.markdown("### Direct assets")
-            display_df(prof["assets"],100)
+        st.caption("Evidence and source-linked records across the company profile.")
         rels=related_tables(entity_id,entity_name)
         for (wb_label,sheet),sub in rels:
-            if sheet in {"Evidence & sources","Overview","Companies","Defence Companies","Shipyards","Programmes","Contracts","Sample Vessels","Announcements","News Registry","Relationships"}:
-                continue
+            if sheet in {"Overview","Companies","Defence Companies"}: continue
             with st.expander(f"{sheet} · {len(sub)} record(s)"):
-                display_df(sub,100)
+                display_df(sub,120)
 
 def entity_search_matches(q, limit=20):
     if ECAT.empty or not q: return pd.DataFrame()
@@ -9084,11 +9204,11 @@ _bst=backend_status()
 st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend")
 
 NAV_SECTIONS={
-    "OPERATING PICTURE":["Overview","Trade Horizon","Regional Maps","Port Activity","Alerts & Disruptions","Watch Areas"],
-    "DOMAINS":["Maritime","Rail","Aviation","Trucking","Government & Security","Defence & Shipbuilding","Energy & Industry"],
-    "TRADE NETWORK":["Ports & Terminals","Services & Routes","Corridors & Systems","Companies","Vessels","Investments"],
-    "MARKETS & POLICY":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Sanctions & Compliance","Trade Policy","Deals, Projects & Contracts"],
-    "MONITORING & TOOLS":["Hormuz Monitor","Live Feeds","News & Developments","Search","Reference & Benchmarks","Data"],
+    "OPERATING PICTURE":["Overview","Trade Horizon","Regional Maps","Alerts & Disruptions","Watch Areas"],
+    "LOGISTICS NETWORK":["Companies","Services & Routes","Corridors & Systems","Trucking","Rail","Aviation","Maritime","Ports & Terminals","Vessels"],
+    "BUSINESS & INFRASTRUCTURE":["Investments","Deals, Projects & Contracts","Energy & Industry","Defence & Shipbuilding"],
+    "MARKETS & POLICY":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Sanctions & Compliance","Trade Policy"],
+    "MONITORING & TOOLS":["Government & Security","Port Activity","Hormuz Monitor","Live Feeds","News & Developments","Search","Reference & Benchmarks","Data"],
 }
 VISIBLE_PAGES=[p for items in NAV_SECTIONS.values() for p in items]
 HIDDEN_ROUTES={"Ports","Shipyards","Network Map","News & Events","Reference Library","Ferries","Cruise","Maritime Security","Maritime Disruptions","Security & Business Risk","Contracts"}
@@ -9125,13 +9245,13 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("<div class='pc-small'>QUICK ACCESS</div>",unsafe_allow_html=True)
 qa1,qa2=st.sidebar.columns(2)
 with qa1:
-    if st.button("Vessels",use_container_width=True,key="qa_vessels"):
-        request_nav("Vessels"); st.rerun()
-    if st.button("Watch Areas",use_container_width=True,key="qa_watch"):
-        request_nav("Watch Areas"); st.rerun()
+    if st.button("Companies",use_container_width=True,key="qa_companies"):
+        request_nav("Companies"); st.rerun()
+    if st.button("Alerts",use_container_width=True,key="qa_alerts"):
+        request_nav("Alerts & Disruptions"); st.rerun()
 with qa2:
-    if st.button("Investments",use_container_width=True,key="qa_investments"):
-        request_nav("Investments"); st.rerun()
+    if st.button("Services",use_container_width=True,key="qa_services"):
+        request_nav("Services & Routes"); st.rerun()
     if st.button("Corridors",use_container_width=True,key="qa_corridors"):
         request_nav("Corridors & Systems"); st.rerun()
 
@@ -10995,7 +11115,7 @@ def render_trade_developments_home():
 
 
 if page=="Overview":
-    header("Trade System","Canonical company developments, disruptions, Trade Horizon, markets, ports, infrastructure, fleets and corridors across the global trade network.")
+    header("Trade System","End-to-end logistics intelligence across companies, road, rail, maritime, aviation, facilities, corridors, markets, infrastructure and disruption.")
 
     render_selected_trade_story_context()
 
@@ -11012,7 +11132,7 @@ if page=="Overview":
         render_live_market_dashboard(compact=True)
 
     st.markdown("---")
-    q=st.text_input("Search the trade system",placeholder="Company, port, vessel, corridor, contract, programme, refinery, terminal...",key="trade_home_search_top")
+    q=st.text_input("Search the trade system",placeholder="Company, trucking fleet, rail network, warehouse, port, vessel, air cargo, corridor, contract, project...",key="trade_home_search_top")
     if q.strip():
         hits=ranked_search(q.strip(),limit=25)
         if hits.empty: st.info("No matching records.")
@@ -11058,8 +11178,8 @@ elif page in {"Forward Calendar","Trade Horizon"}:
 
 
 elif page=="Search":
-    header("Search P&C","One query across companies, ports, shipyards, vessels, contracts, transactions, news, events and systems.")
-    q=st.text_input("Query",placeholder="Try: APM Africa terminals, Seaspan US Coast Guard, AD Ports Black Sea, Rotterdam strike, Fincantieri UAE contracts")
+    header("Search P&C","One query across companies, trucking, rail, aviation, maritime, facilities, corridors, contracts, transactions, news, events and systems.")
+    q=st.text_input("Query",placeholder="Try: Girteka Poland, Etihad Rail freight, CMA CGM service, AD Ports Black Sea, Rotterdam strike")
     if q and PC_USER_CONTEXT:
         if st.button("Save query to my workspace",key="save_trade_query"):
             ok,msg=save_workspace_query(PC_USER_CONTEXT,"TRADE",q[:100],q,"search")
@@ -11218,95 +11338,157 @@ elif page=="Aviation":
     )
 
 elif page=="Rail":
-    header("Rail","Operators, networks, terminals, intermodal nodes, fleet and port connections as a first-class trade infrastructure layer.")
-    operators=TABLES.get(("Rail","Rail Operators"),pd.DataFrame()).copy()
-    networks=TABLES.get(("Rail","Rail Networks"),pd.DataFrame()).copy()
-    nodes=TABLES.get(("Rail","Rail Nodes"),pd.DataFrame()).copy()
-    links=TABLES.get(("Rail","Rail Links"),pd.DataFrame()).copy()
-    rels=TABLES.get(("Rail","Rail Relationships"),pd.DataFrame()).copy()
-    fleet=TABLES.get(("Rail","Rail Fleet"),pd.DataFrame()).copy()
-    connections=TABLES.get(("Rail","Rail Connections"),pd.DataFrame()).copy()
+    header("Rail","Freight and passenger operators, national networks, terminals, intermodal nodes, rolling stock, projects and disruption.")
+
+    ent_names=_entity_name_map()
+    live_ops=_live_frame("pc_rail_operator_details","*",10000)
+    if not live_ops.empty:
+        live_ops["Company"]=live_ops.get("entity_id",pd.Series(index=live_ops.index,dtype=str)).astype(str).map(ent_names)
+    live_networks=_live_frame("pc_rail_networks","*",15000)
+    live_nodes=_live_frame("pc_rail_nodes","*",25000)
+    live_links=_live_frame("pc_rail_links","*",30000)
+    live_rolling=_live_frame("pc_rolling_stock_details","*",20000)
+    live_assets=_live_frame("pc_assets","*",30000)
+
+    # Legacy workbook data remains useful during migration, but live canonical rows lead.
+    old_ops=TABLES.get(("Rail","Rail Operators"),pd.DataFrame()).copy()
+    old_networks=TABLES.get(("Rail","Rail Networks"),pd.DataFrame()).copy()
+    old_nodes=TABLES.get(("Rail","Rail Nodes"),pd.DataFrame()).copy()
     news=TABLES.get(("Rail","Rail News"),pd.DataFrame()).copy()
 
     m1,m2,m3,m4=st.columns(4)
-    m1.metric("Operators",len(operators))
-    m2.metric("Networks / corridors",len(networks))
-    m3.metric("Rail nodes",len(nodes))
-    m4.metric("Port / intermodal links",len(connections))
+    m1.metric("Operators",len(live_ops) if not live_ops.empty else len(old_ops))
+    m2.metric("Networks",len(live_networks) if not live_networks.empty else len(old_networks))
+    m3.metric("Rail nodes",len(live_nodes) if not live_nodes.empty else len(old_nodes))
+    m4.metric("Rolling-stock records",len(live_rolling))
 
-    q=st.text_input("Search rail network",placeholder="Etihad Rail, Hafeet Rail, CPKC, Georgia, Khalifa Port, intermodal...")
+    q=st.text_input("Search rail network",placeholder="Etihad Rail, Hafeet Rail, freight terminal, passenger station, locomotive, intermodal...")
     if q:
-        operators=_contains_any(operators,[q]); networks=_contains_any(networks,[q])
-        nodes=_contains_any(nodes,[q]); links=_contains_any(links,[q])
-        fleet=_contains_any(fleet,[q]); connections=_contains_any(connections,[q]); news=_contains_any(news,[q])
+        live_ops=_filter_frame_any(live_ops,q); live_networks=_filter_frame_any(live_networks,q)
+        live_nodes=_filter_frame_any(live_nodes,q); live_links=_filter_frame_any(live_links,q)
+        live_rolling=_filter_frame_any(live_rolling,q); old_ops=_filter_frame_any(old_ops,q)
+        old_networks=_filter_frame_any(old_networks,q); old_nodes=_filter_frame_any(old_nodes,q); news=_filter_frame_any(news,q)
 
-    tabs=st.tabs(["Operators","Networks & Corridors","Nodes / Terminals","Port & Intermodal Connections","Fleet","Security & Disruption","News & Events"])
+    tabs=st.tabs(["Operators","Networks","Nodes & Terminals","Links & Corridors","Rolling Stock","Projects & Contracts","Events & News"])
     with tabs[0]:
-        clean_network_table(operators,["Operator","Operator Type","Jurisdiction","Role","Network Scale","Gauge","Electrification / Signalling","Status","Notes"],280)
-        if not operators.empty and "Operator" in operators.columns:
-            pick=st.selectbox("Inspect rail operator",range(len(operators)),format_func=lambda i:str(operators.iloc[i].get("Operator","")),key="rail_operator_pick")
-            rr=operators.iloc[pick]
-            linked_company_button(rr.get("Company ID",""),f"railop_company_{pick}")
+        if not live_ops.empty:
+            display_df(live_ops,420)
+            if "Company" in live_ops.columns:
+                opts=live_ops[live_ops["Company"].fillna("").astype(str).ne("")]
+                if not opts.empty:
+                    i=st.selectbox("Open rail company",range(len(opts)),format_func=lambda n:str(opts.iloc[n].get("Company","")),key="rail_live_company_pick")
+                    linked_company_button(opts.iloc[i].get("entity_id",""),f"rail_live_company_{i}")
+        else:
+            clean_network_table(old_ops,["Operator","Operator Type","Jurisdiction","Role","Network Scale","Gauge","Electrification / Signalling","Status","Notes"],280)
     with tabs[1]:
-        clean_network_table(networks,["Network / Corridor","Countries / Jurisdictions","Start Node","End Node","Length / Scale","Gauge","Status","Primary Cargo / Role","Notes"],320)
+        display_df(live_networks,460) if not live_networks.empty else clean_network_table(old_networks,["Network / Corridor","Countries / Jurisdictions","Start Node","End Node","Length / Scale","Gauge","Status","Primary Cargo / Role","Notes"],320)
     with tabs[2]:
-        clean_network_table(nodes,["Node","Country","Node Type","Status","Notes"],320)
+        display_df(live_nodes,460) if not live_nodes.empty else clean_network_table(old_nodes,["Node","Country","Node Type","Status","Notes"],320)
+        if not live_assets.empty:
+            rail_fac=_filter_frame_any(live_assets,"rail")
+            if not rail_fac.empty:
+                st.markdown("#### Rail-linked physical assets")
+                display_df(rail_fac.head(500),360)
     with tabs[3]:
-        clean_network_table(connections,["Connected Entity Type","Connected Entity Name","Status","Notes"],320)
-        st.caption("These records connect rail nodes back to canonical ports, terminals, dry ports and other infrastructure in the Trade System.")
+        display_df(live_links,460)
     with tabs[4]:
-        clean_network_table(fleet,["Fleet Type","Count","Composition / Capacity","Status","Notes"],220)
+        display_df(live_rolling,460)
     with tabs[5]:
-        hev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
-        if not hev.empty: hev=_contains_any(hev,["rail","locomotive","railway","train","depot"],["Mode","Event Family","Event Type","Title","Description","Trade / Commercial Impact"])
-        render_event_cards(hev,40)
+        render_connected_domain_context("Rail",modes=("rail",),keywords=("rail","railway","intermodal","locomotive","freight terminal","passenger station"))
     with tabs[6]:
-        clean_network_table(news,["Date","Event Type","Headline","Summary"],260)
-
-    render_connected_domain_context(
-        "Rail",
-        modes=("rail",),
-        keywords=("rail","railway","intermodal","locomotive")
-    )
+        rail_events=_live_frame("pc_events","*",15000,"start_date")
+        if not rail_events.empty: rail_events=_filter_frame_any(rail_events,"rail")
+        display_df(rail_events.head(500),420)
+        if not news.empty:
+            st.markdown("#### Rail news")
+            clean_network_table(news,["Date","Event Type","Headline","Summary"],260)
 
 elif page=="Trucking":
-    header("Trucking","Road operators, fleets/networks and intermodal relationships connecting ports, rail, warehouses and inland markets.")
-    operators=TABLES.get(("Road & Trucking","Trucking Companies"),pd.DataFrame()).copy()
-    assets=TABLES.get(("Road & Trucking","Trucking Assets"),pd.DataFrame()).copy()
-    rels=TABLES.get(("Road & Trucking","Trucking Relationships"),pd.DataFrame()).copy()
+    header("Trucking","Road freight operators, fleet scale, corridors, depots, warehouses, cross-border operations and intermodal services.")
 
-    m1,m2,m3=st.columns(3)
-    m1.metric("Operators",len(operators))
-    m2.metric("Road / logistics assets",len(assets))
-    m3.metric("Corporate / operating links",len(rels))
+    ent_names=_entity_name_map()
+    live_trucking=_live_frame("pc_trucking_company_details","*",10000)
+    if not live_trucking.empty:
+        live_trucking["Company"]=live_trucking.get("entity_id",pd.Series(index=live_trucking.index,dtype=str)).astype(str).map(ent_names)
+    road_corridors=_live_frame("pc_road_corridors","*",20000)
+    road_vehicle=_live_frame("pc_road_vehicle_details","*",25000)
+    footprint=_live_frame("pc_company_operating_footprint","*",25000)
+    assets_live=_live_frame("pc_assets","*",30000)
+    service_ops=_live_frame("pc_transport_service_operators","*",30000)
+    services_live=_live_frame("pc_transport_services","*",25000)
+    if not services_live.empty and "mode" in services_live.columns:
+        services_live=services_live[services_live["mode"].fillna("").astype(str).str.contains("road|truck|intermodal",case=False,na=False,regex=True)].copy()
 
-    q=st.text_input("Search trucking",placeholder="TFI, Canpar, Qube, Canada, Australia, intermodal...")
+    old_ops=TABLES.get(("Road & Trucking","Trucking Companies"),pd.DataFrame()).copy()
+    old_assets=TABLES.get(("Road & Trucking","Trucking Assets"),pd.DataFrame()).copy()
+    old_rels=TABLES.get(("Road & Trucking","Trucking Relationships"),pd.DataFrame()).copy()
+
+    trucks=pd.to_numeric(live_trucking.get("fleet_size_power_units",pd.Series(dtype=float)),errors="coerce").fillna(0).sum() if not live_trucking.empty else 0
+    trailers=pd.to_numeric(live_trucking.get("fleet_size_trailers",pd.Series(dtype=float)),errors="coerce").fillna(0).sum() if not live_trucking.empty else 0
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Road operators",len(live_trucking) if not live_trucking.empty else len(old_ops))
+    m2.metric("Power units",f"{int(trucks):,}" if trucks else "—")
+    m3.metric("Trailers",f"{int(trailers):,}" if trailers else "—")
+    m4.metric("Road corridors",len(road_corridors))
+
+    q=st.text_input("Search road logistics",placeholder="Girteka, TFI, Canpar, Qube, reefer, FTL, Poland, cross-border, warehouse...")
     if q:
-        operators=_contains_any(operators,[q]); assets=_contains_any(assets,[q]); rels=_contains_any(rels,[q])
+        live_trucking=_filter_frame_any(live_trucking,q); road_corridors=_filter_frame_any(road_corridors,q)
+        road_vehicle=_filter_frame_any(road_vehicle,q); footprint=_filter_frame_any(footprint,q)
+        assets_live=_filter_frame_any(assets_live,q); services_live=_filter_frame_any(services_live,q)
+        old_ops=_filter_frame_any(old_ops,q); old_assets=_filter_frame_any(old_assets,q); old_rels=_filter_frame_any(old_rels,q)
 
-    tabs=st.tabs(["Operators","Assets & Networks","Ownership & Relationships"])
+    tabs=st.tabs(["Operators","Fleet","Services","Road Corridors","Facilities & Footprint","Events & Risk","Relationships"])
     with tabs[0]:
-        clean_network_table(operators,["Company","Road Segment","Primary Geography","Fleet / Network Notes","Public / Private","Status"],260)
-        if not operators.empty:
-            pick=st.selectbox("Inspect trucking operator",range(len(operators)),format_func=lambda i:str(operators.iloc[i].get("Company","")),key="truck_operator_pick")
-            rr=operators.iloc[pick]
-            st.markdown(f"### {rr.get('Company','')}")
-            st.caption(f"{rr.get('Road Segment','')} · {rr.get('Primary Geography','')}")
-            linked_company_button(rr.get("Company ID",""),f"truck_company_{pick}")
-            parent=str(rr.get("Parent Company ID","")).strip()
-            if parent:
-                st.markdown("**Parent company**")
-                st.write(label(parent))
-                linked_company_button(parent,f"truck_parent_{pick}","Open parent company")
+        if not live_trucking.empty:
+            display_df(live_trucking,460)
+            opts=live_trucking[live_trucking.get("Company",pd.Series(index=live_trucking.index,dtype=str)).fillna("").astype(str).ne("")]
+            if not opts.empty:
+                i=st.selectbox("Open trucking company",range(len(opts)),format_func=lambda n:str(opts.iloc[n].get("Company","")),key="truck_live_company_pick")
+                linked_company_button(opts.iloc[i].get("entity_id",""),f"truck_live_company_{i}")
+        else:
+            clean_network_table(old_ops,["Company","Road Segment","Primary Geography","Fleet / Network Notes","Public / Private","Status"],300)
     with tabs[1]:
-        clean_network_table(assets,["Asset / Network","Asset Type","Country / Region","Location","Intermodal Links","Status","Notes"],300)
+        display_df(road_vehicle,460)
+        if road_vehicle.empty and not live_trucking.empty:
+            st.caption("Aggregate fleet figures are held at company level when individual vehicles are not identified.")
+            display_df(live_trucking,320)
     with tabs[2]:
-        clean_network_table(rels,["Relationship","Effective From","Effective To","Status","Confidence","Notes"],240)
+        display_df(services_live,460)
+    with tabs[3]:
+        display_df(road_corridors,460)
+    with tabs[4]:
+        if not footprint.empty:
+            display_df(footprint,420)
+        # Road companies often operate depots/warehouses rather than ports.
+        if not assets_live.empty:
+            road_fac=pd.concat([
+                _filter_frame_any(assets_live,"warehouse"),
+                _filter_frame_any(assets_live,"depot"),
+                _filter_frame_any(assets_live,"logistics"),
+                _filter_frame_any(assets_live,"crossdock")
+            ],ignore_index=True,sort=False)
+            if not road_fac.empty:
+                _dedupe_col="asset_id" if "asset_id" in road_fac.columns else ("name" if "name" in road_fac.columns else None)
+                if _dedupe_col: road_fac=road_fac.drop_duplicates(subset=[_dedupe_col],keep="first")
+            if not road_fac.empty:
+                st.markdown("#### Depots / warehouses / logistics facilities")
+                display_df(road_fac,420)
+        if not old_assets.empty:
+            with st.expander("Legacy road/logistics asset records",expanded=False): clean_network_table(old_assets,["Asset / Network","Asset Type","Country / Region","Location","Intermodal Links","Status","Notes"],300)
+    with tabs[5]:
+        events=_live_frame("pc_events","*",15000,"start_date")
+        if not events.empty:
+            events=_filter_frame_any(events,"road")
+            if events.empty: events=_filter_frame_any(_live_frame("pc_events","*",15000,"start_date"),"truck")
+        display_df(events.head(500),430)
+    with tabs[6]:
+        clean_network_table(old_rels,["Relationship","Effective From","Effective To","Status","Confidence","Notes"],240)
 
     render_connected_domain_context(
         "Trucking & Road Freight",
         modes=("road","intermodal"),
-        keywords=("trucking","road freight","truck","cross-dock","warehouse","drayage")
+        keywords=("trucking","road freight","truck","cross-dock","warehouse","drayage","reefer","FTL")
     )
 
 elif page=="Ferries":
