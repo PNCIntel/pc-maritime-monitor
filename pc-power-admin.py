@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "531-generic-schema-fk-uuid-fix-2026-09-19"
+LOADER_BUILD = "532-generic-source-integrity-fix-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -6055,9 +6055,27 @@ def _generic_cols(row):
 
 
 def _generic_is_mobile(row, sheet_norm=""):
+    """Conservatively identify physical mobile assets.
+
+    Explicit vessel/aircraft identifiers win. Company/operator rows must not become
+    mobile assets merely because their type contains words such as ``shipping``,
+    ``shipyard`` or ``ferry operator``.
+    """
     c=_generic_cols(row)
+    explicit=bool(c.intersection({"imo","mmsi","vessel_name","ship_name","aircraft_registration","tail_number","imo_number"}))
+    if explicit:
+        return True
+
     text=" ".join(str(_generic_first(row,"asset_type","entity_type","type","subtype","category") or "").casefold().split())
-    return bool(c.intersection({"imo","mmsi","vessel_name","ship_name","aircraft_registration","tail_number","imo_number"})) or any(x in text for x in ("vessel","ship","tanker","ferry","aircraft","locomotive","rolling stock")) or any(x in sheet_norm for x in ("vessel","fleet","aircraft","rolling_stock"))
+    entity_hint=bool(c.intersection({"entity_name","company_name","organisation_name","organization_name","company"}))
+    org_words=("operator","company","group","authority","agency","administration","shipyard","shipping line","carrier","terminal operator","port operator")
+    if entity_hint or any(w in text for w in org_words):
+        return False
+
+    mobile_phrases=("vessel","tanker","ferry vessel","aircraft","locomotive","rolling stock","truck","tractor unit","trailer")
+    text_mobile=any(re.search(r"\b"+re.escape(x)+r"\b",text) for x in mobile_phrases)
+    sheet_mobile=any(x in sheet_norm for x in ("vessels","vessel_fleet","aircraft_fleet","rolling_stock","vehicle_fleet"))
+    return bool(text_mobile or sheet_mobile)
 
 
 def _generic_is_sanctions_sheet(sheet_norm, rows):
@@ -6593,34 +6611,72 @@ def _simple_clean_name(v):
 
 
 def _simple_source_id(sb, payload):
-    """Resolve/create a canonical pc_sources row from source URL when possible."""
+    """Resolve or create the canonical pc_sources row required by a payload.
+
+    V5.3.2 fixes a generic-loader integrity bug: arbitrary workbook rows often
+    already carry a deterministic ``SRC_WEB_*`` source_id derived from their URL.
+    Earlier versions returned that ID without checking that the corresponding
+    pc_sources row existed, so every downstream entity/asset/observation using
+    that provenance failed its source_id FK.
+
+    Rules:
+    * reuse an existing source_id when it exists;
+    * if a source_id is supplied with a URL but is missing, create that exact row;
+    * otherwise resolve by URL and create a deterministic source when necessary;
+    * never return a non-existent source_id when there is no evidence to create it.
+    """
     sid=str(payload.get("source_id") or "").strip()
-    if sid:
-        return sid
     url=str(payload.get("source_url") or payload.get("url") or "").strip()
+
+    # Fast cache by both URL and explicit source id.
+    if sid and _SIMPLE_LOAD_CACHE["sources"].get(f"id:{sid}"):
+        return sid
+    if url and url in _SIMPLE_LOAD_CACHE["sources"]:
+        return _SIMPLE_LOAD_CACHE["sources"][url]
+
+    # A supplied source_id is only valid if it already exists or we can create it
+    # from the row's URL/provenance. Do not blindly return orphan FK values.
+    if sid:
+        try:
+            hit=(sb.table("pc_sources").select("source_id,url").eq("source_id",sid).limit(1).execute().data or [])
+            if hit:
+                _SIMPLE_LOAD_CACHE["sources"][f"id:{sid}"]=sid
+                existing_url=str(hit[0].get("url") or "").strip()
+                if existing_url:
+                    _SIMPLE_LOAD_CACHE["sources"][existing_url]=sid
+                if url:
+                    _SIMPLE_LOAD_CACHE["sources"][url]=sid
+                return sid
+        except Exception:
+            pass
+
+    # Prefer an existing source registered by URL, even if the workbook supplied a
+    # different local deterministic source id.
+    if url:
+        try:
+            hit=(sb.table("pc_sources").select("source_id").eq("url",url).limit(1).execute().data or [])
+            if hit:
+                resolved=hit[0]["source_id"]
+                _SIMPLE_LOAD_CACHE["sources"][url]=resolved
+                _SIMPLE_LOAD_CACHE["sources"][f"id:{resolved}"]=resolved
+                return resolved
+        except Exception:
+            pass
+
     if not url:
         return None
-    if url in _SIMPLE_LOAD_CACHE["sources"]:
-        return _SIMPLE_LOAD_CACHE["sources"][url]
-    try:
-        hit=(sb.table("pc_sources").select("source_id").eq("url",url).limit(1).execute().data or [])
-        if hit:
-            resolved=hit[0]["source_id"]
-            _SIMPLE_LOAD_CACHE["sources"][url]=resolved
-            return resolved
-    except Exception:
-        pass
-    sid=_simple_hash_id("SRC_WEB",url)
+
+    resolved_sid=sid or _simple_hash_id("SRC_WEB",url)
     source_name=url
     try:
         source_name=urllib.parse.urlparse(url).netloc or url
     except Exception:
         pass
     row={
-        "source_id":sid,
-        "source_name":source_name,
-        "publisher":payload.get("publisher") or source_name,
-        "source_type":"web",
+        "source_id":resolved_sid,
+        "source_name":payload.get("source_name") or source_name,
+        "publisher":payload.get("publisher") or payload.get("source_name") or source_name,
+        "source_type":payload.get("source_type") or "web",
         "url":url,
         "active":True,
     }
@@ -6629,10 +6685,11 @@ def _simple_source_id(sb, payload):
         row={k:v for k,v in row.items() if k in writable and v not in (None,"")}
         sb.table("pc_sources").upsert(row,on_conflict="source_id").execute()
     except Exception:
-        # Source creation should not block the fact record.
         return None
-    _SIMPLE_LOAD_CACHE["sources"][url]=sid
-    return sid
+
+    _SIMPLE_LOAD_CACHE["sources"][url]=resolved_sid
+    _SIMPLE_LOAD_CACHE["sources"][f"id:{resolved_sid}"]=resolved_sid
+    return resolved_sid
 
 
 def _simple_ensure_entity(sb, name, country=None, entity_type="company", source_id=None, extra=None):
@@ -6969,7 +7026,20 @@ def _simple_prepare_payload(sb, table, payload, natural_key):
     """Key-first canonical preparation. Create missing dependency objects, bind IDs, then return schema-safe payload."""
     p=dict(payload or {})
     p=_normalize_domain_payload(sb,table,p)
+    original_source_id=str(p.get("source_id") or "").strip()
     sid=_simple_source_id(sb,p)
+    if original_source_id and not sid and table!="pc_relationships":
+        # Preserve an unresolved workbook-local provenance id in metadata rather than
+        # sending an orphan FK to Postgres.
+        meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+        meta=dict(meta)
+        meta.setdefault("unresolved_source_id",original_source_id)
+        p["metadata"]=meta
+        p.pop("source_id",None)
+    elif sid and table!="pc_relationships":
+        # If URL resolution found an existing canonical source with a different id,
+        # bind the fact to that canonical id.
+        p["source_id"]=sid
     # ``source_id`` is provenance on most domain tables, but on pc_relationships it
     # is the graph endpoint foreign key.  V5.1 wrote the provenance source ID into
     # that endpoint slot, preventing source_name/target_name resolution and causing
