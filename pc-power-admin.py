@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "516-universal-result-exports-2026-09-19"
+LOADER_BUILD = "517-normalized-trade-workbook-direct-loader-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4607,6 +4607,15 @@ def _research_workbook_kind(sections,filename=""):
         and any(x in names for x in {"oocl_routes","maersk_routes","cma_cgm_routes"})
     ) or ("oocl" in fname and "maersk" in fname and "cma" in fname):
         return "ocean_carriers"
+    # Normalized cross-domain trade/maritime intelligence workbook. This shape
+    # already contains explicit entity/asset/location/link sheets and must never
+    # fall back to the generic three-sheet reconciliation path.
+    normalized_required={"events","entities","locations","assets","event_entity_links","event_location_links","event_asset_links"}
+    normalized_domain={"route_port_calls","vessel_orders","infrastructure_projects","ownership_transactions","labour_events","sources"}
+    if normalized_required.issubset(names) and len(normalized_domain.intersection(names)) >= 3:
+        return "normalized_trade_maritime"
+    if "normalized_trade_maritime_entity_location_loader" in fname:
+        return "normalized_trade_maritime"
     return None
 
 
@@ -5476,6 +5485,208 @@ def _ocean_carriers_workbook_records(sections):
     return records
 
 
+
+def _normalized_trade_maritime_workbook_records(sections):
+    """Load the normalized cross-domain trade/maritime workbook end-to-end.
+
+    The workbook already carries explicit entity/asset/location identifiers, but those
+    identifiers are workbook-local.  Resolve graph endpoints by canonical names so the
+    load enriches existing objects instead of creating ENT-* duplicates.
+    """
+    kind="normalized_trade_maritime"
+    records=[]
+
+    entity_rows=_rw_rows(sections.get("Entities",pd.DataFrame()))
+    asset_rows=_rw_rows(sections.get("Assets",pd.DataFrame()))
+    location_rows=_rw_rows(sections.get("Locations",pd.DataFrame()))
+    entity_by_id={str(r.get("entity_id")):r for r in entity_rows if r.get("entity_id")}
+    asset_by_id={str(r.get("asset_id")):r for r in asset_rows if r.get("asset_id")}
+    location_by_id={str(r.get("location_id")):r for r in location_rows if r.get("location_id")}
+
+    def ename(eid):
+        r=entity_by_id.get(str(eid or ""),{})
+        return r.get("canonical_name") or r.get("name") or (str(eid) if eid else None)
+    def aname(aid):
+        r=asset_by_id.get(str(aid or ""),{})
+        return r.get("asset_name") or r.get("name") or (str(aid) if aid else None)
+    def loc(lid):
+        return location_by_id.get(str(lid or ""),{})
+
+    # Sources first so every downstream row can bind provenance.
+    for row in _rw_rows(sections.get("Sources",pd.DataFrame())):
+        url=row.get("source_url")
+        if not url: continue
+        records.append(_rw_record("pc_sources",f"source:{url}",{
+            "source_id":_simple_hash_id("SRC_WEB",url),
+            "source_name":urlparse(str(url)).netloc,
+            "publisher":urlparse(str(url)).netloc,
+            "source_type":"web","url":url,
+            "ingestion_method":"normalized_trade_workbook","active":True,
+            "metadata":_rw_metadata(kind,"Sources",row),
+        },1.0))
+
+    # Canonical entities. Workbook IDs are preserved only as metadata aliases.
+    for row in entity_rows:
+        name=row.get("canonical_name")
+        if not name: continue
+        url=row.get("website_or_primary_source")
+        records.append(_rw_record("pc_entities",f"entity:{name}:{row.get('country')}",{
+            "name":name,"entity_type":row.get("entity_type") or "company",
+            "hq_country":row.get("country"),"country":row.get("country"),
+            "source_url":url,"record_status":"verified",
+            "metadata":_rw_metadata(kind,"Entities",row,{"workbook_entity_id":row.get("entity_id"),"parent_or_owner":row.get("parent_or_owner"),"notes":row.get("notes")}),
+        },1.0))
+        parent=row.get("parent_or_owner")
+        if parent:
+            records.append(_rw_record("pc_relationships",f"relationship:{parent}:owns:{name}",{
+                "source_type":"entity","source_name":parent,"relationship_type":"owns",
+                "target_type":"entity","target_name":name,"confidence":"high","source_url":url,
+                "metadata":_rw_metadata(kind,"Entities",row),
+            }))
+
+    # Canonical assets/facilities/vessels/projects represented by the normalized asset sheet.
+    for row in asset_rows:
+        name=row.get("asset_name")
+        if not name: continue
+        owner=ename(row.get("owner_operator_entity_id"))
+        url=row.get("source_url")
+        records.append(_rw_record("pc_assets",f"asset:{name}:{row.get('country_flag')}",{
+            "name":name,"asset_type":row.get("asset_type") or "asset","country":row.get("country_flag"),
+            "status":row.get("status"),"owner_entity_name":owner,"operator_entity_name":owner,
+            "source_url":url,"record_status":"verified",
+            "metadata":_rw_metadata(kind,"Assets",row,{"workbook_asset_id":row.get("asset_id"),"capacity_or_metric":row.get("capacity_or_metric"),"notes":row.get("notes")}),
+        },1.0))
+
+    # Events themselves.
+    event_rows=_rw_rows(sections.get("Events",pd.DataFrame()))
+    event_source={str(r.get("event_id")):r.get("source_url") for r in event_rows if r.get("event_id")}
+    for row in event_rows:
+        eid=str(row.get("event_id") or _simple_hash_id("EVENT_RWB",row.get("headline"),row.get("event_date")))
+        records.append(_rw_record("pc_events",f"event:{eid}",{
+            "event_id":eid,"start_date":_rw_date(row.get("event_date")),
+            "event_nature":row.get("event_category"),"event_domain":"trade",
+            "event_type":row.get("event_subtype") or row.get("event_category"),
+            "event_category":row.get("event_category"),"event_subcategory":row.get("event_subtype"),
+            "title":row.get("headline"),"description":row.get("summary"),"status":row.get("status"),
+            "confidence":row.get("confidence"),"verification_status":row.get("verification_status"),
+            "trade_relevance":5,"intelligence_relevance":4,"trade_visible":True,"intelligence_visible":True,
+            "source_url":row.get("source_url"),
+            "metadata":_rw_metadata(kind,"Events",row,{"strategic_relevance":row.get("strategic_relevance"),"secondary_source_url":row.get("secondary_source_url")}),
+        },1.0))
+
+    # Explicit event/entity links resolved through entity names.
+    for row in _rw_rows(sections.get("Event_Entity_Links",pd.DataFrame())):
+        eid=row.get("event_id"); name=ename(row.get("entity_id"))
+        if not eid or not name: continue
+        records.append(_rw_record("pc_event_links",f"event-link:{eid}:entity:{name}:{row.get('relationship')}",{
+            "event_id":eid,"linked_type":"entity","linked_name":name,
+            "relationship":row.get("relationship") or "related entity","confidence":"high",
+            "source_url":row.get("source_url") or event_source.get(str(eid)),
+            "metadata":_rw_metadata(kind,"Event_Entity_Links",row,{"workbook_entity_id":row.get("entity_id")}),
+        },1.0))
+
+    # Explicit event/asset links resolved through asset names.
+    for row in _rw_rows(sections.get("Event_Asset_Links",pd.DataFrame())):
+        eid=row.get("event_id"); name=aname(row.get("asset_id"))
+        if not eid or not name: continue
+        arow=asset_by_id.get(str(row.get("asset_id") or ""),{})
+        records.append(_rw_record("pc_event_links",f"event-link:{eid}:asset:{name}:{row.get('relationship')}",{
+            "event_id":eid,"linked_type":"asset","linked_name":name,"asset_type":arow.get("asset_type") or "asset",
+            "relationship":row.get("relationship") or "related asset","confidence":"high",
+            "source_url":event_source.get(str(eid)),"metadata":_rw_metadata(kind,"Event_Asset_Links",row),
+        },1.0))
+
+    # Locations are event-scoped in the current canonical model.
+    for row in _rw_rows(sections.get("Event_Location_Links",pd.DataFrame())):
+        eid=row.get("event_id"); lr=loc(row.get("location_id"))
+        if not eid or not lr: continue
+        lname=lr.get("canonical_name") or row.get("location_id")
+        records.append(_rw_record("pc_event_locations",f"event-location:{eid}:{lname}",{
+            "event_location_id":_simple_hash_id("EVLOC_RWB",eid,lname,row.get("relationship")),
+            "event_id":eid,"location_name":lname,"country":lr.get("country"),
+            "latitude":_rw_number(lr.get("latitude")),"longitude":_rw_number(lr.get("longitude")),
+            "accuracy":row.get("relationship") or lr.get("location_type"),"notes":lr.get("notes"),
+            "source_url":lr.get("source_url") or event_source.get(str(eid)),
+            "metadata":_rw_metadata(kind,"Event_Location_Links",row,{"location":lr}),
+        },1.0))
+
+    # Liner/ferry route calls -> transport service + ordered stops.
+    service_seen=set()
+    for row in _rw_rows(sections.get("Route_Port_Calls",pd.DataFrame())):
+        sname=row.get("service_name"); sid_local=row.get("service_asset_id")
+        if not sname: continue
+        service_id=_simple_hash_id("SERVICE_AI",sid_local or sname)
+        if service_id not in service_seen:
+            service_seen.add(service_id)
+            records.append(_rw_record("pc_transport_services",f"service:{sname}",{
+                "transport_service_id":service_id,"service_name":sname,"mode":"sea",
+                "service_type":"container liner service","effective_start":_rw_date(row.get("service_start")),
+                "frequency_unit":row.get("frequency"),"status":"active","source_url":row.get("source_url"),
+                "metadata":_rw_metadata(kind,"Route_Port_Calls",row,{"workbook_service_asset_id":sid_local}),
+            },1.0))
+        port=row.get("port_name")
+        if port:
+            records.append(_rw_record("pc_transport_service_stops",f"service-stop:{service_id}:{row.get('direction')}:{row.get('sequence')}:{port}",{
+                "transport_service_id":service_id,"direction":row.get("direction") or "main",
+                "sequence_no":int(_rw_number(row.get("sequence")) or 0),"asset_name":port,"asset_type":"port",
+                "call_type":"scheduled","source_url":row.get("source_url"),
+                "metadata":_rw_metadata(kind,"Route_Port_Calls",row,{"country":row.get("country"),"location_id":row.get("location_id")}),
+            },1.0))
+
+    # Vessel/newbuild orders.
+    for row in _rw_rows(sections.get("Vessel_Orders",pd.DataFrame())):
+        eid=row.get("event_id"); buyer=ename(row.get("owner_entity_id")); builder=ename(row.get("shipyard_entity_id")); url=row.get("source_url")
+        oid=_simple_hash_id("SHIPORD_AI",eid,row.get("asset_id"),buyer,builder,row.get("contract_date"))
+        records.append(_rw_record("pc_shipbuilding_orders",f"shiporder:{oid}",{
+            "shipbuilding_order_id":oid,"buyer_entity_name":buyer,"builder_entity_name":builder,
+            "quantity":_rw_number(row.get("vessel_count")),"vessel_type":row.get("vessel_type"),
+            "contract_date":_rw_date(row.get("contract_date")),"delivery_date":_rw_date(row.get("delivery_date")),
+            "status":row.get("status"),"source_url":url,
+            "metadata":_rw_metadata(kind,"Vessel_Orders",row,{"capacity_teu_each":row.get("capacity_teu_each"),"loa_m":row.get("loa_m"),"beam_m":row.get("beam_m"),"depth_m":row.get("depth_m"),"design_speed_kn":row.get("design_speed_kn"),"propulsion":row.get("propulsion"),"shipyard_parent":ename(row.get("shipyard_parent_entity_id"))}),
+        },1.0))
+
+    # Infrastructure projects + optional financing.
+    for row in _rw_rows(sections.get("Infrastructure_Projects",pd.DataFrame())):
+        pname=row.get("project_name") or aname(row.get("asset_id")); url=row.get("source_url")
+        if not pname: continue
+        owner=ename(row.get("owner_entity_id")); manager=ename(row.get("manager_entity_id"))
+        records.append(_rw_record("pc_assets",f"project-asset:{pname}",{
+            "name":pname,"asset_type":"project","status":row.get("status"),"owner_entity_name":owner,"operator_entity_name":manager,
+            "source_url":url,"metadata":_rw_metadata(kind,"Infrastructure_Projects",row),
+        },1.0))
+        records.append(_rw_record("pc_project_details",f"project-detail:{pname}",{
+            "asset_name":pname,"project_type":row.get("project_type"),"project_stage":row.get("status"),
+            "sponsor_entity_name":owner,"developer_entity_name":manager,"source_url":url,
+            "metadata":_rw_metadata(kind,"Infrastructure_Projects",row,{"capacity_or_scope":row.get("capacity_or_scope"),"linked_port_entity":ename(row.get("linked_port_entity_id"))}),
+        },1.0))
+        amount=_rw_number(row.get("financing_amount_usd"))
+        if amount:
+            records.append(_rw_record("pc_financing_facilities",f"financing:{pname}:{amount}",{
+                "financing_name":f"{pname} financing","financing_type":"project finance","amount":amount,"currency":"USD",
+                "status":row.get("status"),"source_url":url,"metadata":_rw_metadata(kind,"Infrastructure_Projects",row),
+            },1.0))
+
+    # Ownership transactions.
+    for row in _rw_rows(sections.get("Ownership_Transactions",pd.DataFrame())):
+        eid=row.get("event_id"); target=ename(row.get("target_entity_id")); buyer=ename(row.get("buyer_parent_entity_id")); vehicle=ename(row.get("acquiring_vehicle_entity_id")); url=row.get("source_url")
+        records.append(_rw_record("pc_transactions",f"transaction:{eid}:{target}:{buyer}",{
+            "transaction_id":_simple_hash_id("TX_AI",eid,target,buyer),"transaction_type":"ownership acquisition",
+            "target_entity_name":target,"buyer_entity_name":buyer,"status":row.get("status"),
+            "announcement_date":_rw_date(row.get("results_date") or row.get("offer_open")),"source_url":url,
+            "metadata":_rw_metadata(kind,"Ownership_Transactions",row,{"acquiring_vehicle":vehicle,"previous_stake_pct":row.get("previous_stake_pct"),"post_settlement_stake_pct_min":row.get("post_settlement_stake_pct_min"),"offer_price_aed":row.get("offer_price_aed"),"offer_close":row.get("offer_close"),"settlement_deadline":row.get("settlement_deadline"),"notes":row.get("notes")}),
+        },1.0))
+
+    # Labour-specific operational detail preserved as observations linked by event id.
+    for row in _rw_rows(sections.get("Labour_Events",pd.DataFrame())):
+        eid=row.get("event_id"); url=row.get("source_url")
+        records.append(_rw_record("pc_observations",f"labour-observation:{eid}",{
+            "observation_id":_simple_hash_id("OBS_AI","labour",eid),"observation_date":_rw_date(row.get("agreement_or_vote_date")),
+            "source_type":"labour_event","source_url":url,"confidence":"high","review_status":"approved","record_status":"verified",
+            "raw_value":_jsonable(row),"metadata":_rw_metadata(kind,"Labour_Events",row,{"employer":ename(row.get("employer_entity_id")),"union":ename(row.get("union_entity_id"))}),
+        },1.0))
+
+    return records
+
 def _research_workbook_records(sections,filename=""):
     kind=_research_workbook_kind(sections,filename)
     if kind=="girteka": return kind,_girteka_workbook_records(sections)
@@ -5483,6 +5694,7 @@ def _research_workbook_records(sections,filename=""):
     if kind=="trade_articles": return kind,_trade_article_workbook_records(sections)
     if kind=="gcc_security": return kind,_gcc_security_workbook_records(sections)
     if kind=="ocean_carriers": return kind,_ocean_carriers_workbook_records(sections)
+    if kind=="normalized_trade_maritime": return kind,_normalized_trade_maritime_workbook_records(sections)
     return None,[]
 
 
