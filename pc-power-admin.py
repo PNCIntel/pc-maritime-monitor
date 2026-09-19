@@ -1054,6 +1054,27 @@ FIELD_ALIASES = {
 def _norm_field(v):
     return re.sub(r"[^a-z0-9]+","_",str(v or "").strip().casefold()).strip("_")
 
+# V5.1.4 load-scoped caches. Large carrier workbooks can contain 800+
+# canonical/domain rows. Without these caches, the direct loader performs the
+# same schema/source/entity lookups hundreds of times and can appear to hang.
+_SIMPLE_LOAD_CACHE = {
+    "columns": {},
+    "sources": {},
+    "entities": {},
+    "assets": {},
+    "mobile_assets": {},
+}
+
+def _reset_simple_load_cache():
+    for bucket in _SIMPLE_LOAD_CACHE.values():
+        if isinstance(bucket, dict):
+            bucket.clear()
+    try:
+        _TRANSPORT_TAXONOMY_CACHE["modes"] = None
+        _TRANSPORT_TAXONOMY_CACHE["service_types"] = None
+    except Exception:
+        pass
+
 def _table_write_columns_live(sb, table):
     """Return the *actual* writable columns for a live canonical table.
 
@@ -1066,10 +1087,15 @@ def _table_write_columns_live(sb, table):
     unavailable, use pc_meta_columns.  Only as a last-resort compatibility fallback
     do we return the small canonical baseline.
     """
+    cached=_SIMPLE_LOAD_CACHE.get("columns",{}).get(str(table))
+    if cached:
+        return list(cached)
     try:
         r=sb.rpc("pc_get_table_write_columns",{"p_table_name":table}).execute().data
         if isinstance(r,list) and r:
-            return sorted({str(x) for x in r if x})
+            cols=sorted({str(x) for x in r if x})
+            _SIMPLE_LOAD_CACHE["columns"][str(table)]=tuple(cols)
+            return cols
     except Exception:
         pass
 
@@ -1080,7 +1106,9 @@ def _table_write_columns_live(sb, table):
               .execute().data or [])
         cols={str(x.get("column_name")) for x in rows if x.get("column_name")}
         if cols:
-            return sorted(cols)
+            cols=sorted(cols)
+            _SIMPLE_LOAD_CACHE["columns"][str(table)]=tuple(cols)
+            return cols
     except Exception:
         pass
 
@@ -1091,7 +1119,9 @@ def _table_write_columns_live(sb, table):
     # Conservative fallback only. Do not pretend every table has provenance/name
     # columns; overflow is preserved in metadata when metadata is genuinely writable.
     base.update({"metadata"})
-    return sorted(base)
+    cols=sorted(base)
+    _SIMPLE_LOAD_CACHE["columns"][str(table)]=tuple(cols)
+    return cols
 
 def _auto_column_mapping(source_columns, target_columns):
     targets={_norm_field(x):x for x in target_columns}
@@ -4199,104 +4229,122 @@ def _process_queued_content_items(limit_items=10, product_context="TRADE", deep=
 
 
 def _simple_direct_write_records(sb, result):
-    """Write content-derived records straight to canonical/domain tables.
+    """Write normalized records directly, batching large same-table loads.
 
-    No pc_staged_records, no promotion workflow and no reconciliation gate.
-    Deterministic dependencies are created/bound by _simple_prepare_payload().
-    The database write is the validator; only a failed write is an exception.
+    V5.1.4 keeps dependency ordering but avoids one PostgREST write per route.
+    Large carrier workbooks are prepared table-by-table, written in chunks, and
+    automatically fall back to row-wise writes only when a batch fails so the
+    exported diagnostics remain precise.
     """
     records=(result or {}).get("records") or []
     priority={
-        "pc_entities":10,"pc_assets":20,"pc_mobile_assets":30,
-        "pc_events":40,"pc_transactions":42,"pc_transport_services":45,
-        "pc_financing_facilities":45,"pc_contracts":45,"pc_vessel_designs":45,
-        "pc_shipbuilding_orders":46,"pc_transport_routes":46,"pc_project_details":46,
-        "pc_port_capabilities":50,"pc_port_metrics":50,"pc_terminal_details":50,
-        "pc_berth_details":52,"pc_transaction_participants":55,
-        "pc_financing_participants":55,"pc_contract_participants":55,
-        "pc_shipbuilding_order_units":56,"pc_transport_service_aliases":56,
-        "pc_transport_service_operators":56,"pc_transport_service_stops":57,
-        "pc_transport_service_schedules":57,"pc_transport_service_transit_times":58,
+        "pc_sources":5,"pc_source_records":6,"pc_entities":10,"pc_company_profiles":12,
+        "pc_company_registrations":13,"pc_trucking_company_details":14,"pc_rail_operator_details":14,
+        "pc_assets":20,"pc_company_operating_footprint":25,"pc_rail_networks":25,"pc_road_corridors":28,
+        "pc_mobile_assets":30,"pc_rail_nodes":30,"pc_rail_links":35,"pc_events":40,"pc_transactions":42,
+        "pc_transport_services":45,"pc_financing_facilities":45,"pc_contracts":45,"pc_vessel_designs":45,
+        "pc_shipbuilding_orders":46,"pc_transport_routes":46,"pc_project_details":46,"pc_financial_records":47,
+        "pc_port_capabilities":50,"pc_port_metrics":50,"pc_terminal_details":50,"pc_berth_details":52,
+        "pc_transaction_participants":55,"pc_financing_participants":55,"pc_contract_participants":55,
+        "pc_shipbuilding_order_units":56,"pc_transport_service_aliases":56,"pc_transport_service_operators":56,
+        "pc_transport_service_stops":57,"pc_transport_service_schedules":57,"pc_transport_service_transit_times":58,
         "pc_transport_service_mobile_assets":58,"pc_transport_service_network_links":58,
-        "pc_transport_service_connections":58,"pc_transport_service_sources":59,
-        "pc_transport_service_changes":59,"pc_financing_links":60,"pc_contract_links":60,
-        "pc_company_profiles":12,"pc_company_registrations":13,"pc_trucking_company_details":14,
-        "pc_rail_operator_details":14,"pc_company_operating_footprint":25,
-        "pc_rail_networks":25,"pc_road_corridors":28,"pc_rail_nodes":30,"pc_rail_links":35,
-        "pc_financial_records":47,"pc_sources":5,"pc_source_records":6,
-        "pc_relationships":80,"pc_event_links":90,"pc_event_locations":91,"pc_event_impacts":92,
+        "pc_transport_service_connections":58,"pc_transport_service_sources":59,"pc_transport_service_changes":59,
+        "pc_financing_links":60,"pc_contract_links":60,"pc_relationships":80,"pc_event_links":90,
+        "pc_event_locations":91,"pc_event_impacts":92,
     }
-    records=sorted(
-        [r for r in records if isinstance(r,dict)],
-        key=lambda r: priority.get(str(r.get("target_table") or ""),60)
-    )
+    clean=[r for r in records if isinstance(r,dict)]
+    # Group by target table while preserving dependency priority.
+    table_order=sorted({str(r.get("target_table") or "") for r in clean},key=lambda t:(priority.get(t,60),t))
+    grouped={t:[r for r in clean if str(r.get("target_table") or "")==t] for t in table_order}
 
-    applied=0
-    failures=[]
-    by_table={}
-    attempted_by_table={}
-    for rec in records:
-        p=None
-        table=str(rec.get("target_table") or "").strip()
-        payload=rec.get("payload")
-        attempted_by_table[table or "unknown"]=attempted_by_table.get(table or "unknown",0)+1
-        if table not in AI_ALLOWED_TABLES or not isinstance(payload,dict):
-            failures.append({"table":table or None,"record":rec.get("natural_key"),"error":"invalid target table or payload"})
+    applied=0; failures=[]; by_table={}; attempted_by_table={}
+
+    def _record_failure(table,natural_key,exc,p=None):
+        failures.append({
+            "table":table,"record":natural_key,"error":str(exc),
+            "payload_keys":sorted(list(p.keys())) if isinstance(p,dict) else [],
+        })
+
+    def _write_rows(table, prepared, conflict, upsert):
+        nonlocal applied
+        if not prepared:
+            return
+        for i in range(0,len(prepared),100):
+            batch=prepared[i:i+100]
+            payloads=[x[1] for x in batch]
+            try:
+                if upsert:
+                    sb.table(table).upsert(payloads,on_conflict=conflict).execute()
+                else:
+                    sb.table(table).insert(payloads).execute()
+                applied += len(batch)
+                by_table[table]=by_table.get(table,0)+len(batch)
+            except Exception:
+                # One bad row must not hide the other 99 good rows. Fall back to
+                # individual writes only for this failed chunk.
+                for natural_key,p in batch:
+                    try:
+                        if upsert:
+                            sb.table(table).upsert(p,on_conflict=conflict).execute()
+                        else:
+                            sb.table(table).insert(p).execute()
+                        applied += 1
+                        by_table[table]=by_table.get(table,0)+1
+                    except Exception as row_exc:
+                        _record_failure(table,natural_key,row_exc,p)
+
+    for table in table_order:
+        recs=grouped.get(table) or []
+        attempted_by_table[table or "unknown"]=len(recs)
+        if table not in AI_ALLOWED_TABLES:
+            for rec in recs:
+                _record_failure(table,rec.get("natural_key"),"invalid target table or payload")
             continue
-        natural_key=_record_key(payload,rec.get("natural_key") or "")
-        try:
-            p=_simple_prepare_payload(sb,table,payload,natural_key)
-            p=_fill_staging_key(p,table,natural_key)
-            p=_jsonable(p)
-            if not p:
-                raise ValueError("prepared payload is empty")
-
-            conflict=APPLY_CONFLICT_KEYS.get(table)
-            keys=[x.strip() for x in conflict.split(",")] if conflict else []
-            can_upsert=bool(keys) and all(p.get(k) not in (None,"") for k in keys)
-            if can_upsert:
-                sb.table(table).upsert(p,on_conflict=conflict).execute()
-            else:
-                sb.table(table).insert(p).execute()
-            applied+=1
-            by_table[table]=by_table.get(table,0)+1
-        except Exception as exc:
-            failures.append({
-                "table":table,
-                "record":natural_key,
-                "error":str(exc),
-                "payload_keys":sorted(list(p.keys())) if isinstance(locals().get("p"),dict) else [],
-            })
+        conflict=APPLY_CONFLICT_KEYS.get(table)
+        keys=[x.strip() for x in conflict.split(",")] if conflict else []
+        upsert_rows=[]; insert_rows=[]
+        for rec in recs:
+            payload=rec.get("payload")
+            if not isinstance(payload,dict):
+                _record_failure(table,rec.get("natural_key"),"invalid target table or payload")
+                continue
+            natural_key=_record_key(payload,rec.get("natural_key") or "")
+            p=None
+            try:
+                p=_simple_prepare_payload(sb,table,payload,natural_key)
+                p=_fill_staging_key(p,table,natural_key)
+                p=_jsonable(p)
+                if not p:
+                    raise ValueError("prepared payload is empty")
+                can_upsert=bool(keys) and all(p.get(k) not in (None,"") for k in keys)
+                (upsert_rows if can_upsert else insert_rows).append((natural_key,p))
+            except Exception as exc:
+                _record_failure(table,natural_key,exc,p)
+        _write_rows(table,upsert_rows,conflict,True)
+        _write_rows(table,insert_rows,conflict,False)
 
     error_counts={}
     for f in failures:
         key=str(f.get("error") or "unknown error")
-        # Keep summaries readable while retaining complete row-level failures below.
-        if len(key)>280:
-            key=key[:277]+"..."
+        if len(key)>280: key=key[:277]+"..."
         error_counts[key]=error_counts.get(key,0)+1
     failed_by_table={}
     for f in failures:
         t=str(f.get("table") or "unknown")
         failed_by_table[t]=failed_by_table.get(t,0)+1
-
     return {
-        "attempted":len(records),
-        "applied":applied,
-        "blocked":len(failures),
-        "failed":len(failures),
-        "failures":failures,  # do not silently truncate workbook diagnostics
-        "by_table":by_table,
-        "attempted_by_table":attempted_by_table,
+        "attempted":len(clean),"applied":applied,"blocked":len(failures),"failed":len(failures),
+        "failures":failures,"by_table":by_table,"attempted_by_table":attempted_by_table,
         "failed_by_table":failed_by_table,
         "error_summary":[{"error":k,"count":v} for k,v in sorted(error_counts.items(),key=lambda x:(-x[1],x[0]))],
-        "mode":"source_to_canonical_direct",
+        "mode":"source_to_canonical_direct_batched",
     }
 
 
 
 # ---------------------------------------------------------------------------
-# V5.1.3 normalized domain loader + exportable load reports
+# V5.1.4 normalized domain loader + exportable load reports
 # ---------------------------------------------------------------------------
 
 def _research_load_report_exports(report, workbook_name="research_workbook"):
@@ -5418,6 +5466,7 @@ def _load_research_workbook_direct(filename,sections,file_hash):
     Every source row is either normalized into a domain table or preserved as an
     observation/metadata payload.  No fact-promotion queue is involved.
     """
+    _reset_simple_load_cache()
     kind,records=_research_workbook_records(sections,filename)
     if not kind:
         raise ValueError("Workbook is not one of the supported P&C research workbook shapes")
@@ -5761,10 +5810,14 @@ def _simple_source_id(sb, payload):
     url=str(payload.get("source_url") or payload.get("url") or "").strip()
     if not url:
         return None
+    if url in _SIMPLE_LOAD_CACHE["sources"]:
+        return _SIMPLE_LOAD_CACHE["sources"][url]
     try:
         hit=(sb.table("pc_sources").select("source_id").eq("url",url).limit(1).execute().data or [])
         if hit:
-            return hit[0]["source_id"]
+            resolved=hit[0]["source_id"]
+            _SIMPLE_LOAD_CACHE["sources"][url]=resolved
+            return resolved
     except Exception:
         pass
     sid=_simple_hash_id("SRC_WEB",url)
@@ -5788,6 +5841,7 @@ def _simple_source_id(sb, payload):
     except Exception:
         # Source creation should not block the fact record.
         return None
+    _SIMPLE_LOAD_CACHE["sources"][url]=sid
     return sid
 
 
@@ -5796,6 +5850,9 @@ def _simple_ensure_entity(sb, name, country=None, entity_type="company", source_
     name=_simple_clean_name(name)
     if not name:
         return None
+    cache_key=(name.casefold(),str(country or "").strip().casefold(),str(entity_type or "company").casefold())
+    if cache_key in _SIMPLE_LOAD_CACHE["entities"]:
+        return _SIMPLE_LOAD_CACHE["entities"][cache_key]
     try:
         hits=(sb.table("pc_entities").select("entity_id,name,hq_country,entity_type")
               .ilike("name",name).limit(25).execute().data or [])
@@ -5810,6 +5867,7 @@ def _simple_ensure_entity(sb, name, country=None, entity_type="company", source_
             if patch:
                 try: sb.table("pc_entities").update(patch).eq("entity_id",eid).execute()
                 except Exception: pass
+            _SIMPLE_LOAD_CACHE["entities"][cache_key]=eid
             return eid
     except Exception:
         pass
@@ -5830,6 +5888,7 @@ def _simple_ensure_entity(sb, name, country=None, entity_type="company", source_
     writable=set(_table_write_columns_live(sb,"pc_entities"))
     row={k:v for k,v in row.items() if k in writable and v not in (None,"")}
     sb.table("pc_entities").upsert(row,on_conflict="entity_id").execute()
+    _SIMPLE_LOAD_CACHE["entities"][cache_key]=eid
     return eid
 
 
@@ -5838,6 +5897,9 @@ def _simple_ensure_asset(sb, name, country=None, asset_type="asset", subtype=Non
     name=_simple_clean_name(name)
     if not name:
         return None
+    cache_key=(name.casefold(),str(country or "").strip().casefold(),str(asset_type or "asset").casefold(),str(subtype or "").casefold())
+    if cache_key in _SIMPLE_LOAD_CACHE["assets"]:
+        return _SIMPLE_LOAD_CACHE["assets"][cache_key]
     try:
         hits=(sb.table("pc_assets").select("asset_id,name,country,asset_type,subtype")
               .ilike("name",name).limit(25).execute().data or [])
@@ -5846,7 +5908,9 @@ def _simple_ensure_asset(sb, name, country=None, asset_type="asset", subtype=Non
             same=[x for x in hits if not x.get("country") or str(x.get("country")).strip().casefold()==ck]
             if same: hits=same
         if hits:
-            return hits[0]["asset_id"]
+            aid=hits[0]["asset_id"]
+            _SIMPLE_LOAD_CACHE["assets"][cache_key]=aid
+            return aid
     except Exception:
         pass
     aid=_deterministic_asset_id(name,country or "",asset_type or "asset")
@@ -5866,6 +5930,7 @@ def _simple_ensure_asset(sb, name, country=None, asset_type="asset", subtype=Non
     writable=set(_table_write_columns_live(sb,"pc_assets"))
     row={k:v for k,v in row.items() if k in writable and v not in (None,"")}
     sb.table("pc_assets").upsert(row,on_conflict="asset_id").execute()
+    _SIMPLE_LOAD_CACHE["assets"][cache_key]=aid
     return aid
 
 
