@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "515-bulk-carriers-persistent-report-exports-2026-09-19"
+LOADER_BUILD = "516-universal-result-exports-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -7631,6 +7631,158 @@ def _canonical_job_summary(job_id):
     }, by_table
 
 
+
+def _canonical_job_report(job_id, source_name="canonical_package"):
+    """Build an exportable report for the generic canonical/reconciliation loader.
+
+    Structured research workbooks already have their own report path.  This covers
+    ordinary canonical packages (including normalized entity/location workbooks)
+    so every load has the same downloadable result/summary/issues surface.
+    """
+    summ, by_table = _canonical_job_summary(job_id)
+    try:
+        review_rows = _canonical_review_rows(job_id, 5000) or []
+    except Exception:
+        review_rows = []
+
+    reason_counts = {}
+    for rr in review_rows:
+        reason = str(rr.get("resolution_method") or rr.get("resolution_status") or "UNKNOWN")
+        key = (rr.get("target_table") or "unknown", reason)
+        reason_counts[key] = reason_counts.get(key, 0) + 1
+    reason_rows = [
+        {"target_table": k[0], "reason": k[1], "count": v}
+        for k, v in sorted(reason_counts.items(), key=lambda x: (x[0][0], -x[1], x[0][1]))
+    ]
+
+    job = {}
+    try:
+        rows = (sb.table("pc_ingestion_jobs")
+                .select("ingestion_job_id,job_type,title,status,created_at,started_at,completed_at,error_text,stats,source_scope")
+                .eq("ingestion_job_id", str(job_id)).limit(1).execute().data or [])
+        if rows:
+            job = rows[0]
+    except Exception:
+        job = {}
+
+    processor_result = st.session_state.get(f"canonical_result_{job_id}")
+    return {
+        "loader_build": LOADER_BUILD,
+        "source_name": source_name,
+        "job_id": str(job_id),
+        "job": _jsonable(job),
+        "summary": _jsonable(summ),
+        "table_status": _jsonable(by_table),
+        "issue_summary": _jsonable(reason_rows),
+        "issues": _jsonable(review_rows),
+        "processor_result": _jsonable(processor_result) if processor_result is not None else None,
+    }
+
+
+def _canonical_job_report_exports(report, source_name="canonical_package"):
+    """Create JSON, Excel, CSV and ZIP exports for any generic canonical load."""
+    report = report if isinstance(report, dict) else {}
+    base = Path(str(source_name or report.get("source_name") or "canonical_package")).stem
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("_") or "canonical_package"
+    stamp = pd.Timestamp.utcnow().strftime("%Y%m%d_%H%M%S")
+    prefix = f"{safe}_canonical_result_{stamp}"
+
+    json_bytes = json.dumps(_jsonable(report), ensure_ascii=False, indent=2, default=str).encode("utf-8")
+    table_df = pd.DataFrame(report.get("table_status") or [])
+    issue_summary_df = pd.DataFrame(report.get("issue_summary") or [])
+    issues_df = pd.DataFrame(report.get("issues") or [])
+    table_csv = table_df.to_csv(index=False).encode("utf-8-sig")
+    issues_csv = issues_df.to_csv(index=False).encode("utf-8-sig")
+
+    xlsx_bytes = None
+    try:
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            summary = report.get("summary") or {}
+            pd.DataFrame([{"metric": k, "value": v} for k, v in summary.items()]).to_excel(
+                writer, sheet_name="Summary", index=False
+            )
+            table_df.to_excel(writer, sheet_name="Table Status", index=False)
+            issue_summary_df.to_excel(writer, sheet_name="Issue Summary", index=False)
+            issues_df.to_excel(writer, sheet_name="Issues", index=False)
+            job = report.get("job") or {}
+            pd.DataFrame([{"field": k, "value": json.dumps(v, ensure_ascii=False, default=str) if isinstance(v,(dict,list)) else v}
+                          for k,v in job.items()]).to_excel(writer, sheet_name="Job Metadata", index=False)
+            pd.DataFrame([{"full_report_json": json.dumps(_jsonable(report), ensure_ascii=False, default=str)}]).to_excel(
+                writer, sheet_name="Raw Report", index=False
+            )
+        xlsx_bytes = buf.getvalue()
+    except Exception:
+        xlsx_bytes = None
+
+    zbuf = io.BytesIO()
+    with zipfile.ZipFile(zbuf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{prefix}.json", json_bytes)
+        zf.writestr(f"{prefix}_table_status.csv", table_csv)
+        zf.writestr(f"{prefix}_issues.csv", issues_csv)
+        if xlsx_bytes is not None:
+            zf.writestr(f"{prefix}.xlsx", xlsx_bytes)
+
+    return {
+        "prefix": prefix,
+        "json": json_bytes,
+        "xlsx": xlsx_bytes,
+        "table_csv": table_csv,
+        "issues_csv": issues_csv,
+        "zip": zbuf.getvalue(),
+    }
+
+
+def _render_canonical_job_exports(job_id, source_name="canonical_package", key_prefix="canonical_export"):
+    """Render persistent result downloads for generic canonical jobs."""
+    report = _canonical_job_report(job_id, source_name)
+    exports = _canonical_job_report_exports(report, source_name)
+    st.markdown("#### Download result / summary / issues")
+    st.caption("Available for every canonical load, including packages that use reconciliation rather than the structured-workbook path.")
+    c1, c2, c3 = st.columns(3)
+    c1.download_button(
+        "⬇ Excel result + issues",
+        data=exports.get("xlsx") or exports.get("json") or b"{}",
+        file_name=(f"{exports['prefix']}.xlsx" if exports.get("xlsx") is not None else f"{exports['prefix']}.json"),
+        mime=("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if exports.get("xlsx") is not None else "application/json"),
+        use_container_width=True,
+        key=f"{key_prefix}_xlsx_{job_id}",
+    )
+    c2.download_button(
+        "⬇ Full JSON report",
+        data=exports.get("json") or b"{}",
+        file_name=f"{exports['prefix']}.json",
+        mime="application/json",
+        use_container_width=True,
+        key=f"{key_prefix}_json_{job_id}",
+    )
+    c3.download_button(
+        "⬇ Complete report bundle",
+        data=exports.get("zip") or b"",
+        file_name=f"{exports['prefix']}_bundle.zip",
+        mime="application/zip",
+        use_container_width=True,
+        key=f"{key_prefix}_zip_{job_id}",
+    )
+    c4, c5 = st.columns(2)
+    c4.download_button(
+        "⬇ Table status CSV",
+        data=exports.get("table_csv") or b"",
+        file_name=f"{exports['prefix']}_table_status.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key=f"{key_prefix}_table_{job_id}",
+    )
+    c5.download_button(
+        "⬇ Issues CSV",
+        data=exports.get("issues_csv") or b"",
+        file_name=f"{exports['prefix']}_issues.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key=f"{key_prefix}_issues_{job_id}",
+    )
+
+
 def _norm_vocab_token(value):
     return re.sub(r"[^a-z0-9]+","_",str(value or "").strip().casefold()).strip("_")
 
@@ -11300,6 +11452,12 @@ elif page=="Canonical Loader":
                 with st.expander("Job table/status breakdown",expanded=False):
                     dataframe(_selected_by_table)
 
+            _render_canonical_job_exports(
+                _selected_jid,
+                _selected_job.get("title") or "canonical_package",
+                key_prefix="resume_job_export"
+            )
+
             _resume_review=_canonical_review_rows(_selected_jid,3000)
             if _resume_review:
                 _reason_counts={}
@@ -11792,6 +11950,11 @@ elif page=="Canonical Loader":
                     m3.metric("Review",summ.get("review",0))
                     m4.metric("Broken refs",summ.get("broken",0))
                     dataframe(by_table)
+                    _render_canonical_job_exports(
+                        last,
+                        up.name if up else "canonical_package",
+                        key_prefix=f"current_upload_export_{str(file_hash)[:16]}"
+                    )
 
                     if summ.get("review",0):
                         review_rows=_canonical_review_rows(last,2000)
