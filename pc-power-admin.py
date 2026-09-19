@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "48-direct-canonical-load-2026-09-18"
+LOADER_BUILD = "50-sanctions-bulk-load-2026-09-18"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -91,6 +91,7 @@ NAV = {
     "Canonical Exceptions": "Canonical Review",
     "AI Research": "AI Research Workflow",
     "Content Intake": "Universal Content Intake",
+    "Sanctions Bulk Load": "Sanctions Bulk Load",
     "Port Enrichment": "Port Enrichment",
     "Documents": "Document Loader",
     "Email & Distribution": "Distribution Lists",
@@ -2680,24 +2681,31 @@ def _upsert_content_url_item(batch_id,url,document_id=None,discovery_method="man
         raise ValueError(f"Invalid URL: {url}")
     existing=(sb.table("pc_content_ingest_items")
               .select("*").eq("normalized_url",normalized).limit(1).execute().data or [])
-    patch={
+    base_patch={
         "content_batch_id":batch_id,
         "input_type":"url",
         "source_url":url,
         "normalized_url":normalized,
         "document_id":document_id,
         "discovery_method":discovery_method,
+        "updated_at":pd.Timestamp.utcnow().isoformat(),
+    }
+    base_patch={k:v for k,v in base_patch.items() if v is not None}
+    if existing:
+        # Critical idempotency rule: re-adding the same URL must NOT reset a
+        # completed item to pending. That was causing repeated extraction and
+        # fact growth on every workflow click/reload.
+        item_id=existing[0]["content_item_id"]
+        sb.table("pc_content_ingest_items").update(base_patch).eq("content_item_id",item_id).execute()
+        return {**existing[0],**base_patch}
+
+    insert_patch={
+        **base_patch,
         "fetch_status":"pending",
         "extraction_status":"pending",
         "resolution_status":"pending",
-        "updated_at":pd.Timestamp.utcnow().isoformat(),
     }
-    patch={k:v for k,v in patch.items() if v is not None}
-    if existing:
-        item_id=existing[0]["content_item_id"]
-        sb.table("pc_content_ingest_items").update(patch).eq("content_item_id",item_id).execute()
-        return {**existing[0],**patch}
-    return sb.table("pc_content_ingest_items").insert(patch).execute().data[0]
+    return sb.table("pc_content_ingest_items").insert(insert_patch).execute().data[0]
 
 def _save_url_manifest_document(upload,urls):
     """Preserve an uploaded URL-list document in pc_documents when available."""
@@ -2722,27 +2730,142 @@ def _save_url_manifest_document(upload,urls):
         return doc_id
     return sb.table("pc_documents").insert(payload).execute().data[0]["document_id"]
 
+
+def _fact_sig_norm(v):
+    if v is None:
+        return ""
+    try:
+        if pd.isna(v):
+            return ""
+    except Exception:
+        pass
+    if isinstance(v,(dict,list,tuple)):
+        try:
+            return json.dumps(v,sort_keys=True,ensure_ascii=False,separators=(",",":"))
+        except Exception:
+            return str(v)
+    s=str(v).strip().casefold()
+    s=re.sub(r"\s+"," ",s)
+    return s
+
+
+def _fact_signature(f):
+    """Stable semantic fact signature.
+
+    Deliberately excludes confidence/evidence/primary-source URL so a second
+    extraction of the same semantic fact enriches/reuses the original row
+    instead of appending another fact.
+    """
+    keys=[
+        "fact_type",
+        "subject_type","subject_name","subject_identifier",
+        "predicate",
+        "object_type","object_name","object_identifier",
+        "value_text","value_numeric","value_boolean",
+        "unit","currency",
+        "effective_date","start_date","end_date",
+        "location_text","country",
+    ]
+    raw="|".join(_fact_sig_norm(f.get(k)) for k in keys)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _mark_duplicate_content_facts(limit=10000):
+    """Mark repeated semantic facts as duplicates without deleting audit rows."""
+    rows=(sb.table("pc_extracted_facts").select(
+        "fact_id,content_item_id,fact_type,subject_type,subject_name,subject_identifier,"
+        "predicate,object_type,object_name,object_identifier,value_text,value_numeric,"
+        "value_boolean,unit,currency,effective_date,start_date,end_date,location_text,"
+        "country,review_status,resolution_status,created_at"
+    ).order("created_at",desc=False).limit(int(limit)).execute().data or [])
+
+    seen={}
+    duplicates=[]
+    for r in rows:
+        cid=str(r.get("content_item_id") or "")
+        sig=_fact_signature(r)
+        key=(cid,sig)
+        if key not in seen:
+            seen[key]=r.get("fact_id")
+        else:
+            duplicates.append((r.get("fact_id"),seen[key]))
+
+    for fact_id,keep_id in duplicates:
+        if not fact_id:
+            continue
+        sb.table("pc_extracted_facts").update({
+            "review_status":"duplicate",
+            "resolution_status":"duplicate",
+            "metadata":{"duplicate_of_fact_id":str(keep_id),"deduped_by":LOADER_BUILD}
+        }).eq("fact_id",fact_id).execute()
+
+    try:
+        _content_review_data.clear()
+    except Exception:
+        pass
+    return {"scanned":len(rows),"duplicates_marked":len(duplicates),"unique_facts":len(rows)-len(duplicates)}
+
+
 def _persist_extracted_facts(content_item_id,extraction_run_id,result,source_url,document_id=None):
+    """Persist only new semantic facts for a content item.
+
+    Re-extraction of the same article may return a different order or slightly
+    different evidence/confidence. Existing semantic facts are reused/enriched
+    rather than appended.
+    """
     facts=(result or {}).get("facts") or []
+
+    existing=(sb.table("pc_extracted_facts").select(
+        "fact_id,content_item_id,fact_type,subject_type,subject_name,subject_identifier,"
+        "predicate,object_type,object_name,object_identifier,value_text,value_numeric,"
+        "value_boolean,unit,currency,effective_date,start_date,end_date,location_text,"
+        "country,primary_source_url,verification_status,review_status,resolution_status"
+    ).eq("content_item_id",content_item_id).limit(10000).execute().data or [])
+
+    existing_by_sig={}
+    for r in existing:
+        if str(r.get("resolution_status") or "")=="duplicate":
+            continue
+        existing_by_sig.setdefault(_fact_signature(r),r)
+
     rows=[]
+    reused=[]
     for idx,f in enumerate(facts):
         if not isinstance(f,dict) or not f.get("predicate"):
             continue
+
         fact_type=str(f.get("fact_type") or "other").strip()
         if fact_type not in FACT_TYPES:
             fact_type="other"
+        f=dict(f)
+        f["fact_type"]=fact_type
+        sig=_fact_signature(f)
+
         try:
             conf=float(f.get("confidence") if f.get("confidence") is not None else 0.70)
         except Exception:
             conf=0.70
         conf=max(0.0,min(1.0,conf))
         primary=f.get("primary_source_url")
+
+        if sig in existing_by_sig:
+            old=existing_by_sig[sig]
+            patch={}
+            # Enrich the retained fact when a later pass finds better sourcing.
+            if primary and not old.get("primary_source_url"):
+                patch["primary_source_url"]=primary
+                patch["verification_status"]="primary_source_supported"
+            if patch:
+                sb.table("pc_extracted_facts").update(patch).eq("fact_id",old["fact_id"]).execute()
+            reused.append(old)
+            continue
+
         row={
             "extraction_run_id":extraction_run_id,
             "content_item_id":content_item_id,
             "document_id":document_id,
             "fact_type":fact_type,
-            "fact_key":f.get("fact_key") or f"{fact_type}:{idx+1}",
+            "fact_key":f.get("fact_key") or f"{fact_type}:{sig[:16]}",
             "subject_type":f.get("subject_type"),
             "subject_name":f.get("subject_name"),
             "subject_identifier":f.get("subject_identifier"),
@@ -2767,13 +2890,22 @@ def _persist_extracted_facts(content_item_id,extraction_run_id,result,source_url
             "verification_status":"primary_source_supported" if primary else "secondary_source",
             "review_status":"pending",
             "resolution_status":"unresolved",
-            "metadata":f.get("metadata") if isinstance(f.get("metadata"),dict) else {},
+            "metadata":{
+                **(f.get("metadata") if isinstance(f.get("metadata"),dict) else {}),
+                "semantic_fact_signature":sig,
+            },
         }
-        rows.append({k:v for k,v in row.items() if v is not None})
+        row={k:v for k,v in row.items() if v is not None}
+        rows.append(row)
+        existing_by_sig[sig]=row
+
     inserted=[]
     for i in range(0,len(rows),100):
         inserted.extend(sb.table("pc_extracted_facts").insert(rows[i:i+100]).execute().data or [])
-    return inserted
+
+    # Return retained + newly inserted facts so callers have the true active set
+    # from this extraction without creating duplicates.
+    return inserted + reused
 
 def _prepare_universal_records(result,input_url,publisher=None,title=None):
     """Attach source provenance and stable IDs to canonical/domain proposals."""
@@ -3503,15 +3635,19 @@ def _content_review_data(limit=5000):
 
     facts=(sb.table("pc_extracted_facts").select(
         "fact_id,content_item_id,fact_type,subject_type,subject_name,subject_identifier,predicate,object_type,object_name,object_identifier,value_text,value_numeric,unit,currency,effective_date,source_url,primary_source_url,confidence,verification_status,review_status,resolution_status,created_at"
-    ).order("created_at",desc=True).limit(int(limit)).execute().data or [])
+    ).neq("resolution_status","duplicate").order("created_at",desc=True).limit(int(limit)).execute().data or [])
+
+    active_fact_ids={str(x.get("fact_id")) for x in facts if x.get("fact_id")}
 
     links=(sb.table("pc_extracted_fact_links").select(
         "fact_id,linked_type,linked_id,linked_name,role,match_method,confidence,analyst_reviewed"
     ).limit(int(limit)*2).execute().data or [])
+    links=[x for x in links if str(x.get("fact_id")) in active_fact_ids]
 
     promotions=(sb.table("pc_extracted_fact_promotions").select(
         "fact_id,target_table,staged_record_id,target_record_id,promotion_action,status,promoted_at"
     ).limit(int(limit)*2).execute().data or [])
+    promotions=[x for x in promotions if str(x.get("fact_id")) in active_fact_ids]
 
     return items,facts,links,promotions
 
@@ -3786,6 +3922,46 @@ def _run_content_item_extraction(
             "extracted_text":"",
             "publication_date":None
         }
+
+    # Idempotent short-circuit: if this URL's fetched content has not changed
+    # and we already extracted facts, do not call AI again.
+    prior_hash=str(item.get("content_hash") or "")
+    new_hash=str((fetched or {}).get("content_hash") or "")
+    if prior_hash and new_hash and prior_hash==new_hash:
+        existing_count=(sb.table("pc_extracted_facts")
+            .select("fact_id",count="exact")
+            .eq("content_item_id",item_id)
+            .neq("resolution_status","duplicate")
+            .limit(1).execute().count or 0)
+        if existing_count:
+            runs=(sb.table("pc_extraction_runs")
+                .select("extraction_run_id,ingestion_job_id,status,created_at")
+                .eq("content_item_id",item_id)
+                .order("created_at",desc=True)
+                .limit(1).execute().data or [])
+            if runs and runs[0].get("ingestion_job_id"):
+                job_id=runs[0]["ingestion_job_id"]
+                staged_count=(sb.table("pc_staged_records")
+                    .select("staged_record_id",count="exact")
+                    .eq("ingestion_job_id",job_id)
+                    .limit(1).execute().count or 0)
+                try:
+                    _content_review_data.clear()
+                except Exception:
+                    pass
+                return {
+                    "content_item_id":item_id,
+                    "url":url,
+                    "title":fetched.get("title") or item.get("title"),
+                    "facts":int(existing_count),
+                    "staged":int(staged_count or 0),
+                    "rejected":0,
+                    "primary_sources":0,
+                    "job_id":job_id,
+                    "resolution":{"mode":"reused_unchanged_content"},
+                    "fact_resolution":{"reused":True,"facts":int(existing_count)},
+                    "reused_unchanged_content":True,
+                }
 
     job=sb.table("pc_ingestion_jobs").insert({
         "job_type":"CONTENT_INGEST",
@@ -8513,6 +8689,704 @@ def _canonical_section_target(section,df):
     return None,False,"unrecognized sheet — excluded"
 
 
+
+# ===========================================================================
+# SANCTIONS BULK LOADER — V50
+# ===========================================================================
+
+SANCTIONS_SOURCE_CATALOG = {
+    "OFAC SDN": {
+        "authority_code":"OFAC",
+        "authority_name":"U.S. Office of Foreign Assets Control",
+        "jurisdiction":"United States",
+        "source_list":"SDN",
+        "source_id":"SAN-OFAC-SDN",
+        "official_page":"https://ofac.treasury.gov/sanctions-list-service",
+        "preferred":"XML (legacy or advanced); CSV also supported",
+        "formats":["xml","csv","zip"],
+    },
+    "OFAC Non-SDN Consolidated": {
+        "authority_code":"OFAC",
+        "authority_name":"U.S. Office of Foreign Assets Control",
+        "jurisdiction":"United States",
+        "source_list":"NON-SDN",
+        "source_id":"SAN-OFAC-CONS",
+        "official_page":"https://ofac.treasury.gov/sanctions-list-service",
+        "preferred":"XML (legacy or advanced); CSV also supported",
+        "formats":["xml","csv","zip"],
+    },
+    "UK Sanctions List": {
+        "authority_code":"UK",
+        "authority_name":"UK Foreign, Commonwealth & Development Office",
+        "jurisdiction":"United Kingdom",
+        "source_list":"UKSL",
+        "source_id":"SAN-UK",
+        "official_page":"https://www.gov.uk/government/publications/the-uk-sanctions-list",
+        "preferred":"CSV or XML",
+        "formats":["csv","xml","ods","txt","zip"],
+    },
+    "EU Consolidated Financial Sanctions": {
+        "authority_code":"EU",
+        "authority_name":"European Union",
+        "jurisdiction":"European Union",
+        "source_list":"EU-FSF",
+        "source_id":"SAN-EU",
+        "official_page":"https://data.europa.eu/data/datasets/consolidated-list-of-persons-groups-and-entities-subject-to-eu-financial-sanctions",
+        "preferred":"CSV 1.1 or XML 1.1",
+        "formats":["csv","xml","zip"],
+    },
+    "UN Security Council Consolidated": {
+        "authority_code":"UNSC",
+        "authority_name":"United Nations Security Council",
+        "jurisdiction":"United Nations",
+        "source_list":"UNSC-CONSOLIDATED",
+        "source_id":"SAN-UNSC",
+        "official_page":"https://main.un.org/securitycouncil/en/content/un-sc-consolidated-list",
+        "preferred":"XML",
+        "formats":["xml","csv","zip"],
+    },
+    "UN 1718 DPRK": {
+        "authority_code":"UNSC",
+        "authority_name":"United Nations Security Council",
+        "jurisdiction":"United Nations",
+        "source_list":"UNSC-1718",
+        "source_id":"SAN-UNSC-1718",
+        "official_page":"https://main.un.org/securitycouncil/en/sanctions/1718/materials",
+        "preferred":"XML",
+        "formats":["xml","csv","zip"],
+    },
+    "PGSA / Internal": {
+        "authority_code":"PGSA",
+        "authority_name":"Persian Gulf Strait Authority",
+        "jurisdiction":"Persian Gulf / Strait of Hormuz",
+        "source_list":"PGSA",
+        "source_id":"SAN-PGSA",
+        "official_page":None,
+        "preferred":"CSV / XLSX / XML",
+        "formats":["csv","xlsx","xml","zip"],
+    },
+}
+
+
+def _sx_local(tag):
+    return str(tag or "").split("}")[-1].split(":")[-1]
+
+
+def _sx_text(el):
+    return " ".join(" ".join(el.itertext()).split()) if el is not None else ""
+
+
+def _sx_norm_col(v):
+    return re.sub(r"[^a-z0-9]+","_",str(v or "").strip().casefold()).strip("_")
+
+
+def _sx_first(d,*keys):
+    nd={_sx_norm_col(k):v for k,v in d.items()}
+    for k in keys:
+        v=nd.get(_sx_norm_col(k))
+        if v not in (None,"") and not (isinstance(v,float) and pd.isna(v)):
+            return str(v).strip()
+    return None
+
+
+def _sx_split_values(v):
+    if v in (None,""):
+        return []
+    if isinstance(v,list):
+        return [str(x).strip() for x in v if str(x).strip()]
+    s=str(v).strip()
+    if not s:
+        return []
+    return [x.strip() for x in re.split(r"\s*[;|]\s*",s) if x.strip()]
+
+
+def _sx_date(v):
+    if not v:
+        return None
+    try:
+        x=pd.to_datetime(v,errors="coerce",dayfirst=True)
+        if pd.isna(x):
+            return None
+        return x.date().isoformat()
+    except Exception:
+        return None
+
+
+def _sx_entity_type(v):
+    s=str(v or "").strip().casefold()
+    if any(x in s for x in ("ship","vessel")):
+        return "vessel"
+    if any(x in s for x in ("individual","person")):
+        return "individual"
+    if any(x in s for x in ("aircraft","plane")):
+        return "aircraft"
+    return "entity"
+
+
+def _sx_id_type(v):
+    s=_sx_norm_col(v)
+    mapping={
+        "imo_number":"IMO","imo":"IMO","mmsi":"MMSI","call_sign":"CALLSIGN",
+        "passport_number":"PASSPORT","passport":"PASSPORT",
+        "national_identifier_number":"NATIONAL_ID","national_id":"NATIONAL_ID",
+        "business_registration_number_s":"REGISTRATION","registration_number":"REGISTRATION",
+        "tax_id":"TAX_ID","lei":"LEI","un_reference_number":"UN_REFERENCE"
+    }
+    return mapping.get(s, str(v or "").strip().upper().replace(" ","_")[:80])
+
+
+def _sx_authority(cfg):
+    hit=(sb.table("pc_sanctions_authorities")
+         .select("sanctions_authority_id")
+         .eq("authority_code",cfg["authority_code"])
+         .limit(1).execute().data or [])
+    if hit:
+        return hit[0]["sanctions_authority_id"]
+    row={
+        "authority_code":cfg["authority_code"],
+        "authority_name":cfg["authority_name"],
+        "jurisdiction":cfg["jurisdiction"],
+        "official_url":cfg.get("official_page"),
+        "active":True,
+        "metadata":{"created_by":LOADER_BUILD},
+    }
+    return sb.table("pc_sanctions_authorities").insert(row).execute().data[0]["sanctions_authority_id"]
+
+
+def _sx_programme(authority_id, code_value, official_url=None):
+    code_value=str(code_value or "UNSPECIFIED").strip()[:250]
+    hit=(sb.table("pc_sanctions_programmes")
+         .select("sanctions_programme_id")
+         .eq("sanctions_authority_id",authority_id)
+         .eq("programme_code",code_value)
+         .limit(1).execute().data or [])
+    if hit:
+        return hit[0]["sanctions_programme_id"]
+    row={
+        "sanctions_authority_id":authority_id,
+        "programme_code":code_value,
+        "programme_name":code_value,
+        "regime_name":code_value,
+        "official_url":official_url,
+        "active":True,
+        "metadata":{"created_by":LOADER_BUILD},
+    }
+    return sb.table("pc_sanctions_programmes").insert(row).execute().data[0]["sanctions_programme_id"]
+
+
+def _sx_source(cfg):
+    sid=cfg["source_id"]
+    try:
+        hit=(sb.table("pc_sources").select("source_id").eq("source_id",sid).limit(1).execute().data or [])
+        if hit:
+            return sid
+    except Exception:
+        pass
+    row={
+        "source_id":sid,
+        "source_name":cfg["authority_name"]+" "+cfg["source_list"],
+        "publisher":cfg["authority_name"],
+        "source_type":"official_sanctions_list",
+        "coverage":"Sanctions designations and identifiers",
+        "url":cfg.get("official_page"),
+        "reliability":"high",
+        "active":True,
+        "metadata":{"created_by":LOADER_BUILD},
+    }
+    try:
+        writable=set(_table_write_columns_live(sb,"pc_sources"))
+        row={k:v for k,v in row.items() if k in writable}
+    except Exception:
+        pass
+    sb.table("pc_sources").upsert(row,on_conflict="source_id").execute()
+    return sid
+
+
+def _sx_mobile_index():
+    rows=(sb.table("pc_mobile_assets")
+          .select("mobile_asset_id,name,imo,mmsi,call_sign,asset_type,flag")
+          .limit(50000).execute().data or [])
+    by_imo={}
+    by_mmsi={}
+    by_name={}
+    for r in rows:
+        imo=re.sub(r"\D","",str(r.get("imo") or ""))
+        mmsi=re.sub(r"\D","",str(r.get("mmsi") or ""))
+        nk=_canon_name_key(r.get("name"))
+        if len(imo)==7: by_imo.setdefault(imo,[]).append(r)
+        if len(mmsi)==9: by_mmsi.setdefault(mmsi,[]).append(r)
+        if nk: by_name.setdefault(nk,[]).append(r)
+    return by_imo,by_mmsi,by_name
+
+
+def _sx_ensure_vessel(rec, source_id, indexes):
+    by_imo,by_mmsi,by_name=indexes
+    ids={str(x.get("type") or "").upper():str(x.get("value") or "") for x in rec.get("identifiers",[])}
+    imo=re.sub(r"\D","",ids.get("IMO",""))
+    mmsi=re.sub(r"\D","",ids.get("MMSI",""))
+    name=rec["primary_name"]
+    if len(imo)==7 and len(by_imo.get(imo,[]))==1:
+        return "mobile_asset",by_imo[imo][0]["mobile_asset_id"],"IMO_EXACT",1.0
+    if len(mmsi)==9 and len(by_mmsi.get(mmsi,[]))==1:
+        return "mobile_asset",by_mmsi[mmsi][0]["mobile_asset_id"],"MMSI_EXACT",0.99
+    nk=_canon_name_key(name)
+    if nk and len(by_name.get(nk,[]))==1:
+        return "mobile_asset",by_name[nk][0]["mobile_asset_id"],"NAME_EXACT",0.95
+
+    key_source=imo or mmsi or nk
+    mid="MOBILE_SAN_"+hashlib.sha1(str(key_source).encode()).hexdigest()[:20].upper()
+    row={
+        "mobile_asset_id":mid,
+        "name":name,
+        "asset_type":"vessel",
+        "subtype":rec.get("subtype") or "sanctions_listed_vessel",
+        "imo":imo if len(imo)==7 else None,
+        "mmsi":mmsi if len(mmsi)==9 else None,
+        "call_sign":ids.get("CALLSIGN") or None,
+        "flag":rec.get("flag"),
+        "record_status":"verified",
+        "data_quality":"high",
+        "source_id":source_id,
+        "metadata":{"created_from_sanctions":True,"source_external_id":rec.get("external_id")},
+    }
+    writable=set(_table_write_columns_live(sb,"pc_mobile_assets"))
+    row={k:v for k,v in row.items() if k in writable and v is not None}
+    sb.table("pc_mobile_assets").upsert(row,on_conflict="mobile_asset_id").execute()
+    by_name.setdefault(nk,[]).append(row)
+    if len(imo)==7: by_imo.setdefault(imo,[]).append(row)
+    if len(mmsi)==9: by_mmsi.setdefault(mmsi,[]).append(row)
+    return "mobile_asset",mid,"CREATED_SANCTIONS_KEY",1.0
+
+
+def _sx_ensure_entity(rec, source_id, entity_index):
+    et="person" if rec.get("listed_entity_type")=="individual" else "organization"
+    eid=_ensure_exact_company_entity(
+        rec["primary_name"],
+        entity_type=et,
+        subtype="sanctions_listed_"+rec.get("listed_entity_type","entity"),
+        hq_country=rec.get("country"),
+        metadata={
+            "created_from_sanctions":True,
+            "source_external_id":rec.get("external_id"),
+            "source_id":source_id,
+        },
+        entity_index=entity_index
+    )
+    return ("entity",eid,"NAME_EXACT_OR_CREATED",1.0) if eid else (None,None,"AMBIGUOUS_NAME",0.0)
+
+
+def _sx_parse_ofac_xml(data, source_list):
+    root=ET.fromstring(data)
+    records=[]
+    legacy=[e for e in root.iter() if _sx_local(e.tag)=="sdnEntry"]
+    if legacy:
+        for e in legacy:
+            uid=next((_sx_text(x) for x in e if _sx_local(x.tag)=="uid"),None)
+            first=next((_sx_text(x) for x in e if _sx_local(x.tag)=="firstName"),"")
+            last=next((_sx_text(x) for x in e if _sx_local(x.tag)=="lastName"),"")
+            name=(" ".join([first,last])).strip()
+            typ=next((_sx_text(x) for x in e if _sx_local(x.tag)=="sdnType"),"entity")
+            rec={
+                "external_id":uid,
+                "primary_name":name or uid or "Unnamed OFAC record",
+                "listed_entity_type":_sx_entity_type(typ),
+                "programmes":[],
+                "aliases":[],
+                "identifiers":[],
+                "addresses":[],
+                "remarks":None,
+                "source_list":source_list,
+                "raw_record":{"xml_tag":"sdnEntry"},
+            }
+            for x in e.iter():
+                ln=_sx_local(x.tag)
+                if ln=="program" and _sx_text(x):
+                    rec["programmes"].append(_sx_text(x))
+                elif ln=="aka":
+                    af=next((_sx_text(y) for y in x if _sx_local(y.tag)=="firstName"),"")
+                    al=next((_sx_text(y) for y in x if _sx_local(y.tag)=="lastName"),"")
+                    av=(" ".join([af,al])).strip()
+                    at=next((_sx_text(y) for y in x if _sx_local(y.tag)=="type"),None)
+                    if av: rec["aliases"].append({"alias":av,"alias_type":at})
+                elif ln=="id":
+                    it=next((_sx_text(y) for y in x if _sx_local(y.tag)=="idType"),None)
+                    iv=next((_sx_text(y) for y in x if _sx_local(y.tag)=="idNumber"),None)
+                    ic=next((_sx_text(y) for y in x if _sx_local(y.tag)=="idCountry"),None)
+                    if it and iv: rec["identifiers"].append({"type":_sx_id_type(it),"value":iv,"country":ic})
+                elif ln=="address":
+                    vals={_sx_local(y.tag):_sx_text(y) for y in x}
+                    if any(vals.values()):
+                        rec["addresses"].append({
+                            "line1":vals.get("address1"),"line2":vals.get("address2"),
+                            "city":vals.get("city"),"region":vals.get("stateOrProvince"),
+                            "postal_code":vals.get("postalCode"),"country":vals.get("country")
+                        })
+                elif ln=="remarks" and _sx_text(x):
+                    rec["remarks"]=_sx_text(x)
+                elif ln=="vesselInfo":
+                    vals={_sx_local(y.tag):_sx_text(y) for y in x}
+                    rec["flag"]=vals.get("vesselFlag")
+                    rec["subtype"]=vals.get("vesselType")
+                    if vals.get("callSign"):
+                        rec["identifiers"].append({"type":"CALLSIGN","value":vals["callSign"]})
+            records.append(rec)
+        return records
+
+    # Generic advanced XML fallback. OFAC's advanced model uses repeated party/profile
+    # records; this captures IDs, aliases and document-style identifiers by local names.
+    candidates=[e for e in root.iter() if _sx_local(e.tag).casefold() in {"distinctparty","entity","profile"}]
+    seen=set()
+    for e in candidates:
+        ext=e.attrib.get("FixedRef") or e.attrib.get("ID") or e.attrib.get("id")
+        vals=[_sx_text(x) for x in e.iter() if _sx_local(x.tag).casefold() in {"namepartvalue","formattedfullname","fullname"} and _sx_text(x)]
+        name=vals[0] if vals else None
+        if not name:
+            continue
+        key=(ext,name)
+        if key in seen: continue
+        seen.add(key)
+        aliases=[]
+        ids=[]
+        for x in e.iter():
+            ln=_sx_local(x.tag).casefold()
+            txt=_sx_text(x)
+            if ln in {"alias","namepartvalue"} and txt and txt!=name:
+                aliases.append({"alias":txt,"alias_type":"alias"})
+            if ln in {"documentnumber","documentnumbertext","idnumber"} and txt:
+                ids.append({"type":"OTHER_ID","value":txt})
+        records.append({
+            "external_id":ext or hashlib.sha1(name.encode()).hexdigest()[:20],
+            "primary_name":name,
+            "listed_entity_type":"entity",
+            "programmes":[],
+            "aliases":aliases,
+            "identifiers":ids,
+            "addresses":[],
+            "remarks":None,
+            "source_list":source_list,
+            "raw_record":{"xml_tag":_sx_local(e.tag),"advanced_fallback":True},
+        })
+    return records
+
+
+def _sx_parse_un_xml(data, source_list):
+    root=ET.fromstring(data)
+    records=[]
+    for e in root.iter():
+        ln=_sx_local(e.tag)
+        if ln not in {"INDIVIDUAL","ENTITY"}:
+            continue
+        vals={}
+        for x in e.iter():
+            vals.setdefault(_sx_local(x.tag),[])
+            t=_sx_text(x)
+            if t: vals[_sx_local(x.tag)].append(t)
+        if ln=="INDIVIDUAL":
+            parts=[(vals.get(k) or [""])[0] for k in ("FIRST_NAME","SECOND_NAME","THIRD_NAME","FOURTH_NAME")]
+            name=" ".join(x for x in parts if x).strip()
+            typ="individual"
+        else:
+            name=(vals.get("FIRST_NAME") or vals.get("NAME") or [""])[0]
+            typ="entity"
+        ext=(vals.get("REFERENCE_NUMBER") or vals.get("DATAID") or [""])[0]
+        rec={
+            "external_id":ext or hashlib.sha1(name.encode()).hexdigest()[:20],
+            "primary_name":name,
+            "listed_entity_type":typ,
+            "programmes":_sx_split_values((vals.get("UN_LIST_TYPE") or [""])[0]),
+            "aliases":[],
+            "identifiers":[],
+            "addresses":[],
+            "remarks":(vals.get("COMMENTS1") or [None])[0],
+            "source_list":source_list,
+            "designation_date":_sx_date((vals.get("LISTED_ON") or [None])[0]),
+            "last_updated_date":_sx_date((vals.get("LAST_DAY_UPDATED") or [None])[0]),
+            "raw_record":{"xml_tag":ln},
+        }
+        for a in e.iter():
+            aln=_sx_local(a.tag)
+            if aln in {"INDIVIDUAL_ALIAS","ENTITY_ALIAS"}:
+                av=next((_sx_text(y) for y in a if _sx_local(y.tag)=="ALIAS_NAME"),None)
+                aq=next((_sx_text(y) for y in a if _sx_local(y.tag)=="QUALITY"),None)
+                if av: rec["aliases"].append({"alias":av,"alias_type":aq})
+            elif aln in {"INDIVIDUAL_ADDRESS","ENTITY_ADDRESS"}:
+                ad={_sx_local(y.tag):_sx_text(y) for y in a}
+                rec["addresses"].append({
+                    "line1":ad.get("STREET"),"city":ad.get("CITY"),"region":ad.get("STATE_PROVINCE"),
+                    "postal_code":ad.get("ZIP_CODE"),"country":ad.get("COUNTRY")
+                })
+        if name:
+            records.append(rec)
+    return records
+
+
+def _sx_parse_csv(data, source_key):
+    df=pd.read_csv(io.BytesIO(data),dtype=object,keep_default_na=False)
+    recs=[]
+    cols={_sx_norm_col(c):c for c in df.columns}
+    if source_key=="UK Sanctions List":
+        groups={}
+        for _,r in df.iterrows():
+            d=r.to_dict()
+            ext=_sx_first(d,"Unique ID","UK Sanctions List Ref") or hashlib.sha1(json.dumps(d,sort_keys=True,default=str).encode()).hexdigest()[:20]
+            groups.setdefault(ext,[]).append(d)
+        for ext,rows in groups.items():
+            prim=next((x for x in rows if str(_sx_first(x,"Name type") or "").casefold()=="primary name"),rows[0])
+            typ=_sx_entity_type(_sx_first(prim,"Individual, Entity, Ship","Group Type"))
+            def nm(d):
+                parts=[_sx_first(d,f"Name {i}") for i in range(1,7)]
+                return " ".join(x for x in parts if x).strip()
+            name=nm(prim)
+            rec={
+                "external_id":ext,"primary_name":name or ext,"listed_entity_type":typ,
+                "programmes":list(dict.fromkeys(x for x in [_sx_first(q,"Regime Name","Regime") for q in rows] if x)),
+                "aliases":[],"identifiers":[],"addresses":[],"remarks":_sx_first(prim,"Other Information","UK Statement of Reasons"),
+                "source_list":"UKSL","designation_date":_sx_date(_sx_first(prim,"Date Designated")),
+                "last_updated_date":_sx_date(_sx_first(prim,"Last Updated")),"raw_record":prim,
+            }
+            for q in rows:
+                n=nm(q)
+                nt=str(_sx_first(q,"Name type") or "").casefold()
+                if n and n!=name and nt in {"alias","primary name variation"}:
+                    rec["aliases"].append({"alias":n,"alias_type":nt})
+            for field,itype in [("IMO number","IMO"),("Passport number","PASSPORT"),("National Identifier number","NATIONAL_ID"),("Business registration number (s)","REGISTRATION"),("UN Reference Number","UN_REFERENCE")]:
+                for v in _sx_split_values(_sx_first(prim,field)):
+                    rec["identifiers"].append({"type":itype,"value":v})
+            addr=[_sx_first(prim,f"Address Line {i}") for i in range(1,7)]
+            if any(addr) or _sx_first(prim,"Address Country"):
+                rec["addresses"].append({"line1":"; ".join(x for x in addr[:3] if x),"line2":"; ".join(x for x in addr[3:] if x),
+                    "postal_code":_sx_first(prim,"Address Postal Code"),"country":_sx_first(prim,"Address Country")})
+            rec["flag"]=_sx_first(prim,"Current believed flag of ship")
+            rec["subtype"]=_sx_first(prim,"Type of ship")
+            recs.append(rec)
+        return recs
+
+    # OFAC legacy CSV primary-name files.
+    if source_key.startswith("OFAC"):
+        for _,r in df.iterrows():
+            d=r.to_dict()
+            ext=_sx_first(d,"uid","ent_num","id","unique_id") or str(r.name)
+            name=_sx_first(d,"sdn_name","name","primary_name")
+            typ=_sx_entity_type(_sx_first(d,"sdn_type","type"))
+            prog=_sx_first(d,"program","programs","program_name")
+            remarks=_sx_first(d,"remarks","comments")
+            if not name: continue
+            recs.append({
+                "external_id":ext,"primary_name":name,"listed_entity_type":typ,
+                "programmes":_sx_split_values(prog),"aliases":[],"identifiers":[],
+                "addresses":[],"remarks":remarks,"source_list":"SDN" if source_key=="OFAC SDN" else "NON-SDN",
+                "raw_record":d,
+            })
+        return recs
+
+    # EU / generic sanctions CSV mapper.
+    for _,r in df.iterrows():
+        d=r.to_dict()
+        ext=_sx_first(d,"logical_id","entity_logical_id","eu_reference_number","reference_number","id","unique_id")
+        name=_sx_first(d,"name_whole_name","whole_name","name","full_name","primary_name")
+        if not name:
+            # try assembling common name-part fields
+            parts=[_sx_first(d,x) for x in ("name_first_name","name_middle_name","name_last_name")]
+            name=" ".join(x for x in parts if x).strip()
+        if not name: continue
+        typ=_sx_entity_type(_sx_first(d,"subject_type","entity_type","type","individual_entity_ship"))
+        prog=_sx_first(d,"regulation_programme","programme","program","regime","regime_name")
+        rec={
+            "external_id":ext or hashlib.sha1((name+"|"+str(prog)).encode()).hexdigest()[:20],
+            "primary_name":name,"listed_entity_type":typ,
+            "programmes":_sx_split_values(prog),"aliases":[],"identifiers":[],"addresses":[],
+            "remarks":_sx_first(d,"remark","remarks","other_information"),
+            "source_list":"EU-FSF" if source_key.startswith("EU") else source_key,
+            "designation_date":_sx_date(_sx_first(d,"listing_date","date_designated","listed_on")),
+            "last_updated_date":_sx_date(_sx_first(d,"last_updated","last_day_updated")),
+            "raw_record":d,
+        }
+        imo=_sx_first(d,"imo_number","imo")
+        if imo: rec["identifiers"].append({"type":"IMO","value":imo})
+        recs.append(rec)
+    return recs
+
+
+def _sx_parse_xml(data, source_key, cfg):
+    if source_key.startswith("OFAC"):
+        return _sx_parse_ofac_xml(data,cfg["source_list"])
+    if source_key.startswith("UN "):
+        return _sx_parse_un_xml(data,cfg["source_list"])
+    # UK/EU XML: flatten repeating likely record elements; UK is better via CSV.
+    root=ET.fromstring(data)
+    records=[]
+    candidates=[e for e in root.iter() if _sx_local(e.tag).casefold() in {"designation","designatedperson","sanctionentity","entity","record"}]
+    for e in candidates:
+        flat={}
+        for x in e.iter():
+            t=_sx_text(x)
+            if t and len(list(x))==0:
+                flat.setdefault(_sx_local(x.tag),t)
+        name=_sx_first(flat,"Name 6","WholeName","wholeName","Name","FullName","primary_name")
+        if not name: continue
+        ext=_sx_first(flat,"Unique ID","logicalId","LogicalId","ReferenceNumber","ID") or hashlib.sha1(name.encode()).hexdigest()[:20]
+        typ=_sx_entity_type(_sx_first(flat,"Individual, Entity, Ship","subjectType","EntityType","Type"))
+        records.append({
+            "external_id":ext,"primary_name":name,"listed_entity_type":typ,
+            "programmes":_sx_split_values(_sx_first(flat,"Regime Name","programme","Program")),
+            "aliases":[],"identifiers":[],"addresses":[],"remarks":_sx_first(flat,"Other Information","Remark"),
+            "source_list":cfg["source_list"],"raw_record":flat,
+        })
+    return records
+
+
+def _sx_parse_upload(upload, source_key):
+    cfg=SANCTIONS_SOURCE_CATALOG[source_key]
+    data=upload.getvalue()
+    name=upload.name.lower()
+    if name.endswith(".zip"):
+        out=[]
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            for n in z.namelist():
+                if n.lower().endswith((".xml",".csv")):
+                    fake=type("Upload",(),{"name":n,"getvalue":lambda self,nn=n: z.read(nn)})()
+                    out.extend(_sx_parse_upload(fake,source_key))
+        return out
+    if name.endswith(".xml"):
+        return _sx_parse_xml(data,source_key,cfg)
+    if name.endswith(".csv"):
+        return _sx_parse_csv(data,source_key)
+    if name.endswith(".ods"):
+        df=pd.read_excel(io.BytesIO(data),engine="odf",dtype=object)
+        b=df.to_csv(index=False).encode("utf-8")
+        fake=type("Upload",(),{"name":"converted.csv","getvalue":lambda self:b})()
+        return _sx_parse_csv(b,source_key)
+    if name.endswith(".xlsx"):
+        df=pd.read_excel(io.BytesIO(data),dtype=object)
+        b=df.to_csv(index=False).encode("utf-8")
+        return _sx_parse_csv(b,source_key)
+    raise ValueError(f"Unsupported bulk sanctions format: {upload.name}")
+
+
+def _sx_load_records(source_key, records):
+    cfg=SANCTIONS_SOURCE_CATALOG[source_key]
+    authority_id=_sx_authority(cfg)
+    source_id=_sx_source(cfg)
+    eindex=_canonical_entity_index()
+    vindex=_sx_mobile_index()
+
+    stats={"records":0,"designations_upserted":0,"canonical_created_or_linked":0,
+           "identifiers":0,"aliases":0,"addresses":0,"links":0,"exceptions":0,"errors":[]}
+
+    for rec in records:
+        try:
+            stats["records"]+=1
+            programmes=rec.get("programmes") or ["UNSPECIFIED"]
+            programme_id=_sx_programme(authority_id,programmes[0],cfg.get("official_page"))
+            ext=str(rec.get("external_id") or "").strip()
+            if not ext:
+                ext=hashlib.sha1((rec["primary_name"]+"|"+cfg["source_list"]).encode()).hexdigest()[:24]
+
+            existing=(sb.table("pc_sanctions_designations")
+                      .select("sanctions_designation_id")
+                      .eq("sanctions_authority_id",authority_id)
+                      .eq("source_list",cfg["source_list"])
+                      .eq("source_external_id",ext)
+                      .limit(1).execute().data or [])
+
+            drow={
+                "sanctions_authority_id":authority_id,
+                "sanctions_programme_id":programme_id,
+                "source_id":source_id,
+                "source_list":cfg["source_list"],
+                "source_external_id":ext,
+                "listed_entity_type":rec.get("listed_entity_type") or "entity",
+                "primary_name":rec["primary_name"],
+                "normalized_name":_canon_name_key(rec["primary_name"]),
+                "designation_date":rec.get("designation_date"),
+                "last_updated_date":rec.get("last_updated_date"),
+                "status":"active",
+                "remarks":rec.get("remarks"),
+                "source_url":cfg.get("official_page"),
+                "raw_record":rec.get("raw_record") or {},
+                "last_seen_at":pd.Timestamp.utcnow().isoformat(),
+                "metadata":{"programmes":programmes,"loader_build":LOADER_BUILD},
+            }
+            drow={k:v for k,v in drow.items() if v is not None}
+            if existing:
+                did=existing[0]["sanctions_designation_id"]
+                sb.table("pc_sanctions_designations").update(drow).eq("sanctions_designation_id",did).execute()
+            else:
+                did=sb.table("pc_sanctions_designations").insert(drow).execute().data[0]["sanctions_designation_id"]
+            stats["designations_upserted"]+=1
+
+            for p in programmes[1:]:
+                _sx_programme(authority_id,p,cfg.get("official_page"))
+
+            for ident in rec.get("identifiers") or []:
+                iv=str(ident.get("value") or "").strip()
+                if not iv: continue
+                it=_sx_id_type(ident.get("type"))
+                row={"sanctions_designation_id":did,"identifier_type":it,"identifier_value":iv,
+                     "country":ident.get("country"),"issuing_authority":ident.get("issuing_authority"),
+                     "is_primary":it in {"IMO","MMSI","UN_REFERENCE"},
+                     "metadata":{"loader_build":LOADER_BUILD}}
+                row={k:v for k,v in row.items() if v is not None}
+                sb.table("pc_sanctions_identifiers").upsert(
+                    row,on_conflict="sanctions_designation_id,identifier_type,identifier_value"
+                ).execute()
+                stats["identifiers"]+=1
+
+            for a in rec.get("aliases") or []:
+                av=str(a.get("alias") or "").strip()
+                if not av: continue
+                hit=(sb.table("pc_sanctions_aliases").select("sanctions_alias_id")
+                     .eq("sanctions_designation_id",did).eq("alias",av).limit(1).execute().data or [])
+                if not hit:
+                    sb.table("pc_sanctions_aliases").insert({
+                        "sanctions_designation_id":did,"alias":av,
+                        "normalized_alias":_canon_name_key(av),"alias_type":a.get("alias_type"),
+                        "metadata":{"loader_build":LOADER_BUILD}
+                    }).execute()
+                    stats["aliases"]+=1
+
+            for ad in rec.get("addresses") or []:
+                sig="|".join(str(ad.get(k) or "").strip() for k in ("line1","line2","city","region","postal_code","country"))
+                if not sig.replace("|",""): continue
+                hit=(sb.table("pc_sanctions_addresses").select("sanctions_address_id,metadata")
+                     .eq("sanctions_designation_id",did).limit(200).execute().data or [])
+                if not any((x.get("metadata") or {}).get("address_signature")==sig for x in hit):
+                    row={"sanctions_designation_id":did,**{k:ad.get(k) for k in ("line1","line2","city","region","postal_code","country")},
+                         "metadata":{"address_signature":sig,"loader_build":LOADER_BUILD}}
+                    sb.table("pc_sanctions_addresses").insert(row).execute()
+                    stats["addresses"]+=1
+
+            if rec.get("listed_entity_type")=="vessel":
+                ltype,lid,mm,conf=_sx_ensure_vessel(rec,source_id,vindex)
+            else:
+                ltype,lid,mm,conf=_sx_ensure_entity(rec,source_id,eindex)
+
+            if lid:
+                stats["canonical_created_or_linked"]+=1
+                hit=(sb.table("pc_sanctions_links").select("sanctions_link_id")
+                     .eq("sanctions_designation_id",did)
+                     .eq("linked_type",ltype).eq("linked_id",lid)
+                     .limit(1).execute().data or [])
+                linkrow={
+                    "sanctions_designation_id":did,"linked_type":ltype,"linked_id":lid,
+                    "linked_name":rec["primary_name"],"relationship_type":"direct_designation",
+                    "is_direct_designation":True,"match_method":mm,"match_confidence":conf,
+                    "review_status":"confirmed","source_id":source_id,
+                    "metadata":{"loader_build":LOADER_BUILD},
+                }
+                if hit:
+                    sb.table("pc_sanctions_links").update(linkrow).eq("sanctions_link_id",hit[0]["sanctions_link_id"]).execute()
+                else:
+                    sb.table("pc_sanctions_links").insert(linkrow).execute()
+                    stats["links"]+=1
+            else:
+                stats["exceptions"]+=1
+        except Exception as exc:
+            stats["exceptions"]+=1
+            stats["errors"].append({"name":rec.get("primary_name"),"error":str(exc)})
+    return stats
+
+
 if page=="Canonical Home":
     title(
         "Canonical admin",
@@ -10929,6 +11803,109 @@ elif page=="Reconciliation Center":
             st.code("027_workflow_orchestration.sql\n028_document_ingestion.sql\n029_intelligence_authoring.sql\n030_distribution_lists.sql\n031_reconciliation_cleanup.sql\n032_event_first_dependency_engine.sql\n033_dependency_autocreate_engine.sql\n034_ingestion_quality_checks.sql\n035_dependency_regression_checks.sql\n036_compact_workflow_views.sql")
             st.caption("The cleanup functions are job-scoped and operate on staging before canonical apply.")
 
+
+elif page=="Sanctions Bulk Load":
+    title(
+        "Sanctions bulk load",
+        "Load official sanctions files directly into the canonical model. Existing companies/vessels are reused; missing canonical keys are created; only genuine identity collisions are held as exceptions."
+    )
+    if not sb:
+        st.error("Supabase service connection required.")
+    else:
+        st.markdown("### Official source catalogue")
+        cat_rows=[]
+        for k,v in SANCTIONS_SOURCE_CATALOG.items():
+            cat_rows.append({
+                "Source":k,
+                "Preferred machine format":v["preferred"],
+                "Accepted by loader":", ".join(x.upper() for x in v["formats"]),
+                "Official page":v.get("official_page") or "",
+            })
+        dataframe(cat_rows)
+
+        st.info(
+            "Recommended: use **XML** for OFAC and UN when possible, **CSV or XML** for the UK, "
+            "and **CSV 1.1 or XML 1.1** for the EU. PDF is for human reference and is intentionally "
+            "not used as a bulk machine-load format."
+        )
+
+        source_key=st.selectbox("Sanctions source / list",list(SANCTIONS_SOURCE_CATALOG.keys()))
+        cfg=SANCTIONS_SOURCE_CATALOG[source_key]
+        st.caption(f"Canonical source: `{cfg['source_id']}` · list: `{cfg['source_list']}`")
+
+        uploads=st.file_uploader(
+            "Official sanctions file(s)",
+            type=["xml","csv","zip","ods","xlsx"],
+            accept_multiple_files=True,
+            key="sanctions_bulk_files",
+            help="For OFAC CSV packages you may upload multiple related CSV files or a ZIP. XML is preferred because it preserves richer aliases/identifiers in one file."
+        )
+
+        preview_records=[]
+        parse_errors=[]
+        if uploads:
+            for up in uploads:
+                try:
+                    preview_records.extend(_sx_parse_upload(up,source_key))
+                except Exception as exc:
+                    parse_errors.append({"file":up.name,"error":str(exc)})
+
+            c1,c2,c3,c4=st.columns(4)
+            c1.metric("Files",len(uploads))
+            c2.metric("Parsed records",len(preview_records))
+            c3.metric("Vessels",sum(1 for r in preview_records if r.get("listed_entity_type")=="vessel"))
+            c4.metric("Parse errors",len(parse_errors))
+
+            if preview_records:
+                dataframe([{
+                    "external_id":r.get("external_id"),
+                    "name":r.get("primary_name"),
+                    "type":r.get("listed_entity_type"),
+                    "programmes":"; ".join(r.get("programmes") or []),
+                    "identifiers":len(r.get("identifiers") or []),
+                    "aliases":len(r.get("aliases") or []),
+                } for r in preview_records[:250]])
+
+            if parse_errors:
+                st.warning("Some files could not be parsed.")
+                dataframe(parse_errors)
+
+            if preview_records and st.button(
+                f"Load {len(preview_records):,} sanctions record(s) → canonical model",
+                type="primary",
+                use_container_width=True,
+                key="sanctions_bulk_apply"
+            ):
+                with st.spinner("Loading sanctions designations and canonical links..."):
+                    rep=_sx_load_records(source_key,preview_records)
+                st.success(
+                    f"Processed {rep['records']:,} designation record(s) · "
+                    f"{rep['designations_upserted']:,} designation upsert(s) · "
+                    f"{rep['canonical_created_or_linked']:,} canonical object(s) linked/created · "
+                    f"{rep['links']:,} new sanctions link(s) · "
+                    f"{rep['exceptions']:,} exception(s)."
+                )
+                c1,c2,c3,c4=st.columns(4)
+                c1.metric("Identifiers",rep["identifiers"])
+                c2.metric("Aliases",rep["aliases"])
+                c3.metric("Addresses",rep["addresses"])
+                c4.metric("Exceptions",rep["exceptions"])
+                if rep["errors"]:
+                    st.markdown("#### Exceptions")
+                    dataframe(rep["errors"][:500])
+
+        st.markdown("### What the loader does")
+        st.code(
+            "designation file → canonical company/person/vessel key → sanctions designation "
+            "→ identifiers / aliases / addresses → direct-designation link → provenance",
+            language="text"
+        )
+        st.caption(
+            "Idempotent rule: the same authority + source list + external ID updates the existing designation. "
+            "Vessels are matched IMO → MMSI → exact name; other targets use exact canonical/alias name. "
+            "If no canonical object exists, one is created."
+        )
+
 elif page=="Port Enrichment":
     title(
         "Port enrichment",
@@ -11512,62 +12489,38 @@ elif page=="Universal Content Intake":
         with facts_tab:
             st.markdown("### Extracted fact review")
             st.caption(
-                "Facts are preserved independently of canonical records. Resolution links existing P&C objects; "
-                "promotion links facts to staged proposals. Nothing here bypasses the normal review/apply workflow."
+                "Facts are preserved as provenance only. Normal ingestion writes deterministic records directly "
+                "to canonical tables; this page is for audit/debugging and genuine exceptions."
             )
 
-            a1,a2,a3=st.columns([1.8,1.1,0.9])
+            a1,a2=st.columns([1.5,1])
             with a1:
                 if st.button(
-                    "Build canonical proposals + keys",
-                    type="primary",
+                    "Clean duplicate audit facts",
+                    type="secondary",
                     use_container_width=True,
-                    key="promote_content_fact_queue"
+                    key="dedupe_content_fact_queue"
                 ):
-                    if not ai_configured():
-                        st.error("Configure OPENAI_API_KEY and OPENAI_MODEL first.")
-                    else:
-                        with st.spinner("Building staged records from preserved facts..."):
-                            rep=_build_proposals_for_fact_queue(50,product_context="TRADE")
-                        st.session_state["content_promotion_report"]=rep
-                        try:
-                            _content_review_data.clear()
-                        except Exception:
-                            pass
-                        ok=[x for x in rep if not x.get("error")]
-                        staged_total=sum(int(x.get("staged") or 0) for x in ok)
-                        st.success(
-                            f"Processed {len(ok)} source(s); {staged_total} new staged proposal(s) created. "
-                            "Next: open Review Queue in the sidebar."
-                        )
-                        st.rerun()
-            with a2:
-                if st.button(
-                    "Refresh canonical links",
-                    use_container_width=True,
-                    key="resolve_content_fact_queue"
-                ):
-                    with st.spinner("Resolving canonical identities and staged promotions..."):
-                        rep=_resolve_all_pending_content_facts(250)
-                    st.session_state["content_resolution_report"]=rep
-                    try:
-                        _content_review_data.clear()
-                    except Exception:
-                        pass
-                    st.success(f"Resolution pass completed for {len(rep)} content item(s).")
+                    with st.spinner("Collapsing repeated semantic facts..."):
+                        rep=_mark_duplicate_content_facts(10000)
+                    st.success(
+                        f"Scanned {rep['scanned']} audit fact row(s); "
+                        f"marked {rep['duplicates_marked']} duplicate(s). "
+                        f"{rep['unique_facts']} unique fact row(s) remain."
+                    )
                     st.rerun()
-            with a3:
+            with a2:
                 review_limit=st.selectbox(
-                    "Review window",
+                    "Audit window",
                     [500,1000,2500,5000],
                     index=1,
                     key="content_fact_review_limit"
                 )
 
             st.info(
-                "Move the workflow forward: **Build canonical proposals + keys** → "
-                "open **Review Queue** → approve READY records → apply. "
-                "Use **Refresh canonical links** after adding or correcting canonical identities."
+                "This page is now an **audit/provenance view only**. "
+                "Normal URL/document loads write safe records directly to canonical tables. "
+                "No proposal-building or canonical-link refresh is required here."
             )
 
             try:
@@ -11587,25 +12540,27 @@ elif page=="Universal Content Intake":
                 # Headline analyst metrics.
                 m1,m2,m3,m4,m5,m6=st.columns(6)
                 m1.metric("Sources",fdf["content_item_id"].nunique() if "content_item_id" in fdf.columns else 0)
-                m2.metric("Facts",len(fdf))
+                m2.metric("Audit facts",len(fdf))
                 verified=(
                     fdf["verification_status"].astype(str).isin(["primary_source_supported","corroborated"]).sum()
                     if "verification_status" in fdf.columns else 0
                 )
                 m3.metric("Primary supported",int(verified))
                 m4.metric("Canonical links",len(ldf))
-                m5.metric("Staged proposals",len(pdf))
+                m5.metric("Promotions",len(pdf))
                 needs=(
-                    fdf["resolution_status"].astype(str).isin(["unresolved","ambiguous","partial"]).sum()
+                    fdf["resolution_status"].astype(str).isin(
+                        ["ambiguous","partial","broken_reference","invalid"]
+                    ).sum()
                     if "resolution_status" in fdf.columns else 0
                 )
-                m6.metric("Needs review",int(needs))
+                m6.metric("True exceptions",int(needs))
 
                 by_article,needs_tab,ready_tab,raw_tab=st.tabs([
                     "By Article",
-                    "Needs Resolution",
-                    "Ready / Staged",
-                    "Raw Facts"
+                    "True Exceptions",
+                    "Linked / Promoted",
+                    "Raw Audit Facts"
                 ])
 
                 with by_article:
@@ -11621,42 +12576,38 @@ elif page=="Universal Content Intake":
                             fact_ids=set(ff["fact_id"].astype(str)) if not ff.empty else set()
                             ll=ldf[ldf["fact_id"].astype(str).isin(fact_ids)].copy() if not ldf.empty else pd.DataFrame()
                             pp=pdf[pdf["fact_id"].astype(str).isin(fact_ids)].copy() if not pdf.empty else pd.DataFrame()
+                            raw_title=itemrow.get("title")
+                            try:
+                                bad_title=pd.isna(raw_title)
+                            except Exception:
+                                bad_title=False
+                            display_title=(
+                                itemrow.get("source_url") or "Untitled source"
+                                if bad_title or not str(raw_title or "").strip() or str(raw_title).strip().casefold()=="nan"
+                                else str(raw_title).strip()
+                            )
                             with st.expander(
-                                f"{itemrow.get('title') or itemrow.get('source_url') or 'Untitled source'} · {len(ff)} fact(s)",
+                                f"{display_title} · {len(ff)} audit fact(s)",
                                 expanded=False
                             ):
-                                _review_article_summary(itemrow.to_dict(),ff.to_dict("records"),ll.to_dict("records"),pp.to_dict("records"))
-                                if pp.empty:
-                                    if st.button(
-                                        "Build staged proposals for this source",
-                                        key=f"promote_one_{cid}",
-                                        use_container_width=True
-                                    ):
-                                        if not ai_configured():
-                                            st.error("AI research is not configured.")
-                                        else:
-                                            with st.spinner("Building staged records from these facts..."):
-                                                rep=_build_staged_proposals_from_content_item(
-                                                    cid,product_context="TRADE",use_web=False
-                                                )
-                                            try:
-                                                _content_review_data.clear()
-                                            except Exception:
-                                                pass
-                                            st.success(
-                                                f"Created {int(rep.get('staged') or 0)} staged proposal(s). "
-                                                "Continue in Review Queue."
-                                            )
-                                            st.rerun()
-                                else:
-                                    st.caption("Staged proposals already exist for this source. Continue in Review Queue.")
+                                _review_article_summary(
+                                    itemrow.to_dict(),
+                                    ff.to_dict("records"),
+                                    ll.to_dict("records"),
+                                    pp.to_dict("records")
+                                )
+                                st.caption(
+                                    "Audit only — canonical loading happens during source/document ingestion."
+                                )
 
                 with needs_tab:
                     need=fdf[
-                        fdf["resolution_status"].astype(str).isin(["unresolved","ambiguous","partial"])
+                        fdf["resolution_status"].astype(str).isin(
+                            ["ambiguous","partial","broken_reference","invalid"]
+                        )
                     ].copy()
                     if need.empty:
-                        st.success("No unresolved or ambiguous facts in the current review window.")
+                        st.success("No true canonical exceptions in the current audit window.")
                     else:
                         showcols=[
                             "fact_type","subject_name","subject_identifier","predicate",
