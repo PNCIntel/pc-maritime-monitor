@@ -2037,46 +2037,6 @@ def enrich_ports_from_reference(ports):
     return out
 
 
-def _meta_dict(v):
-    """Return a dict for canonical metadata regardless of backend serialization."""
-    if isinstance(v, dict):
-        return v
-    if isinstance(v, str) and v.strip():
-        try:
-            x=json.loads(v)
-            return x if isinstance(x,dict) else {}
-        except Exception:
-            return {}
-    return {}
-
-
-def _source_row_from_meta(v):
-    meta=_meta_dict(v)
-    for key in ("source_row","source row","source_record","source record"):
-        row=meta.get(key)
-        if isinstance(row,dict):
-            return row
-    return {}
-
-
-def _first_nonblank(mapping, *keys):
-    for k in keys:
-        v=mapping.get(k) if isinstance(mapping,dict) else None
-        if v is None:
-            continue
-        txt=str(v).strip()
-        if txt and txt.casefold() not in {"nan","none","null"}:
-            return v
-    return None
-
-
-def _clean_display(v):
-    if v is None:
-        return ""
-    txt=str(v).strip()
-    return "" if txt.casefold() in {"nan","none","null","nat"} else txt
-
-
 @st.cache_data(show_spinner=False, ttl=60)
 def live_canonical_port_view():
     """Project live pc_assets port records into the Trade port explorer schema.
@@ -2157,22 +2117,6 @@ def live_canonical_port_view():
             "Canonical Source":"pc_assets",
             "Metadata":df.get("metadata",pd.Series(index=df.index,dtype=object)),
         })
-
-        # Generic workbook loads preserve valuable engineering fields inside metadata.source_row.
-        # Surface them into the Trade view so a canonical port remains useful before its
-        # terminal/berth detail records have been promoted into dedicated tables.
-        src_rows=out["Metadata"].apply(_source_row_from_meta)
-        out["Reported Berths"]=src_rows.apply(lambda x:_first_nonblank(x,"berths","berth_count","Berths","Berth Count"))
-        out["Depth M"]=src_rows.apply(lambda x:_first_nonblank(x,"depth_m","max_draught_m","draft_m","Depth M"))
-        out["Quay Length M"]=src_rows.apply(lambda x:_first_nonblank(x,"quay_length_m","Quay Length M","quay_m"))
-        out["Primary Roles"]=src_rows.apply(lambda x:_first_nonblank(x,"primary_roles","Primary Roles","roles"))
-        out["Capacity / Scale"]=src_rows.apply(lambda x:_first_nonblank(x,"headline_capacity_or_scale","capacity","Capacity"))
-        out["Source URL"]=src_rows.apply(lambda x:_first_nonblank(x,"source_url","url","Source URL"))
-        out["Source Port ID"]=src_rows.apply(lambda x:_first_nonblank(x,"port_id","Port ID"))
-        # If the normalized operator/owner foreign key has not been set yet, retain the
-        # verified workbook operator text rather than displaying 'Multiple / authority-led'.
-        fallback_operator=src_rows.apply(lambda x:_first_nonblank(x,"operator_owner","operator","Operator","owner_operator"))
-        out["Operator"]=out["Operator"].where(out["Operator"].fillna("").astype(str).str.strip().ne(""),fallback_operator)
         return out
     except Exception:
         return pd.DataFrame()
@@ -3314,12 +3258,21 @@ def _live_canonical_company_rollup(entity_id, entity_name):
         root_scope=set(scope)
         _hydrate_relationship_neighbourhood(scope)
 
+        # Corporate/group scope includes both legal ownership and explicit operating
+        # control/management relationships.  Do not require every terminal asset to
+        # be denormalized directly onto the ultimate parent company: a parent -> local
+        # operating/JV company -> physical terminal chain is the canonical model.
         down = {
             "owns","owns_group_company","parent_of","controls","controlled_entity",
             "subsidiary","subsidiary_of_group","consolidates","group_company",
             "owns_51_percent","owns_60_percent","owns_70_percent","owns_81_percent",
+            "owns_controls","controls_operates","operates","manages",
+            "operator_of","management_control","concession_operator",
         }
-        reverse = {"subsidiary_of","owned_by","controlled_by","part_of","member_of"}
+        reverse = {
+            "subsidiary_of","owned_by","controlled_by","part_of","member_of",
+            "operated_by","managed_by","concession_of",
+        }
 
         # Traverse corporate hierarchy up to five levels. Re-hydrate after every
         # expansion so a child entity's vessel edges are available even when the
@@ -8184,57 +8137,6 @@ def _port_event_bundle_live(port_id, terminal_ids, port_name, country=""):
     return ev,eloc,ech,audit
 
 
-def render_port_infrastructure_summary(port_row, live_t=None, berths=None):
-    """Readable engineering summary, including generic-load metadata fallbacks."""
-    meta=_source_row_from_meta(port_row.get("Metadata"))
-    reported_berths=_first_nonblank(meta,"berths","berth_count","Berths","Berth Count") or port_row.get("Reported Berths")
-    depth=_first_nonblank(meta,"depth_m","max_draught_m","draft_m","Depth M") or port_row.get("Depth M")
-    quay=_first_nonblank(meta,"quay_length_m","Quay Length M","quay_m") or port_row.get("Quay Length M")
-    roles=_first_nonblank(meta,"primary_roles","Primary Roles","roles") or port_row.get("Primary Roles")
-    scale=_first_nonblank(meta,"headline_capacity_or_scale","capacity","Capacity") or port_row.get("Capacity / Scale")
-
-    canonical_terminal_count=0 if live_t is None or live_t.empty else len(live_t)
-    canonical_berth_count=0 if berths is None or berths.empty else len(berths)
-    cols=st.columns(4)
-    cols[0].metric("Terminal records",canonical_terminal_count)
-    cols[1].metric("Detailed berth records",canonical_berth_count)
-    cols[2].metric("Reported berths",_clean_display(reported_berths) or "—")
-    cols[3].metric("Reported depth",(f"{_clean_display(depth)} m" if _clean_display(depth) else "—"))
-    bits=[]
-    if _clean_display(quay): bits.append(f"Quay: {_clean_display(quay)} m")
-    if _clean_display(scale): bits.append(str(scale))
-    if _clean_display(roles): bits.append(str(roles))
-    if bits:
-        st.markdown("<div class='pc-card'><div class='pc-label'>Infrastructure profile</div><div class='pc-search-details'>"+"<br>".join(html_lib.escape(str(x)) for x in bits)+"</div></div>",unsafe_allow_html=True)
-
-
-def _live_port_entity_relationships(port_id):
-    """Resolve live entity↔port ownership/operator relationships from pc_relationships."""
-    if not port_id:
-        return pd.DataFrame()
-    rels=_live_frame("pc_relationships","*",30000)
-    ents=_live_frame("pc_entities","entity_id,name,entity_type,status",20000)
-    if rels.empty:
-        return pd.DataFrame()
-    rows=[]
-    for _,r in rels.iterrows():
-        stp=str(r.get("source_type") or "").casefold(); ttp=str(r.get("target_type") or "").casefold()
-        sid=str(r.get("source_id") or ""); tid=str(r.get("target_id") or "")
-        rel=str(r.get("relationship_type") or "").strip().casefold().replace("-","_").replace(" ","_")
-        entity_id=""; direction=""
-        if stp=="entity" and ttp=="asset" and tid==str(port_id): entity_id=sid; direction="entity_to_port"
-        elif stp=="asset" and sid==str(port_id) and ttp=="entity": entity_id=tid; direction="port_to_entity"
-        if not entity_id: continue
-        if rel not in {"owns","owner_of","owned_by","operates","operator_of","operated_by","manages","managed_by","administers","authority_for","part_of","controlled_by","controls"}:
-            continue
-        name=entity_id
-        if not ents.empty and "entity_id" in ents.columns:
-            hit=ents[ents["entity_id"].astype(str).eq(entity_id)]
-            if not hit.empty: name=str(hit.iloc[0].get("name") or entity_id)
-        rows.append({"Entity ID":entity_id,"Entity":name,"Relationship":rel,"Direction":direction,"Notes":r.get("notes") or ""})
-    return pd.DataFrame(rows).drop_duplicates() if rows else pd.DataFrame()
-
-
 def render_port_connected_dossier(port_row, terminals):
     """Selected port as a connected commercial / operational dossier."""
     pid=str(port_row.get("Port ID") or port_row.get("asset_id") or "")
@@ -8265,41 +8167,6 @@ def render_port_connected_dossier(port_row, terminals):
         berths["Berth"]=berths["asset_id"].astype(str).map(bnames).fillna(berths["asset_id"].astype(str))
         if "terminal_asset_id" in berths.columns:
             berths["Terminal"]=berths["terminal_asset_id"].astype(str).map(bnames).fillna("")
-
-    # Generic-load berth fallback: berth assets may exist in pc_assets with their
-    # workbook terminal/port linkage preserved only inside metadata.source_row.
-    if berths.empty and not asset_rows.empty:
-        port_src=_source_row_from_meta(port_row.get("Metadata"))
-        src_port_id=_clean_display(_first_nonblank(port_src,"port_id","Port ID"))
-        term_src_ids=set()
-        if terminals is not None and not terminals.empty:
-            for _,tr in terminals.iterrows():
-                tmeta=_source_row_from_meta(tr.get("Metadata")) if "Metadata" in terminals.columns else {}
-                x=_first_nonblank(tmeta,"terminal_id","Terminal ID")
-                if x: term_src_ids.add(str(x))
-        inferred=[]
-        for _,a in asset_rows.iterrows():
-            meta=_source_row_from_meta(a.get("metadata"))
-            berth_id=_first_nonblank(meta,"berth_id","Berth ID")
-            if not berth_id: continue
-            parent_port=_clean_display(_first_nonblank(meta,"parent_port_id","port_id","Parent Port ID"))
-            terminal_src=_clean_display(_first_nonblank(meta,"terminal_id","Terminal ID"))
-            if not ((src_port_id and parent_port==src_port_id) or (terminal_src and terminal_src in term_src_ids)):
-                continue
-            inferred.append({
-                "asset_id":a.get("asset_id"),
-                "Berth":a.get("name") or _first_nonblank(meta,"berth_name","Berth") or berth_id,
-                "Terminal":_first_nonblank(meta,"terminal_id","terminal_name","Terminal") or "",
-                "berth_code":_first_nonblank(meta,"berth_code","berth_id") or "",
-                "berth_type":_first_nonblank(meta,"use","function","berth_type") or a.get("subtype") or "",
-                "length_m":_first_nonblank(meta,"length_m","max_loa_m"),
-                "depth_m":_first_nonblank(meta,"depth_m","depth_alongside_m","draft_m"),
-                "max_vessel_length_m":_first_nonblank(meta,"max_loa_m","max_vessel_length_m"),
-                "status":a.get("status") or "",
-                "source_id":a.get("source_id") or "",
-            })
-        if inferred:
-            berths=pd.DataFrame(inferred)
 
     capabilities=_live_frame("pc_port_capabilities","*",5000)
     if not capabilities.empty and "port_asset_id" in capabilities.columns:
@@ -8397,14 +8264,18 @@ def render_port_connected_dossier(port_row, terminals):
     ])
 
     with tabs[0]:
-        render_port_infrastructure_summary(port_row,live_t if not live_t.empty else terminals,berths)
-        s1,s2=st.columns(2)
-        s1.metric("Linked services",len(pservices))
-        s2.metric("Recorded port calls",len(calls))
+        s1,s2,s3,s4=st.columns(4)
+        s1.metric("Terminals",len(live_t) if not live_t.empty else len(terminals))
+        s2.metric("Berths",len(berths))
+        berth_total=None
+        if not live_t.empty and "berth_count" in live_t.columns:
+            berth_total=pd.to_numeric(live_t["berth_count"],errors="coerce").sum(min_count=1)
+        if pd.notna(berth_total) if berth_total is not None else False:
+            s2.caption(f"Terminal-reported berth count: {int(berth_total)}")
+        s3.metric("Services",len(pservices))
+        s4.metric("Port calls",len(calls))
 
-        st.markdown("#### Canonical port record")
-        core_cols=[c for c in ["Port / Facility","Country","City / Area","Facility Type","Status","Operator","Owner","Primary Roles","Capacity / Scale","Reported Berths","Depth M","Quay Length M","Source URL"] if c in port_row.index]
-        display_df(pd.DataFrame([{c:port_row.get(c,"") for c in core_cols}]),180)
+        display_df(pd.DataFrame([port_row]),140)
 
         if not capabilities.empty:
             st.markdown("#### Port capabilities")
@@ -8421,7 +8292,6 @@ def render_port_connected_dossier(port_row, terminals):
         render_portwatch_port_snapshot(pname,country)
 
     with tabs[1]:
-        render_port_infrastructure_summary(port_row,live_t if not live_t.empty else terminals,berths)
         if not live_t.empty:
             st.markdown("#### Canonical terminal detail")
             display_df(live_t,360)
@@ -8439,12 +8309,10 @@ def render_port_connected_dossier(port_row, terminals):
             ]
             display_df(berths[display_cols] if display_cols else berths,360)
         else:
-            meta=_source_row_from_meta(port_row.get("Metadata"))
-            reported=_clean_display(_first_nonblank(meta,"berths","berth_count","Berths","Berth Count"))
-            if reported:
-                st.info(f"The port source record reports {reported} berth(s), but individual berth names/dimensions have not yet been promoted into pc_berth_details.")
-            else:
-                st.info("No individual berth-level records are loaded yet. Use Port Enrichment in Power Admin to stage berth details.")
+            st.info(
+                "No berth-level records are loaded for the canonical terminals yet. "
+                "Use Port Enrichment in Power Admin to research and stage berth details."
+            )
 
     with tabs[2]:
         display_df(pservices,420)
@@ -9630,72 +9498,7 @@ def live_db_terminals_for_port(port_row):
                 })
             return pd.DataFrame(rows), f"{len(rows)} canonical terminal(s) from pc_terminal_details"
 
-        # FALLBACK 1: generic workbook-load metadata.
-        # The generic loader may have created terminal pc_assets without yet promoting
-        # parent_port_asset_id into pc_terminal_details. Recover that hierarchy from the
-        # preserved source_row IDs/names rather than making the port page look empty.
-        parent_source_ids=set()
-        for p in parents:
-            sr=_source_row_from_meta(p.get("metadata"))
-            sid=_first_nonblank(sr,"port_id","Port ID")
-            if sid:
-                parent_source_ids.add(str(sid).strip())
-
-        cand_assets=(sb.table("pc_assets")
-                     .select("asset_id,name,asset_type,subtype,country,region_city,status,operator_entity_id,owner_entity_id,source_id,metadata")
-                     .limit(30000).execute().data or [])
-        meta_children=[]
-        entity_ids=set()
-        for a in cand_assets:
-            sr=_source_row_from_meta(a.get("metadata"))
-            parent_src=_first_nonblank(sr,"parent_port_id","parent_port_asset_id","Parent Port ID")
-            parent_name=_clean_display(_first_nonblank(sr,"parent_port","port_name","Port","Parent Port"))
-            at=(str(a.get("asset_type") or "")+" "+str(a.get("subtype") or "")).casefold()
-            looks_terminal=("terminal" in at or "quay" in at or "berth" in at)
-            parent_match=(parent_src and str(parent_src).strip() in parent_source_ids) or (
-                parent_name and _norm_place_name(parent_name)==_norm_place_name(pname)
-            )
-            if looks_terminal and parent_match:
-                meta_children.append((a,sr))
-                for c in ("operator_entity_id","owner_entity_id"):
-                    if a.get(c): entity_ids.add(str(a.get(c)))
-
-        if meta_children:
-            entities={}
-            for eid in entity_ids:
-                er=(sb.table("pc_entities").select("entity_id,name").eq("entity_id",eid).limit(1).execute().data or [])
-                if er: entities[eid]=er[0].get("name") or eid
-            rows=[]
-            for a,sr in meta_children:
-                cid=str(a.get("asset_id") or "")
-                op=str(a.get("operator_entity_id") or "")
-                own=str(a.get("owner_entity_id") or "")
-                rows.append({
-                    "Terminal ID":cid,
-                    "Terminal / Facility":a.get("name") or cid,
-                    "Terminal":a.get("name") or cid,
-                    "Parent Port":pname,
-                    "Port":pname,
-                    "Country":a.get("country") or pcountry,
-                    "City / Area":a.get("region_city") or "",
-                    "Terminal Type":_first_nonblank(sr,"terminal_type","Terminal Type") or a.get("subtype") or "",
-                    "Terminal Code":_first_nonblank(sr,"terminal_code","Terminal Code") or "",
-                    "Primary Operator Company ID":op,
-                    "Primary Operator":entities.get(op) or _clean_display(_first_nonblank(sr,"operator","operator_owner","Primary Operator")),
-                    "Owner Company ID":own,
-                    "Owner":entities.get(own) or _clean_display(_first_nonblank(sr,"owner","operator_owner","Owner")),
-                    "Berth Count":_first_nonblank(sr,"berths","berth_count","Berth Count"),
-                    "Quay Length M":_first_nonblank(sr,"quay_length_m","Quay Length M"),
-                    "Max Draught M":_first_nonblank(sr,"depth_m","max_draught_m","draft_m"),
-                    "Capacity":_first_nonblank(sr,"capacity","headline_capacity_or_scale","Capacity"),
-                    "Equipment":_first_nonblank(sr,"equipment","equipment_or_features","Equipment"),
-                    "Status":a.get("status") or "",
-                    "Source ID":a.get("source_id") or "",
-                    "Data Status":"Canonical pc_assets · metadata-linked terminal fallback",
-                })
-            return pd.DataFrame(rows), f"{len(rows)} metadata-linked terminal asset(s)"
-
-        # FALLBACK 2: legacy relationship edges.
+        # FALLBACK ONLY: legacy relationship edges.
         rels=[]
         for pid in parent_ids:
             rels.extend(
@@ -9751,17 +9554,6 @@ def render_port_commercial_network(port_row, port_terminals):
 
     st.markdown("### Ownership & operations")
 
-    live_rel=_live_port_entity_relationships(pid)
-    if not live_rel.empty:
-        st.markdown("**Canonical ownership / operating relationships**")
-        show=live_rel.rename(columns={"Entity":"Company / Authority","Relationship":"Role"})
-        display_df(show[[c for c in ["Company / Authority","Role","Notes"] if c in show.columns]],220)
-
-    port_operator_name=_clean_display(port_operator_name)
-    if not port_operator_name:
-        meta=_source_row_from_meta(port_row.get("Metadata"))
-        port_operator_name=_clean_display(_first_nonblank(meta,"operator_owner","operator","Operator","owner_operator"))
-
     if port_operator_name or port_operator_id:
         st.markdown("**Port operator / authority**")
         c1,c2=st.columns([5,1])
@@ -9780,7 +9572,7 @@ def render_port_commercial_network(port_row, port_terminals):
         seen=set()
         for _,tr in port_terminals.iterrows():
             cid=str(tr.get("Primary Operator Company ID","") or "").strip()
-            name=_clean_display(tr.get("Primary Operator","") or tr.get("Operator / Network","") or "")
+            name=str(tr.get("Primary Operator","") or tr.get("Operator / Network","") or "").strip()
             tid=str(tr.get("Terminal ID","") or "").strip()
             tname=str(tr.get("Terminal / Facility","") or "").strip()
             key=(cid,name)
@@ -12201,18 +11993,14 @@ elif page in ["Ports","Ports & Terminals"]:
                 if "Terminal ID" in pt_raw.columns:
                     pt_raw=pt_raw.drop_duplicates(subset=["Terminal ID"],keep="last")
             pt=filter_distinct_port_terminals(row,pt_raw)
-            c1.metric("Detailed terminal records",len(pt))
+            c1.metric("Terminals",len(pt))
             if live_term_status:
                 if live_terms.empty:
-                    st.caption(f"Terminal detail status: {live_term_status}")
+                    st.caption(f"Terminal link status: {live_term_status}")
                 else:
-                    st.success(f"Terminal detail status: {live_term_status}")
+                    st.success(f"Terminal link status: {live_term_status}")
             c2.markdown(f"<div class='pc-card'><div class='pc-label'>Country</div><div class='pc-big'>{row.get('Country','')}</div></div>",unsafe_allow_html=True)
-            op=_clean_display(row.get('Operator','')) or _clean_display(row.get('Owner',''))
-            if not op:
-                meta=_source_row_from_meta(row.get("Metadata"))
-                op=_clean_display(_first_nonblank(meta,"operator_owner","operator","Operator","owner_operator")) or "Authority / operator not yet normalized"
-            c3.markdown(f"<div class='pc-card'><div class='pc-label'>Operator / Authority</div><div class='pc-big'>{html_lib.escape(op)}</div></div>",unsafe_allow_html=True)
+            c3.markdown(f"<div class='pc-card'><div class='pc-label'>Operator</div><div class='pc-big'>{row.get('Operator','') or 'Multiple / authority-led'}</div></div>",unsafe_allow_html=True)
             lat=pd.to_numeric(pd.Series([row.get("Latitude","")]),errors="coerce").iloc[0]
             lon=pd.to_numeric(pd.Series([row.get("Longitude","")]),errors="coerce").iloc[0]
             if pd.notna(lat) and pd.notna(lon):
