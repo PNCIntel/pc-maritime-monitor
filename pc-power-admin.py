@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "501-sanctions-bulk-load-dedupe-fix-2026-09-19"
+LOADER_BUILD = "502-simple-direct-content-loader-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -2420,6 +2420,54 @@ FACT_TYPES = {
     "security_incident","operational_status","source_reference","other"
 }
 
+SIMPLE_CONTENT_OUTPUT_CONTRACT = """
+Return one JSON object with this shape:
+{
+  "records": [
+    {
+      "target_table": "one allowed P&C canonical/domain table",
+      "natural_key": "stable key",
+      "action": "REVIEW",
+      "confidence": 0.0,
+      "payload": {
+        "...": "schema-supported fields only",
+        "metadata": {
+          "research_sources": [
+            {"url": "...", "publisher": "...", "title": "..."}
+          ]
+        }
+      }
+    }
+  ],
+  "primary_sources": [],
+  "conflicts": [],
+  "notes": []
+}
+
+Allowed target tables:
+""" + ", ".join(sorted(AI_ALLOWED_TABLES)) + """
+
+Simple-load rules:
+1. The source/article itself is already stored in pc_content_ingest_items. Do not turn
+   each sentence into an atomic fact and do not return a facts array.
+2. Create only the canonical/domain records materially supported by the source.
+3. Link or enrich existing companies, assets, vessels, routes, projects, contracts,
+   financing and other objects when supported. Create a new object only when the
+   source clearly identifies a real object not already matched.
+4. Create pc_events only for a real development, milestone, incident, transaction,
+   announcement or operational change described by the source. Do not create an
+   event merely because an article exists.
+5. Preserve the input source URL in metadata.research_sources on every proposed
+   record. Source provenance is sufficient; no separate fact-promotion workflow is
+   required.
+6. Do not invent IDs, IMO numbers, ownership, stakes, dates, values, route calls or
+   other unsupported details.
+7. Prefer one coherent record for one real-world development. Do not split one
+   development into artificial schedule/regulatory/relationship/event duplicates.
+8. Ambiguous identity matches may remain unresolved for review; deterministic
+   supported records should be written normally.
+"""
+
 UNIVERSAL_CONTENT_OUTPUT_CONTRACT = """
 Return one JSON object with this shape:
 {
@@ -3896,15 +3944,14 @@ def _run_content_item_extraction(
     extract_only=False,
     resolve_after=True
 ):
-    """Fetch one URL and extract structured content.
+    """Fetch one URL and load supported structured records directly.
 
-    Fast mode (`extract_only=True`) preserves atomic facts only and deliberately
-    defers staging/resolution to the batch promotion step. This is materially
-    faster than doing web research + staging + canonical resolution per URL.
+    Simple-loader model: source/article -> canonical/domain records -> canonical apply.
+    The source item itself is the news/content record. New ordinary URL loads do not
+    manufacture pc_extracted_facts or require a second promotion pass.
     """
     item_id=item["content_item_id"]
     url=item.get("source_url") or item.get("normalized_url")
-    fetched=None
     try:
         fetched=_fetch_content_url(url)
         sb.table("pc_content_ingest_items").update({
@@ -3926,68 +3973,49 @@ def _run_content_item_extraction(
         sb.table("pc_content_ingest_items").update({
             "fetch_status":"failed",
             "fetch_error":str(exc),
-            "extraction_status":"running",
+            "extraction_status":"failed",
             "updated_at":pd.Timestamp.utcnow().isoformat(),
         }).eq("content_item_id",item_id).execute()
-        fetched={
-            "url":url,"title":None,
-            "publisher":urllib.parse.urlsplit(url).netloc,
-            "extracted_text":"",
-            "publication_date":None
-        }
+        raise
 
-    # Idempotent short-circuit: if this URL's fetched content has not changed
-    # and we already extracted facts, do not call AI again.
+    # Idempotent reuse is based on source content, not fact counts.
     prior_hash=str(item.get("content_hash") or "")
     new_hash=str((fetched or {}).get("content_hash") or "")
     if prior_hash and new_hash and prior_hash==new_hash:
-        existing_count=(sb.table("pc_extracted_facts")
-            .select("fact_id",count="exact")
-            .eq("content_item_id",item_id)
-            .limit(10000).execute().data or [])
-        existing_count=sum(
-            1 for x in existing_rows
-            if not bool((x.get("metadata") or {}).get("audit_duplicate"))
-        )
-        if existing_count:
-            runs=(sb.table("pc_extraction_runs")
-                .select("extraction_run_id,ingestion_job_id,status,created_at")
-                .eq("content_item_id",item_id)
-                .order("created_at",desc=True)
-                .limit(1).execute().data or [])
-            if runs and runs[0].get("ingestion_job_id"):
-                job_id=runs[0]["ingestion_job_id"]
-                staged_count=(sb.table("pc_staged_records")
-                    .select("staged_record_id",count="exact")
-                    .eq("ingestion_job_id",job_id)
-                    .limit(1).execute().count or 0)
-                try:
-                    _content_review_data.clear()
-                except Exception:
-                    pass
-                return {
-                    "content_item_id":item_id,
-                    "url":url,
-                    "title":fetched.get("title") or item.get("title"),
-                    "facts":int(existing_count),
-                    "staged":int(staged_count or 0),
-                    "rejected":0,
-                    "primary_sources":0,
-                    "job_id":job_id,
-                    "resolution":{"mode":"reused_unchanged_content"},
-                    "fact_resolution":{"reused":True,"facts":int(existing_count)},
-                    "reused_unchanged_content":True,
-                }
+        runs=(sb.table("pc_extraction_runs")
+              .select("extraction_run_id,ingestion_job_id,status,created_at,records_proposed")
+              .eq("content_item_id",item_id)
+              .eq("status","completed")
+              .order("created_at",desc=True).limit(1).execute().data or [])
+        if runs and runs[0].get("ingestion_job_id"):
+            job_id=runs[0]["ingestion_job_id"]
+            staged_count=(sb.table("pc_staged_records")
+                          .select("staged_record_id",count="exact")
+                          .eq("ingestion_job_id",job_id)
+                          .limit(1).execute().count or 0)
+            return {
+                "content_item_id":item_id,
+                "url":url,
+                "title":fetched.get("title") or item.get("title"),
+                "facts":0,
+                "staged":int(staged_count or runs[0].get("records_proposed") or 0),
+                "rejected":0,
+                "primary_sources":0,
+                "job_id":job_id,
+                "resolution":{"mode":"reused_unchanged_content"},
+                "reused_unchanged_content":True,
+            }
 
     job=sb.table("pc_ingestion_jobs").insert({
         "job_type":"CONTENT_INGEST",
         "title":fetched.get("title") or url,
-        "query_text":"Universal URL/article fact extraction",
+        "query_text":"Simple source-to-canonical content load",
         "source_scope":{
             "content_batch_id":batch_id,
             "content_item_id":item_id,
             "source_url":url,
-            "product_context":product_context
+            "product_context":product_context,
+            "loader_build":LOADER_BUILD,
         },
         "status":"running",
     }).execute().data[0]
@@ -4001,35 +4029,40 @@ def _run_content_item_extraction(
     extraction_run=sb.table("pc_extraction_runs").insert({
         "content_item_id":item_id,
         "ingestion_job_id":job_id,
-        "extraction_type":"article_fact_extraction",
+        "extraction_type":"simple_content_load",
         "status":"running",
-        "prompt_version":"universal-v4",
-        "metadata":{"source_url":url}
+        "prompt_version":"simple-direct-v1",
+        "metadata":{"source_url":url,"loader_build":LOADER_BUILD}
     }).execute().data[0]
 
-    article_text=(fetched.get("extracted_text") or "")[:80000]
+    article_text=(fetched.get("extracted_text") or "")[:100000]
     prompt=f"""
-Analyze this source for Power & Corridors. Extract ALL material structured facts
-supported by the source: entities, ownership/control, transactions, financing,
-contracts, infrastructure projects, ports/terminals, vessels, shipbuilding,
-scheduled transport services/routes, sanctions, security incidents, operational
-changes, dates, monetary values, quantities and specifications.
+POWER & CORRIDORS SIMPLE CONTENT LOAD.
+
+Treat this source as one news/content item. Extract only supported structured
+records that belong in the canonical/domain model. Do not atomize the article into
+hundreds of facts and do not create a separate promotion workflow.
 
 INPUT URL: {url}
 TITLE: {fetched.get('title') or ''}
 PUBLISHER: {fetched.get('publisher') or ''}
 PUBLICATION DATE: {fetched.get('publication_date') or ''}
 
-If current web research is enabled, verify material facts and locate the most
-authoritative primary sources (company release, exchange filing, regulator,
-government source, shipyard/carrier release, etc.). Do not overwrite the
-secondary article: return the primary source separately and preserve both.
-
-Do not create a generic news/event record merely because an article exists.
-Create pc_events only when the article describes a real event/milestone/
-disruption/announcement that belongs in the event layer.
-
-{"FAST EXTRACTION MODE: Return atomic facts only. Set records=[] and primary_sources=[] unless the source text itself explicitly contains an authoritative primary-source URL. Do not spend tokens constructing staged records in this pass." if extract_only else "FULL EXTRACTION MODE: Return facts and supported canonical/domain record proposals."}
+LOAD RULES
+- Keep the article itself as the source/news item; its URL is the provenance.
+- Return canonical/domain records for material information actually supported by
+  the source: companies/entities, assets, vessels/mobile assets, relationships,
+  projects, transactions, financing, contracts, transport services/routes,
+  sanctions/compliance records and real events.
+- Create an event only when the article describes an actual development, milestone,
+  incident, transaction, announcement or operational change.
+- Reuse supplied canonical IDs only when deterministic. Otherwise let the loader
+  resolve/create the object; do not invent internal IDs.
+- Preserve the source URL on every returned record under metadata.research_sources.
+- One real-world development should normally be represented once, with useful
+  fields/links, not split into artificial pseudo-facts.
+- If web verification is enabled, verify material claims and identify authoritative
+  primary sources while preserving this article as the input source.
 
 SOURCE TEXT:
 {article_text}
@@ -4041,64 +4074,23 @@ SOURCE TEXT:
         prompt,
         product_context,
         bool(use_web),
-        output_contract=UNIVERSAL_CONTENT_OUTPUT_CONTRACT
+        output_contract=SIMPLE_CONTENT_OUTPUT_CONTRACT
     )
     result=_prepare_universal_records(
         result,url,fetched.get("publisher"),fetched.get("title")
     )
+    result["facts"]=[]
 
-    facts=_persist_extracted_facts(
-        item_id,
-        extraction_run["extraction_run_id"],
-        result,
-        url,
-        item.get("document_id")
-    )
     primary_count=_persist_primary_source_relationships(
         item_id,
         (result or {}).get("primary_sources") or [],
         batch_id
     )
-
-    if extract_only:
-        staged=0
-        rejected=0
-        resolution={"mode":"deferred_fast_extract"}
-        fact_resolution={
-            "facts":len(facts),
-            "matched":0,
-            "ready":0,
-            "partial":0,
-            "ambiguous":0,
-            "unresolved":len(facts),
-            "links":0,
-            "promotions":0,
-            "deferred":True,
-        }
-    else:
-        staged,rejected,resolution=stage_ai_result(sb,job_id,result)
-        if resolve_after:
-            fact_resolution=_resolve_content_item_facts(
-                item_id,
-                extraction_run_id=extraction_run["extraction_run_id"],
-                ingestion_job_id=job_id
-            )
-        else:
-            fact_resolution={
-                "facts":len(facts),
-                "matched":0,
-                "ready":0,
-                "partial":0,
-                "ambiguous":0,
-                "unresolved":len(facts),
-                "links":0,
-                "promotions":0,
-                "deferred":True,
-            }
+    staged,rejected,resolution=stage_ai_result(sb,job_id,result)
 
     sb.table("pc_extraction_runs").update({
         "status":"completed",
-        "facts_extracted":len(facts),
+        "facts_extracted":0,
         "records_proposed":staged,
         "conflicts_count":len((result or {}).get("conflicts") or []),
         "completed_at":pd.Timestamp.utcnow().isoformat(),
@@ -4106,18 +4098,14 @@ SOURCE TEXT:
             "source_url":url,
             "primary_sources_discovered":primary_count,
             "rejected_records":rejected,
-            "fact_resolution":fact_resolution
+            "loader_build":LOADER_BUILD,
+            "mode":"simple_direct_records",
         }
     }).eq("extraction_run_id",extraction_run["extraction_run_id"]).execute()
 
     sb.table("pc_content_ingest_items").update({
         "extraction_status":"completed",
-        "resolution_status":(
-            "facts_only" if extract_only
-            else "ready" if fact_resolution.get("unresolved",0)==0 and fact_resolution.get("ambiguous",0)==0 and fact_resolution.get("partial",0)==0
-            else "partial" if (fact_resolution.get("ready",0) or fact_resolution.get("matched",0))
-            else "unresolved"
-        ),
+        "resolution_status":"ready" if not rejected else "partial",
         "updated_at":pd.Timestamp.utcnow().isoformat()
     }).eq("content_item_id",item_id).execute()
 
@@ -4126,11 +4114,12 @@ SOURCE TEXT:
         "completed_at":pd.Timestamp.utcnow().isoformat(),
         "stats":{
             "content_item_id":item_id,
-            "facts":len(facts),
+            "facts":0,
             "staged_records":staged,
             "rejected_records":rejected,
             "primary_sources":primary_count,
-            "resolution":resolution
+            "resolution":resolution,
+            "mode":"simple_direct_records",
         }
     }).eq("ingestion_job_id",job_id).execute()
 
@@ -4143,13 +4132,12 @@ SOURCE TEXT:
         "content_item_id":item_id,
         "url":url,
         "title":fetched.get("title"),
-        "facts":len(facts),
+        "facts":0,
         "staged":staged,
         "rejected":rejected,
         "primary_sources":primary_count,
         "job_id":job_id,
         "resolution":resolution,
-        "fact_resolution":fact_resolution,
     }
 
 
@@ -12193,7 +12181,7 @@ elif page=="Universal Content Intake":
         st.error("Run the Universal Content / Fact Extraction Foundation SQL first.")
     else:
         intake_tab, queue_tab, facts_tab = st.tabs(
-            ["Add URLs / URL-list document","Content queue","Facts / audit trail"]
+            ["Add URLs / URL-list document","Content queue","Legacy fact audit"]
         )
 
         with intake_tab:
@@ -12282,7 +12270,7 @@ elif page=="Universal Content Intake":
 
             st.caption(
                 f"{len(urls)} unique URL(s) detected. "
-                "The source article remains evidence; structured facts are routed separately."
+                "Each URL is stored as one source/news item; supported records load directly to the canonical model."
             )
             if urls:
                 with st.expander("URL preview",expanded=False):
@@ -12426,7 +12414,7 @@ elif page=="Universal Content Intake":
                         st.success(
                             f"Loaded {len(results)} source(s) · {applied_total} canonical record(s) created/updated"
                             + (f" · {blocked_total} genuine exception(s) need review" if blocked_total else " · no blocking exceptions")
-                            + ". Facts were retained as provenance and do not block the load."
+                            + ". The source URL is retained as provenance; no fact-promotion step is required."
                         )
                         dataframe([{
                             "source":x.get("title") or x.get("content_item_id"),
@@ -12442,7 +12430,7 @@ elif page=="Universal Content Intake":
             st.markdown("### Content ingestion queue")
             st.caption(
                 "Queue URLs instantly, then load them directly into the canonical model in one action. "
-                "Facts remain provenance; only genuine identity ambiguity is held for review."
+                "Each source loads directly to canonical records; only genuine identity ambiguity is held for review."
             )
             q1,q2,q3=st.columns([1,1,1.4])
             queued_limit=q1.number_input(
@@ -12503,10 +12491,10 @@ elif page=="Universal Content Intake":
             dataframe(rows)
 
         with facts_tab:
-            st.markdown("### Extracted fact review")
+            st.markdown("### Legacy extracted-fact audit")
             st.caption(
-                "Facts are preserved as provenance only. Normal ingestion writes deterministic records directly "
-                "to canonical tables; this page is for audit/debugging and genuine exceptions."
+                "Historical fact rows from older loader builds remain visible here for audit/debugging. "
+                "New simple content loads do not create or depend on this fact layer."
             )
 
             a1,a2=st.columns([1.5,1])
@@ -12534,9 +12522,8 @@ elif page=="Universal Content Intake":
                 )
 
             st.info(
-                "This page is now an **audit/provenance view only**. "
-                "Normal URL/document loads write safe records directly to canonical tables. "
-                "No proposal-building or canonical-link refresh is required here."
+                "Legacy audit only. New URL loads go source → structured records → canonical apply. "
+                "No extracted-fact promotion or canonical-link refresh is part of the normal workflow."
             )
 
             try:
@@ -12656,7 +12643,7 @@ elif page=="Universal Content Intake":
                     dataframe(fdf.to_dict("records"))
 
 elif page=="Document Loader":
-    title("Document / report loader","Upload and preserve a source document. For documents containing lists of article URLs, use Universal Content Intake so every URL is fetched, fact-extracted and routed.")
+    title("Document / report loader","Upload and preserve a source document. For documents containing article URLs, use Universal Content Intake so each source is fetched and loaded directly to supported canonical records.")
     if not sb:
         st.error("Supabase required.")
     elif not _table_exists("pc_documents"):
