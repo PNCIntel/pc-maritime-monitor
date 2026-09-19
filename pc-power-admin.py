@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "532-generic-source-integrity-fix-2026-09-19"
+LOADER_BUILD = "533-uae-port-terminal-berth-promotion-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4608,6 +4608,16 @@ def _research_workbook_kind(sections,filename=""):
         and any(x in names for x in {"oocl_routes","maersk_routes","cma_cgm_routes"})
     ) or ("oocl" in fname and "maersk" in fname and "cma" in fname):
         return "ocean_carriers"
+
+    # UAE national port-system master.  This workbook deliberately carries
+    # separate port, terminal, berth, storage, shipyard and relationship sheets.
+    # It must not fall through to the generic asset-only classifier because the
+    # Trade app reads terminal/berth detail from pc_terminal_details and
+    # pc_berth_details.
+    uae_port_required={"uae_port_master","terminals"}
+    uae_port_detail={"fujairah_oil_berths","bulk_berths","multipurpose_berths","port_entity_links","port_terminal_links"}
+    if (uae_port_required.issubset(names) and len(uae_port_detail.intersection(names))>=2) or ("uae_ports_master" in fname or "uae_ports" in fname):
+        return "uae_ports_system"
     # Portsmouth full port-system / end-to-end logistics workbook.  This is a
     # domain research package rather than the generic Events/Entities/Assets graph.
     # Detect it explicitly so all ferry, berth, naval, cruise, cargo and project tabs
@@ -6087,6 +6097,300 @@ def _generic_is_sanctions_sheet(sheet_norm, rows):
     return bool(keys.intersection({"program","programs","sanctions_program","designation_date","sdn_type","ofac_uid","sanctions_authority","list_name"}))
 
 
+
+def _uae_ports_system_workbook_records(sections):
+    """Normalize the UAE national ports workbook into canonical port/terminal/berth tables.
+
+    The generic workbook engine is intentionally broad and therefore maps most
+    physical rows only to ``pc_assets``. That is insufficient for the Trade port
+    page, which expects terminal children in ``pc_terminal_details`` and berth
+    children in ``pc_berth_details``.
+    """
+    kind="uae_ports_system"
+    records=[]
+
+    def rows(sheet):
+        return _rw_rows(sections.get(sheet,pd.DataFrame()))
+
+    records.extend(_rw_sources_records(kind,sections))
+
+    port_rows=rows("UAE_Port_Master")
+    terminal_rows=rows("Terminals")
+    entity_rows=rows("Canonical_Entities")
+    if not entity_rows:
+        entity_rows=rows("Companies_Operators")
+
+    port_by_local={str(r.get("port_id")):r for r in port_rows if r.get("port_id")}
+    terminal_by_local={str(r.get("terminal_id")):r for r in terminal_rows if r.get("terminal_id")}
+    entity_by_local={str(r.get("entity_id")):r for r in entity_rows if r.get("entity_id")}
+    zone_by_local={str(r.get("zone_id")):r for r in rows("Industrial_Free_Zones") if r.get("zone_id")}
+    yard_by_local={str(r.get("yard_id")):r for r in rows("Shipyards_Drydocks") if r.get("yard_id")}
+    storage_by_local={str(r.get("storage_id")):r for r in rows("Fujairah_Storage_Terminals") if r.get("storage_id")}
+
+    def port_name(local_id):
+        r=port_by_local.get(str(local_id or ""),{})
+        return r.get("port_name") or r.get("canonical_name") or r.get("name") or (str(local_id) if local_id else None)
+
+    def terminal_name(local_id):
+        r=terminal_by_local.get(str(local_id or ""),{})
+        return r.get("terminal_name") or r.get("name") or (str(local_id) if local_id else None)
+
+    def entity_name(local_id):
+        r=entity_by_local.get(str(local_id or ""),{})
+        return r.get("canonical_name") or r.get("name") or (str(local_id) if local_id else None)
+
+    def zone_name(local_id):
+        r=zone_by_local.get(str(local_id or ""),{})
+        return r.get("name") or (str(local_id) if local_id else None)
+
+    def yard_name(local_id):
+        r=yard_by_local.get(str(local_id or ""),{})
+        return r.get("name") or (str(local_id) if local_id else None)
+
+    def storage_name(local_id):
+        r=storage_by_local.get(str(local_id or ""),{})
+        return r.get("company_terminal") or r.get("name") or (str(local_id) if local_id else None)
+
+    for row in entity_rows:
+        name=row.get("canonical_name") or row.get("name")
+        if not name:
+            continue
+        url=_rw_url(row)
+        records.append(_rw_record("pc_entities",f"entity:uae-port:{name}:{row.get('country') or ''}",{
+            "name":name,
+            "entity_type":row.get("entity_type") or "organization",
+            "subtype":row.get("relationship_class"),
+            "country":row.get("country"),
+            "hq_location":row.get("uae_base"),
+            "record_status":"verified",
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"Canonical_Entities",row,{
+                "workbook_entity_id":row.get("entity_id"),
+                "notes":row.get("notes"),
+            }),
+        },1.0))
+
+    for row in port_rows:
+        name=row.get("port_name") or row.get("canonical_name") or row.get("name")
+        if not name:
+            continue
+        url=_rw_url(row)
+        owner=row.get("operator_owner")
+        records.append(_rw_record("pc_assets",f"asset:uae-port:{row.get('port_id') or name}",{
+            "name":name,
+            "asset_type":"port",
+            "subtype":row.get("port_type"),
+            "country":"United Arab Emirates",
+            "region_city":row.get("emirate"),
+            "owner_entity_name":owner,
+            "operator_entity_name":owner,
+            "status":row.get("status"),
+            "record_status":"verified",
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"UAE_Port_Master",row,{
+                "workbook_port_id":row.get("port_id"),
+                "coast":row.get("coast"),
+                "primary_roles":row.get("primary_roles"),
+                "headline_capacity_or_scale":row.get("headline_capacity_or_scale"),
+                "reported_depth_m":_rw_number(row.get("depth_m")),
+                "reported_berths":_rw_number(row.get("berths")),
+                "reported_quay_length_m":_rw_number(row.get("quay_length_m")),
+            }),
+        },1.0))
+        records.append(_rw_record("pc_port_capabilities",f"port-capability:uae:{row.get('port_id') or name}",{
+            "port_asset_name":name,
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"UAE_Port_Master",row,{
+                "coast":row.get("coast"),
+                "primary_roles":row.get("primary_roles"),
+                "headline_capacity_or_scale":row.get("headline_capacity_or_scale"),
+                "depth_m":_rw_number(row.get("depth_m")),
+                "berth_count":_rw_number(row.get("berths")),
+                "quay_length_m":_rw_number(row.get("quay_length_m")),
+            }),
+        },1.0))
+
+    for row in terminal_rows:
+        name=row.get("terminal_name") or row.get("name")
+        parent=port_name(row.get("parent_port_id"))
+        if not name or not parent:
+            continue
+        url=_rw_url(row)
+        operator=row.get("operator")
+        parent_row=port_by_local.get(str(row.get("parent_port_id") or ""),{})
+        records.append(_rw_record("pc_assets",f"asset:uae-terminal:{row.get('terminal_id') or name}:{parent}",{
+            "name":name,
+            "asset_type":"terminal",
+            "subtype":row.get("terminal_type"),
+            "country":"United Arab Emirates",
+            "region_city":parent_row.get("emirate"),
+            "operator_entity_name":operator,
+            "status":row.get("status"),
+            "record_status":"verified",
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"Terminals",row,{
+                "workbook_terminal_id":row.get("terminal_id"),
+                "parent_port_name":parent,
+            }),
+        },1.0))
+        records.append(_rw_record("pc_terminal_details",f"terminal-detail:uae:{row.get('terminal_id') or name}:{parent}",{
+            "terminal_name":name,
+            "parent_port_name":parent,
+            "terminal_type":row.get("terminal_type"),
+            "operator_entity_name":operator,
+            "status":row.get("status"),
+            "berth_count":_rw_number(row.get("berths")),
+            "quay_length_m":_rw_number(row.get("quay_length_m")),
+            "max_draught_m":_rw_number(row.get("depth_m")),
+            "capacity":row.get("capacity"),
+            "yard_area_sqm":_rw_number(row.get("yard_area_sqm")),
+            "equipment":row.get("equipment_or_features"),
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"Terminals",row,{
+                "workbook_terminal_id":row.get("terminal_id"),
+                "parent_port_id":row.get("parent_port_id"),
+                "capacity":row.get("capacity"),
+                "depth_m":_rw_number(row.get("depth_m")),
+                "berths":_rw_number(row.get("berths")),
+                "quay_length_m":_rw_number(row.get("quay_length_m")),
+                "yard_area_sqm":_rw_number(row.get("yard_area_sqm")),
+                "equipment_or_features":row.get("equipment_or_features"),
+            }),
+        },1.0))
+
+    def emit_berth(sheet,row,name,terminal_local,parent_port_local=None):
+        if not name:
+            return
+        tname=terminal_name(terminal_local)
+        if not tname:
+            return
+        parent=port_name(parent_port_local or terminal_by_local.get(str(terminal_local or ""),{}).get("parent_port_id"))
+        url=_rw_url(row)
+        subtype=row.get("use") or row.get("function") or row.get("primary_use") or "berth"
+        length=_rw_number(row.get("length_m"))
+        depth=_rw_number(row.get("draft_m") or row.get("depth_alongside_m") or row.get("max_arrival_draft_m") or row.get("depth_m"))
+        max_loa=_rw_number(row.get("max_loa_m") or row.get("max_vessel_length_m"))
+        records.append(_rw_record("pc_assets",f"asset:uae-berth:{sheet}:{name}:{tname}",{
+            "name":name,"asset_type":"berth","subtype":subtype,
+            "country":"United Arab Emirates","status":row.get("status") or "Operational",
+            "record_status":"verified","source_url":url,
+            "metadata":_rw_metadata(kind,sheet,row,{
+                "terminal_name":tname,"parent_port_name":parent,
+                "workbook_berth_id":row.get("berth_id"),
+            }),
+        },1.0))
+        records.append(_rw_record("pc_berth_details",f"berth-detail:uae:{sheet}:{name}:{tname}",{
+            "berth_name":name,
+            "terminal_name":tname,
+            "berth_type":subtype,
+            "length_m":length,
+            "maintained_depth_m_cd":depth,
+            "max_vessel_length_m":max_loa,
+            "status":row.get("status") or "Operational",
+            "source_url":url,
+            "metadata":_rw_metadata(kind,sheet,row,{
+                "parent_port_name":parent,
+                "max_dwt":_rw_number(row.get("max_dwt")),
+                "max_loa_m":_rw_number(row.get("max_loa_m")),
+                "draft_m":_rw_number(row.get("draft_m")),
+                "max_arrival_draft_m":_rw_number(row.get("max_arrival_draft_m")),
+                "max_sailing_draft_m":_rw_number(row.get("max_sailing_draft_m")),
+                "loading_rate":row.get("loading_rate"),
+                "notes":row.get("notes"),
+            }),
+        },1.0))
+
+    for row in rows("Fujairah_Oil_Berths"):
+        emit_berth("Fujairah_Oil_Berths",row,row.get("berth_name") or row.get("name"),row.get("terminal_id") or "TERM-FUJ-FOTT")
+
+    for row in rows("Bulk_Berths"):
+        bid=str(row.get("berth_id") or "")
+        terminal_local=("TERM-DIBBA-BULK" if bid.startswith("DIB-") else "TERM-FUJ-BULK")
+        emit_berth("Bulk_Berths",row,row.get("berth_name") or row.get("name"),terminal_local,row.get("parent_port_id"))
+
+    for row in rows("Multipurpose_Berths"):
+        emit_berth("Multipurpose_Berths",row,row.get("berth_name") or row.get("name"),row.get("terminal_id") or "TERM-FUJ-FT")
+
+    for row in rows("Fujairah_Storage_Terminals"):
+        name=row.get("company_terminal") or row.get("name")
+        if not name: continue
+        records.append(_rw_record("pc_assets",f"asset:uae-storage:{row.get('storage_id') or name}",{
+            "name":name,"asset_type":"storage terminal","subtype":row.get("facility_type"),
+            "country":"United Arab Emirates","region_city":"Fujairah","status":row.get("status"),
+            "source_url":_rw_url(row),"record_status":"verified",
+            "metadata":_rw_metadata(kind,"Fujairah_Storage_Terminals",row),
+        },1.0))
+
+    for row in rows("Shipyards_Drydocks"):
+        name=row.get("name")
+        if not name: continue
+        records.append(_rw_record("pc_assets",f"asset:uae-yard:{row.get('yard_id') or name}",{
+            "name":name,"asset_type":"shipyard","subtype":row.get("yard_type"),
+            "country":"United Arab Emirates","region_city":row.get("emirate"),
+            "operator_entity_name":row.get("operator"),"status":row.get("status"),
+            "source_url":_rw_url(row),"record_status":"verified",
+            "metadata":_rw_metadata(kind,"Shipyards_Drydocks",row),
+        },1.0))
+
+    for row in rows("Industrial_Free_Zones"):
+        name=row.get("name")
+        if not name: continue
+        records.append(_rw_record("pc_assets",f"asset:uae-zone:{row.get('zone_id') or name}",{
+            "name":name,"asset_type":"free zone","subtype":"port-linked industrial zone",
+            "country":"United Arab Emirates","region_city":row.get("emirate"),
+            "source_url":_rw_url(row),"record_status":"verified",
+            "metadata":_rw_metadata(kind,"Industrial_Free_Zones",row),
+        },1.0))
+
+    def add_rel(source_type,source_name,relationship,target_type,target_name,row,sheet):
+        if not source_name or not target_name:
+            return
+        records.append(_rw_record("pc_relationships",f"uae-rel:{sheet}:{source_type}:{source_name}:{relationship}:{target_type}:{target_name}",{
+            "source_type":source_type,"source_name":source_name,
+            "relationship_type":relationship or "related_to",
+            "target_type":target_type,"target_name":target_name,
+            "confidence":"high","source_url":_rw_url(row),
+            "metadata":_rw_metadata(kind,sheet,row),
+        },1.0))
+
+    for row in rows("Port_Entity_Links"):
+        add_rel("asset",port_name(row.get("port_id")),row.get("relationship"),"entity",entity_name(row.get("entity_id")),row,"Port_Entity_Links")
+    for row in rows("Port_Terminal_Links"):
+        add_rel("asset",port_name(row.get("port_id")),row.get("relationship") or "contains","asset",terminal_name(row.get("terminal_id")),row,"Port_Terminal_Links")
+    for row in rows("Terminal_Entity_Links"):
+        add_rel("asset",terminal_name(row.get("terminal_id")),row.get("relationship"),"entity",entity_name(row.get("entity_id")),row,"Terminal_Entity_Links")
+    for row in rows("Port_Zone_Links"):
+        add_rel("asset",port_name(row.get("port_id")),row.get("relationship"),"asset",zone_name(row.get("zone_id")),row,"Port_Zone_Links")
+    for row in rows("Port_Shipyard_Links"):
+        add_rel("asset",port_name(row.get("port_id")),row.get("relationship"),"asset",yard_name(row.get("yard_id")),row,"Port_Shipyard_Links")
+        if row.get("operator_entity_id"):
+            add_rel("asset",yard_name(row.get("yard_id")),"operated_by","entity",entity_name(row.get("operator_entity_id")),row,"Port_Shipyard_Links")
+    for row in rows("Port_Storage_Links"):
+        add_rel("asset",port_name(row.get("port_id")),row.get("relationship"),"asset",storage_name(row.get("storage_id")),row,"Port_Storage_Links")
+        if row.get("operator_entity_id"):
+            add_rel("asset",storage_name(row.get("storage_id")),"operated_by","entity",entity_name(row.get("operator_entity_id")),row,"Port_Storage_Links")
+    for row in rows("Storage_Entity_Links"):
+        add_rel("asset",storage_name(row.get("storage_id")),row.get("relationship"),"entity",entity_name(row.get("entity_id")),row,"Storage_Entity_Links")
+    for row in rows("Entity_Relationships"):
+        add_rel("entity",entity_name(row.get("from_entity_id")),row.get("relationship"),"entity",entity_name(row.get("to_entity_id")),row,"Entity_Relationships")
+
+    for i,row in enumerate(rows("Recent_News_Projects"),1):
+        headline=row.get("headline")
+        if not headline: continue
+        eid=_simple_hash_id("EVENT_RWB",kind,row.get("date"),headline,i)
+        records.append(_rw_record("pc_events",f"event:{eid}",{
+            "event_id":eid,"start_date":_rw_date(row.get("date")),
+            "event_nature":"port_development","event_domain":"maritime",
+            "event_type":row.get("event_type") or "port development",
+            "status":"reported","title":headline,"description":row.get("summary"),
+            "countries":"United Arab Emirates","location":row.get("port_asset"),
+            "trade_relevance":5,"intelligence_relevance":3,
+            "trade_visible":True,"intelligence_visible":True,
+            "source_url":_rw_url(row),"metadata":_rw_metadata(kind,"Recent_News_Projects",row),
+        },1.0))
+
+    return records
+
 def _generic_schema_driven_workbook_records(sections):
     """Infer canonical/domain records from arbitrary research workbooks.
 
@@ -6264,6 +6568,7 @@ def _research_workbook_records(sections,filename=""):
     if kind=="ocean_carriers": return kind,_ocean_carriers_workbook_records(sections)
     if kind=="portsmouth_system": return kind,_portsmouth_system_workbook_records(sections)
     if kind=="normalized_trade_maritime": return kind,_normalized_trade_maritime_workbook_records(sections)
+    if kind=="uae_ports_system": return kind,_uae_ports_system_workbook_records(sections)
     if kind=="generic_schema_driven": return kind,_generic_schema_driven_workbook_records(sections)
     return None,[]
 
