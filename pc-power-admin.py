@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "517-normalized-trade-workbook-direct-loader-2026-09-19"
+LOADER_BUILD = "530-generic-schema-driven-loader-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4607,6 +4607,15 @@ def _research_workbook_kind(sections,filename=""):
         and any(x in names for x in {"oocl_routes","maersk_routes","cma_cgm_routes"})
     ) or ("oocl" in fname and "maersk" in fname and "cma" in fname):
         return "ocean_carriers"
+    # Portsmouth full port-system / end-to-end logistics workbook.  This is a
+    # domain research package rather than the generic Events/Entities/Assets graph.
+    # Detect it explicitly so all ferry, berth, naval, cruise, cargo and project tabs
+    # are loaded instead of falling through to generic reconciliation.
+    portsmouth_required={"port_system","berths_infrastructure","ferry_routes","ferry_vessels","companies_entities"}
+    portsmouth_domain={"royal_navy_fleet","naval_infrastructure","cruise_schedule","cargo_logistics","projects_investment"}
+    if (portsmouth_required.issubset(names) and len(portsmouth_domain.intersection(names))>=3) or "portsmouth" in fname:
+        return "portsmouth_system"
+
     # Normalized cross-domain trade/maritime intelligence workbook. This shape
     # already contains explicit entity/asset/location/link sheets and must never
     # fall back to the generic three-sheet reconciliation path.
@@ -4621,6 +4630,12 @@ def _research_workbook_kind(sections,filename=""):
         return "normalized_trade_maritime"
     if "normalized_trade_maritime_entity_location_loader" in fname:
         return "normalized_trade_maritime"
+
+    # V5.3 generic fallback: any workbook with at least one non-empty data sheet is
+    # treated as a schema-driven research package. Dedicated handlers above remain
+    # useful hints, but are no longer required for a workbook to load.
+    if names:
+        return "generic_schema_driven"
     return None
 
 
@@ -5491,6 +5506,299 @@ def _ocean_carriers_workbook_records(sections):
 
 
 
+
+def _portsmouth_system_workbook_records(sections):
+    """Normalize the Portsmouth port-system workbook across the full logistics cycle.
+
+    The workbook spans commercial ports, berths, ferry routes/vessels, cargo services,
+    companies, Royal Navy assets, naval infrastructure, cruise calls, economic metrics,
+    projects, news and local maritime-service companies.  Every supported row is loaded
+    directly; residual research/data-quality rows are retained as observations.
+    """
+    kind="portsmouth_system"
+    records=[]
+
+    def rows(sheet):
+        return _rw_rows(sections.get(sheet,pd.DataFrame()))
+
+    port_rows=rows("Port_System")
+    port_by_id={str(r.get("port_asset_id")):r for r in port_rows if r.get("port_asset_id")}
+    entity_rows=rows("Companies_Entities")
+    entity_by_id={str(r.get("entity_id")):r for r in entity_rows if r.get("entity_id")}
+
+    def port_name(local_id):
+        r=port_by_id.get(str(local_id or ""),{})
+        return r.get("canonical_name") or r.get("name") or (str(local_id) if local_id else None)
+
+    def split_names(value):
+        if value in (None,""):
+            return []
+        s=str(value).strip()
+        # Keep slashes inside ordinary names where possible, but split common multi-party delimiters.
+        parts=re.split(r"\s*;\s*|\s+\|\s+",s)
+        return [p.strip() for p in parts if p and p.strip()]
+
+    # Sources -----------------------------------------------------------------
+    for row in rows("Sources"):
+        url=row.get("url") or row.get("source_url")
+        if not url: continue
+        host=urllib.parse.urlparse(str(url)).netloc
+        records.append(_rw_record("pc_sources",f"source:{url}",{
+            "source_id":_simple_hash_id("SRC_WEB",url),
+            "source_name":row.get("source_name") or host,
+            "publisher":row.get("source_name") or host,
+            "source_type":row.get("source_type") or "web",
+            "url":url,"ingestion_method":"portsmouth_system_workbook","active":True,
+            "metadata":_rw_metadata(kind,"Sources",row,{"used_for":row.get("used_for")}),
+        },1.0))
+
+    # Companies/entities ------------------------------------------------------
+    for row in entity_rows:
+        name=row.get("name")
+        if not name: continue
+        url=row.get("source_url")
+        records.append(_rw_record("pc_entities",f"entity:{name}",{
+            "name":name,"entity_type":row.get("entity_type") or "company",
+            "country":"United Kingdom","hq_country":"United Kingdom",
+            "source_url":url,"record_status":"verified",
+            "metadata":_rw_metadata(kind,"Companies_Entities",row,{
+                "workbook_entity_id":row.get("entity_id"),
+                "role_in_portsmouth":row.get("role_in_portsmouth"),
+                "location_or_address":row.get("location_or_address"),
+                "current_metric_or_note":row.get("current_metric_or_note"),
+            }),
+        },1.0))
+        parent=row.get("ownership_parent")
+        if parent:
+            records.append(_rw_record("pc_relationships",f"relationship:{parent}:owns:{name}",{
+                "source_type":"entity","source_name":parent,"relationship_type":"owns",
+                "target_type":"entity","target_name":name,"confidence":"high","source_url":url,
+                "metadata":_rw_metadata(kind,"Companies_Entities",row),
+            },1.0))
+
+    # Local maritime directory companies -------------------------------------
+    for row in rows("Maritime_Directory"):
+        name=row.get("company")
+        if not name: continue
+        records.append(_rw_record("pc_entities",f"entity:portsmouth-directory:{name}",{
+            "name":name,"entity_type":"maritime services company","country":"United Kingdom",
+            "source_url":row.get("source_url"),"record_status":"verified",
+            "metadata":_rw_metadata(kind,"Maritime_Directory",row,{
+                "service_category":row.get("category"),"location":row.get("location"),"role":row.get("role")
+            }),
+        },1.0))
+
+    # Port-system assets ------------------------------------------------------
+    for row in port_rows:
+        name=row.get("canonical_name") or row.get("name")
+        if not name: continue
+        owner=row.get("owner_operator")
+        atype=row.get("asset_type") or "port"
+        records.append(_rw_record("pc_assets",f"asset:portsmouth:{name}",{
+            "name":name,"asset_type":atype,"country":"United Kingdom","region_city":"Portsmouth",
+            "status":row.get("status"),"operator_entity_name":owner,"owner_entity_name":owner,
+            "source_url":row.get("source_url"),"record_status":"verified",
+            "metadata":_rw_metadata(kind,"Port_System",row,{
+                "workbook_port_asset_id":row.get("port_asset_id"),"address_or_area":row.get("address_or_area"),
+                "primary_role":row.get("primary_role"),"scale_or_metric":row.get("scale_or_metric")
+            }),
+        },1.0))
+        if "port" in str(atype).casefold() or "harbour" in str(atype).casefold() or "naval base" in str(atype).casefold():
+            records.append(_rw_record("pc_port_capabilities",f"port-capability:{name}",{
+                "port_asset_name":name,"source_url":row.get("source_url"),
+                "metadata":_rw_metadata(kind,"Port_System",row,{
+                    "primary_role":row.get("primary_role"),"scale_or_metric":row.get("scale_or_metric")
+                }),
+            },1.0))
+
+    # Berths/infrastructure ---------------------------------------------------
+    for row in rows("Berths_Infrastructure"):
+        name=row.get("name") or row.get("berth_id")
+        if not name: continue
+        parent=port_name(row.get("port_asset_id"))
+        url=row.get("source_url")
+        records.append(_rw_record("pc_assets",f"asset:berth:{name}:{parent}",{
+            "name":name,"asset_type":"berth","subtype":row.get("berth_type"),"country":"United Kingdom",
+            "region_city":"Portsmouth","status":row.get("status"),"source_url":url,"record_status":"verified",
+            "metadata":_rw_metadata(kind,"Berths_Infrastructure",row,{"parent_port":parent,"workbook_berth_id":row.get("berth_id")}),
+        },1.0))
+        records.append(_rw_record("pc_berth_details",f"berth-detail:{name}:{parent}",{
+            "berth_name":name,"parent_port_name":parent,"berth_type":row.get("berth_type"),
+            "length_m":_rw_number(row.get("length_m")),"maintained_depth_m_cd":_rw_number(row.get("maintained_depth_m_cd")),
+            "max_vessel_length_m":_rw_number(row.get("max_vessel_length_m")),"max_beam_m":_rw_number(row.get("max_beam_m")),
+            "shore_power":row.get("shore_power"),"status":row.get("status"),"source_url":url,
+            "metadata":_rw_metadata(kind,"Berths_Infrastructure",row,{"known_use_or_feature":row.get("known_use_or_feature")}),
+        },1.0))
+
+    # Ferry routes -> services + ordered endpoints ---------------------------
+    for row in rows("Ferry_Routes"):
+        route_id=row.get("route_id")
+        origin=port_name(row.get("origin_port_asset"))
+        dest=row.get("destination")
+        operator=row.get("operator")
+        if not origin or not dest: continue
+        sname=f"{operator}: {origin}–{dest}" if operator else f"{origin}–{dest}"
+        sid=_simple_hash_id("SERVICE_AI",route_id or sname)
+        records.append(_rw_record("pc_transport_services",f"service:{route_id or sname}",{
+            "transport_service_id":sid,"service_name":sname,"mode":"sea","service_type":row.get("service_type") or "ferry service",
+            "primary_operator_entity_name":operator,"status":row.get("status") or "active","trade_lane":f"{origin}–{dest}",
+            "source_url":row.get("source_url"),
+            "metadata":_rw_metadata(kind,"Ferry_Routes",row,{"crossing_time":row.get("crossing_time"),"frequency":row.get("frequency"),"current_vessels_or_notes":row.get("current_vessels_or_notes")}),
+        },1.0))
+        for seq,pname in ((1,origin),(2,dest)):
+            records.append(_rw_record("pc_transport_service_stops",f"service-stop:{sid}:main:{seq}:{pname}",{
+                "transport_service_id":sid,"direction":"main","sequence_no":seq,"asset_name":pname,"asset_type":"port",
+                "call_type":"scheduled","source_url":row.get("source_url"),"metadata":_rw_metadata(kind,"Ferry_Routes",row),
+            },1.0))
+
+    # Ferry vessels -----------------------------------------------------------
+    for row in rows("Ferry_Vessels"):
+        name=row.get("vessel_name")
+        if not name: continue
+        records.append(_rw_record("pc_mobile_assets",f"mobile:ferry:{name}",{
+            "name":name,"asset_type":"vessel","subtype":row.get("vessel_type"),"operator_entity_name":row.get("operator"),
+            "status":row.get("status"),"source_url":row.get("source_url"),
+            "metadata":_rw_metadata(kind,"Ferry_Vessels",row,{
+                "workbook_vessel_id":row.get("vessel_id"),"route_or_port_link":row.get("route_or_port_link"),
+                "length_m":row.get("length_m"),"passenger_capacity":row.get("passenger_capacity"),
+                "vehicle_or_lane_capacity":row.get("vehicle_or_lane_capacity"),"propulsion_or_feature":row.get("propulsion_or_feature")
+            }),
+        },1.0))
+
+    # Cargo services / logistics observations --------------------------------
+    for row in rows("Cargo_Logistics"):
+        label=row.get("service_or_cargo") or row.get("cargo_record_id")
+        if not label: continue
+        terminal=row.get("terminal"); operator=row.get("operator_or_line"); lane=row.get("route_or_market")
+        # Rows with an operator/line and route/market are operational transport/logistics services.
+        if operator and lane:
+            sname=f"{operator}: {label}"
+            records.append(_rw_record("pc_transport_services",f"cargo-service:{row.get('cargo_record_id') or sname}",{
+                "transport_service_id":_simple_hash_id("SERVICE_AI","portsmouth-cargo",row.get("cargo_record_id") or sname),
+                "service_name":sname,"mode":"sea","service_type":"freight service","primary_operator_entity_name":operator,
+                "status":row.get("status"),"trade_lane":lane,"source_url":row.get("source_url"),
+                "metadata":_rw_metadata(kind,"Cargo_Logistics",row,{"terminal":terminal,"capacity_or_metric":row.get("capacity_or_metric"),"infrastructure":row.get("infrastructure")}),
+            },1.0))
+        records.append(_rw_record("pc_observations",f"cargo-observation:{row.get('cargo_record_id') or label}",{
+            "observation_id":_simple_hash_id("OBS_AI","portsmouth-cargo",row.get("cargo_record_id") or label),
+            "source_type":"cargo_logistics","source_url":row.get("source_url"),"confidence":"high",
+            "review_status":"approved","record_status":"verified","raw_value":_jsonable(row),
+            "metadata":_rw_metadata(kind,"Cargo_Logistics",row),
+        },1.0))
+
+    # Royal Navy fleet --------------------------------------------------------
+    for row in rows("Royal_Navy_Fleet"):
+        name=row.get("name_or_class")
+        if not name: continue
+        records.append(_rw_record("pc_mobile_assets",f"mobile:royal-navy:{name}",{
+            "name":name,"asset_type":"naval vessel" if "class" not in str(row.get("asset_type") or "").casefold() else "naval class",
+            "subtype":row.get("asset_type"),"operator_entity_name":"Royal Navy","status":"active","source_url":row.get("source_url"),
+            "metadata":_rw_metadata(kind,"Royal_Navy_Fleet",row,{
+                "workbook_naval_asset_id":row.get("naval_asset_id"),"homeport_status":row.get("homeport_status"),
+                "key_spec_or_count":row.get("key_spec_or_count"),"current_2026_context":row.get("current_2026_context"),
+                "support_entities":row.get("support_entities")
+            }),
+        },1.0))
+        # Explicit base relationship where the row says Portsmouth-based/homeport.
+        if "portsmouth" in str(row.get("homeport_status") or "").casefold():
+            records.append(_rw_record("pc_relationships",f"relationship:{name}:homeported:HMNB Portsmouth",{
+                "source_type":"mobile_asset","source_name":name,"source_subtype":row.get("asset_type"),
+                "relationship_type":"homeported at","target_type":"asset","target_name":"HMNB Portsmouth",
+                "target_asset_type":"naval base","confidence":"high","source_url":row.get("source_url"),
+                "metadata":_rw_metadata(kind,"Royal_Navy_Fleet",row),
+            },1.0))
+
+    # Naval infrastructure + investment projects -----------------------------
+    for sheet in ("Naval_Infrastructure","Projects_Investment"):
+        for row in rows(sheet):
+            pname=row.get("asset_or_program") or row.get("project") or row.get("project_id")
+            if not pname: continue
+            url=row.get("source_url")
+            leads=row.get("lead_entity") or row.get("lead_entities")
+            lead_first=split_names(leads)[0] if split_names(leads) else (str(leads).split(" / ")[0].strip() if leads else None)
+            status=row.get("status")
+            records.append(_rw_record("pc_assets",f"project-asset:{sheet}:{pname}",{
+                "name":pname,"asset_type":"project","country":"United Kingdom","region_city":"Portsmouth",
+                "status":status,"operator_entity_name":lead_first,"source_url":url,"record_status":"verified",
+                "metadata":_rw_metadata(kind,sheet,row,{"lead_entities":leads}),
+            },1.0))
+            records.append(_rw_record("pc_project_details",f"project-detail:{sheet}:{pname}",{
+                "asset_name":pname,"project_type":"naval infrastructure" if sheet=="Naval_Infrastructure" else "port/logistics investment",
+                "project_stage":status,"sponsor_entity_name":lead_first,"source_url":url,
+                "metadata":_rw_metadata(kind,sheet,row),
+            },1.0))
+
+    # Cruise schedule -> mobile assets + scheduled port calls -----------------
+    default_cruise_port="Portsmouth International Port"
+    for row in rows("Cruise_Schedule"):
+        ship=row.get("ship")
+        if not ship: continue
+        url=row.get("source_url")
+        records.append(_rw_record("pc_mobile_assets",f"mobile:cruise:{ship}",{
+            "name":ship,"asset_type":"vessel","subtype":"cruise ship","operator_entity_name":row.get("cruise_line"),
+            "status":"active","source_url":url,"metadata":_rw_metadata(kind,"Cruise_Schedule",row),
+        },1.0))
+        port=port_name(row.get("port_asset_id")) or default_cruise_port
+        call_key=f"{ship}:{row.get('date')}:{port}:{row.get('eta')}"
+        records.append(_rw_record("pc_port_calls",f"port-call:{call_key}",{
+            "vessel_name":ship,"port_name":port,"call_type":row.get("call_type") or "scheduled cruise call",
+            "arrival_time":row.get("eta"),"departure_time":row.get("etd"),"call_date":_rw_date(row.get("date")),
+            "status":"scheduled","source_url":url,
+            "metadata":_rw_metadata(kind,"Cruise_Schedule",row,{"provisional":True,"cruise_line":row.get("cruise_line")}),
+        },1.0))
+
+    # Economic metrics --------------------------------------------------------
+    for row in rows("Economic_Stats"):
+        metric=row.get("metric")
+        if not metric: continue
+        records.append(_rw_record("pc_observations",f"economic:{metric}:{row.get('period')}:{row.get('scope')}",{
+            "observation_id":_simple_hash_id("OBS_AI","portsmouth-economic",metric,row.get("period"),row.get("scope")),
+            "source_type":"economic_metric","source_url":row.get("source_url"),"confidence":"high",
+            "review_status":"approved","record_status":"verified","raw_value":_jsonable(row),
+            "metadata":_rw_metadata(kind,"Economic_Stats",row),
+        },1.0))
+
+    # News/events -------------------------------------------------------------
+    for row in rows("News_12M"):
+        title=row.get("headline")
+        if not title: continue
+        eid=_simple_hash_id("EVENT_RWB","portsmouth",row.get("date"),title)
+        url=row.get("source_url")
+        records.append(_rw_record("pc_events",f"event:{eid}",{
+            "event_id":eid,"start_date":_rw_date(row.get("date")),"event_domain":"logistics",
+            "event_nature":row.get("domain"),"event_type":row.get("domain") or "news/development",
+            "event_category":row.get("domain"),"title":title,"description":row.get("summary"),
+            "trade_relevance":3,"intelligence_relevance":3,"trade_visible":True,"intelligence_visible":True,
+            "status":"recorded","source_url":url,"metadata":_rw_metadata(kind,"News_12M",row),
+        },1.0))
+        for en in split_names(row.get("entities")):
+            # Ship names are still safe as entity links here; the event retains full source row.
+            records.append(_rw_record("pc_event_links",f"event-link:{eid}:entity:{en}",{
+                "event_id":eid,"linked_type":"entity","linked_name":en,"relationship":"mentioned/affected party",
+                "confidence":"high","source_url":url,"metadata":_rw_metadata(kind,"News_12M",row),
+            },1.0))
+
+    # Data-quality notes are valuable source-scoped observations, not load blockers.
+    for row in rows("Data_Quality"):
+        issue=row.get("issue")
+        if not issue: continue
+        records.append(_rw_record("pc_observations",f"data-quality:{issue}",{
+            "observation_id":_simple_hash_id("OBS_AI","portsmouth-dq",issue),"source_type":"data_quality_note",
+            "source_url":row.get("source_url"),"confidence":"high","review_status":"approved","record_status":"verified",
+            "raw_value":_jsonable(row),"metadata":_rw_metadata(kind,"Data_Quality",row),
+        },1.0))
+
+    # Preserve summary rows as observations so no research content disappears.
+    for idx,row in enumerate(rows("Summary"),start=1):
+        records.append(_rw_record("pc_observations",f"summary:{idx}:{row}",{
+            "observation_id":_simple_hash_id("OBS_AI","portsmouth-summary",idx,str(row)),"source_type":"workbook_summary",
+            "confidence":"high","review_status":"approved","record_status":"verified","raw_value":_jsonable(row),
+            "metadata":_rw_metadata(kind,"Summary",row),
+        },1.0))
+
+    return records
+
+
 def _normalized_trade_maritime_workbook_records(sections):
     """Load the normalized cross-domain trade/maritime workbook end-to-end.
 
@@ -5728,6 +6036,206 @@ def _normalized_trade_maritime_workbook_records(sections):
 
     return records
 
+
+# ---------------------------------------------------------------------------
+# V5.3 generic schema-driven workbook normalizer
+# ---------------------------------------------------------------------------
+
+def _generic_first(row, *keys):
+    for k in keys:
+        v=row.get(k)
+        if v not in (None, ""):
+            return v
+    return None
+
+
+def _generic_cols(row):
+    return {_norm_field(k) for k,v in (row or {}).items() if v not in (None,"")}
+
+
+def _generic_is_mobile(row, sheet_norm=""):
+    c=_generic_cols(row)
+    text=" ".join(str(_generic_first(row,"asset_type","entity_type","type","subtype","category") or "").casefold().split())
+    return bool(c.intersection({"imo","mmsi","vessel_name","ship_name","aircraft_registration","tail_number","imo_number"})) or any(x in text for x in ("vessel","ship","tanker","ferry","aircraft","locomotive","rolling stock")) or any(x in sheet_norm for x in ("vessel","fleet","aircraft","rolling_stock"))
+
+
+def _generic_is_sanctions_sheet(sheet_norm, rows):
+    if any(x in sheet_norm for x in ("ofac","sanction","sdn","non_sdn","designation")):
+        return True
+    sample=rows[:5]
+    keys=set()
+    for r in sample: keys |= _generic_cols(r)
+    return bool(keys.intersection({"program","programs","sanctions_program","designation_date","sdn_type","ofac_uid","sanctions_authority","list_name"}))
+
+
+def _generic_schema_driven_workbook_records(sections):
+    """Infer canonical/domain records from arbitrary research workbooks.
+
+    The engine is intentionally conservative: recognizable rows are mapped to the
+    model; anything else is retained as a canonical observation with full source
+    payload. This means new workbook shapes load without a new Python handler.
+    """
+    kind="generic_schema_driven"
+    records=[]
+    records.extend(_rw_sources_records(kind,sections))
+    emitted_services=set()
+
+    skip_sheets={"readme","summary","loader_notes","methodology","data_quality","notes","instructions"}
+    for sheet,df in (sections or {}).items():
+        if df is None or df.empty: continue
+        sn=_norm_field(sheet)
+        rows=_rw_rows(df)
+        if not rows: continue
+        is_sanctions=_generic_is_sanctions_sheet(sn,rows)
+
+        for i,row in enumerate(rows,1):
+            url=_rw_url(row) or _generic_first(row,"website_or_primary_source","website_or_source","source")
+            source_id=_simple_hash_id("SRC_WEB",url) if url and str(url).startswith(("http://","https://")) else None
+            cols=_generic_cols(row)
+            md=_rw_metadata(kind,sheet,row,{"generic_classifier":True})
+
+            # --- sanctions / watchlist rows ---------------------------------
+            if is_sanctions:
+                name=_generic_first(row,"primary_name","name","entity_name","company_name","vessel_name","aircraft_name","target_name")
+                if not name: 
+                    # Some OFAC workbooks separate aliases/addresses from primary rows.
+                    records.append(_rw_record("pc_observations",f"generic:{sn}:{i}",{
+                        "observation_id":_simple_hash_id("OBS_AI",sn,i,str(row)),"source_type":sn,
+                        "source_url":url,"raw_value":_jsonable(row),"confidence":"high",
+                        "review_status":"approved","record_status":"verified","metadata":md,
+                    },1.0)); continue
+                typ=str(_generic_first(row,"sdn_type","target_type","entity_type","type") or "entity").casefold()
+                mobile=_generic_is_mobile(row,sn) or any(x in typ for x in ("vessel","ship","aircraft"))
+                if mobile:
+                    records.append(_rw_record("pc_mobile_assets",f"sanctions-mobile:{name}:{row.get('imo') or row.get('mmsi') or ''}",{
+                        "name":name,"asset_type":"aircraft" if "aircraft" in typ else "vessel",
+                        "subtype":_generic_first(row,"vessel_type","aircraft_type","subtype"),"imo":_generic_first(row,"imo","imo_number"),
+                        "mmsi":row.get("mmsi"),"registration":_generic_first(row,"aircraft_registration","tail_number","registration"),
+                        "flag":_generic_first(row,"flag","flag_state","country"),"source_url":url,"metadata":md,
+                    },1.0))
+                    target_type="mobile_asset"
+                else:
+                    etype="person" if any(x in typ for x in ("individual","person")) else (_generic_first(row,"entity_type","type") or "organization")
+                    records.append(_rw_record("pc_entities",f"sanctions-entity:{name}:{row.get('country') or ''}",{
+                        "name":name,"entity_type":etype,"country":_generic_first(row,"country","jurisdiction"),"source_url":url,"metadata":md,
+                    },1.0))
+                    target_type="entity"
+                program=_generic_first(row,"program","programs","sanctions_program","programme","regime","list_name")
+                desig=_generic_first(row,"designation_date","listed_date","date")
+                notes=_generic_first(row,"remarks","reason","notes","comment")
+                records.append(_rw_record("pc_security_compliance",f"sanctions:{name}:{program}:{desig}",{
+                    "record_type":"Sanctions designation","regime":program or "Sanctions/watchlist",
+                    "target_type":target_type,"target_name":name,"status":_generic_first(row,"status","designation_status") or "listed",
+                    "notes":notes,"source_id":source_id,"source_url":url,"confidence":"high",
+                    "metadata":_rw_metadata(kind,sheet,row,{"designation_date":_rw_date(desig),"official_identifier":_generic_first(row,"uid","ofac_uid","id"),"aliases":_generic_first(row,"aliases","aka","akas")}),
+                },1.0))
+                continue
+
+            # --- event rows --------------------------------------------------
+            if ("event_id" in cols or "event_date" in cols or "incident_date" in cols) and cols.intersection({"headline","title","event_type","event_category","summary","description"}):
+                eid=str(_generic_first(row,"event_id","incident_id") or _simple_hash_id("EVENT_RWB",sn,i,_generic_first(row,"headline","title","summary"),_generic_first(row,"event_date","incident_date","date")))
+                title=_generic_first(row,"headline","title","event_name","summary") or f"{sheet} record {i}"
+                records.append(_rw_record("pc_events",f"event:{eid}",{
+                    "event_id":eid,"start_date":_rw_date(_generic_first(row,"event_date","incident_date","date","start_date")),
+                    "event_type":_generic_first(row,"event_type","event_category","category") or "Operational event",
+                    "event_domain":_generic_first(row,"event_domain","domain","mode"),"event_nature":_generic_first(row,"event_nature","nature"),
+                    "title":title,"description":_generic_first(row,"description","summary","details"),
+                    "location":_generic_first(row,"location","location_name","city","port"),"countries":_generic_first(row,"country","countries"),
+                    "severity":row.get("severity"),"status":row.get("status"),"source_id":source_id,"source_url":url,
+                    "trade_relevance":_generic_first(row,"trade_relevance","trade_score"),"intelligence_relevance":_generic_first(row,"intelligence_relevance","intel_score"),
+                    "trade_visible":True,"intelligence_visible":True,"metadata":md,
+                },1.0))
+                continue
+
+            # --- explicit relationships ------------------------------------
+            if cols.intersection({"relationship","relationship_type"}) and (cols.intersection({"source_name","source_entity","parent","owner","owner_name"}) or cols.intersection({"target_name","target_entity","child","subsidiary","company"})):
+                sname=_generic_first(row,"source_name","source_entity","parent","owner","owner_name","from_name")
+                tname=_generic_first(row,"target_name","target_entity","child","subsidiary","company","to_name")
+                if sname and tname:
+                    records.append(_rw_record("pc_relationships",f"relationship:{sname}:{_generic_first(row,'relationship_type','relationship')}:{tname}",{
+                        "source_type":_generic_first(row,"source_type") or "entity","source_name":sname,
+                        "relationship_type":_generic_first(row,"relationship_type","relationship") or "related to",
+                        "target_type":_generic_first(row,"target_type") or "entity","target_name":tname,
+                        "valid_from":_rw_date(_generic_first(row,"valid_from","start_date","date")),"valid_to":_rw_date(_generic_first(row,"valid_to","end_date")),
+                        "confidence":"high","source_id":source_id,"source_url":url,"metadata":md,
+                    },1.0)); continue
+
+            # --- services / routes / ordered stops -------------------------
+            if "service_name" in cols or ("route_name" in cols and cols.intersection({"origin","destination","sequence","port_name","station_name","stop_name"})):
+                sname=_generic_first(row,"service_name","route_name")
+                if sname:
+                    sid=_simple_hash_id("SERVICE_AI",sname,_generic_first(row,"operator","company","carrier"))
+                    if sid not in emitted_services:
+                        emitted_services.add(sid)
+                        records.append(_rw_record("pc_transport_services",f"service:{sname}",{
+                            "transport_service_id":sid,"service_name":sname,"mode":_generic_first(row,"mode","transport_mode") or ("sea" if any(x in sn for x in ("port","maritime","ferry","ocean")) else None),
+                            "service_type":_generic_first(row,"service_type","route_type","type"),"status":row.get("status"),
+                            "effective_start":_rw_date(_generic_first(row,"effective_start","start_date","service_start")),
+                            "primary_operator_entity_name":_generic_first(row,"operator","operator_name","company","carrier"),"source_id":source_id,"source_url":url,"metadata":md,
+                        },1.0))
+                    stop=_generic_first(row,"port_name","station_name","stop_name","location_name","node_name")
+                    seq=_rw_number(_generic_first(row,"sequence","sequence_no","stop_sequence","call_sequence"))
+                    if stop and seq is not None:
+                        records.append(_rw_record("pc_transport_service_stops",f"service-stop:{sid}:{seq}:{stop}",{
+                            "transport_service_id":sid,"direction":_generic_first(row,"direction","leg") or "main","sequence_no":int(seq),
+                            "asset_name":stop,"asset_type":_generic_first(row,"stop_type") or "transport node","call_type":_generic_first(row,"call_type","stop_type") or "scheduled",
+                            "source_id":source_id,"source_url":url,"metadata":md,
+                        },1.0))
+                    continue
+
+            # --- mobile assets ---------------------------------------------
+            if _generic_is_mobile(row,sn):
+                name=_generic_first(row,"vessel_name","ship_name","aircraft_name","name","asset_name","model_or_type")
+                if name:
+                    atype="aircraft" if cols.intersection({"aircraft_registration","tail_number"}) or "aircraft" in sn else ("rolling_stock" if "rolling_stock" in sn else "vessel")
+                    records.append(_rw_record("pc_mobile_assets",f"mobile:{name}:{_generic_first(row,'imo','imo_number','mmsi','registration','tail_number')}",{
+                        "name":name,"asset_type":atype,"subtype":_generic_first(row,"subtype","vessel_type","asset_class","type"),
+                        "imo":_generic_first(row,"imo","imo_number"),"mmsi":row.get("mmsi"),"registration":_generic_first(row,"registration","aircraft_registration","tail_number"),
+                        "flag":_generic_first(row,"flag","country"),"year_built":_rw_number(_generic_first(row,"year_built","build_year")),
+                        "owner_entity_name":_generic_first(row,"owner","owner_name","owner_entity"),"operator_entity_name":_generic_first(row,"operator","operator_name","operator_entity"),
+                        "status":row.get("status"),"source_id":source_id,"source_url":url,"metadata":md,
+                    },1.0)); continue
+
+            # --- projects ---------------------------------------------------
+            if "project_name" in cols or ("project" in sn and cols.intersection({"name","title"})):
+                pname=_generic_first(row,"project_name","name","title")
+                if pname:
+                    records.append(_rw_record("pc_assets",f"project-asset:{pname}",{"name":pname,"asset_type":"project","country":row.get("country"),"status":row.get("status"),"source_id":source_id,"source_url":url,"metadata":md},1.0))
+                    records.append(_rw_record("pc_project_details",f"project:{pname}",{"asset_name":pname,"project_type":_generic_first(row,"project_type","type"),"project_stage":_generic_first(row,"project_stage","status"),"sponsor_entity_name":_generic_first(row,"sponsor","owner","developer"),"source_id":source_id,"source_url":url,"metadata":md},1.0))
+                    continue
+
+            # --- entities ---------------------------------------------------
+            ename=_generic_first(row,"entity_name","company_name","organisation_name","organization_name","company")
+            if not ename and "entities" in sn: ename=_generic_first(row,"name","canonical_name")
+            if ename:
+                records.append(_rw_record("pc_entities",f"entity:{ename}:{row.get('country') or ''}",{
+                    "name":ename,"entity_type":_generic_first(row,"entity_type","company_type","type") or "organization",
+                    "subtype":row.get("subtype"),"country":_generic_first(row,"country","jurisdiction"),"source_id":source_id,"source_url":url,"metadata":md,
+                },1.0)); continue
+
+            # --- physical assets / facilities / ports / terminals ----------
+            aname=_generic_first(row,"asset_name","facility_name","port_name","terminal_name","berth_name")
+            if not aname and any(x in sn for x in ("asset","port","terminal","berth","facility","warehouse","airport","station","node")):
+                aname=_generic_first(row,"name","canonical_name")
+            if aname:
+                atype=_generic_first(row,"asset_type","facility_type","type") or ("port" if "port" in sn else "facility")
+                records.append(_rw_record("pc_assets",f"asset:{aname}:{row.get('country') or ''}",{
+                    "name":aname,"asset_type":atype,"subtype":row.get("subtype"),"country":row.get("country"),"region_city":_generic_first(row,"city","region_city"),
+                    "owner_entity_name":_generic_first(row,"owner","owner_name"),"operator_entity_name":_generic_first(row,"operator","operator_name"),
+                    "status":row.get("status"),"source_id":source_id,"source_url":url,"metadata":md,
+                },1.0)); continue
+
+            # --- everything else: preserve, never silently drop ------------
+            if sn not in skip_sheets:
+                records.append(_rw_record("pc_observations",f"generic:{sn}:{i}",{
+                    "observation_id":_simple_hash_id("OBS_AI",sn,i,str(row)),"observation_date":_rw_date(_generic_first(row,"date","as_of","observation_date")),
+                    "source_type":sn or "workbook_row","source_id":source_id,"source_url":url,"confidence":_generic_first(row,"confidence") or "high",
+                    "review_status":"approved","record_status":"verified","raw_value":_jsonable(row),"metadata":md,
+                },1.0))
+
+    return records
+
+
 def _research_workbook_records(sections,filename=""):
     kind=_research_workbook_kind(sections,filename)
     if kind=="girteka": return kind,_girteka_workbook_records(sections)
@@ -5735,7 +6243,9 @@ def _research_workbook_records(sections,filename=""):
     if kind=="trade_articles": return kind,_trade_article_workbook_records(sections)
     if kind=="gcc_security": return kind,_gcc_security_workbook_records(sections)
     if kind=="ocean_carriers": return kind,_ocean_carriers_workbook_records(sections)
+    if kind=="portsmouth_system": return kind,_portsmouth_system_workbook_records(sections)
     if kind=="normalized_trade_maritime": return kind,_normalized_trade_maritime_workbook_records(sections)
+    if kind=="generic_schema_driven": return kind,_generic_schema_driven_workbook_records(sections)
     return None,[]
 
 
