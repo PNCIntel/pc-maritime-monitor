@@ -2370,7 +2370,7 @@ APPLY_CONFLICT_KEYS = {
     "pc_event_links": "event_link_id",
     "pc_transactions": "transaction_id",
     "pc_transaction_participants": "participant_id",
-    "pc_security_compliance": "security_compliance_id",
+    "pc_security_compliance": "security_record_id",
     "pc_energy_assets": "asset_id",
     "pc_energy_asset_connections": "connection_id",
     "pc_industrial_assets": "asset_id",
@@ -4296,7 +4296,7 @@ def _simple_direct_write_records(sb, result):
 
 
 # ---------------------------------------------------------------------------
-# V5.1.2 load-report exports
+# V5.1.3 normalized domain loader + exportable load reports
 # ---------------------------------------------------------------------------
 
 def _research_load_report_exports(report, workbook_name="research_workbook"):
@@ -4392,6 +4392,14 @@ def _rw_value(v):
 
 
 def _rw_date(v):
+    """Return a database-safe ISO date or None.
+
+    Research workbooks often contain status prose in date/as-of columns
+    (for example ``service-page``, ``Current 2026`` or
+    ``2023 network completion``).  Those strings belong in source-row metadata,
+    not in a PostgreSQL date field. Exact dates embedded in prose are retained;
+    year/month precision is normalized conservatively to the first day.
+    """
     v=_rw_value(v)
     if v in (None,""):
         return None
@@ -4399,14 +4407,35 @@ def _rw_date(v):
         try:
             return (pd.Timestamp("1899-12-30") + pd.to_timedelta(float(v),unit="D")).date().isoformat()
         except Exception:
-            pass
+            return None
+    if isinstance(v,(pd.Timestamp,datetime,date)):
+        try:
+            return pd.Timestamp(v).date().isoformat()
+        except Exception:
+            return None
+    txt=str(v).strip()
+    # Prefer an explicit ISO date found anywhere in descriptive prose.
+    m=re.search(r"(?<!\d)(20\d{2}|19\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])(?!\d)",txt)
+    if m:
+        try:
+            return pd.Timestamp(f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}").date().isoformat()
+        except Exception:
+            return None
+    # Month precision is useful for observations; normalize to month start.
+    m=re.fullmatch(r"\s*(20\d{2}|19\d{2})[-/](0?[1-9]|1[0-2])(?:\s+approx(?:\.|imately)?)?\s*",txt,flags=re.I)
+    if m:
+        return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-01"
+    # A bare year is safe; narrative strings containing a year are not.
+    m=re.fullmatch(r"\s*(20\d{2}|19\d{2})\s*",txt)
+    if m:
+        return f"{int(m.group(1)):04d}-01-01"
     try:
-        ts=pd.to_datetime(v,errors="coerce")
+        ts=pd.to_datetime(txt,errors="coerce")
         if not pd.isna(ts):
             return ts.date().isoformat()
     except Exception:
         pass
-    return str(v).strip() or None
+    return None
 
 
 def _rw_number(v):
@@ -5937,15 +5966,130 @@ def _simple_primary_id(table, payload, natural_key):
         "contract_id":"CONTRACT_AI","contract_participant_id":"CONPART_AI","contract_link_id":"CONLINK_AI",
         "vessel_design_id":"VDESIGN_AI","shipbuilding_order_id":"SHIPORD_AI","shipbuilding_order_unit_id":"SHIPUNIT_AI",
         "financial_record_id":"FINREC_AI","road_corridor_id":"ROAD_AI","rail_network_id":"RAILNET_AI",
-        "rail_link_id":"RAILLINK_AI","event_location_id":"EVLOC_AI","source_id":"SRC_AI",
+        "rail_link_id":"RAILLINK_AI","event_location_id":"EVLOC_AI","security_record_id":"SECURITY_AI","source_id":"SRC_AI",
     }.get(key,key.upper())
     payload[key]=_simple_hash_id(prefix,natural_key or _record_key(payload,""),table)
     return payload
 
 
+_TRANSPORT_TAXONOMY_CACHE = {"modes": None, "service_types": None}
+
+
+def _transport_taxonomy(sb):
+    """Read the live transport lookup tables once per process."""
+    global _TRANSPORT_TAXONOMY_CACHE
+    if _TRANSPORT_TAXONOMY_CACHE.get("modes") is None:
+        try:
+            rows=(sb.table("pc_meta_transport_modes").select("mode,display_name,active").limit(500).execute().data or [])
+            _TRANSPORT_TAXONOMY_CACHE["modes"]=[r for r in rows if r.get("mode") and r.get("active",True) is not False]
+        except Exception:
+            _TRANSPORT_TAXONOMY_CACHE["modes"]=[]
+    if _TRANSPORT_TAXONOMY_CACHE.get("service_types") is None:
+        try:
+            rows=(sb.table("pc_meta_transport_service_types").select("service_type,mode,display_name,active").limit(1000).execute().data or [])
+            _TRANSPORT_TAXONOMY_CACHE["service_types"]=[r for r in rows if r.get("service_type") and r.get("active",True) is not False]
+        except Exception:
+            _TRANSPORT_TAXONOMY_CACHE["service_types"]=[]
+    return _TRANSPORT_TAXONOMY_CACHE
+
+
+def _norm_tax(v):
+    return re.sub(r"[^a-z0-9]+"," ",str(v or "").casefold()).strip()
+
+
+def _canonical_transport_mode(sb, raw_mode):
+    """Map descriptive workbook modes onto the live mode FK vocabulary."""
+    tax=_transport_taxonomy(sb)
+    rows=tax.get("modes") or []
+    raw=_norm_tax(raw_mode)
+    if not rows:
+        # Conservative fallback for installations where lookup reads are blocked.
+        if any(x in raw for x in ("sea","ocean","maritime","liner")): return "sea"
+        if "rail" in raw and any(x in raw for x in ("road","truck","sea","air")): return "intermodal"
+        if "rail" in raw: return "rail"
+        if any(x in raw for x in ("road","truck","ftl","reefer","haul")): return "road"
+        if any(x in raw for x in ("air","aviation","flight")): return "air"
+        return str(raw_mode or "road").strip().casefold()
+    # exact key/display match
+    for r in rows:
+        if raw in {_norm_tax(r.get("mode")),_norm_tax(r.get("display_name"))}:
+            return r.get("mode")
+    # semantic preference, resolved only to an actually-present lookup key
+    prefs=[]
+    if "rail" in raw and any(x in raw for x in ("road","truck","sea","ocean","air")): prefs=["intermodal","multimodal","combined"]
+    elif any(x in raw for x in ("sea","ocean","maritime","liner","ferry")): prefs=["sea","maritime","ocean"]
+    elif "rail" in raw: prefs=["rail"]
+    elif any(x in raw for x in ("road","truck","ftl","reefer","haul","partner network")): prefs=["road","trucking"]
+    elif any(x in raw for x in ("air","aviation","flight")): prefs=["air","aviation"]
+    for pref in prefs:
+        for r in rows:
+            hay=" ".join((_norm_tax(r.get("mode")),_norm_tax(r.get("display_name"))))
+            if pref in hay:
+                return r.get("mode")
+    return rows[0].get("mode")
+
+
+def _canonical_transport_service_type(sb, raw_type, canonical_mode=None):
+    """Return a supported service_type FK, or None when no defensible mapping exists."""
+    rows=(_transport_taxonomy(sb).get("service_types") or [])
+    raw=_norm_tax(raw_type)
+    if not raw:
+        return None
+    for r in rows:
+        if raw in {_norm_tax(r.get("service_type")),_norm_tax(r.get("display_name"))}:
+            return r.get("service_type")
+    mode=_norm_tax(canonical_mode)
+    mode_rows=[r for r in rows if not mode or not r.get("mode") or _norm_tax(r.get("mode"))==mode]
+    tokens=[]
+    if any(x in raw for x in ("container","liner")): tokens=["container","liner"]
+    elif "passenger" in raw: tokens=["passenger"]
+    elif any(x in raw for x in ("freight","cargo","ftl","trucking","road")): tokens=["freight","cargo","truck"]
+    elif "ferry" in raw: tokens=["ferry"]
+    for tok in tokens:
+        for r in mode_rows or rows:
+            hay=" ".join((_norm_tax(r.get("service_type")),_norm_tax(r.get("display_name"))))
+            if tok in hay:
+                return r.get("service_type")
+    # service_type is nullable: preserving the unsupported raw value in metadata is
+    # safer than inventing a taxonomy value that violates the FK.
+    return None
+
+
+def _normalize_domain_payload(sb, table, p):
+    """Normalize workbook values to live database constraints without losing source detail."""
+    p=dict(p or {})
+    meta=p.get("metadata") if isinstance(p.get("metadata"),dict) else {}
+    meta=dict(meta)
+    if table=="pc_events":
+        for field in ("trade_relevance","intelligence_relevance"):
+            if p.get(field) not in (None,""):
+                try:
+                    p[field]=max(0,min(5,int(float(p[field]))))
+                except Exception:
+                    p.pop(field,None)
+    if table=="pc_transport_services":
+        raw_mode=p.get("mode")
+        raw_type=p.get("service_type")
+        mode=_canonical_transport_mode(sb,raw_mode)
+        if raw_mode not in (None,"") and _norm_tax(raw_mode)!=_norm_tax(mode):
+            meta.setdefault("source_transport_taxonomy",{})["mode"]=raw_mode
+        p["mode"]=mode
+        mapped_type=_canonical_transport_service_type(sb,raw_type,mode)
+        if raw_type not in (None,"") and mapped_type!=raw_type:
+            meta.setdefault("source_transport_taxonomy",{})["service_type"]=raw_type
+        if mapped_type:
+            p["service_type"]=mapped_type
+        else:
+            p.pop("service_type",None)
+    if meta:
+        p["metadata"]=meta
+    return p
+
+
 def _simple_prepare_payload(sb, table, payload, natural_key):
     """Key-first canonical preparation. Create missing dependency objects, bind IDs, then return schema-safe payload."""
     p=dict(payload or {})
+    p=_normalize_domain_payload(sb,table,p)
     sid=_simple_source_id(sb,p)
     # ``source_id`` is provenance on most domain tables, but on pc_relationships it
     # is the graph endpoint foreign key.  V5.1 wrote the provenance source ID into
@@ -6053,6 +6197,9 @@ def _simple_prepare_payload(sb, table, payload, natural_key):
         else:
             p["linked_type"]="asset"
             p["linked_id"]=_simple_ensure_asset(sb,p.get("linked_name"),country,p.get("asset_type") or "asset",p.get("subtype"),sid)
+
+    if table=="pc_security_compliance" and not p.get("security_record_id"):
+        p["security_record_id"]=_simple_hash_id("SECURITY_AI",natural_key or _record_key(p,""),table)
 
     p=_simple_primary_id(table,p,natural_key)
 
