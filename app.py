@@ -5008,10 +5008,84 @@ def _company_mode_summary(bundle, prof):
     return sorted(modes,key=lambda x:["Road","Rail","Warehousing","Aviation","Maritime","Ports","Ferry"].index(x) if x in ["Road","Rail","Warehousing","Aviation","Maritime","Ports","Ferry"] else 99)
 
 
+
+def _company_terminal_union(bundle, prof):
+    """Return the company terminal set with live canonical rows taking precedence.
+
+    The company page historically counted the workbook/profile projection
+    (`prof["port_terminals"]`).  New canonical terminals can therefore exist in
+    pc_assets / the live company roll-up without changing the displayed metric.
+
+    Merge the two representations by normalized terminal name + country, keeping
+    the live canonical row last.  This is generic across all operators.
+    """
+    frames=[]
+
+    legacy=prof.get("port_terminals",pd.DataFrame()) if isinstance(prof,dict) else pd.DataFrame()
+    live=bundle.get("live_terminals",pd.DataFrame()) if isinstance(bundle,dict) else pd.DataFrame()
+
+    if isinstance(legacy,pd.DataFrame) and not legacy.empty:
+        x=legacy.copy()
+        x["_source_rank"]=0
+        frames.append(x)
+
+    if isinstance(live,pd.DataFrame) and not live.empty:
+        x=live.copy()
+        x["_source_rank"]=1
+        frames.append(x)
+
+    if not frames:
+        return pd.DataFrame()
+
+    df=pd.concat(frames,ignore_index=True,sort=False)
+
+    # Normalize common display columns across legacy/live projections.
+    if "Terminal / Facility" not in df.columns:
+        for c in ["Terminal","Facility","Asset","Name"]:
+            if c in df.columns:
+                df["Terminal / Facility"]=df[c]
+                break
+
+    if "Country" not in df.columns:
+        df["Country"]=""
+
+    def _k(v):
+        s=str(v or "").casefold()
+        s=re.sub(r"[^a-z0-9]+"," ",s).strip()
+        return s
+
+    df["_terminal_key"]=df.get(
+        "Terminal / Facility",
+        pd.Series(index=df.index,dtype=str)
+    ).fillna("").astype(str).map(_k)
+
+    df["_country_key"]=df.get(
+        "Country",
+        pd.Series(index=df.index,dtype=str)
+    ).fillna("").astype(str).map(_k)
+
+    # If a name is blank, preserve by ID instead of collapsing unrelated rows.
+    blank=df["_terminal_key"].eq("")
+    if blank.any():
+        fallback=pd.Series("",index=df.index,dtype=str)
+        for c in ["Terminal ID","Asset ID"]:
+            if c in df.columns:
+                fallback=fallback.mask(fallback.eq(""),df[c].fillna("").astype(str))
+        df.loc[blank,"_terminal_key"]=fallback.loc[blank].map(_k)
+
+    df=df.sort_values("_source_rank").drop_duplicates(
+        subset=["_terminal_key","_country_key"],
+        keep="last"
+    )
+
+    return df.drop(columns=["_source_rank","_terminal_key","_country_key"],errors="ignore").reset_index(drop=True)
+
+
 def render_company_profile(entity_id, entity_name):
     prof=build_company_profile(entity_id,entity_name)
     rec=company_record(entity_id)
     bundle=_company_live_logistics_bundle(entity_id,entity_name)
+    terminal_union=_company_terminal_union(bundle,prof)
     modes=_company_mode_summary(bundle,prof)
 
     st.markdown(f"## {entity_name}")
@@ -5056,7 +5130,8 @@ def render_company_profile(entity_id, entity_name):
     if not bundle.get("services",pd.DataFrame()).empty: metrics.append(("Services / routes",len(bundle["services"])))
     if not bundle.get("footprint",pd.DataFrame()).empty: metrics.append(("Operating footprint",len(bundle["footprint"])))
     if profile_count(prof,"ports"): metrics.append(("Ports",profile_count(prof,"ports")))
-    if profile_count(prof,"port_terminals"): metrics.append(("Terminals",profile_count(prof,"port_terminals")))
+    if isinstance(terminal_union,pd.DataFrame) and not terminal_union.empty:
+        metrics.append(("Terminals",len(terminal_union)))
     if profile_count(prof,"maritime_vessels"): metrics.append(("Vessels",profile_count(prof,"maritime_vessels")))
     if not bundle.get("events",pd.DataFrame()).empty or profile_count(prof,"events"):
         metrics.append(("Events",max(len(bundle.get("events",pd.DataFrame())),profile_count(prof,"events"))))
@@ -5156,9 +5231,9 @@ def render_company_profile(entity_id, entity_name):
         if isinstance(assets,pd.DataFrame) and not assets.empty:
             st.markdown("#### Physical facilities / infrastructure")
             display_df(assets,420)
-        if not prof.get("port_terminals",pd.DataFrame()).empty:
+        if isinstance(terminal_union,pd.DataFrame) and not terminal_union.empty:
             st.markdown("#### Port terminals / facilities")
-            display_df(prof["port_terminals"],350)
+            display_df(terminal_union,500)
 
     with tabs[2]:
         if not bundle.get("services",pd.DataFrame()).empty:
