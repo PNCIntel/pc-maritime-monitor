@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "505-no-fake-exceptions-2026-09-19"
+LOADER_BUILD = "510-expanded-research-workbook-loader-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -1213,6 +1213,82 @@ def _fill_staging_key(payload,target_table,natural_key):
         ))
     return payload
 
+def _normalize_excel_sheet_frame(raw_df):
+    """Detect the real header row in research workbooks.
+
+    P&C research files often use rows 1-3 for a sheet title, research cut-off and
+    spacer, with the actual table header on row 4.  The old loader treated the
+    title as the header, which turned useful columns into ``Unnamed:*`` fields and
+    made the canonical mapper effectively blind.  Standard one-row-header files
+    still resolve to row 1.
+    """
+    if raw_df is None or raw_df.empty:
+        return pd.DataFrame()
+    df=raw_df.copy()
+    df=df.dropna(axis=0,how="all").dropna(axis=1,how="all").reset_index(drop=True)
+    if df.empty:
+        return df
+
+    known={
+        "name","entity","entity_name","entity_type","company","company_name",
+        "event_id","event_date","event_type","event_category","headline","summary",
+        "source_url","url","source_article_url","verification_url","source_name",
+        "country","country_region","location","asset_type","route_type","mode",
+        "service","service_name","sequence","port","terminal_or_port","station",
+        "record_type","attribute","value","relationship","relationship_type",
+        "owner_or_parent","stake_pct","partner","project","project_or_agreement",
+        "metric","year","revenue_eur","financial_record_id","manufacturer",
+        "asset_class","network_name","segment_or_asset","facility","city",
+    }
+    best_idx=0
+    best_score=-1
+    scan=min(len(df),12)
+    for i in range(scan):
+        vals=[]
+        for v in df.iloc[i].tolist():
+            if pd.isna(v):
+                continue
+            txt=str(v).strip()
+            if txt:
+                vals.append(txt)
+        if not vals:
+            continue
+        norms=[_norm_field(v) for v in vals]
+        keyword_hits=sum(1 for n in norms if n in known or n.endswith("_url") or n.endswith("_id"))
+        # Multi-column rows are overwhelmingly more likely to be headers than a
+        # decorative title/cut-off row.  Known field names provide an extra boost.
+        score=len(vals)*3 + keyword_hits*7
+        if len(vals)==1 and len(vals[0])>45:
+            score-=8
+        if score>best_score:
+            best_score=score
+            best_idx=i
+
+    headers=[]
+    seen={}
+    for j,v in enumerate(df.iloc[best_idx].tolist()):
+        h="" if pd.isna(v) else str(v).strip()
+        if not h:
+            h=f"_blank_{j+1}"
+        base=h
+        seen[base]=seen.get(base,0)+1
+        if seen[base]>1:
+            h=f"{base}_{seen[base]}"
+        headers.append(h)
+
+    out=df.iloc[best_idx+1:].copy().reset_index(drop=True)
+    out.columns=headers
+    out=out.dropna(axis=0,how="all").dropna(axis=1,how="all")
+    # Remove empty placeholder columns created by merged title areas.
+    drop=[]
+    for c in out.columns:
+        if str(c).startswith("_blank_") and out[c].isna().all():
+            drop.append(c)
+    if drop:
+        out=out.drop(columns=drop)
+    return out
+
+
 def _parse_multitable_upload(upload):
     """Parse flat workbooks/CSVs plus loader-native JSON/JSONL packages.
 
@@ -1228,7 +1304,8 @@ def _parse_multitable_upload(upload):
     if name.endswith((".xlsx",".xls")):
         xf=pd.ExcelFile(io.BytesIO(raw))
         for sheet in xf.sheet_names:
-            sections[sheet]=pd.read_excel(io.BytesIO(raw),sheet_name=sheet,dtype=object)
+            raw_sheet=pd.read_excel(io.BytesIO(raw),sheet_name=sheet,dtype=object,header=None)
+            sections[sheet]=_normalize_excel_sheet_frame(raw_sheet)
 
     elif name.endswith(".csv"):
         df=pd.read_csv(io.BytesIO(raw),dtype=object)
@@ -2317,6 +2394,47 @@ APPLY_CONFLICT_KEYS = {
     "pc_shipbuilding_orders": "shipbuilding_order_id",
     "pc_shipbuilding_order_units": "shipbuilding_order_unit_id",
 }
+
+# V5.1 expanded corporate / trucking / rail / source model.  These tables are
+# already present in the current P&C schema; the previous loader allow-list simply
+# had not caught up with the data model.
+EXPANDED_RESEARCH_TABLES = {
+    "pc_sources",
+    "pc_source_records",
+    "pc_company_profiles",
+    "pc_company_registrations",
+    "pc_company_operating_footprint",
+    "pc_trucking_company_details",
+    "pc_road_vehicle_details",
+    "pc_road_corridors",
+    "pc_rail_networks",
+    "pc_rail_nodes",
+    "pc_rail_links",
+    "pc_rail_operator_details",
+    "pc_rolling_stock_details",
+    "pc_financial_records",
+    "pc_event_impacts",
+    "pc_event_locations",
+}
+AI_ALLOWED_TABLES.update(EXPANDED_RESEARCH_TABLES)
+DIRECT_DOMAIN_TABLES.update(EXPANDED_RESEARCH_TABLES)
+APPLY_CONFLICT_KEYS.update({
+    "pc_sources":"source_id",
+    "pc_company_profiles":"entity_id",
+    "pc_company_registrations":"entity_id,jurisdiction,registration_type,registration_number",
+    "pc_company_operating_footprint":"footprint_id",
+    "pc_trucking_company_details":"entity_id",
+    "pc_road_vehicle_details":"mobile_asset_id",
+    "pc_road_corridors":"road_corridor_id",
+    "pc_rail_networks":"rail_network_id",
+    "pc_rail_nodes":"asset_id",
+    "pc_rail_links":"rail_link_id",
+    "pc_rail_operator_details":"entity_id",
+    "pc_rolling_stock_details":"mobile_asset_id",
+    "pc_financial_records":"financial_record_id",
+    "pc_event_locations":"event_location_id",
+    "pc_event_impacts":"impact_id",
+})
 
 AI_CAMPAIGNS = {
     "Article / URL fact extraction": (
@@ -3997,10 +4115,13 @@ def _load_content_item_to_canonical(batch_id,item,product_context="TRADE",use_we
         extract_only=False,
         resolve_after=False,
     )
-    direct=_direct_apply_content_result(res)
-    res["canonical_applied"]=direct.get("applied",0)
-    res["canonical_blocked"]=direct.get("blocked",0)
-    res["canonical_apply_report"]=direct.get("report")
+    # _run_content_item_extraction now writes canonical rows itself. Do not send
+    # ordinary content through pc_staged_records or a second apply pass.
+    direct={
+        "applied":int(res.get("canonical_applied",0) or 0),
+        "blocked":int(res.get("canonical_blocked",0) or 0),
+        "report":res.get("canonical_apply_report") or {},
+    }
     try:
         sb.table("pc_content_ingest_items").update({
             "resolution_status":(
@@ -4057,6 +4178,821 @@ def _process_queued_content_items(limit_items=10, product_context="TRADE", deep=
     return results,failures
 
 
+
+
+def _simple_direct_write_records(sb, result):
+    """Write content-derived records straight to canonical/domain tables.
+
+    No pc_staged_records, no promotion workflow and no reconciliation gate.
+    Deterministic dependencies are created/bound by _simple_prepare_payload().
+    The database write is the validator; only a failed write is an exception.
+    """
+    records=(result or {}).get("records") or []
+    priority={
+        "pc_entities":10,"pc_assets":20,"pc_mobile_assets":30,
+        "pc_events":40,"pc_transactions":42,"pc_transport_services":45,
+        "pc_financing_facilities":45,"pc_contracts":45,"pc_vessel_designs":45,
+        "pc_shipbuilding_orders":46,"pc_transport_routes":46,"pc_project_details":46,
+        "pc_port_capabilities":50,"pc_port_metrics":50,"pc_terminal_details":50,
+        "pc_berth_details":52,"pc_transaction_participants":55,
+        "pc_financing_participants":55,"pc_contract_participants":55,
+        "pc_shipbuilding_order_units":56,"pc_transport_service_aliases":56,
+        "pc_transport_service_operators":56,"pc_transport_service_stops":57,
+        "pc_transport_service_schedules":57,"pc_transport_service_transit_times":58,
+        "pc_transport_service_mobile_assets":58,"pc_transport_service_network_links":58,
+        "pc_transport_service_connections":58,"pc_transport_service_sources":59,
+        "pc_transport_service_changes":59,"pc_financing_links":60,"pc_contract_links":60,
+        "pc_company_profiles":12,"pc_company_registrations":13,"pc_trucking_company_details":14,
+        "pc_rail_operator_details":14,"pc_company_operating_footprint":25,
+        "pc_rail_networks":25,"pc_road_corridors":28,"pc_rail_nodes":30,"pc_rail_links":35,
+        "pc_financial_records":47,"pc_sources":5,"pc_source_records":6,
+        "pc_relationships":80,"pc_event_links":90,"pc_event_locations":91,"pc_event_impacts":92,
+    }
+    records=sorted(
+        [r for r in records if isinstance(r,dict)],
+        key=lambda r: priority.get(str(r.get("target_table") or ""),60)
+    )
+
+    applied=0
+    failures=[]
+    by_table={}
+    for rec in records:
+        table=str(rec.get("target_table") or "").strip()
+        payload=rec.get("payload")
+        if table not in AI_ALLOWED_TABLES or not isinstance(payload,dict):
+            failures.append({"table":table or None,"record":rec.get("natural_key"),"error":"invalid target table or payload"})
+            continue
+        natural_key=_record_key(payload,rec.get("natural_key") or "")
+        try:
+            p=_simple_prepare_payload(sb,table,payload,natural_key)
+            p=_fill_staging_key(p,table,natural_key)
+            p=_jsonable(p)
+            if not p:
+                raise ValueError("prepared payload is empty")
+
+            conflict=APPLY_CONFLICT_KEYS.get(table)
+            keys=[x.strip() for x in conflict.split(",")] if conflict else []
+            can_upsert=bool(keys) and all(p.get(k) not in (None,"") for k in keys)
+            if can_upsert:
+                sb.table(table).upsert(p,on_conflict=conflict).execute()
+            else:
+                sb.table(table).insert(p).execute()
+            applied+=1
+            by_table[table]=by_table.get(table,0)+1
+        except Exception as exc:
+            failures.append({
+                "table":table,
+                "record":natural_key,
+                "error":str(exc),
+                "payload_keys":sorted(list(p.keys())) if isinstance(locals().get("p"),dict) else [],
+            })
+
+    return {
+        "applied":applied,
+        "blocked":len(failures),
+        "failed":len(failures),
+        "failures":failures[:200],
+        "by_table":by_table,
+        "mode":"source_to_canonical_direct",
+    }
+
+
+# ---------------------------------------------------------------------------
+# V5.1 research-workbook normalizer
+# ---------------------------------------------------------------------------
+
+def _rw_value(v):
+    if v is None:
+        return None
+    try:
+        if pd.isna(v):
+            return None
+    except Exception:
+        pass
+    if isinstance(v,pd.Timestamp):
+        return v.isoformat()
+    if isinstance(v,(datetime,date)):
+        return v.isoformat()
+    if isinstance(v,float) and v.is_integer():
+        return int(v)
+    return v
+
+
+def _rw_date(v):
+    v=_rw_value(v)
+    if v in (None,""):
+        return None
+    if isinstance(v,(int,float)) and 20000 <= float(v) <= 80000:
+        try:
+            return (pd.Timestamp("1899-12-30") + pd.to_timedelta(float(v),unit="D")).date().isoformat()
+        except Exception:
+            pass
+    try:
+        ts=pd.to_datetime(v,errors="coerce")
+        if not pd.isna(ts):
+            return ts.date().isoformat()
+    except Exception:
+        pass
+    return str(v).strip() or None
+
+
+def _rw_number(v):
+    v=_rw_value(v)
+    if v in (None,""):
+        return None
+    if isinstance(v,(int,float)):
+        return v
+    txt=str(v).replace(",","").replace("€","").replace("$","").strip()
+    m=re.search(r"-?\d+(?:\.\d+)?",txt)
+    if not m:
+        return None
+    try:
+        n=float(m.group(0))
+        return int(n) if n.is_integer() else n
+    except Exception:
+        return None
+
+
+def _rw_bool(v):
+    if isinstance(v,bool):
+        return v
+    t=str(v or "").strip().casefold()
+    if t in {"true","yes","y","1","current","active","operational"}: return True
+    if t in {"false","no","n","0","inactive"}: return False
+    return None
+
+
+def _rw_rows(df):
+    rows=[]
+    if df is None or df.empty:
+        return rows
+    for raw in df.to_dict("records"):
+        row={}
+        for k,v in raw.items():
+            if str(k).startswith("_blank_"):
+                continue
+            vv=_rw_value(v)
+            if vv not in (None,""):
+                row[str(k).strip()]=vv
+        if row:
+            rows.append(row)
+    return rows
+
+
+def _rw_uuid(*parts):
+    raw="|".join(str(x or "").strip() for x in parts)
+    return str(uuid.uuid5(uuid.NAMESPACE_URL,"power-corridors|research-workbook|"+raw))
+
+
+def _rw_record(table,natural_key,payload,confidence=0.95):
+    p={k:_rw_value(v) for k,v in (payload or {}).items() if _rw_value(v) not in (None,"")}
+    return {
+        "target_table":table,
+        "natural_key":natural_key,
+        "confidence":confidence,
+        "payload":p,
+    }
+
+
+def _rw_url(row):
+    for k in ("source_url","source_article_url","verification_url","url","secondary_source_url"):
+        if row.get(k):
+            return str(row.get(k)).strip()
+    return None
+
+
+def _rw_metadata(kind,sheet,row,extra=None):
+    md={
+        "research_workbook_type":kind,
+        "research_sheet":sheet,
+        "source_row":_jsonable(row),
+    }
+    if extra:
+        md.update(_jsonable(extra))
+    return md
+
+
+def _research_workbook_kind(sections,filename=""):
+    names={_norm_field(k) for k,v in (sections or {}).items() if v is not None and not v.empty}
+    fname=str(filename or "").casefold()
+    if {"company_profile","fleet_assets","routes_geography","facilities_offices"}.issubset(names) or "girteka" in fname:
+        return "girteka"
+    if {"corporate_profile","network_corridors","rolling_stock","passenger_stations"}.issubset(names) or "etihad_rail" in fname or "etihad rail" in fname:
+        return "etihad_rail"
+    if {"service_rotation","vessel_orders","ownership_transaction"}.issubset(names) or "trade_ports_shipping" in fname:
+        return "trade_articles"
+    if "events" in names and "sources" in names and "methodology" in names:
+        ev=sections.get(next((k for k in sections if _norm_field(k)=="events"),""))
+        cols={_norm_field(c) for c in (ev.columns if ev is not None else [])}
+        if "primary_actor" in cols and "monitoring_indicators" in cols:
+            return "gcc_security"
+    return None
+
+
+def _rw_sources_records(kind,sections):
+    records=[]
+    for sheet,df in sections.items():
+        if _norm_field(sheet)!="sources":
+            continue
+        for row in _rw_rows(df):
+            url=row.get("url") or row.get("source_url")
+            if not url:
+                continue
+            sid=_simple_hash_id("SRC_WEB",url)
+            records.append(_rw_record("pc_sources",f"source:{url}",{
+                "source_id":sid,
+                "source_name":row.get("source_name") or row.get("source_title") or urlparse(str(url)).netloc,
+                "publisher":row.get("source_name") or row.get("source_title"),
+                "source_type":row.get("source_type") or "web",
+                "url":url,
+                "published_at":_rw_date(row.get("publication_date")),
+                "reliability":row.get("reliability_note"),
+                "notes":row.get("notes") or row.get("used_for"),
+                "ingestion_method":"research_workbook",
+                "active":True,
+            },1.0))
+    return records
+
+
+def _rw_event_records(kind,sheet,rows,default_entity=None):
+    records=[]
+    for i,row in enumerate(rows,1):
+        eid=str(row.get("event_id") or _simple_hash_id("EVENT_RWB",kind,sheet,row.get("headline") or row.get("title"),row.get("event_date") or row.get("date"),i))
+        url=_rw_url(row)
+        title=row.get("headline") or row.get("title") or row.get("event_type") or f"{sheet} event {i}"
+        event_date=_rw_date(row.get("event_date") or row.get("date"))
+        countries=row.get("country_region") or row.get("country") or row.get("region")
+        location=row.get("location") or row.get("city_or_location") or row.get("asset_or_route")
+        records.append(_rw_record("pc_events",f"event:{eid}",{
+            "event_id":eid,
+            "start_date":event_date,
+            "event_nature":row.get("event_category") or row.get("event_type"),
+            "event_domain":row.get("impact_area") or row.get("event_category"),
+            "event_type":row.get("event_subtype") or row.get("event_type") or row.get("event_category"),
+            "event_category":row.get("event_category") or row.get("event_type"),
+            "event_subcategory":row.get("event_subtype"),
+            "severity":row.get("severity"),
+            "status":row.get("status"),
+            "countries":countries,
+            "location":location,
+            "title":title,
+            "description":row.get("summary") or row.get("description"),
+            "operational_impact":row.get("operational_relevance"),
+            "commercial_impact":row.get("commercial_significance"),
+            "confidence":row.get("confidence"),
+            "verification_status":row.get("verification_status"),
+            "trade_relevance":8 if kind in {"trade_articles","girteka","etihad_rail"} else 5,
+            "intelligence_relevance":9 if kind=="gcc_security" else 6,
+            "trade_visible":True,
+            "intelligence_visible":True,
+            "source_url":url,
+            "metadata":_rw_metadata(kind,sheet,row),
+        }))
+        linked=[]
+        if default_entity:
+            linked.append((default_entity,"entity","subject"))
+        for nm,rel in [
+            (row.get("primary_entity"),"primary entity"),
+            (row.get("primary_actor"),"primary actor"),
+            (row.get("secondary_actor"),"secondary actor"),
+        ]:
+            if nm:
+                linked.append((nm,"entity",rel))
+        sec=row.get("secondary_entities")
+        if sec:
+            for nm in re.split(r"[;,]",str(sec)):
+                if nm.strip(): linked.append((nm.strip(),"entity","secondary entity"))
+        for nm,lt,rel in linked:
+            records.append(_rw_record("pc_event_links",f"event-link:{eid}:{lt}:{nm}:{rel}",{
+                "event_id":eid,
+                "linked_type":lt,
+                "linked_name":nm,
+                "relationship":rel,
+                "confidence":row.get("confidence") or "high",
+                "source_url":url,
+                "metadata":_rw_metadata(kind,sheet,row),
+            }))
+        if location or row.get("country"):
+            records.append(_rw_record("pc_event_locations",f"event-location:{eid}:{location or countries}",{
+                "event_location_id":_simple_hash_id("EVLOC_RWB",eid,location or countries),
+                "event_id":eid,
+                "location_name":location,
+                "country":row.get("country") or row.get("country_region"),
+                "notes":row.get("region"),
+            }))
+    return records
+
+
+def _girteka_workbook_records(sections):
+    kind="girteka"; records=[]; main="Girteka Group"
+    records += _rw_sources_records(kind,sections)
+    profile_rows=_rw_rows(sections.get("Company_Profile",pd.DataFrame()))
+    facts={str(r.get("attribute")):r.get("value") for r in profile_rows if r.get("attribute")}
+    src=next((_rw_url(r) for r in profile_rows if _rw_url(r)),None)
+    records.append(_rw_record("pc_entities","entity:girteka-group",{
+        "name":main,"entity_type":"company","subtype":"logistics_group","hq_city":"Vilnius","hq_country":"Lithuania",
+        "record_status":"verified","data_quality":"high","as_of":"2026-09-18","source_url":src,
+        "metadata":{"research_workbook_type":kind,"profile_facts":facts},
+    },1.0))
+    records.append(_rw_record("pc_company_profiles","company-profile:girteka-group",{
+        "entity_name":main,"legal_name":"Girteka Group UAB","trading_name":"Girteka","company_class":"private",
+        "incorporation_country":"Lithuania","registration_number":facts.get("group_legal_code"),"lei":facts.get("group_lei"),
+        "tax_id":facts.get("group_vat"),"sector":"Transport & Logistics","industry":"Road freight / logistics",
+        "employee_count":_rw_number(facts.get("employees")),"website_url":"https://www.girteka.eu/",
+        "business_description":facts.get("market_position") or facts.get("mission"),"last_verified":"2026-09-18",
+        "source_url":src,"metadata":{"profile_facts":facts},
+    },1.0))
+
+    for row in _rw_rows(sections.get("Ownership",pd.DataFrame())):
+        owner=row.get("owner_or_parent"); url=_rw_url(row)
+        if not owner: continue
+        records.append(_rw_record("pc_entities",f"entity:{_norm_field(owner)}",{
+            "name":owner,"entity_type":"person" if " " in str(owner) else "company","source_url":url,
+            "metadata":_rw_metadata(kind,"Ownership",row),
+        }))
+        records.append(_rw_record("pc_relationships",f"ownership:{owner}:{main}:{row.get('as_of')}",{
+            "source_type":"entity","source_name":owner,"relationship_type":"owns","target_type":"entity","target_name":main,
+            "ownership_percent":_rw_number(row.get("stake_pct")),"valid_from":_rw_date(row.get("as_of")),
+            "confidence":row.get("status"),"notes":row.get("notes"),"source_url":url,
+            "metadata":_rw_metadata(kind,"Ownership",row),
+        }))
+
+    for row in _rw_rows(sections.get("Legal_Entities",pd.DataFrame())):
+        name=row.get("entity_name"); url=_rw_url(row)
+        if not name: continue
+        records.append(_rw_record("pc_entities",f"entity:{_norm_field(name)}:{row.get('country')}",{
+            "name":name,"entity_type":"company","subtype":row.get("role_or_activity"),"hq_city":row.get("city"),"hq_country":row.get("country"),
+            "status":row.get("relationship_status"),"record_status":"verified","source_url":url,
+            "metadata":_rw_metadata(kind,"Legal_Entities",row,{"address":row.get("address"),"manager_or_leader":row.get("manager_or_leader")}),
+        },1.0))
+        reg=row.get("entity_code")
+        if reg:
+            records.append(_rw_record("pc_company_registrations",f"registration:{name}:{reg}",{
+                "entity_name":name,"jurisdiction":row.get("country"),"registration_type":"company registration",
+                "registration_number":str(reg),"legal_name":name,"status":row.get("relationship_status"),"source_url":url,
+                "metadata":{"vat_or_other_id":row.get("vat_or_other_id"),"address":row.get("address")},
+            },1.0))
+        records.append(_rw_record("pc_company_profiles",f"company-profile:{name}",{
+            "entity_name":name,"legal_name":name,"incorporation_country":row.get("country"),"registration_number":str(reg) if reg else None,
+            "tax_id":row.get("vat_or_other_id"),"industry":row.get("role_or_activity"),"source_url":url,
+            "metadata":_rw_metadata(kind,"Legal_Entities",row),
+        }))
+        if _norm_field(name)!=_norm_field(main):
+            records.append(_rw_record("pc_relationships",f"group-link:{main}:{name}",{
+                "source_type":"entity","source_name":main,"relationship_type":"group_linked","target_type":"entity","target_name":name,
+                "confidence":"high" if "confirmed" in str(row.get("relationship_status") or "").casefold() else "medium",
+                "notes":row.get("notes"),"source_url":url,
+            }))
+
+    for row in _rw_rows(sections.get("Leadership",pd.DataFrame())):
+        person=row.get("name"); ent=row.get("entity") or main; url=_rw_url(row)
+        if not person: continue
+        records.append(_rw_record("pc_entities",f"person:{_norm_field(person)}",{
+            "name":person,"entity_type":"person","subtype":"executive","source_url":url,
+            "metadata":_rw_metadata(kind,"Leadership",row,{"role":row.get("role"),"background":row.get("background")}),
+        }))
+        records.append(_rw_record("pc_relationships",f"leadership:{person}:{ent}:{row.get('role')}",{
+            "source_type":"entity","source_name":person,"relationship_type":"executive_of","target_type":"entity","target_name":ent,
+            "valid_from":_rw_date(row.get("effective_or_current")),"notes":row.get("role"),"source_url":url,
+            "metadata":_rw_metadata(kind,"Leadership",row),
+        }))
+
+    for row in _rw_rows(sections.get("Fleet_Assets",pd.DataFrame())):
+        metric=str(row.get("metric") or ""); url=_rw_url(row); val=_rw_number(row.get("value")); asof=_rw_date(row.get("as_of"))
+        records.append(_rw_record("pc_observations",f"girteka-fleet:{metric}:{asof}:{row.get('scope')}",{
+            "observation_id":_rw_uuid(kind,"Fleet_Assets",metric,asof,row.get("scope")),"source_url":url,"source_type":"research_workbook",
+            "observation_date":asof,"raw_value":{"metric":metric,"value":row.get("value"),"unit":row.get("unit"),"scope":row.get("scope")},
+            "confidence":row.get("confidence"),"review_status":"approved","record_status":"verified",
+            "metadata":_rw_metadata(kind,"Fleet_Assets",row),
+        }))
+        patch={"entity_name":main,"last_verified":asof,"source_url":url,"metadata":{"latest_observation_context":_jsonable(row)}}
+        mn=_norm_field(metric)
+        if "truck" in mn and "trailer" not in mn: patch["fleet_size_power_units"]=int(val) if val is not None else None
+        elif "trailer" in mn: patch["fleet_size_trailers"]=int(val) if val is not None else None
+        elif "driver" in mn: patch["driver_count"]=int(val) if val is not None else None
+        else: patch=None
+        if patch:
+            records.append(_rw_record("pc_trucking_company_details",f"trucking-company:{main}:{mn}",patch))
+
+    for row in _rw_rows(sections.get("Services",pd.DataFrame())):
+        svc=row.get("service"); url=_rw_url(row)
+        if not svc: continue
+        records.append(_rw_record("pc_transport_services",f"service:girteka:{svc}",{
+            "service_name":svc,"mode":str(row.get("mode") or "road").lower(),"service_type":"commercial freight service",
+            "trade_lane":row.get("geography"),"description":row.get("capability_details"),"status":"active",
+            "primary_operator_entity_name":main,"source_url":url,
+            "metadata":_rw_metadata(kind,"Services",row,{"cargo_or_sector":row.get("cargo_or_sector"),"security_quality":row.get("security_quality")}),
+        }))
+
+    for row in _rw_rows(sections.get("Routes_Geography",pd.DataFrame())):
+        rt=row.get("route_type"); origin=row.get("origin"); dest=row.get("destination"); mode=str(row.get("mode") or "road")
+        url=_rw_url(row); name=f"{origin} – {dest}" if origin and dest else str(rt or "Girteka route")
+        if "road" in mode.casefold() or "road" in str(rt or "").casefold():
+            countries=[x.strip() for x in re.split(r"[,/]",str(row.get("countries_or_region") or "")) if x.strip()]
+            records.append(_rw_record("pc_road_corridors",f"road-corridor:girteka:{name}:{row.get('countries_or_region')}",{
+                "corridor_name":name,"corridor_type":rt,"countries":countries,"status":row.get("status"),"source_url":url,
+                "metadata":_rw_metadata(kind,"Routes_Geography",row,{"operator":main,"mode":mode,"frequency_or_scale":row.get("frequency_or_scale")}),
+            }))
+        else:
+            records.append(_rw_record("pc_transport_routes",f"route:girteka:{name}:{mode}",{
+                "route_name":name,"mode":mode,"operator_entity_name":main,"current_status":row.get("status"),"source_url":url,
+                "metadata":_rw_metadata(kind,"Routes_Geography",row,{"countries_or_region":row.get("countries_or_region"),"frequency_or_scale":row.get("frequency_or_scale")}),
+            }))
+
+    for row in _rw_rows(sections.get("Facilities_Offices",pd.DataFrame())):
+        fac=row.get("facility"); url=_rw_url(row)
+        if not fac: continue
+        records.append(_rw_record("pc_assets",f"facility:{fac}:{row.get('country')}",{
+            "name":fac,"asset_type":"logistics facility","subtype":row.get("facility_type"),"country":row.get("country"),"region_city":row.get("city"),
+            "operator_entity_name":main,"owner_entity_name":main,"capacity_value":_rw_number(row.get("size_sqm")),"capacity_unit":"sqm" if row.get("size_sqm") else None,
+            "status":row.get("status"),"source_url":url,"metadata":_rw_metadata(kind,"Facilities_Offices",row),
+        }))
+        records.append(_rw_record("pc_logistics_facilities",f"logistics-facility:{fac}:{row.get('country')}",{
+            "facility_name":fac,"facility_type":row.get("facility_type") or "logistics facility","owner_entity_name":main,"operator_entity_name":main,
+            "area_sqm":_rw_number(row.get("size_sqm")),"source_url":url,
+            "metadata":_rw_metadata(kind,"Facilities_Offices",row,{"staff_or_capacity":row.get("staff_or_capacity"),"functions":row.get("functions")}),
+        }))
+        records.append(_rw_record("pc_company_operating_footprint",f"footprint:{main}:{fac}",{
+            "footprint_id":_rw_uuid(kind,"footprint",main,fac,row.get("country")),"entity_name":main,"country":row.get("country"),"region":row.get("city"),
+            "activity_type":row.get("facility_type"),"source_url":url,"metadata":{"facility_name":fac},
+        }))
+
+    for row in _rw_rows(sections.get("Financials",pd.DataFrame())):
+        url=_rw_url(row); scope=row.get("scope") or main; year=_rw_date(row.get("year")) or (f"{row.get('year')}-12-31" if row.get("year") else None)
+        if isinstance(row.get("year"),(int,float)):
+            year=f"{int(row.get('year'))}-12-31"
+        for col,metric in [("revenue_eur","revenue"),("pbt_eur","profit_before_tax"),("net_profit_eur","net_profit"),("equity_eur","equity")]:
+            if row.get(col) in (None,""): continue
+            records.append(_rw_record("pc_financial_records",f"financial:{scope}:{year}:{metric}",{
+                "entity_name":scope.replace("Consolidated ","").replace(" UAB","") if scope else main,
+                "period_or_date":year,"record_type":"annual financial","metric_or_project":metric,"value":_rw_number(row.get(col)),"unit":"EUR","currency":"EUR",
+                "status":"reported","notes":row.get("notes"),"source_url":url,"metadata":_rw_metadata(kind,"Financials",row,{"source_quality":row.get("source_quality")}),
+            }))
+
+    for row in _rw_rows(sections.get("Technology_Quality",pd.DataFrame())):
+        url=_rw_url(row); cat=row.get("category"); item=row.get("item")
+        records.append(_rw_record("pc_observations",f"girteka-tech:{cat}:{item}",{
+            "observation_id":_rw_uuid(kind,"Technology_Quality",cat,item),"source_url":url,"source_type":"research_workbook",
+            "raw_value":{"category":cat,"item":item,"description":row.get("description"),"status_or_metric":row.get("status_or_metric")},
+            "confidence":"high","review_status":"approved","record_status":"verified","metadata":{"entity_name":main},
+        }))
+        if str(cat or "").casefold() in {"certification","security","quality"}:
+            records.append(_rw_record("pc_security_compliance",f"security:{main}:{item}",{
+                "record_type":cat or "compliance","regime":item,"target_type":"entity","target_name":main,"status":row.get("status_or_metric"),
+                "confidence":"high","notes":row.get("description"),"source_url":url,"metadata":_rw_metadata(kind,"Technology_Quality",row),
+            }))
+
+    for row in _rw_rows(sections.get("Partners",pd.DataFrame())):
+        partner=row.get("partner"); url=_rw_url(row)
+        if not partner: continue
+        records.append(_rw_record("pc_entities",f"partner:{_norm_field(partner)}",{
+            "name":partner,"entity_type":"company","subtype":row.get("category"),"source_url":url,"metadata":_rw_metadata(kind,"Partners",row),
+        }))
+        records.append(_rw_record("pc_relationships",f"partner-link:{main}:{partner}:{row.get('relationship')}",{
+            "source_type":"entity","source_name":main,"relationship_type":"partner_of","target_type":"entity","target_name":partner,
+            "notes":row.get("relationship"),"source_url":url,"metadata":_rw_metadata(kind,"Partners",row,{"date_or_period":row.get("date_or_period")}),
+        }))
+
+    records += _rw_event_records(kind,"News_12M",_rw_rows(sections.get("News_12M",pd.DataFrame())),main)
+    for row in _rw_rows(sections.get("Data_Quality",pd.DataFrame())):
+        records.append(_rw_record("pc_observations",f"dq:girteka:{row.get('issue')}",{
+            "observation_id":_rw_uuid(kind,"Data_Quality",row.get("issue")),"source_url":_rw_url(row),"source_type":"data_quality",
+            "raw_value":_jsonable(row),"confidence":"medium","review_status":"approved","record_status":"verified","metadata":{"entity_name":main},
+        }))
+    return records
+
+
+def _etihad_workbook_records(sections):
+    kind="etihad_rail"; records=[]; main="Etihad Rail"
+    records += _rw_sources_records(kind,sections)
+    profile_rows=_rw_rows(sections.get("Corporate_Profile",pd.DataFrame()))
+    facts={str(r.get("attribute")):r.get("value") for r in profile_rows if r.get("attribute")}
+    src=next((_rw_url(r) for r in profile_rows if _rw_url(r)),None)
+    legal=facts.get("legal_name") or "Etihad Rail Company PJSC"
+    records.append(_rw_record("pc_entities","entity:etihad-rail",{
+        "name":main,"entity_type":"company","subtype":"rail_operator_infrastructure_manager","hq_city":"Abu Dhabi","hq_country":"United Arab Emirates",
+        "record_status":"verified","data_quality":"high","as_of":"2026-09-19","source_url":src,"metadata":{"legal_name":legal,"profile_facts":facts},
+    },1.0))
+    records.append(_rw_record("pc_company_profiles","company-profile:etihad-rail",{
+        "entity_name":main,"legal_name":legal,"trading_name":main,"company_class":"state-backed rail company","incorporation_country":"United Arab Emirates",
+        "registration_number":facts.get("trade_licence"),"sector":"Transport & Infrastructure","industry":"Rail freight and passenger transport",
+        "business_description":facts.get("legal_mandate"),"website_url":"https://corporate.etihadrail.ae/","state_owned":True,
+        "last_verified":"2026-09-19","source_url":src,"metadata":{"profile_facts":facts},
+    },1.0))
+    if facts.get("trade_licence"):
+        records.append(_rw_record("pc_company_registrations",f"registration:etihad-rail:{facts.get('trade_licence')}",{
+            "entity_name":main,"jurisdiction":"United Arab Emirates","registration_type":"trade licence","registration_number":facts.get("trade_licence"),
+            "legal_name":legal,"status":"active","source_url":src,
+        },1.0))
+    records.append(_rw_record("pc_rail_operator_details","rail-operator:etihad-rail",{
+        "entity_name":main,"operator_type":"integrated railway company","freight_operator":True,"passenger_operator":True,"infrastructure_manager":True,
+        "operating_countries":["United Arab Emirates"],"network_length_km":_rw_number(facts.get("length_km")),"last_verified":"2026-09-19","source_url":src,
+        "metadata":{"profile_facts":facts},
+    },1.0))
+    records.append(_rw_record("pc_rail_networks","rail-network:uae-national-rail-network",{
+        "network_name":"UAE National Rail Network","network_type":"national mixed freight/passenger railway","owner_entity_name":main,"operator_entity_name":main,
+        "countries":["United Arab Emirates"],"total_length_km":_rw_number(facts.get("length_km")),"status":"operational","last_verified":"2026-09-19","source_url":src,
+        "metadata":{"western_eastern_endpoints":facts.get("western_eastern_endpoints")},
+    },1.0))
+
+    for row in _rw_rows(sections.get("Group_Entities",pd.DataFrame())):
+        name=row.get("entity"); url=_rw_url(row)
+        if not name: continue
+        records.append(_rw_record("pc_entities",f"entity:{_norm_field(name)}:{row.get('jurisdiction')}",{
+            "name":name,"entity_type":"company","subtype":row.get("entity_type"),"hq_country":row.get("jurisdiction"),"status":row.get("status"),"source_url":url,
+            "metadata":_rw_metadata(kind,"Group_Entities",row),
+        }))
+        records.append(_rw_record("pc_relationships",f"group:{main}:{name}:{row.get('relationship')}",{
+            "source_type":"entity","source_name":main,"relationship_type":row.get("relationship") or "group_linked","target_type":"entity","target_name":name,
+            "operating_control":True if "control" in str(row.get("ownership_or_control") or "").casefold() else None,
+            "notes":row.get("ownership_or_control") or row.get("role"),"source_url":url,"metadata":_rw_metadata(kind,"Group_Entities",row),
+        }))
+
+    for row in _rw_rows(sections.get("Board_Leadership",pd.DataFrame())):
+        person=row.get("name"); ent=row.get("entity") or main; url=_rw_url(row)
+        if not person: continue
+        records.append(_rw_record("pc_entities",f"person:{_norm_field(person)}",{
+            "name":person,"entity_type":"person","subtype":"board_or_executive","source_url":url,"metadata":_rw_metadata(kind,"Board_Leadership",row),
+        }))
+        records.append(_rw_record("pc_relationships",f"leadership:{person}:{ent}:{row.get('role')}",{
+            "source_type":"entity","source_name":person,"relationship_type":"leadership_of","target_type":"entity","target_name":ent,
+            "notes":row.get("role"),"source_url":url,"metadata":_rw_metadata(kind,"Board_Leadership",row),
+        }))
+
+    for row in _rw_rows(sections.get("Network_Corridors",pd.DataFrame())):
+        seg=row.get("segment_or_asset"); url=_rw_url(row)
+        if not seg: continue
+        records.append(_rw_record("pc_transport_routes",f"rail-route:{seg}:{row.get('from')}:{row.get('to')}",{
+            "route_name":seg,"mode":"rail","operator_entity_name":main,"capacity_value":None,"current_status":row.get("status"),"source_url":url,
+            "metadata":_rw_metadata(kind,"Network_Corridors",row,{"from":row.get("from"),"to":row.get("to"),"length_km":row.get("length_km"),"strategic_role":row.get("strategic_role")}),
+        }))
+
+    for row in _rw_rows(sections.get("Freight_Terminals",pd.DataFrame())):
+        name=row.get("terminal_or_port"); url=_rw_url(row)
+        if not name: continue
+        records.append(_rw_record("pc_assets",f"rail-terminal:{name}:{row.get('emirate')}",{
+            "name":name,"asset_type":"rail terminal","subtype":row.get("asset_type"),"country":"United Arab Emirates","region_city":row.get("emirate"),
+            "operator_entity_name":main,"owner_entity_name":main,"status":row.get("status"),"source_url":url,"metadata":_rw_metadata(kind,"Freight_Terminals",row),
+        }))
+        records.append(_rw_record("pc_rail_nodes",f"rail-node:{name}",{
+            "asset_name":name,"node_type":"freight_terminal","operator_entity_name":main,"intermodal":True,"road_connected":True,
+            "capacity":{"description":row.get("capacity_or_scale")},"last_verified":"2026-09-19","source_url":url,
+            "metadata":_rw_metadata(kind,"Freight_Terminals",row,{"services":row.get("services"),"connected_markets_or_assets":row.get("connected_markets_or_assets")}),
+        }))
+
+    for row in _rw_rows(sections.get("Freight_Customers",pd.DataFrame())):
+        name=row.get("customer_partner"); url=_rw_url(row)
+        if not name: continue
+        records.append(_rw_record("pc_entities",f"customer:{_norm_field(name)}",{
+            "name":name,"entity_type":"company","subtype":row.get("sector"),"source_url":url,"metadata":_rw_metadata(kind,"Freight_Customers",row),
+        }))
+        records.append(_rw_record("pc_relationships",f"customer-link:{main}:{name}:{row.get('cargo')}",{
+            "source_type":"entity","source_name":main,"relationship_type":"freight_service_provider_to","target_type":"entity","target_name":name,
+            "notes":row.get("cargo"),"source_url":url,"metadata":_rw_metadata(kind,"Freight_Customers",row),
+        }))
+
+    rolling=_rw_rows(sections.get("Rolling_Stock",pd.DataFrame()))
+    fleet_summary=[]
+    for row in rolling:
+        url=_rw_url(row); fleet_summary.append(_jsonable(row))
+        records.append(_rw_record("pc_observations",f"etihad-rolling-stock:{row.get('asset_class')}:{row.get('manufacturer')}:{row.get('model_or_type')}",{
+            "observation_id":_rw_uuid(kind,"Rolling_Stock",row.get("asset_class"),row.get("manufacturer"),row.get("model_or_type")),
+            "source_url":url,"source_type":"research_workbook","observation_date":_rw_date(row.get("status_as_of")),"raw_value":_jsonable(row),
+            "confidence":"high","review_status":"approved","record_status":"verified","metadata":{"entity_name":main},
+        }))
+    if fleet_summary:
+        records.append(_rw_record("pc_rail_operator_details","rail-operator:etihad-rail:fleet",{
+            "entity_name":main,"freight_operator":True,"passenger_operator":True,"infrastructure_manager":True,"operating_countries":["United Arab Emirates"],
+            "fleet_summary":fleet_summary,"last_verified":"2026-09-19","source_url":next((_rw_url(r) for r in rolling if _rw_url(r)),None),
+        }))
+
+    prl=_rw_rows(sections.get("PRL_Passenger_Rail",pd.DataFrame()))
+    prlfacts={str(r.get("attribute")):r.get("value") for r in prl if r.get("attribute")}
+    prlurl=next((_rw_url(r) for r in prl if _rw_url(r)),None)
+    records.append(_rw_record("pc_transport_services","service:uae-national-passenger-rail",{
+        "service_name":prlfacts.get("project_name") or "UAE National Passenger Rail","mode":"rail","service_type":"intercity passenger rail",
+        "description":prlfacts.get("initial_operational_route"),"status":"operational","effective_start":"2026-06-30",
+        "primary_operator_entity_name":prlfacts.get("operator") or "Etihad Rail Mobility","source_url":prlurl,"metadata":{"passenger_facts":prlfacts},
+    },1.0))
+    for row in prl:
+        records.append(_rw_record("pc_observations",f"etihad-prl:{row.get('attribute')}:{row.get('as_of')}",{
+            "observation_id":_rw_uuid(kind,"PRL_Passenger_Rail",row.get("attribute"),row.get("as_of")),"source_url":_rw_url(row),"source_type":"research_workbook",
+            "observation_date":_rw_date(row.get("as_of")),"raw_value":_jsonable(row),"confidence":"high","review_status":"approved","record_status":"verified",
+            "metadata":{"entity_name":main,"service":"UAE National Passenger Rail"},
+        }))
+
+    for row in _rw_rows(sections.get("Passenger_Stations",pd.DataFrame())):
+        name=row.get("station"); url=_rw_url(row)
+        if not name: continue
+        records.append(_rw_record("pc_assets",f"passenger-station:{name}",{
+            "name":name,"asset_type":"rail station","subtype":"passenger station","country":"United Arab Emirates","region_city":row.get("emirate_or_region"),
+            "operator_entity_name":main,"status":row.get("opening_or_status"),"source_url":url,"metadata":_rw_metadata(kind,"Passenger_Stations",row),
+        }))
+        records.append(_rw_record("pc_rail_nodes",f"rail-node:{name}",{
+            "asset_name":name,"node_type":"passenger_station","operator_entity_name":main,"intermodal":True,
+            "last_verified":_rw_date(row.get("date")),"source_url":url,"metadata":_rw_metadata(kind,"Passenger_Stations",row),
+        }))
+
+    for row in _rw_rows(sections.get("International_JVs",pd.DataFrame())):
+        partner=row.get("project_or_partner"); url=_rw_url(row)
+        if not partner: continue
+        records.append(_rw_record("pc_entities",f"international-partner:{_norm_field(partner)}:{row.get('country')}",{
+            "name":partner,"entity_type":"company","subtype":"rail_project_partner","hq_country":row.get("country"),"source_url":url,"metadata":_rw_metadata(kind,"International_JVs",row),
+        }))
+        records.append(_rw_record("pc_relationships",f"international-link:{main}:{partner}:{row.get('relationship_type')}",{
+            "source_type":"entity","source_name":main,"relationship_type":row.get("relationship_type") or "partner_of","target_type":"entity","target_name":partner,
+            "notes":row.get("scope"),"source_url":url,"metadata":_rw_metadata(kind,"International_JVs",row),
+        }))
+        if any(x in str(row.get("relationship_type") or "").casefold() for x in ["jv","project"]):
+            project_name=f"{partner} rail project"
+            records.append(_rw_record("pc_assets",f"project:{project_name}",{
+                "name":project_name,"asset_type":"project","subtype":"rail project","country":row.get("country"),"operator_entity_name":main,
+                "status":row.get("status_as_of"),"source_url":url,"metadata":_rw_metadata(kind,"International_JVs",row),
+            }))
+            records.append(_rw_record("pc_project_details",f"project-details:{project_name}",{
+                "asset_name":project_name,"project_type":"rail infrastructure","project_stage":row.get("status_as_of"),"sponsor_entity_name":main,
+                "scope_description":row.get("scope"),"capacity_description":row.get("capacity"),"source_url":url,"last_verified":"2026-09-19",
+                "metadata":_rw_metadata(kind,"International_JVs",row,{"length_or_value":row.get("length_or_value")}),
+            }))
+
+    for row in _rw_rows(sections.get("Projects_Contracts",pd.DataFrame())):
+        partner=row.get("partner"); name=row.get("project_or_agreement") or row.get("category"); url=_rw_url(row)
+        if not name: continue
+        records.append(_rw_record("pc_contracts",f"contract:etihad:{name}:{row.get('date')}",{
+            "contract_name":name,"contract_type":row.get("category") or "agreement","announced_date":_rw_date(row.get("date")),"status":row.get("status") or "announced",
+            "scope_summary":row.get("scope"),"source_url":url,"metadata":_rw_metadata(kind,"Projects_Contracts",row,{"commercial_or_technical_detail":row.get("commercial_or_technical_detail")}),
+        }))
+        if partner:
+            for part in [x.strip() for x in re.split(r"[;]",str(partner)) if x.strip()]:
+                records.append(_rw_record("pc_entities",f"partner:{_norm_field(part)}",{"name":part,"entity_type":"company","source_url":url}))
+
+    for row in _rw_rows(sections.get("Sustainability_Tech",pd.DataFrame())):
+        records.append(_rw_record("pc_observations",f"etihad-sustainability:{row.get('category')}:{row.get('initiative_or_metric')}",{
+            "observation_id":_rw_uuid(kind,"Sustainability_Tech",row.get("category"),row.get("initiative_or_metric")),"source_url":_rw_url(row),"source_type":"research_workbook",
+            "observation_date":_rw_date(row.get("as_of")),"raw_value":_jsonable(row),"confidence":"high","review_status":"approved","record_status":"verified","metadata":{"entity_name":main},
+        }))
+    records += _rw_event_records(kind,"News_12M",_rw_rows(sections.get("News_12M",pd.DataFrame())),main)
+    for row in _rw_rows(sections.get("Data_Quality",pd.DataFrame())):
+        records.append(_rw_record("pc_observations",f"dq:etihad:{row.get('issue')}",{
+            "observation_id":_rw_uuid(kind,"Data_Quality",row.get("issue")),"source_url":_rw_url(row),"source_type":"data_quality","raw_value":_jsonable(row),
+            "confidence":"medium","review_status":"approved","record_status":"verified","metadata":{"entity_name":main},
+        }))
+    return records
+
+
+def _trade_article_workbook_records(sections):
+    kind="trade_articles"; records=[]
+    records += _rw_sources_records(kind,sections)
+    records += _rw_event_records(kind,"Events",_rw_rows(sections.get("Events",pd.DataFrame())))
+    svc_rows=_rw_rows(sections.get("Service_Rotation",pd.DataFrame()))
+    bysvc={}
+    for row in svc_rows:
+        bysvc.setdefault(str(row.get("service") or "Unnamed service"),[]).append(row)
+    for svc,rows in bysvc.items():
+        url=next((_rw_url(r) for r in rows if _rw_url(r)),None)
+        records.append(_rw_record("pc_transport_services",f"service:{svc}",{
+            "service_name":svc,"mode":"maritime","service_type":"container liner service","frequency_unit":rows[0].get("frequency"),
+            "effective_start":_rw_date(rows[0].get("service_start")),"status":"active","source_url":url,
+            "metadata":{"research_workbook_type":kind},
+        }))
+        for row in rows:
+            port=row.get("port"); country=row.get("country"); seq=_rw_number(row.get("sequence"))
+            if not port: continue
+            records.append(_rw_record("pc_assets",f"port:{port}:{country}",{
+                "name":port,"asset_type":"port","country":country,"source_url":_rw_url(row),"metadata":_rw_metadata(kind,"Service_Rotation",row),
+            }))
+            records.append(_rw_record("pc_transport_service_stops",f"service-stop:{svc}:{row.get('direction')}:{seq}:{port}",{
+                "transport_service_name":svc,"transport_service_id":_simple_hash_id("SERVICE_AI",f"service:{svc}","pc_transport_services"),
+                "direction":row.get("direction") or "main","sequence_no":int(seq or 0),"asset_name":port,"call_type":row.get("role") or "scheduled",
+                "source_url":_rw_url(row),"metadata":_rw_metadata(kind,"Service_Rotation",row),
+            }))
+
+    for row in _rw_rows(sections.get("Labour_Relations",pd.DataFrame())):
+        eid=str(row.get("event_id") or _simple_hash_id("EVENT_RWB","labour",row.get("employer"),row.get("agreement_date")))
+        url=_rw_url(row)
+        records.append(_rw_record("pc_events",f"event:{eid}:labour",{
+            "event_id":eid,"start_date":_rw_date(row.get("agreement_date")),"event_domain":"labour","event_type":"labour relations",
+            "title":f"{row.get('employer') or 'Employer'} – {row.get('union') or 'union'} labour agreement","description":row.get("notes"),
+            "status":row.get("bargaining_status"),"operational_impact":row.get("strike_risk_status"),"trade_visible":True,"intelligence_visible":True,
+            "source_url":url,"metadata":_rw_metadata(kind,"Labour_Relations",row),
+        }))
+        for nm,rel in [(row.get("employer"),"employer"),(row.get("union"),"union")]:
+            if nm:
+                records.append(_rw_record("pc_event_links",f"event-link:{eid}:{rel}:{nm}",{
+                    "event_id":eid,"linked_type":"entity","linked_name":nm,"relationship":rel,"source_url":url,
+                }))
+
+    for row in _rw_rows(sections.get("Infrastructure_Finance",pd.DataFrame())):
+        proj=row.get("project"); url=_rw_url(row); eid=row.get("event_id")
+        if proj:
+            records.append(_rw_record("pc_assets",f"project:{proj}",{
+                "name":proj,"asset_type":"project","subtype":"port/infrastructure project","region_city":row.get("location"),"status":row.get("status"),"source_url":url,
+                "metadata":_rw_metadata(kind,"Infrastructure_Finance",row),
+            }))
+            records.append(_rw_record("pc_project_details",f"project-details:{proj}",{
+                "asset_name":proj,"project_type":"transport infrastructure","project_stage":row.get("status"),"sponsor_entity_name":row.get("owner_borrower"),
+                "scope_description":row.get("project_scope"),"source_url":url,"metadata":_rw_metadata(kind,"Infrastructure_Finance",row),
+            }))
+        finname=f"{proj or row.get('owner_borrower')} {row.get('loan_program') or 'financing'}"
+        records.append(_rw_record("pc_financing_facilities",f"financing:{finname}:{row.get('loan_amount_usd')}",{
+            "financing_name":finname,"financing_type":row.get("loan_program") or "loan","amount":_rw_number(row.get("loan_amount_usd")),"currency":"USD",
+            "facility_status":row.get("status"),"purpose":row.get("project_scope"),"source_url":url,"metadata":_rw_metadata(kind,"Infrastructure_Finance",row),
+        }))
+
+    for row in _rw_rows(sections.get("Ownership_Transaction",pd.DataFrame())):
+        eid=row.get("event_id"); url=_rw_url(row); target=row.get("target_company"); buyer=row.get("buyer_parent") or row.get("acquiring_vehicle")
+        txid=_simple_hash_id("TX_RWB",eid,target,buyer,row.get("results_date"))
+        records.append(_rw_record("pc_transactions",f"transaction:{txid}",{
+            "transaction_id":txid,"announced_date":_rw_date(row.get("results_date") or row.get("offer_open")),"effective_date":_rw_date(row.get("settlement_deadline")),
+            "buyer_entity_name":buyer,"target_entity_name":target,"target_name":target,"transaction_type":"tender offer / acquisition",
+            "equity_percent":_rw_number(row.get("post_settlement_stake_pct")),"reported_value":_rw_number(row.get("offer_price_aed")),"currency":"AED",
+            "status":row.get("transaction_status"),"source_url":url,"notes":row.get("notes"),"metadata":_rw_metadata(kind,"Ownership_Transaction",row),
+        }))
+
+    for row in _rw_rows(sections.get("Vessel_Orders",pd.DataFrame())):
+        owner=row.get("owner_operator"); yard=row.get("shipyard"); url=_rw_url(row); eid=row.get("event_id")
+        design_id=_simple_hash_id("VDESIGN_RWB",row.get("vessel_type"),row.get("capacity_teu_each"),row.get("loa_m"),row.get("beam_m"),yard)
+        order_id=_simple_hash_id("SHIPORD_RWB",eid,owner,yard,row.get("contract_date"))
+        records.append(_rw_record("pc_vessel_designs",f"vessel-design:{design_id}",{
+            "vessel_design_id":design_id,"design_name":f"{row.get('capacity_teu_each') or ''} TEU {row.get('vessel_type') or 'vessel'}".strip(),
+            "builder_entity_name":yard,"vessel_type":row.get("vessel_type"),"propulsion_type":row.get("propulsion"),"teu_capacity":_rw_number(row.get("capacity_teu_each")),
+            "loa_m":_rw_number(row.get("loa_m")),"beam_m":_rw_number(row.get("beam_m")),"depth_m":_rw_number(row.get("depth_m")),"design_speed_knots":_rw_number(row.get("design_speed_kn")),
+            "source_url":url,"metadata":_rw_metadata(kind,"Vessel_Orders",row,{"energy_saving_features":row.get("energy_saving_features")}),
+        }))
+        records.append(_rw_record("pc_shipbuilding_orders",f"shipbuilding-order:{order_id}",{
+            "shipbuilding_order_id":order_id,"buyer_entity_name":owner,"builder_entity_name":yard,"vessel_design_id":design_id,
+            "order_date":_rw_date(row.get("contract_date")),"firm_quantity":int(_rw_number(row.get("vessel_count")) or 0),"vessel_type":row.get("vessel_type"),
+            "teu_capacity_each":_rw_number(row.get("capacity_teu_each")),"first_delivery_date":_rw_date(row.get("delivery_date")),"status":"ordered","source_url":url,
+            "metadata":_rw_metadata(kind,"Vessel_Orders",row,{"strategic_context":row.get("strategic_context")}),
+        }))
+
+    for row in _rw_rows(sections.get("Entities",pd.DataFrame())):
+        name=row.get("entity"); url=_rw_url(row); eid=row.get("event_id")
+        if not name: continue
+        records.append(_rw_record("pc_entities",f"entity:{_norm_field(name)}:{row.get('country')}",{
+            "name":name,"entity_type":row.get("entity_type") or "company","hq_country":row.get("country"),"source_url":url,"metadata":_rw_metadata(kind,"Entities",row),
+        }))
+        if eid:
+            records.append(_rw_record("pc_event_links",f"event-link:{eid}:{name}:{row.get('relationship_to_event')}",{
+                "event_id":eid,"linked_type":"entity","linked_name":name,"relationship":row.get("relationship_to_event") or "related entity","source_url":url,
+                "metadata":{"key_fact":row.get("key_fact")},
+            }))
+    for row in _rw_rows(sections.get("Data_Quality",pd.DataFrame())):
+        records.append(_rw_record("pc_observations",f"dq:trade:{row.get('event_id')}:{row.get('issue')}",{
+            "observation_id":_rw_uuid(kind,"Data_Quality",row.get("event_id"),row.get("issue")),"source_type":"data_quality","raw_value":_jsonable(row),
+            "confidence":"medium","review_status":"approved","record_status":"verified",
+        }))
+    return records
+
+
+def _gcc_security_workbook_records(sections):
+    kind="gcc_security"; records=[]
+    records += _rw_sources_records(kind,sections)
+    rows=_rw_rows(sections.get("Events",pd.DataFrame()))
+    records += _rw_event_records(kind,"Events",rows)
+    for row in rows:
+        eid=str(row.get("event_id") or "")
+        target=row.get("target_or_object")
+        if target and eid:
+            # Preserve the target/object without pretending every free-text target is
+            # already a canonical company or asset identity.
+            records.append(_rw_record("pc_event_impacts",f"event-impact:{eid}:{target}",{
+                "impact_id":_rw_uuid(kind,"impact",eid,target),"event_id":eid,"impact_domain":row.get("event_category") or "security",
+                "impact_type":row.get("event_subtype"),"impact_level":row.get("severity"),"geography":row.get("region"),
+                "description":row.get("operational_relevance"),"confidence":row.get("confidence"),"source_url":_rw_url(row),
+                "metadata":{"target_or_object":target,"conflict_link":row.get("conflict_link"),"monitoring_indicators":row.get("monitoring_indicators")},
+            }))
+    return records
+
+
+def _research_workbook_records(sections,filename=""):
+    kind=_research_workbook_kind(sections,filename)
+    if kind=="girteka": return kind,_girteka_workbook_records(sections)
+    if kind=="etihad_rail": return kind,_etihad_workbook_records(sections)
+    if kind=="trade_articles": return kind,_trade_article_workbook_records(sections)
+    if kind=="gcc_security": return kind,_gcc_security_workbook_records(sections)
+    return None,[]
+
+
+def _load_research_workbook_direct(filename,sections,file_hash):
+    """Normalize a supported research workbook and write every supported row directly.
+
+    Every source row is either normalized into a domain table or preserved as an
+    observation/metadata payload.  No fact-promotion queue is involved.
+    """
+    kind,records=_research_workbook_records(sections,filename)
+    if not kind:
+        raise ValueError("Workbook is not one of the supported P&C research workbook shapes")
+    result={"records":records}
+    report=_simple_direct_write_records(sb,result)
+    return {
+        "workbook_type":kind,
+        "file_sha256":file_hash,
+        "records_generated":len(records),
+        **report,
+    }
+
+
 def _run_content_item_extraction(
     batch_id,
     item,
@@ -4104,28 +5040,31 @@ def _run_content_item_extraction(
     new_hash=str((fetched or {}).get("content_hash") or "")
     if prior_hash and new_hash and prior_hash==new_hash:
         runs=(sb.table("pc_extraction_runs")
-              .select("extraction_run_id,ingestion_job_id,status,started_at,records_proposed")
+              .select("extraction_run_id,ingestion_job_id,status,started_at,records_proposed,metadata")
               .eq("content_item_id",item_id)
               .eq("status","completed")
               .order("started_at",desc=True).limit(1).execute().data or [])
         if runs and runs[0].get("ingestion_job_id"):
-            job_id=runs[0]["ingestion_job_id"]
-            staged_count=(sb.table("pc_staged_records")
-                          .select("staged_record_id",count="exact")
-                          .eq("ingestion_job_id",job_id)
-                          .limit(1).execute().count or 0)
-            return {
-                "content_item_id":item_id,
-                "url":url,
-                "title":fetched.get("title") or item.get("title"),
-                "facts":0,
-                "staged":int(staged_count or runs[0].get("records_proposed") or 0),
-                "rejected":0,
-                "primary_sources":0,
-                "job_id":job_id,
-                "resolution":{"mode":"reused_unchanged_content"},
-                "reused_unchanged_content":True,
-            }
+            md=runs[0].get("metadata") if isinstance(runs[0].get("metadata"),dict) else {}
+            # Reuse only a successful run from THIS simple-loader build. Older
+            # staged/promotion runs must be reprocessed so a previously broken
+            # zero-write result cannot permanently suppress canonical loading.
+            if md.get("loader_build")==LOADER_BUILD and int(md.get("canonical_applied") or 0)>0:
+                return {
+                    "content_item_id":item_id,
+                    "url":url,
+                    "title":fetched.get("title") or item.get("title"),
+                    "facts":0,
+                    "staged":0,
+                    "rejected":0,
+                    "primary_sources":int(md.get("primary_sources_discovered") or 0),
+                    "job_id":runs[0]["ingestion_job_id"],
+                    "canonical_applied":int(md.get("canonical_applied") or 0),
+                    "canonical_blocked":0,
+                    "canonical_apply_report":md.get("canonical_apply_report") or {},
+                    "resolution":{"mode":"reused_successful_direct_load"},
+                    "reused_unchanged_content":True,
+                }
 
     job=sb.table("pc_ingestion_jobs").insert({
         "job_type":"CONTENT_INGEST",
@@ -4212,40 +5151,46 @@ SOURCE TEXT:
         (result or {}).get("primary_sources") or [],
         batch_id
     )
-    staged,rejected,resolution=stage_ai_result(sb,job_id,result)
+    direct=_simple_direct_write_records(sb,result)
+    applied=int(direct.get("applied",0) or 0)
+    blocked=int(direct.get("blocked",0) or 0)
 
     sb.table("pc_extraction_runs").update({
         "status":"completed",
         "facts_extracted":0,
-        "records_proposed":staged,
+        "records_proposed":len((result or {}).get("records") or []),
         "conflicts_count":len((result or {}).get("conflicts") or []),
         "completed_at":pd.Timestamp.utcnow().isoformat(),
         "metadata":{
             "source_url":url,
             "primary_sources_discovered":primary_count,
-            "rejected_records":rejected,
             "loader_build":LOADER_BUILD,
-            "mode":"simple_direct_records",
+            "mode":"source_to_canonical_direct",
+            "canonical_applied":applied,
+            "canonical_blocked":blocked,
+            "canonical_apply_report":direct,
         }
     }).eq("extraction_run_id",extraction_run["extraction_run_id"]).execute()
 
     sb.table("pc_content_ingest_items").update({
         "extraction_status":"completed",
-        "resolution_status":"ready" if not rejected else "partial",
+        "resolution_status":"loaded" if blocked==0 else "loaded_with_exceptions",
         "updated_at":pd.Timestamp.utcnow().isoformat()
     }).eq("content_item_id",item_id).execute()
 
     sb.table("pc_ingestion_jobs").update({
-        "status":"completed",
+        "status":"completed" if blocked==0 else "completed_with_exceptions",
         "completed_at":pd.Timestamp.utcnow().isoformat(),
         "stats":{
             "content_item_id":item_id,
             "facts":0,
-            "staged_records":staged,
-            "rejected_records":rejected,
+            "records_returned":len((result or {}).get("records") or []),
+            "canonical_applied":applied,
+            "canonical_blocked":blocked,
+            "by_table":direct.get("by_table") or {},
+            "write_failures":direct.get("failures") or [],
             "primary_sources":primary_count,
-            "resolution":resolution,
-            "mode":"simple_direct_records",
+            "mode":"source_to_canonical_direct",
         }
     }).eq("ingestion_job_id",job_id).execute()
 
@@ -4259,11 +5204,14 @@ SOURCE TEXT:
         "url":url,
         "title":fetched.get("title"),
         "facts":0,
-        "staged":staged,
-        "rejected":rejected,
+        "staged":0,
+        "rejected":0,
         "primary_sources":primary_count,
         "job_id":job_id,
-        "resolution":resolution,
+        "canonical_applied":applied,
+        "canonical_blocked":blocked,
+        "canonical_apply_report":direct,
+        "resolution":{"mode":"source_to_canonical_direct"},
     }
 
 
@@ -4537,6 +5485,12 @@ _SIMPLE_ENTITY_REFS = {
     "entity_name":"entity_id",
     "authority_entity_name":"authority_entity_id",
     "company_name":"entity_id",
+    "primary_operator_entity_name":"primary_operator_entity_id",
+    "manufacturer_entity_name":"manufacturer_entity_id",
+    "sponsor_entity_name":"sponsor_entity_id",
+    "developer_entity_name":"developer_entity_id",
+    "delivery_entity_name":"delivery_entity_id",
+    "ultimate_parent_entity_name":"ultimate_parent_entity_id",
 }
 
 _SIMPLE_ASSET_REFS = {
@@ -4547,6 +5501,7 @@ _SIMPLE_ASSET_REFS = {
     "berth_name":"berth_asset_id",
     "target_asset_name":"target_asset_id",
     "facility_name":"asset_id",
+    "node_name":"asset_id",
 }
 
 
@@ -4572,6 +5527,8 @@ def _simple_primary_id(table, payload, natural_key):
         "financing_id":"FIN_AI","financing_participant_id":"FINPART_AI","financing_link_id":"FINLINK_AI",
         "contract_id":"CONTRACT_AI","contract_participant_id":"CONPART_AI","contract_link_id":"CONLINK_AI",
         "vessel_design_id":"VDESIGN_AI","shipbuilding_order_id":"SHIPORD_AI","shipbuilding_order_unit_id":"SHIPUNIT_AI",
+        "financial_record_id":"FINREC_AI","road_corridor_id":"ROAD_AI","rail_network_id":"RAILNET_AI",
+        "rail_link_id":"RAILLINK_AI","event_location_id":"EVLOC_AI","source_id":"SRC_AI",
     }.get(key,key.upper())
     payload[key]=_simple_hash_id(prefix,natural_key or _record_key(payload,""),table)
     return payload
@@ -4637,6 +5594,32 @@ def _simple_prepare_payload(sb, table, payload, natural_key):
         )
     if table=="pc_mobile_assets" and not p.get("mobile_asset_id"):
         p["mobile_asset_id"]=_simple_ensure_mobile_asset(sb,p.get("name"),p.get("imo"),p.get("mmsi"),p.get("flag"),p.get("subtype"),sid)
+
+    # Generic graph relationships: research workbooks often carry endpoint names
+    # rather than canonical IDs. Resolve/create those endpoints before the write.
+    if table=="pc_relationships":
+        if p.get("source_id") in (None,"") and p.get("source_name"):
+            stype=str(p.get("source_type") or "entity").casefold()
+            if stype in {"entity","company","organization","person","actor"}:
+                p["source_type"]="entity"
+                p["source_id"]=_simple_ensure_entity(sb,p.get("source_name"),p.get("source_country") or country,p.get("source_entity_type") or ("person" if stype=="person" else "company"),sid)
+            elif stype in {"mobile_asset","vessel","ship","aircraft"}:
+                p["source_type"]="mobile_asset"
+                p["source_id"]=_simple_ensure_mobile_asset(sb,p.get("source_name"),p.get("source_imo"),p.get("source_mmsi"),p.get("source_flag"),p.get("source_subtype"),sid)
+            else:
+                p["source_type"]="asset"
+                p["source_id"]=_simple_ensure_asset(sb,p.get("source_name"),p.get("source_country") or country,p.get("source_asset_type") or "asset",p.get("source_subtype"),sid)
+        if p.get("target_id") in (None,"") and p.get("target_name"):
+            ttype=str(p.get("target_type") or "entity").casefold()
+            if ttype in {"entity","company","organization","person","actor"}:
+                p["target_type"]="entity"
+                p["target_id"]=_simple_ensure_entity(sb,p.get("target_name"),p.get("target_country") or country,p.get("target_entity_type") or ("person" if ttype=="person" else "company"),sid)
+            elif ttype in {"mobile_asset","vessel","ship","aircraft"}:
+                p["target_type"]="mobile_asset"
+                p["target_id"]=_simple_ensure_mobile_asset(sb,p.get("target_name"),p.get("target_imo"),p.get("target_mmsi"),p.get("target_flag"),p.get("target_subtype"),sid)
+            else:
+                p["target_type"]="asset"
+                p["target_id"]=_simple_ensure_asset(sb,p.get("target_name"),p.get("target_country") or country,p.get("target_asset_type") or "asset",p.get("target_subtype"),sid)
 
     # Polymorphic event links: resolve linked_id directly from linked_type + linked_name.
     if table=="pc_event_links" and not p.get("linked_id") and p.get("linked_name"):
@@ -5853,7 +6836,7 @@ CANONICAL_DIRECT_TABLES = {
     "pc_trade_flows",
     "pc_supply_series",
     "pc_observations",
-}
+} | set(EXPANDED_RESEARCH_TABLES)
 CANONICAL_LOAD_TABLES = sorted(
     CANONICAL_OBJECT_TABLES | CANONICAL_EDGE_TABLES | CANONICAL_DIRECT_TABLES
 )
@@ -9737,6 +10720,55 @@ elif page=="Canonical Loader":
                 sections,file_hash=_parse_multitable_upload(up)
                 sections={k:v for k,v in sections.items() if not v.empty}
 
+                # V5.1: research workbooks are already structured intelligence
+                # packages.  Do not force Girteka / Etihad Rail / article batches /
+                # GCC event workbooks through one-sheet-one-table manual mapping.
+                # Normalize the workbook into the expanded canonical model and write
+                # it directly, retaining row-level source URLs and metadata.
+                _rwb_kind,_rwb_records=_research_workbook_records(sections,up.name)
+                if _rwb_kind:
+                    _rwb_counts={}
+                    for _rr in _rwb_records:
+                        _tt=str(_rr.get("target_table") or "unknown")
+                        _rwb_counts[_tt]=_rwb_counts.get(_tt,0)+1
+                    st.success(
+                        f"Structured research workbook detected: {_rwb_kind.replace('_',' ').title()} · "
+                        f"{len(_rwb_records):,} canonical/domain record(s) prepared."
+                    )
+                    st.caption(
+                        "This path uses the expanded company / trucking / rail / events model directly. "
+                        "Every source row is preserved in canonical fields or metadata; no fact-promotion step is used."
+                    )
+                    dataframe([{"target_table":k,"records":v} for k,v in sorted(_rwb_counts.items())])
+                    if st.button(
+                        "▶ Load structured workbook directly to canonical model",
+                        type="primary",
+                        use_container_width=True,
+                        key=f"research_workbook_direct_{str(file_hash)[:16]}"
+                    ):
+                        with st.status("Writing structured workbook to canonical tables…",expanded=True) as _rwb_status:
+                            _rwb_report=_load_research_workbook_direct(up.name,sections,file_hash)
+                            if int(_rwb_report.get("blocked") or 0)==0:
+                                _rwb_status.update(
+                                    label=f"Workbook complete — {_rwb_report.get('applied',0)} canonical/domain rows written",
+                                    state="complete",expanded=False
+                                )
+                                st.success(
+                                    f"Loaded {_rwb_report.get('applied',0):,} row(s) from {len(sections)} worksheet(s)."
+                                )
+                            else:
+                                _rwb_status.update(
+                                    label=(f"Workbook loaded with exceptions — {_rwb_report.get('applied',0)} written · "
+                                           f"{_rwb_report.get('blocked',0)} failed"),
+                                    state="error",expanded=True
+                                )
+                                st.warning(
+                                    f"{_rwb_report.get('applied',0):,} row(s) written; "
+                                    f"{_rwb_report.get('blocked',0):,} row(s) need attention."
+                                )
+                            st.json(_rwb_report)
+                    st.stop()
+
                 # V23: bind the result panel to the CURRENT upload, not a prior job
                 # left in Streamlit session state.
                 current_hash=str(file_hash)
@@ -12557,6 +13589,7 @@ elif page=="Universal Content Intake":
                             "canonical_applied":x.get("canonical_applied",0),
                             "exceptions":x.get("canonical_blocked",0),
                             "job_id":x.get("job_id"),
+                            "first_error":(((x.get("canonical_apply_report") or {}).get("failures") or [{}])[0].get("error") if int(x.get("canonical_blocked") or 0) else None),
                         } for x in results])
                     if failures:
                         st.warning(f"{len(failures)} source(s) need attention.")
