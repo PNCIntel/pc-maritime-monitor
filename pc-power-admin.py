@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "50-sanctions-bulk-load-2026-09-18"
+LOADER_BUILD = "501-sanctions-bulk-load-dedupe-fix-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -2793,10 +2793,18 @@ def _mark_duplicate_content_facts(limit=10000):
     for fact_id,keep_id in duplicates:
         if not fact_id:
             continue
+        current=(sb.table("pc_extracted_facts")
+                 .select("metadata")
+                 .eq("fact_id",fact_id)
+                 .limit(1).execute().data or [])
+        md=(current[0].get("metadata") if current else {}) or {}
+        md.update({
+            "audit_duplicate":True,
+            "duplicate_of_fact_id":str(keep_id),
+            "deduped_by":LOADER_BUILD
+        })
         sb.table("pc_extracted_facts").update({
-            "review_status":"duplicate",
-            "resolution_status":"duplicate",
-            "metadata":{"duplicate_of_fact_id":str(keep_id),"deduped_by":LOADER_BUILD}
+            "metadata":md
         }).eq("fact_id",fact_id).execute()
 
     try:
@@ -2819,12 +2827,13 @@ def _persist_extracted_facts(content_item_id,extraction_run_id,result,source_url
         "fact_id,content_item_id,fact_type,subject_type,subject_name,subject_identifier,"
         "predicate,object_type,object_name,object_identifier,value_text,value_numeric,"
         "value_boolean,unit,currency,effective_date,start_date,end_date,location_text,"
-        "country,primary_source_url,verification_status,review_status,resolution_status"
+        "country,primary_source_url,verification_status,review_status,resolution_status,metadata"
     ).eq("content_item_id",content_item_id).limit(10000).execute().data or [])
 
     existing_by_sig={}
     for r in existing:
-        if str(r.get("resolution_status") or "")=="duplicate":
+        md=r.get("metadata") if isinstance(r.get("metadata"),dict) else {}
+        if bool((md or {}).get("audit_duplicate")):
             continue
         existing_by_sig.setdefault(_fact_signature(r),r)
 
@@ -3634,8 +3643,12 @@ def _content_review_data(limit=5000):
     ).order("created_at",desc=True).limit(1000).execute().data or [])
 
     facts=(sb.table("pc_extracted_facts").select(
-        "fact_id,content_item_id,fact_type,subject_type,subject_name,subject_identifier,predicate,object_type,object_name,object_identifier,value_text,value_numeric,unit,currency,effective_date,source_url,primary_source_url,confidence,verification_status,review_status,resolution_status,created_at"
-    ).neq("resolution_status","duplicate").order("created_at",desc=True).limit(int(limit)).execute().data or [])
+        "fact_id,content_item_id,fact_type,subject_type,subject_name,subject_identifier,predicate,object_type,object_name,object_identifier,value_text,value_numeric,unit,currency,effective_date,source_url,primary_source_url,confidence,verification_status,review_status,resolution_status,metadata,created_at"
+    ).order("created_at",desc=True).limit(int(limit)).execute().data or [])
+    facts=[
+        x for x in facts
+        if not bool((x.get("metadata") or {}).get("audit_duplicate"))
+    ]
 
     active_fact_ids={str(x.get("fact_id")) for x in facts if x.get("fact_id")}
 
@@ -3931,8 +3944,11 @@ def _run_content_item_extraction(
         existing_count=(sb.table("pc_extracted_facts")
             .select("fact_id",count="exact")
             .eq("content_item_id",item_id)
-            .neq("resolution_status","duplicate")
-            .limit(1).execute().count or 0)
+            .limit(10000).execute().data or [])
+        existing_count=sum(
+            1 for x in existing_rows
+            if not bool((x.get("metadata") or {}).get("audit_duplicate"))
+        )
         if existing_count:
             runs=(sb.table("pc_extraction_runs")
                 .select("extraction_run_id,ingestion_job_id,status,created_at")
