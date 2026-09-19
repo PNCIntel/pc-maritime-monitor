@@ -2653,30 +2653,58 @@ def _strip_html_to_text(raw_html):
         return cleaned.strip(),title,None,None
 
 def _fetch_content_url(url, timeout=30, max_bytes=6_000_000):
-    """Fetch a public URL and return article/document text plus basic metadata."""
-    req=urllib.request.Request(
-        url,
-        headers={
-            "User-Agent":"PowerAndCorridorsResearch/1.0 (+https://www.powerncorridors.com)",
-            "Accept":"text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.7",
-        }
-    )
-    with urllib.request.urlopen(req,timeout=timeout) as resp:
-        status=getattr(resp,"status",200)
-        ctype=(resp.headers.get("Content-Type") or "").lower()
-        final_url=resp.geturl()
-        raw=resp.read(max_bytes+1)
-        if len(raw)>max_bytes:
-            raw=raw[:max_bytes]
-        mime=ctype.split(";",1)[0].strip() or None
+    """Fetch a public URL and return article/document text plus basic metadata.
 
-    if "pdf" in ctype or final_url.lower().endswith(".pdf"):
+    Normal news sites increasingly return 403 to non-browser clients. We try the
+    source directly with browser-like headers first, then fall back to the Jina
+    text reader for 401/403/429 responses. The ORIGINAL article URL remains the
+    provenance URL; the reader is transport only.
+    """
+    def _open(fetch_url, headers):
+        req=urllib.request.Request(fetch_url,headers=headers)
+        with urllib.request.urlopen(req,timeout=timeout) as resp:
+            status=getattr(resp,"status",200)
+            ctype=(resp.headers.get("Content-Type") or "").lower()
+            final_url=resp.geturl()
+            raw=resp.read(max_bytes+1)
+            if len(raw)>max_bytes:
+                raw=raw[:max_bytes]
+            return status,ctype,final_url,raw
+
+    browser_headers={
+        "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36",
+        "Accept":"text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.7",
+        "Accept-Language":"en-US,en;q=0.9",
+        "Cache-Control":"no-cache",
+    }
+    fetched_via="direct"
+    try:
+        status,ctype,final_url,raw=_open(url,browser_headers)
+    except urllib.error.HTTPError as exc:
+        if int(getattr(exc,"code",0) or 0) not in {401,403,429}:
+            raise
+        # Reader fallback is intentionally only for access-block responses.
+        # Provenance is still the original source URL below.
+        reader_url="https://r.jina.ai/" + str(url)
+        reader_headers={
+            "User-Agent":"Mozilla/5.0 (compatible; PowerAndCorridorsResearch/1.0)",
+            "Accept":"text/plain,text/markdown;q=0.9,*/*;q=0.5",
+        }
+        status,ctype,reader_final,raw=_open(reader_url,reader_headers)
+        final_url=url
+        fetched_via="jina_reader"
+        # Reader output is text/markdown even when the source was HTML.
+        ctype="text/plain; charset=utf-8"
+
+    if "pdf" in ctype or str(final_url).lower().endswith(".pdf"):
         text=_extract_pdf_text(raw)
         return {
-            "url":final_url,"status":status,"mime_type":"application/pdf",
-            "raw_text":None,"extracted_text":text,"title":Path(urllib.parse.urlsplit(final_url).path).name or None,
-            "publisher":urllib.parse.urlsplit(final_url).netloc,"publication_date":None,
-            "content_hash":hashlib.sha256(raw).hexdigest()
+            "url":url,"status":status,"mime_type":"application/pdf",
+            "raw_text":None,"extracted_text":text,
+            "title":Path(urllib.parse.urlsplit(url).path).name or None,
+            "publisher":urllib.parse.urlsplit(url).netloc,"publication_date":None,
+            "content_hash":hashlib.sha256(raw).hexdigest(),
+            "fetch_transport":fetched_via,
         }
 
     charset="utf-8"
@@ -2685,12 +2713,20 @@ def _fetch_content_url(url, timeout=30, max_bytes=6_000_000):
         charset=cm.group(1)
     raw_text=raw.decode(charset,errors="replace")
 
-    if "html" in ctype or "<html" in raw_text[:1000].lower():
+    if fetched_via=="jina_reader":
+        text=raw_text
+        # Jina commonly emits metadata headers like 'Title:' and 'Published Time:'.
+        tm=re.search(r"(?mi)^Title:\s*(.+)$",raw_text)
+        pm=re.search(r"(?mi)^Published Time:\s*(.+)$",raw_text)
+        title=tm.group(1).strip() if tm else (Path(urllib.parse.urlsplit(url).path).name or None)
+        publisher=urllib.parse.urlsplit(url).netloc
+        published=pm.group(1).strip() if pm else None
+    elif "html" in ctype or "<html" in raw_text[:1000].lower():
         text,title,publisher,published=_strip_html_to_text(raw_text)
     else:
         text=raw_text
-        title=Path(urllib.parse.urlsplit(final_url).path).name or None
-        publisher=urllib.parse.urlsplit(final_url).netloc
+        title=Path(urllib.parse.urlsplit(url).path).name or None
+        publisher=urllib.parse.urlsplit(url).netloc
         published=None
 
     pub_date=None
@@ -2701,13 +2737,14 @@ def _fetch_content_url(url, timeout=30, max_bytes=6_000_000):
             pub_date=None
 
     return {
-        "url":final_url,"status":status,"mime_type":mime,
+        "url":url,"status":status,"mime_type":ctype.split(";",1)[0].strip() or None,
         "raw_text":raw_text[:250000],
         "extracted_text":text[:500000],
         "title":title,
-        "publisher":publisher or urllib.parse.urlsplit(final_url).netloc,
+        "publisher":publisher or urllib.parse.urlsplit(url).netloc,
         "publication_date":pub_date,
-        "content_hash":hashlib.sha256(raw).hexdigest()
+        "content_hash":hashlib.sha256(raw).hexdigest(),
+        "fetch_transport":fetched_via,
     }
 
 def _create_content_batch(input_mode,batch_name=None,product_context=None,research_mode=None,item_count=0,metadata=None):
@@ -4080,6 +4117,11 @@ SOURCE TEXT:
         result,url,fetched.get("publisher"),fetched.get("title")
     )
     result["facts"]=[]
+    if not ((result or {}).get("records") or []):
+        raise RuntimeError(
+            "Source was fetched but produced no structured canonical records. "
+            "Nothing was written; retry with Research + load or inspect the source text."
+        )
 
     primary_count=_persist_primary_source_relationships(
         item_id,
@@ -4594,9 +4636,8 @@ def stage_ai_result(sb, job_id, result):
         conflict_keys=[x.strip() for x in conflict.split(",")] if conflict else []
         key_ready=not conflict_keys or all(payload.get(k) not in (None,"") for k in conflict_keys)
 
-        staged.append({
+        staged_row={
             "ingestion_job_id":job_id,
-            "target_entity_type":logical or "domain_record",
             "target_table":table,
             "source_record_key":natural_key,
             "natural_key":natural_key,
@@ -4607,7 +4648,15 @@ def stage_ai_result(sb, job_id, result):
             "review_status":"pending",
             "resolution_status":"READY" if key_ready else "UNRESOLVED",
             "resolution_method":"simple_key_first" if key_ready else "missing_required_key",
-        })
+        }
+        # pc_staged_records.target_entity_type is FK-backed by the registered
+        # canonical entity-type registry. Direct/domain tables (projects, contracts,
+        # service children, event links, relationships, etc.) must NOT receive an
+        # invented placeholder such as 'domain_record' or 'event_link'. Doing so
+        # makes an otherwise valid simple load fail at the staging insert.
+        if logical:
+            staged_row["target_entity_type"]=logical
+        staged.append(staged_row)
 
     for i in range(0,len(staged),100):
         sb.table("pc_staged_records").insert(staged[i:i+100]).execute()
