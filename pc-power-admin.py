@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "530-generic-schema-driven-loader-2026-09-19"
+LOADER_BUILD = "531-generic-schema-fk-uuid-fix-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -1024,6 +1024,7 @@ ID_FIELDS = {
 }
 
 UUID_ID_FIELDS = {
+    "pc_observations":"observation_id",
     "pc_port_metrics":"port_metric_id",
     "pc_port_calls":"port_call_id",
     "pc_transport_service_aliases":"service_alias_id",
@@ -6788,6 +6789,7 @@ _SIMPLE_ENTITY_REFS = {
 _SIMPLE_ASSET_REFS = {
     "asset_name":"asset_id",
     "port_name":"port_asset_id",
+    "port_asset_name":"port_asset_id",
     "parent_port_name":"parent_port_asset_id",
     "terminal_name":"terminal_asset_id",
     "berth_name":"berth_asset_id",
@@ -6798,16 +6800,39 @@ _SIMPLE_ASSET_REFS = {
 
 
 def _simple_primary_id(table, payload, natural_key):
-    """Fill missing record IDs deterministically from natural key/source-backed content."""
+    """Fill missing record IDs using the live model's key semantics.
+
+    Two important rules:
+    1. UUID-backed tables must receive real UUID values, never readable hash IDs.
+    2. Extension/detail tables whose conflict key is a parent FK must bind that
+       parent first; the loader must never invent a fake FK just to satisfy a key.
+    """
+    payload=dict(payload or {})
     conflict=APPLY_CONFLICT_KEYS.get(table)
     if not conflict or "," in conflict:
         return payload
     key=conflict.strip()
     if payload.get(key) not in (None,""):
         return payload
-    # Extension tables keyed directly by an existing asset/entity should not invent a second key.
-    if key in {"asset_id","entity_id","mobile_asset_id"}:
+
+    # Tables whose primary/conflict key is explicitly UUID-backed in the model.
+    uuid_field=UUID_ID_FIELDS.get(table)
+    if uuid_field and key==uuid_field:
+        payload[key]=str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"power-corridors|canonical|{table}|{natural_key or _record_key(payload,'')}"
+        ))
         return payload
+
+    # Extension/detail records reuse a canonical parent FK as their key. That FK
+    # must be resolved by _simple_prepare_payload; inventing one creates an orphan.
+    fk_identity_keys={
+        "asset_id","entity_id","mobile_asset_id","port_asset_id",
+        "terminal_asset_id","berth_asset_id","transport_service_id",
+    }
+    if key in fk_identity_keys:
+        return payload
+
     prefix={
         "event_id":"EVENT_AI","event_link_id":"EVLINK_AI","relationship_id":"REL_AI",
         "transaction_id":"TX_AI","participant_id":"PART_AI","route_id":"ROUTE_AI",
@@ -7054,6 +7079,22 @@ def _simple_prepare_payload(sb, table, payload, natural_key):
 
     if table=="pc_security_compliance" and not p.get("security_record_id"):
         p["security_record_id"]=_simple_hash_id("SECURITY_AI",natural_key or _record_key(p,""),table)
+
+    # Research generators from older builds may supply readable IDs such as
+    # OBS_AI_* or PORTCALL_AI_* to columns that are UUID in the live schema.
+    # Normalize them deterministically here so all workbook handlers and the
+    # generic fallback share the same database-safe behavior.
+    uuid_field=UUID_ID_FIELDS.get(table)
+    if uuid_field:
+        raw_uuid=p.get(uuid_field)
+        if raw_uuid not in (None,""):
+            try:
+                p[uuid_field]=str(uuid.UUID(str(raw_uuid)))
+            except Exception:
+                p[uuid_field]=str(uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"power-corridors|canonical|{table}|{natural_key or raw_uuid}"
+                ))
 
     p=_simple_primary_id(table,p,natural_key)
 
