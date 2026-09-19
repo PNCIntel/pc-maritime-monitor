@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "510-expanded-research-workbook-loader-2026-09-19"
+LOADER_BUILD = "511-strict-schema-ocean-carriers-diagnostics-2026-09-19"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -1055,24 +1055,42 @@ def _norm_field(v):
     return re.sub(r"[^a-z0-9]+","_",str(v or "").strip().casefold()).strip("_")
 
 def _table_write_columns_live(sb, table):
-    """Return writable columns plus critical canonical fields needed by staging.
+    """Return the *actual* writable columns for a live canonical table.
 
-    Some deployments of pc_get_table_write_columns omit fields that the staging
-    validator/reconciler still requires (for example entity_type) or provenance
-    fields we preserve in metadata. Always union the RPC result with the canonical
-    staging field set instead of trusting the RPC list as exhaustive.
+    V5.1 accidentally unioned a generic field set into every table.  That meant
+    payloads retained fields such as ``source_url`` on tables that do not have a
+    source_url column (pc_events, pc_entities, pc_company_profiles, rail/trucking
+    extension tables, etc.). PostgREST then rejected otherwise valid rows.
+
+    Prefer the database's write-column RPC exactly as returned.  If that RPC is
+    unavailable, use pc_meta_columns.  Only as a last-resort compatibility fallback
+    do we return the small canonical baseline.
     """
-    base=set(REQUIRED_BY_TABLE.get(table,[])) | set(ID_FIELDS.get(table,("", "", 0))[:1]) | {
-        "name","title","entity_type","asset_type","event_type","subtype","status","country","region_city",
-        "imo","mmsi","flag","owner_entity_id","operator_entity_id","manager_entity_id","source_id",
-        "source_url","metadata"
-    }
     try:
         r=sb.rpc("pc_get_table_write_columns",{"p_table_name":table}).execute().data
-        if isinstance(r,list):
-            base.update(str(x) for x in r if x)
+        if isinstance(r,list) and r:
+            return sorted({str(x) for x in r if x})
     except Exception:
         pass
+
+    try:
+        rows=(sb.table("pc_meta_columns")
+              .select("column_name")
+              .eq("table_name",table)
+              .execute().data or [])
+        cols={str(x.get("column_name")) for x in rows if x.get("column_name")}
+        if cols:
+            return sorted(cols)
+    except Exception:
+        pass
+
+    base=set(REQUIRED_BY_TABLE.get(table,[]))
+    spec=ID_FIELDS.get(table)
+    if spec and spec[0]:
+        base.add(spec[0])
+    # Conservative fallback only. Do not pretend every table has provenance/name
+    # columns; overflow is preserved in metadata when metadata is genuinely writable.
+    base.update({"metadata"})
     return sorted(base)
 
 def _auto_column_mapping(source_columns, target_columns):
@@ -4216,9 +4234,12 @@ def _simple_direct_write_records(sb, result):
     applied=0
     failures=[]
     by_table={}
+    attempted_by_table={}
     for rec in records:
+        p=None
         table=str(rec.get("target_table") or "").strip()
         payload=rec.get("payload")
+        attempted_by_table[table or "unknown"]=attempted_by_table.get(table or "unknown",0)+1
         if table not in AI_ALLOWED_TABLES or not isinstance(payload,dict):
             failures.append({"table":table or None,"record":rec.get("natural_key"),"error":"invalid target table or payload"})
             continue
@@ -4247,12 +4268,28 @@ def _simple_direct_write_records(sb, result):
                 "payload_keys":sorted(list(p.keys())) if isinstance(locals().get("p"),dict) else [],
             })
 
+    error_counts={}
+    for f in failures:
+        key=str(f.get("error") or "unknown error")
+        # Keep summaries readable while retaining complete row-level failures below.
+        if len(key)>280:
+            key=key[:277]+"..."
+        error_counts[key]=error_counts.get(key,0)+1
+    failed_by_table={}
+    for f in failures:
+        t=str(f.get("table") or "unknown")
+        failed_by_table[t]=failed_by_table.get(t,0)+1
+
     return {
+        "attempted":len(records),
         "applied":applied,
         "blocked":len(failures),
         "failed":len(failures),
-        "failures":failures[:200],
+        "failures":failures,  # do not silently truncate workbook diagnostics
         "by_table":by_table,
+        "attempted_by_table":attempted_by_table,
+        "failed_by_table":failed_by_table,
+        "error_summary":[{"error":k,"count":v} for k,v in sorted(error_counts.items(),key=lambda x:(-x[1],x[0]))],
         "mode":"source_to_canonical_direct",
     }
 
@@ -4386,6 +4423,11 @@ def _research_workbook_kind(sections,filename=""):
         cols={_norm_field(c) for c in (ev.columns if ev is not None else [])}
         if "primary_actor" in cols and "monitoring_indicators" in cols:
             return "gcc_security"
+    if (
+        {"company_profiles","ownership_brands","leadership","verified_rotations"}.issubset(names)
+        and any(x in names for x in {"oocl_routes","maersk_routes","cma_cgm_routes"})
+    ) or ("oocl" in fname and "maersk" in fname and "cma" in fname):
+        return "ocean_carriers"
     return None
 
 
@@ -4965,12 +5007,303 @@ def _gcc_security_workbook_records(sections):
     return records
 
 
+
+def _ocean_carrier_name(code_or_name):
+    key=_norm_field(code_or_name)
+    mapping={
+        "oocl":"Orient Overseas Container Line (OOCL)",
+        "orient_overseas_container_line_oocl":"Orient Overseas Container Line (OOCL)",
+        "maersk":"A.P. Moller - Maersk A/S",
+        "a_p_moller_maersk_as":"A.P. Moller - Maersk A/S",
+        "cmacgm":"CMA CGM Group",
+        "cma_cgm":"CMA CGM Group",
+        "cma_cgm_group":"CMA CGM Group",
+    }
+    return mapping.get(key,str(code_or_name or "").strip())
+
+
+def _ocean_service_key(company, service):
+    return f"service:ocean:{_norm_field(company)}:{_norm_field(service)}"
+
+
+def _ocean_service_id(company, service):
+    nk=_ocean_service_key(company,service)
+    return _simple_hash_id("SERVICE_AI",nk,"pc_transport_services")
+
+
+def _ocean_carriers_workbook_records(sections):
+    """Normalize OOCL / Maersk / CMA CGM corporate + ocean-service workbook.
+
+    Every catalog route becomes a first-class pc_transport_services row. Verified
+    rotations additionally create ordered service stops, while corporate, ownership,
+    leadership, footprint and news sheets enrich the carrier entities.
+    """
+    kind="ocean_carriers"
+    records=[]
+    records += _rw_sources_records(kind,sections)
+
+    # --- Core carrier profiles -------------------------------------------------
+    for row in _rw_rows(sections.get("Company_Profiles",pd.DataFrame())):
+        code=row.get("company_id") or row.get("company")
+        company=_ocean_carrier_name(code)
+        if not company:
+            continue
+        url=_rw_url(row)
+        hq=str(row.get("headquarters") or "").strip()
+        hq_parts=[x.strip() for x in hq.split(",") if x.strip()]
+        hq_city=hq_parts[0] if hq_parts else None
+        hq_country=hq_parts[-1] if len(hq_parts)>1 else None
+        listing=str(row.get("ownership_listing") or "")
+        records.append(_rw_record("pc_entities",f"entity:ocean-carrier:{_norm_field(company)}",{
+            "name":company,
+            "entity_type":"company",
+            "subtype":"container_liner_integrated_logistics",
+            "hq_city":hq_city,
+            "hq_country":hq_country,
+            "record_status":"verified",
+            "data_quality":"high",
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"Company_Profiles",row,{
+                "carrier_code":code,
+                "legal_parent":row.get("legal_parent"),
+                "fleet_or_capacity":row.get("fleet_or_capacity"),
+                "ports_or_network":row.get("ports_or_network"),
+                "alliances":row.get("alliances"),
+            }),
+        },1.0))
+        records.append(_rw_record("pc_company_profiles",f"company-profile:ocean:{_norm_field(company)}",{
+            "entity_name":company,
+            "legal_name":company,
+            "trading_name":row.get("company"),
+            "company_class":"public" if any(x in listing.casefold() for x in ("listed","public")) else None,
+            "incorporation_country":hq_country,
+            "publicly_traded":True if any(x in listing.casefold() for x in ("listed","public")) else None,
+            "employee_count":_rw_number(row.get("employees")),
+            "sector":"Transport & Logistics",
+            "industry":"Container shipping / integrated logistics",
+            "business_description":row.get("core_business"),
+            "products_services":[x.strip() for x in str(row.get("core_business") or "").split(",") if x.strip()],
+            "last_verified":"2026-09-19",
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"Company_Profiles",row,{
+                "ownership_listing":row.get("ownership_listing"),
+                "countries_or_cities":row.get("countries_or_cities"),
+                "offices":row.get("offices"),
+                "fleet_or_capacity":row.get("fleet_or_capacity"),
+                "ports_or_network":row.get("ports_or_network"),
+                "alliances":row.get("alliances"),
+            }),
+        },1.0))
+        if row.get("fleet_or_capacity"):
+            records.append(_rw_record("pc_observations",f"ocean-fleet-scale:{_norm_field(company)}:2026-09-19",{
+                "observation_id":_rw_uuid(kind,"fleet-scale",company,"2026-09-19"),
+                "source_url":url,
+                "source_type":"research_workbook",
+                "observation_date":"2026-09-19",
+                "raw_value":{"fleet_or_capacity":row.get("fleet_or_capacity"),"ports_or_network":row.get("ports_or_network")},
+                "confidence":"high",
+                "review_status":"approved",
+                "record_status":"verified",
+                "metadata":{"entity_name":company},
+            }))
+
+    # --- Ownership, brands and group businesses -------------------------------
+    for row in _rw_rows(sections.get("Ownership_Brands",pd.DataFrame())):
+        company=_ocean_carrier_name(row.get("company"))
+        other=row.get("entity_or_brand")
+        if not company or not other:
+            continue
+        url=_rw_url(row)
+        records.append(_rw_record("pc_entities",f"entity:ocean-related:{_norm_field(other)}",{
+            "name":other,
+            "entity_type":"company",
+            "subtype":"brand_or_group_business",
+            "record_status":"verified",
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"Ownership_Brands",row),
+        }))
+        rel=str(row.get("relationship") or "related_to")
+        records.append(_rw_record("pc_relationships",f"ocean-rel:{company}:{other}:{rel}",{
+            "source_type":"entity",
+            "source_name":company,
+            "relationship_type":_norm_field(rel) or "related_to",
+            "target_type":"entity",
+            "target_name":other,
+            "confidence":"high",
+            "notes":row.get("notes") or row.get("activity_or_market"),
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"Ownership_Brands",row,{"status":row.get("status")}),
+        }))
+
+    # --- Leadership as person entities + graph relationships ------------------
+    for row in _rw_rows(sections.get("Leadership",pd.DataFrame())):
+        company=_ocean_carrier_name(row.get("company"))
+        person=row.get("name")
+        org=row.get("entity") or company
+        if not person or not org:
+            continue
+        org=_ocean_carrier_name(org) if _norm_field(org) in {"oocl","maersk","cmacgm","cma_cgm"} else str(org)
+        url=_rw_url(row)
+        records.append(_rw_record("pc_entities",f"person:ocean:{_norm_field(person)}",{
+            "name":person,
+            "entity_type":"person",
+            "subtype":"executive",
+            "record_status":"verified",
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"Leadership",row),
+        }))
+        # Ensure the named board/company entity exists when leadership is attached to
+        # OOIL or another parent rather than the operating carrier brand.
+        records.append(_rw_record("pc_entities",f"entity:ocean-org:{_norm_field(org)}",{
+            "name":org,
+            "entity_type":"company",
+            "record_status":"verified",
+            "source_url":url,
+            "metadata":{"research_workbook_type":kind,"leadership_context":True},
+        }))
+        records.append(_rw_record("pc_relationships",f"leadership:ocean:{person}:{org}:{row.get('role')}",{
+            "source_type":"entity",
+            "source_name":person,
+            "relationship_type":"executive_of",
+            "target_type":"entity",
+            "target_name":org,
+            "confidence":"high",
+            "notes":row.get("role"),
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"Leadership",row,{
+                "effective_or_current":row.get("effective_or_current"),
+                "company_context":company,
+            }),
+        }))
+
+    # --- Offices / footprint ---------------------------------------------------
+    for row in _rw_rows(sections.get("Locations_Footprint",pd.DataFrame())):
+        company=_ocean_carrier_name(row.get("company"))
+        if not company:
+            continue
+        loc=row.get("location")
+        country=row.get("country_region")
+        url=_rw_url(row)
+        records.append(_rw_record("pc_company_operating_footprint",f"footprint:ocean:{company}:{loc}:{country}",{
+            "footprint_id":_rw_uuid(kind,"footprint",company,loc,country,row.get("location_type")),
+            "entity_name":company,
+            "country":country,
+            "region":loc,
+            "activity_type":row.get("location_type") or "office",
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"Locations_Footprint",row,{"detail":row.get("detail")}),
+        }))
+
+    # --- Full public service catalogs -----------------------------------------
+    route_sheets=("OOCL_Routes","Maersk_Routes","CMA_CGM_Routes")
+    for sheet in route_sheets:
+        for row in _rw_rows(sections.get(sheet,pd.DataFrame())):
+            company=_ocean_carrier_name(row.get("company"))
+            service=row.get("service_name") or row.get("service_code")
+            if not company or not service:
+                continue
+            code=row.get("service_code") or (service if len(str(service))<=32 else None)
+            url=_rw_url(row)
+            nk=_ocean_service_key(company,service)
+            records.append(_rw_record("pc_transport_services",nk,{
+                "transport_service_id":_ocean_service_id(company,service),
+                "service_name":service,
+                "service_code":code,
+                "mode":"sea",
+                "service_type":row.get("service_type") or "container liner service",
+                "trade_lane":row.get("trade_lane"),
+                "description":row.get("current_rotation_if_verified"),
+                "status":"active" if "current" in str(row.get("status") or row.get("status_notes") or "").casefold() else "announced",
+                "primary_operator_entity_name":company,
+                "source_url":url,
+                "last_verified_at":"2026-09-19",
+                "metadata":_rw_metadata(kind,sheet,row),
+            },1.0))
+
+    # --- Verified rotations -> services + ordered port stops ------------------
+    for row in _rw_rows(sections.get("Verified_Rotations",pd.DataFrame())):
+        company=_ocean_carrier_name(row.get("company"))
+        service=row.get("service")
+        rotation=row.get("rotation")
+        if not company or not service:
+            continue
+        url=_rw_url(row)
+        sid=_ocean_service_id(company,service)
+        records.append(_rw_record("pc_transport_services",_ocean_service_key(company,service),{
+            "transport_service_id":sid,
+            "service_name":service,
+            "service_code":service if len(str(service))<=32 else None,
+            "mode":"sea",
+            "service_type":"container liner service",
+            "description":rotation,
+            "frequency_unit":"weekly" if "weekly" in str(row.get("frequency_or_fleet") or "").casefold() else None,
+            "status":"active",
+            "effective_start":_rw_date(row.get("effective_date")),
+            "primary_operator_entity_name":company,
+            "source_url":url,
+            "last_verified_at":"2026-09-19",
+            "metadata":_rw_metadata(kind,"Verified_Rotations",row,{"frequency_or_fleet":row.get("frequency_or_fleet")}),
+        },1.0))
+        if rotation:
+            ports=[x.strip() for x in re.split(r"\s+[–—>]\s+|\s+->\s+",str(rotation)) if x.strip()]
+            for seq,port in enumerate(ports,1):
+                records.append(_rw_record("pc_transport_service_stops",f"stop:{sid}:main:{seq}:{port}",{
+                    "transport_service_id":sid,
+                    "direction":"main",
+                    "sequence_no":seq,
+                    "asset_name":port,
+                    "asset_type":"port",
+                    "call_type":"scheduled",
+                    "is_origin":seq==1,
+                    "is_destination":seq==len(ports),
+                    "source_url":url,
+                    "metadata":_rw_metadata(kind,"Verified_Rotations",row,{"port_name":port}),
+                },1.0))
+
+    # --- Company press/news ----------------------------------------------------
+    for i,row in enumerate(_rw_rows(sections.get("Press_News_12M",pd.DataFrame())),1):
+        company=_ocean_carrier_name(row.get("company"))
+        eid=_simple_hash_id("EVENT_RWB",kind,company,row.get("headline"),row.get("date"),i)
+        url=_rw_url(row)
+        records.append(_rw_record("pc_events",f"event:{eid}",{
+            "event_id":eid,
+            "start_date":_rw_date(row.get("date")),
+            "event_nature":"company_news",
+            "event_domain":"trade",
+            "event_type":row.get("type") or "company_news",
+            "event_category":row.get("type") or "company_news",
+            "status":"reported",
+            "title":row.get("headline") or f"{company} update",
+            "description":row.get("summary"),
+            "trade_relevance":7,
+            "intelligence_relevance":5,
+            "trade_visible":True,
+            "intelligence_visible":True,
+            "verification_status":"verified",
+            "source_url":url,
+            "metadata":_rw_metadata(kind,"Press_News_12M",row),
+        }))
+        if company:
+            records.append(_rw_record("pc_event_links",f"event-link:{eid}:entity:{company}",{
+                "event_id":eid,
+                "linked_type":"entity",
+                "linked_name":company,
+                "relationship":"subject",
+                "confidence":"high",
+                "source_url":url,
+                "metadata":{"research_workbook_type":kind},
+            }))
+
+    return records
+
+
 def _research_workbook_records(sections,filename=""):
     kind=_research_workbook_kind(sections,filename)
     if kind=="girteka": return kind,_girteka_workbook_records(sections)
     if kind=="etihad_rail": return kind,_etihad_workbook_records(sections)
     if kind=="trade_articles": return kind,_trade_article_workbook_records(sections)
     if kind=="gcc_security": return kind,_gcc_security_workbook_records(sections)
+    if kind=="ocean_carriers": return kind,_ocean_carriers_workbook_records(sections)
     return None,[]
 
 
@@ -5538,7 +5871,18 @@ def _simple_prepare_payload(sb, table, payload, natural_key):
     """Key-first canonical preparation. Create missing dependency objects, bind IDs, then return schema-safe payload."""
     p=dict(payload or {})
     sid=_simple_source_id(sb,p)
-    if sid and not p.get("source_id"):
+    # ``source_id`` is provenance on most domain tables, but on pc_relationships it
+    # is the graph endpoint foreign key.  V5.1 wrote the provenance source ID into
+    # that endpoint slot, preventing source_name/target_name resolution and causing
+    # relationship FK failures.  Relationships use evidence_source_id for provenance.
+    if table=="pc_relationships":
+        if sid and not p.get("evidence_source_id"):
+            p["evidence_source_id"]=sid
+        # If an old payload carried source_id only because source_url was present,
+        # clear it so endpoint resolution below can bind the real canonical entity.
+        if p.get("source_name") and p.get("source_id")==sid:
+            p.pop("source_id",None)
+    elif sid and not p.get("source_id"):
         p["source_id"]=sid
 
     country=p.get("country") or p.get("hq_country") or p.get("jurisdiction")
@@ -10764,9 +11108,34 @@ elif page=="Canonical Loader":
                                 )
                                 st.warning(
                                     f"{_rwb_report.get('applied',0):,} row(s) written; "
-                                    f"{_rwb_report.get('blocked',0):,} row(s) need attention."
+                                    f"{_rwb_report.get('blocked',0):,} row(s) failed. "
+                                    "Failures are shown below — no row is hidden behind a generic count."
                                 )
-                            st.json(_rwb_report)
+                                if _rwb_report.get("failed_by_table"):
+                                    st.markdown("#### Failed rows by table")
+                                    dataframe([
+                                        {"target_table":k,"failed":v}
+                                        for k,v in sorted(
+                                            _rwb_report.get("failed_by_table",{}).items(),
+                                            key=lambda x:(-x[1],x[0])
+                                        )
+                                    ])
+                                if _rwb_report.get("error_summary"):
+                                    st.markdown("#### Database error summary")
+                                    dataframe(_rwb_report.get("error_summary"))
+                                if _rwb_report.get("failures"):
+                                    st.markdown("#### Row-level failures")
+                                    _fail_rows=[]
+                                    for _f in _rwb_report.get("failures",[]):
+                                        _fail_rows.append({
+                                            "target_table":_f.get("table"),
+                                            "record":_f.get("record"),
+                                            "error":_f.get("error"),
+                                            "payload_keys":", ".join(_f.get("payload_keys") or []),
+                                        })
+                                    dataframe(_fail_rows)
+                            with st.expander("Full load report",expanded=False):
+                                st.json(_rwb_report)
                     st.stop()
 
                 # V23: bind the result panel to the CURRENT upload, not a prior job
