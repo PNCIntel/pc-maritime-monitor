@@ -2085,6 +2085,24 @@ def live_canonical_port_view():
             )
 
         df=df[df.apply(_is_portish,axis=1)].copy()
+
+        # Canonical port explorer must not expose retired/merged aliases as
+        # selectable live ports. Alias rows remain in pc_assets for provenance
+        # and identity-resolution edges, but operational screens follow the
+        # active canonical object.
+        if not df.empty:
+            _status=df.get("status",pd.Series(index=df.index,dtype=str)).fillna("").astype(str).str.casefold()
+            _subtype=df.get("subtype",pd.Series(index=df.index,dtype=str)).fillna("").astype(str).str.casefold()
+            df=df[
+                ~_status.isin({
+                    "legacy alias / merged",
+                    "legacy alias / do not count",
+                    "retired",
+                    "inactive",
+                })
+                & ~_subtype.eq("port_alias")
+            ].copy()
+
         if df.empty:
             return pd.DataFrame()
 
@@ -8214,7 +8232,8 @@ def _port_event_bundle_live(port_id, terminal_ids, port_name, country=""):
 
 def render_port_connected_dossier(port_row, terminals):
     """Selected port as a connected commercial / operational dossier."""
-    pid=str(port_row.get("Port ID") or port_row.get("asset_id") or "")
+    raw_pid=str(port_row.get("Port ID") or port_row.get("asset_id") or "")
+    pid=_canonical_live_asset_id(raw_pid) if raw_pid and not raw_pid.startswith("REF_") else raw_pid
     pname=str(port_row.get("Port / Facility") or port_row.get("name") or "")
     country=str(port_row.get("Country") or port_row.get("country") or "")
 
@@ -9445,6 +9464,52 @@ def filter_distinct_port_terminals(port_row, port_terminals):
 
 
 
+def _canonical_live_asset_id(asset_id):
+    """Resolve retired alias/merged asset IDs to the active canonical asset.
+
+    Identity-resolution edges intentionally keep the historical alias as the
+    source (alias_of / merged_into / duplicate_of / superseded_by). Operational
+    screens, however, must query the canonical target so terminals/events are
+    not stranded behind an old ID.
+    """
+    aid=str(asset_id or "").strip()
+    if not aid:
+        return aid
+    try:
+        sb=pc_db_client(service=True)
+    except Exception:
+        sb=None
+    if sb is None:
+        return aid
+    seen=set()
+    current=aid
+    for _ in range(6):
+        if current in seen:
+            break
+        seen.add(current)
+        try:
+            rows=(sb.table("pc_relationships")
+                  .select("source_id,relationship_type,target_id,record_status")
+                  .eq("source_type","asset")
+                  .eq("source_id",current)
+                  .eq("target_type","asset")
+                  .limit(100).execute().data or [])
+        except Exception:
+            rows=[]
+        nxt=None
+        for r in rows:
+            rt=str(r.get("relationship_type") or "").strip().casefold()
+            if rt in {"alias_of","merged_into","duplicate_of","superseded_by"}:
+                tid=str(r.get("target_id") or "").strip()
+                if tid and tid != current:
+                    nxt=tid
+                    break
+        if not nxt:
+            break
+        current=nxt
+    return current
+
+
 def live_db_terminals_for_port(port_row):
     """Resolve canonical terminals using pc_terminal_details first.
 
@@ -9460,13 +9525,23 @@ def live_db_terminals_for_port(port_row):
 
     pname=str(port_row.get("Port / Facility","") or "").strip()
     pcountry=str(port_row.get("Country","") or "").strip()
+    requested_pid=str(port_row.get("Port ID","") or port_row.get("asset_id","") or "").strip()
+    canonical_pid=_canonical_live_asset_id(requested_pid) if requested_pid and not requested_pid.startswith("REF_") else requested_pid
     if not pname:
         return pd.DataFrame(), "Selected port has no name"
 
     try:
-        parents=(sb.table("pc_assets")
-                 .select("asset_id,name,asset_type,subtype,country,region_city,status,metadata")
-                 .eq("name",pname).limit(20).execute().data or [])
+        # Prefer the selected canonical ID. Name matching remains a fallback for
+        # legacy/reference rows that do not carry a canonical pc_assets ID.
+        parents=[]
+        if canonical_pid and not canonical_pid.startswith("REF_"):
+            parents=(sb.table("pc_assets")
+                     .select("asset_id,name,asset_type,subtype,country,region_city,status,metadata")
+                     .eq("asset_id",canonical_pid).limit(1).execute().data or [])
+        if not parents:
+            parents=(sb.table("pc_assets")
+                     .select("asset_id,name,asset_type,subtype,country,region_city,status,metadata")
+                     .eq("name",pname).limit(20).execute().data or [])
 
         if pcountry:
             same=[
@@ -12052,8 +12127,10 @@ elif page in ["Ports","Ports & Terminals"]:
                 format_func=lambda i:f"{p.iloc[i].get('Port / Facility','')} — {p.iloc[i].get('Country','')}",
                 key="port_select_idx"
             )
-            row=p.iloc[pick]; pid=str(row.get("Port ID","")); pname=str(row.get("Port / Facility",""))
+            row=p.iloc[pick]; raw_pid=str(row.get("Port ID","")); pid=_canonical_live_asset_id(raw_pid) if raw_pid and not raw_pid.startswith("REF_") else raw_pid; pname=str(row.get("Port / Facility",""))
             st.markdown(f"## {pname}")
+            if raw_pid and pid and raw_pid != pid:
+                st.caption(f"Resolved legacy alias `{raw_pid}` → canonical asset `{pid}`")
             if str(row.get("Canonical Source",""))=="pc_assets":
                 st.caption(f"Canonical live asset · `{pid}`")
             elif str(pid).startswith("REF_"):
