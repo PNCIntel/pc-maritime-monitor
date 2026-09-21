@@ -44,7 +44,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v5.2-report-studio"
+APP_VERSION = "v5.3-report-studio"
 RELEASE_NAME = "End-to-End Logistics Operating Picture · Companies, Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -10535,6 +10535,306 @@ def _render_trade_report_studio():
     if pdf_bytes:
         d1.download_button("Download A4 PDF", data=pdf_bytes, file_name=f"{slug}-{date_slug}.pdf", mime="application/pdf", use_container_width=True, type="primary", key="trade_report_pdf_download")
     d2.download_button("Download email-safe HTML", data=html_doc.encode("utf-8"), file_name=f"{slug}-{date_slug}.html", mime="text/html", use_container_width=True, key="trade_report_html_download")
+
+
+# ============================================================
+# v5.3 Report Studio override
+# Adds source links, five-item Horizon Outlook, editable disclaimer,
+# and dependency-tolerant PDF export.
+# ============================================================
+
+_PC_REPORT_DEFAULT_DISCLAIMER = (
+    "This publication is provided by Power & Corridors Intelligence for information and situational-awareness purposes only. "
+    "It draws on public, commercial and other sources considered reliable at the time of preparation, but information may be incomplete, "
+    "delayed, disputed or subject to change without notice. Assessments reflect the information available at publication and should not be "
+    "treated as statements of fact where uncertainty is identified. Nothing in this publication constitutes investment, financial, legal, "
+    "sanctions/compliance, insurance, security or operational advice, or a recommendation to take or refrain from any action. Readers should "
+    "independently verify material information and obtain appropriate professional advice before making commercial, investment, compliance "
+    "or operational decisions. Power & Corridors accepts no responsibility for losses arising from reliance on this publication."
+)
+
+
+def _pc_report_row_source_urls(row):
+    urls=[]
+    def add(v):
+        if isinstance(v,(list,tuple,set)):
+            for x in v: add(x)
+            return
+        if isinstance(v,dict):
+            for k in ("url","source_url","link"):
+                add(v.get(k))
+            return
+        s=str(v or "").strip()
+        if s.startswith(("http://","https://")) and s not in urls:
+            urls.append(s)
+    for k in ("Source URL","source_url","URL","url","Research Sources","research_sources"):
+        try: add(row.get(k))
+        except Exception: pass
+    eid=_pc_report_clean(row.get("Event ID") or row.get("event_id"))
+    if eid:
+        try:
+            ctx=_load_trade_event_database_context(eid)
+            for u in _event_source_urls(ctx): add(u)
+        except Exception:
+            pass
+    return urls[:6]
+
+
+def _pc_report_horizon_candidates(report_date):
+    try:
+        h=trade_horizon_events().copy()
+    except Exception:
+        h=pd.DataFrame()
+    if h.empty:
+        return h
+    if "Start Date" in h.columns:
+        h["_hdt"]=pd.to_datetime(h["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+    else:
+        h["_hdt"]=pd.NaT
+    rd=pd.Timestamp(report_date).normalize()
+    explicit=h.get("Explicit Horizon",pd.Series(False,index=h.index)).fillna(False).astype(bool)
+    future=h["_hdt"].notna() & (h["_hdt"]>=rd)
+    h=h[future | (explicit & h["_hdt"].isna())].copy()
+    if h.empty:
+        return h
+    h["_date_rank"]=h["_hdt"].fillna(pd.Timestamp.max)
+    h["_explicit_rank"]=h.get("Explicit Horizon",pd.Series(False,index=h.index)).fillna(False).astype(int)
+    return h.sort_values(["_date_rank","_explicit_rank"],ascending=[True,False],na_position="last")
+
+
+def _pc_report_horizon_label(row):
+    dt=_pc_report_date_value(row.get("Start Date"))
+    ds=dt.strftime("%d %b %Y") if dt is not None else _pc_report_clean(row.get("Date Precision"),"Date TBC")
+    title=_pc_report_clean(row.get("Title") or row.get("Card Title") or row.get("Next Milestone"),"Forward milestone")
+    htype=_pc_report_clean(row.get("Horizon Type"))
+    return " · ".join(x for x in [ds,htype,title] if x)
+
+
+def _pc_report_horizon_default_text(row):
+    parts=[]
+    for k in ("Next Milestone","Description","Why It Matters","Trade / Commercial Impact","Operational Impact"):
+        v=_pc_report_clean(row.get(k))
+        if v and v not in parts: parts.append(v)
+    txt=" ".join(parts)
+    if len(txt.split())>85:
+        txt=" ".join(txt.split()[:85]).rstrip(" ,;:")+"..."
+    return txt or "Forward milestone requiring monitoring."
+
+
+def _pc_report_html(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows=None, disclaimer=None, include_logo=True):
+    esc=html_lib.escape
+    horizon_rows=horizon_rows or []
+    disclaimer=_pc_report_clean(disclaimer,_PC_REPORT_DEFAULT_DISCLAIMER)
+    gold,navy,blue,muted,line,pale="#B38B32","#071B2E","#078DB8","#5F6F7C","#D7E0E7","#F4F7F9"
+    if include_logo and _PC_REPORT_LOGO_B64:
+        logo_html='<img src="data:image/png;base64,%s" alt="Power & Corridors" width="260" style="display:block;border:0;max-width:260px;height:auto;">' % _PC_REPORT_LOGO_B64
+    else:
+        logo_html='<div style="font-weight:800;letter-spacing:1.2px;color:#071B2E;font-size:19px;">POWER &amp; CORRIDORS</div>'
+
+    def source_html(r):
+        urls=r.get("_report_sources") or _pc_report_row_source_urls(r)
+        if not urls: return ""
+        bits=[]
+        for i,u in enumerate(urls[:4],1):
+            bits.append('<a href="%s" style="color:%s;text-decoration:underline;word-break:break-all;">Source %d</a>'%(esc(u,quote=True),blue,i))
+        return '<div style="margin-top:9px;font-size:11px;line-height:1.5;color:%s;"><b>Sources:</b> %s</div>'%(muted," &nbsp;·&nbsp; ".join(bits))
+
+    def story_block(r,n,kind):
+        title=esc(_pc_report_clean(r.get("_report_title") or r.get("Card Title") or r.get("Title"),"Untitled development"))
+        body=esc(_pc_report_clean(r.get("_report_text"),_pc_report_default_summary(r,kind=="security")))
+        watch=esc(_pc_report_clean(r.get("_report_watch")))
+        sev=esc(_pc_report_clean(r.get("Severity")).upper())
+        loc=esc(_pc_report_clean(r.get("Location") or r.get("Country / Countries")))
+        dt=_pc_report_date_value(r.get("Start Date")); ds=dt.strftime("%d %b %Y") if dt is not None else ""
+        meta=" · ".join(x for x in [ds,sev,loc] if x)
+        accent=blue if kind=="commercial" else gold
+        watch_html=('<div style="margin-top:9px;font-size:12px;line-height:1.5;color:%s;"><b>Watch:</b> %s</div>'%(navy,watch)) if watch else ""
+        return ('<tr><td style="padding:0 0 14px 0;"><table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid %s;background:#ffffff;">'
+                '<tr><td width="6" style="background:%s;"></td><td style="padding:16px 18px;">'
+                '<div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:%s;">%s</div>'
+                '<div style="font-size:18px;line-height:1.25;font-weight:700;color:%s;margin:5px 0 8px;">%02d · %s</div>'
+                '<div style="font-size:13px;line-height:1.65;color:#263746;">%s</div>%s%s'
+                '</td></tr></table></td></tr>')%(line,accent,muted,esc(meta),navy,n,title,body,watch_html,source_html(r))
+
+    def horizon_block(r,n):
+        title=esc(_pc_report_clean(r.get("_report_title") or r.get("Title") or r.get("Next Milestone"),"Forward milestone"))
+        body=esc(_pc_report_clean(r.get("_report_text"),_pc_report_horizon_default_text(r)))
+        dt=_pc_report_date_value(r.get("Start Date")); ds=dt.strftime("%d %b %Y") if dt is not None else esc(_pc_report_clean(r.get("Date Precision"),"Date TBC"))
+        htype=esc(_pc_report_clean(r.get("Horizon Type")))
+        meta=" · ".join(x for x in [ds,htype] if x)
+        return ('<tr><td style="padding:0 0 12px 0;"><table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid %s;background:#ffffff;">'
+                '<tr><td width="6" style="background:%s;"></td><td style="padding:14px 18px;">'
+                '<div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:%s;">%s</div>'
+                '<div style="font-size:17px;line-height:1.25;font-weight:700;color:%s;margin:5px 0 7px;">%02d · %s</div>'
+                '<div style="font-size:13px;line-height:1.6;color:#263746;">%s</div>%s'
+                '</td></tr></table></td></tr>')%(line,navy,muted,esc(meta),navy,n,title,body,source_html(r))
+
+    commercial_html="".join(story_block(r,i,"commercial") for i,r in enumerate(commercial_rows,1))
+    security_html="".join(story_block(r,i,"security") for i,r in enumerate(security_rows,1))
+    horizon_html="".join(horizon_block(r,i) for i,r in enumerate(horizon_rows,1))
+    pubdate=pd.Timestamp(report_date).strftime("%d %B %Y")
+    sub=esc(subtitle or "Trade, logistics, infrastructure, markets and operational risk")
+    return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#eef2f5;font-family:Arial,Helvetica,sans-serif;color:{navy};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#eef2f5;"><tr><td align="center" style="padding:24px 10px;">
+<table role="presentation" width="760" cellpadding="0" cellspacing="0" style="width:100%;max-width:760px;border-collapse:collapse;background:#ffffff;">
+<tr><td style="padding:30px 34px 18px;">{logo_html}<div style="height:12px"></div><div style="height:2px;background:{blue}"></div></td></tr>
+<tr><td style="padding:18px 34px 30px;"><div style="font-size:11px;letter-spacing:1.4px;color:{gold};font-weight:700;text-transform:uppercase;">P&amp;C Trade Intelligence · {esc(report_type)}</div>
+<h1 style="margin:8px 0;font-size:30px;line-height:1.12;color:{navy};">{esc(report_title)}</h1><div style="font-size:14px;line-height:1.5;color:{muted};">{sub}</div><div style="margin-top:18px;font-size:12px;font-weight:700;color:{navy};">{pubdate}</div></td></tr>
+<tr><td style="padding:0 34px 24px;"><div style="height:1px;background:{line}"></div></td></tr>
+<tr><td style="padding:0 34px 10px;"><div style="font-size:11px;color:{gold};letter-spacing:1.2px;font-weight:700;text-transform:uppercase;">Commercial developments</div><div style="font-size:23px;font-weight:800;margin:4px 0 14px;color:{navy};">Five developments shaping trade</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{commercial_html}</table></td></tr>
+<tr><td style="padding:14px 34px 10px;"><div style="height:2px;background:{gold}"></div></td></tr>
+<tr><td style="padding:10px 34px 24px;"><div style="font-size:11px;color:{gold};letter-spacing:1.2px;font-weight:700;text-transform:uppercase;">Security &amp; operational risk</div><div style="font-size:23px;font-weight:800;margin:4px 0 14px;color:{navy};">Three developments to monitor</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{security_html}</table></td></tr>
+<tr><td style="padding:14px 34px 10px;"><div style="height:2px;background:{blue}"></div></td></tr>
+<tr><td style="padding:10px 34px 24px;"><div style="font-size:11px;color:{gold};letter-spacing:1.2px;font-weight:700;text-transform:uppercase;">Horizon outlook</div><div style="font-size:23px;font-weight:800;margin:4px 0 14px;color:{navy};">Five dates and milestones ahead</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{horizon_html}</table></td></tr>
+<tr><td style="padding:24px 34px;background:{pale};"><div style="font-size:11px;color:{gold};letter-spacing:1.1px;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Disclaimer</div><div style="font-size:10.5px;line-height:1.55;color:{muted};">{esc(disclaimer)}</div></td></tr>
+<tr><td style="padding:14px 34px;background:{navy};font-size:10px;line-height:1.5;color:#ffffff;">Power &amp; Corridors Intelligence · powerncorridors.com · Generated from the canonical P&amp;C event layer. Analyst edits are preserved in the exported publication.</td></tr>
+</table></td></tr></table></body></html>'''
+
+
+def _pc_report_pdf_minimal(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows, disclaimer):
+    import textwrap
+    W,H=595.28,841.89
+    pages=[]; cur=[]; y=H-55
+    def escpdf(s):
+        s=str(s or "").replace("\\","\\\\").replace("(","\\(").replace(")","\\)")
+        return s.encode("latin-1","replace").decode("latin-1")
+    def rgb(hexv):
+        h=hexv.lstrip('#'); return tuple(int(h[i:i+2],16)/255 for i in (0,2,4))
+    navy=rgb("071B2E"); blue=rgb("078DB8"); gold=rgb("B38B32"); muted=rgb("5F6F7C")
+    def new_page():
+        nonlocal cur,y
+        if cur: pages.append(cur)
+        cur=[]; y=H-92
+        cur.append(f"{blue[0]:.3f} {blue[1]:.3f} {blue[2]:.3f} RG 50 {H-73:.2f} 495 1.5 re S")
+        cur.append(f"BT /F2 9 Tf {navy[0]:.3f} {navy[1]:.3f} {navy[2]:.3f} rg 50 {H-48:.2f} Td (POWER & CORRIDORS INTELLIGENCE) Tj ET")
+    def ensure(h=24):
+        nonlocal y
+        if y-h<55: new_page()
+    def line(txt,size=10,bold=False,color=navy,leading=None,indent=0):
+        nonlocal y
+        leading=leading or size*1.35
+        width_chars=max(35,int((495-indent)/(size*0.52)))
+        for p in str(txt or "").split("\n"):
+            wraps=textwrap.wrap(p,width=width_chars,break_long_words=False,replace_whitespace=False) or [""]
+            for w in wraps:
+                ensure(leading+2); font="F2" if bold else "F1"
+                cur.append(f"BT /{font} {size:.1f} Tf {color[0]:.3f} {color[1]:.3f} {color[2]:.3f} rg {50+indent:.2f} {y:.2f} Td ({escpdf(w)}) Tj ET")
+                y-=leading
+        y-=2
+    def rule(color=gold):
+        nonlocal y
+        ensure(10); cur.append(f"{color[0]:.3f} {color[1]:.3f} {color[2]:.3f} RG 50 {y:.2f} m 545 {y:.2f} l S"); y-=12
+    def sources(r):
+        urls=r.get("_report_sources") or _pc_report_row_source_urls(r)
+        if urls: line("Sources: "+" | ".join(urls[:3]),7.3,False,muted,9.5,8)
+    new_page(); line(report_type.upper()+" | "+pd.Timestamp(report_date).strftime("%d %B %Y"),9,True,gold); line(report_title,24,True,navy,29); line(subtitle,11,False,muted,15); y-=12
+    line("5 COMMERCIAL DEVELOPMENTS | 3 SECURITY / OPERATIONAL RISKS | 5 HORIZON ITEMS",9,True,navy,12); y-=20; rule(blue)
+    def section(kicker,heading,rows,kind):
+        nonlocal y
+        line(kicker.upper(),8.5,True,gold,11); line(heading,17,True,navy,21)
+        for i,r in enumerate(rows,1):
+            ensure(125)
+            dt=_pc_report_date_value(r.get("Start Date")); ds=dt.strftime("%d %b %Y") if dt else ""
+            meta=" · ".join(x for x in [ds,_pc_report_clean(r.get("Severity")).upper(),_pc_report_clean(r.get("Location") or r.get("Country / Countries"))] if x)
+            line(meta,7.8,False,muted,10); line(f"{i:02d} · "+_pc_report_clean(r.get("_report_title") or r.get("Title") or r.get("Card Title"),"Untitled development"),13,True,navy,17)
+            bodytxt=_pc_report_clean(r.get("_report_text"),_pc_report_horizon_default_text(r) if kind=="horizon" else _pc_report_default_summary(r,kind=="security"))
+            line(bodytxt,9.2,False,navy,12.5,8)
+            watch=_pc_report_clean(r.get("_report_watch"))
+            if watch: line("Watch: "+watch,8,True,navy,10.5,8)
+            sources(r); y-=7; rule(blue if kind=="commercial" else (gold if kind=="security" else navy))
+    new_page(); section("Commercial developments","Five developments shaping trade",commercial_rows,"commercial")
+    new_page(); section("Security & operational risk","Three developments to monitor",security_rows,"security")
+    new_page(); section("Horizon outlook","Five dates and milestones ahead",horizon_rows,"horizon")
+    ensure(180); line("DISCLAIMER",8.5,True,gold,11); line(disclaimer,7.6,False,muted,10.2)
+    if cur: pages.append(cur)
+    objects=[]
+    def obj(data): objects.append(data); return len(objects)
+    catalog=obj(None); pages_obj=obj(None); font1=obj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"); font2=obj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>")
+    page_ids=[]
+    for cmds in pages:
+        stream="\n".join(cmds).encode('latin-1','replace'); content=obj(b"<< /Length %d >>\nstream\n"%len(stream)+stream+b"\nendstream")
+        page=obj(f"<< /Type /Page /Parent {pages_obj} 0 R /MediaBox [0 0 {W:.2f} {H:.2f}] /Resources << /Font << /F1 {font1} 0 R /F2 {font2} 0 R >> >> /Contents {content} 0 R >>"); page_ids.append(page)
+    objects[pages_obj-1]=f"<< /Type /Pages /Kids [{' '.join(f'{p} 0 R' for p in page_ids)}] /Count {len(page_ids)} >>"; objects[catalog-1]=f"<< /Type /Catalog /Pages {pages_obj} 0 R >>"
+    out=bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"); offsets=[0]
+    for i,data in enumerate(objects,1):
+        offsets.append(len(out)); out.extend(f"{i} 0 obj\n".encode()); out.extend(data if isinstance(data,bytes) else str(data).encode('latin-1','replace')); out.extend(b"\nendobj\n")
+    xref=len(out); out.extend(f"xref\n0 {len(objects)+1}\n".encode()); out.extend(b"0000000000 65535 f \n")
+    for off in offsets[1:]: out.extend(f"{off:010d} 00000 n \n".encode())
+    out.extend(f"trailer\n<< /Size {len(objects)+1} /Root {catalog} 0 R >>\nstartxref\n{xref}\n%%EOF".encode()); return bytes(out)
+
+
+def _pc_report_pdf(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows=None, disclaimer=None, include_logo=True):
+    horizon_rows=horizon_rows or []
+    disclaimer=_pc_report_clean(disclaimer,_PC_REPORT_DEFAULT_DISCLAIMER)
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image, KeepTogether
+        import io
+        bio=io.BytesIO(); navy=colors.HexColor("#071B2E"); blue=colors.HexColor("#078DB8"); gold=colors.HexColor("#B38B32"); muted=colors.HexColor("#5F6F7C"); linec=colors.HexColor("#D7E0E7")
+        doc=SimpleDocTemplate(bio,pagesize=A4,rightMargin=18*mm,leftMargin=18*mm,topMargin=18*mm,bottomMargin=18*mm,title=report_title,author="Power & Corridors Intelligence")
+        styles=getSampleStyleSheet(); kicker=ParagraphStyle("pck",parent=styles["Normal"],fontName="Helvetica-Bold",fontSize=8,textColor=gold,leading=11,spaceAfter=4); h1=ParagraphStyle("pch1",parent=styles["Heading1"],fontName="Helvetica-Bold",fontSize=24,textColor=navy,leading=28,spaceAfter=8); h2=ParagraphStyle("pch2",parent=styles["Heading2"],fontName="Helvetica-Bold",fontSize=16,textColor=navy,leading=20,spaceAfter=10); meta=ParagraphStyle("pcm",parent=styles["Normal"],fontSize=7.5,textColor=muted,leading=10,spaceAfter=3); title_style=ParagraphStyle("pct",parent=styles["Normal"],fontName="Helvetica-Bold",fontSize=11.5,textColor=navy,leading=14,spaceAfter=6); body=ParagraphStyle("pcb",parent=styles["Normal"],fontSize=9,textColor=navy,leading=13,spaceAfter=5); small=ParagraphStyle("pcs",parent=styles["Normal"],fontSize=7.2,textColor=muted,leading=9.5,spaceAfter=3)
+        story=[]
+        if include_logo and _PC_REPORT_LOGO_B64:
+            try: story += [Image(io.BytesIO(base64.b64decode(_PC_REPORT_LOGO_B64)),width=61*mm,height=13*mm),Spacer(1,6*mm)]
+            except Exception: pass
+        story += [Paragraph("P&amp;C TRADE INTELLIGENCE · "+html_lib.escape(report_type.upper()),kicker),Paragraph(html_lib.escape(report_title),h1),Paragraph(html_lib.escape(subtitle),body),Paragraph(pd.Timestamp(report_date).strftime("%d %B %Y"),meta),Spacer(1,24*mm),Paragraph("5 COMMERCIAL DEVELOPMENTS · 3 SECURITY / OPERATIONAL RISKS · 5 HORIZON ITEMS",kicker),PageBreak()]
+        def add_section(label,heading,rows,accent,kind):
+            story.extend([Paragraph(label.upper(),kicker),Paragraph(heading,h2)])
+            for i,r in enumerate(rows,1):
+                dt=_pc_report_date_value(r.get("Start Date")); ds=dt.strftime("%d %b %Y") if dt else ""; m=" · ".join(x for x in [ds,_pc_report_clean(r.get("Severity")).upper(),_pc_report_clean(r.get("Location") or r.get("Country / Countries"))] if x); ttl=_pc_report_clean(r.get("_report_title") or r.get("Title") or r.get("Card Title"),"Untitled development"); txt=_pc_report_clean(r.get("_report_text"),_pc_report_horizon_default_text(r) if kind=="horizon" else _pc_report_default_summary(r,kind=="security")); parts=[Paragraph(html_lib.escape(m),meta),Paragraph(f"{i:02d} · "+html_lib.escape(ttl),title_style),Paragraph(html_lib.escape(txt),body)]
+                watch=_pc_report_clean(r.get("_report_watch"));
+                if watch: parts.append(Paragraph("<b>Watch:</b> "+html_lib.escape(watch),small))
+                urls=r.get("_report_sources") or _pc_report_row_source_urls(r)
+                if urls: parts.append(Paragraph("<b>Sources:</b> "+" · ".join(f'<link href="{html_lib.escape(u,quote=True)}">Source {j}</link>' for j,u in enumerate(urls[:4],1)),small))
+                inner=Table([[p] for p in parts],colWidths=[158*mm]); card=Table([[inner]],colWidths=[166*mm]); card.setStyle(TableStyle([("LINEBEFORE",(0,0),(0,-1),3,accent),("BOX",(0,0),(-1,-1),0.5,linec),("BACKGROUND",(0,0),(-1,-1),colors.white),("LEFTPADDING",(0,0),(-1,-1),7),("RIGHTPADDING",(0,0),(-1,-1),7),("TOPPADDING",(0,0),(-1,-1),7),("BOTTOMPADDING",(0,0),(-1,-1),7)])); story.append(KeepTogether([card,Spacer(1,5*mm)]))
+        add_section("Commercial developments","Five developments shaping trade",commercial_rows,blue,"commercial"); story.append(PageBreak()); add_section("Security & operational risk","Three developments to monitor",security_rows,gold,"security"); story.append(PageBreak()); add_section("Horizon outlook","Five dates and milestones ahead",horizon_rows,navy,"horizon"); story += [Spacer(1,5*mm),Paragraph("DISCLAIMER",kicker),Paragraph(html_lib.escape(disclaimer),small)]
+        def footer(c,d): c.saveState(); c.setStrokeColor(linec); c.line(18*mm,12*mm,192*mm,12*mm); c.setFillColor(muted); c.setFont("Helvetica",7.5); c.drawString(18*mm,7.7*mm,"POWER & CORRIDORS INTELLIGENCE"); c.drawRightString(192*mm,7.7*mm,str(d.page)); c.restoreState()
+        doc.build(story,onFirstPage=footer,onLaterPages=footer); bio.seek(0); return bio.getvalue()
+    except Exception:
+        return _pc_report_pdf_minimal(report_title,report_type,report_date,subtitle,commercial_rows,security_rows,horizon_rows,disclaimer)
+
+
+def _render_trade_report_studio():
+    st.markdown("<div class='pc-kicker'>Publications</div>",unsafe_allow_html=True); st.markdown("## Report Studio"); st.caption("Build an A4 P&C trade-and-risk publication from the canonical event layer. Select and edit five commercial developments, three security/operational-risk developments and five forward Horizon items, then export PDF or email-safe HTML.")
+    c1,c2,c3=st.columns([1.1,1.2,2.7]); report_type=c1.selectbox("Report type",["Daily","Weekly","Special Brief","Client Brief"],index=0,key="trade_report_type"); report_date=c2.date_input("Report date",value=pd.Timestamp.utcnow().date(),key="trade_report_date"); default_title={"Daily":"Daily Trade & Risk Brief","Weekly":"Weekly Trade & Risk Review","Special Brief":"Special Trade & Risk Brief","Client Brief":"Client Trade & Risk Brief"}[report_type]; report_title=c3.text_input("Report title",value=default_title,key="trade_report_title"); subtitle=st.text_input("Cover subtitle",value="Trade, logistics, infrastructure, markets and operational risk",key="trade_report_subtitle"); include_logo=st.checkbox("Include P&C logo",value=True,key="trade_report_logo")
+    commercial,security=_pc_report_candidates(report_date,report_type); horizon=_pc_report_horizon_candidates(report_date); start_days=1 if report_type in {"Daily","Special Brief","Client Brief"} else 6; start_label=(pd.Timestamp(report_date)-pd.Timedelta(days=start_days)).strftime("%d %b %Y"); st.caption(f"Candidate window · {start_label} to {pd.Timestamp(report_date).strftime('%d %b %Y')} · {len(commercial)} commercial · {len(security)} security/operational-risk · {len(horizon)} forward horizon")
+    st.markdown("### 1 · Select five commercial developments"); copts=list(commercial.index); cpicks=st.multiselect("Commercial stories",copts,default=copts[:min(5,len(copts))],format_func=lambda i:_pc_report_story_label(commercial.loc[i]),key="trade_report_commercial_picks");
+    if len(cpicks)!=5: st.warning(f"Select exactly five commercial stories. Current selection: {len(cpicks)}.")
+    st.markdown("### 2 · Select three security / operational-risk developments"); st.caption("Includes attacks and conflict plus material disruptions such as strikes, closures, collisions, fires, outages, cyber incidents, sanctions restrictions, congestion and severe weather."); sopts=list(security.index); spicks=st.multiselect("Security / operational-risk stories",sopts,default=sopts[:min(3,len(sopts))],format_func=lambda i:_pc_report_story_label(security.loc[i]),key="trade_report_security_picks");
+    if len(spicks)!=3: st.warning(f"Select exactly three security / operational-risk stories. Current selection: {len(spicks)}.")
+    st.markdown("### 3 · Select five Horizon Outlook dates / milestones"); hopts=list(horizon.index); hpicks=st.multiselect("Horizon Outlook",hopts,default=hopts[:min(5,len(hopts))],format_func=lambda i:_pc_report_horizon_label(horizon.loc[i]),key="trade_report_horizon_picks");
+    if len(hpicks)!=5: st.warning(f"Select exactly five Horizon items. Current selection: {len(hpicks)}.")
+    edited_com,edited_sec,edited_hor=[],[],[]
+    if cpicks or spicks or hpicks: st.markdown("### 4 · Edit publication copy")
+    for kind,picks,frame,target in [("commercial",cpicks,commercial,edited_com),("security",spicks,security,edited_sec),("horizon",hpicks,horizon,edited_hor)]:
+        label={"commercial":"Commercial","security":"Security / operational risk","horizon":"Horizon"}[kind]
+        for n,idx in enumerate(picks,1):
+            r=frame.loc[idx].copy(); eid=_pc_report_clean(r.get("Event ID"),f"{kind}_{n}"); safe=re.sub(r"[^A-Za-z0-9_-]+","_",eid or f"{kind}_{n}")
+            with st.expander(f"{label} {n} · {_pc_report_clean(r.get('Card Title') or r.get('Title') or r.get('Next Milestone'),'Untitled')}",expanded=(n==1 and kind=="commercial")):
+                title_key=f"pc_trade_rep_title_{kind}_{safe}"; text_key=f"pc_trade_rep_text_{kind}_{safe}"; watch_key=f"pc_trade_rep_watch_{kind}_{safe}"
+                if title_key not in st.session_state: st.session_state[title_key]=_pc_report_clean(r.get("Card Title") or r.get("Title") or r.get("Next Milestone"),"Untitled development")
+                if text_key not in st.session_state: st.session_state[text_key]=_pc_report_horizon_default_text(r) if kind=="horizon" else _pc_report_default_summary(r,kind=="security")
+                if watch_key not in st.session_state: st.session_state[watch_key]=_pc_report_clean(r.get("Next Milestone") if kind!="horizon" else r.get("Monitoring Indicators"))
+                title=st.text_input("Headline",key=title_key); bodytxt=st.text_area("Publication text",key=text_key,height=160); watch=st.text_input("Watch / next indicator",key=watch_key); r["_report_title"],r["_report_text"],r["_report_watch"]=title,bodytxt,watch; r["_report_sources"]=_pc_report_row_source_urls(r)
+                if r["_report_sources"]:
+                    st.markdown("**Sources used**")
+                    for j,u in enumerate(r["_report_sources"],1): st.markdown(f"{j}. [{u}]({u})")
+                else: st.caption("No source URL is currently attached to this canonical event.")
+                target.append(r)
+    st.markdown("### 5 · Disclaimer")
+    if "trade_report_disclaimer" not in st.session_state: st.session_state["trade_report_disclaimer"]=_PC_REPORT_DEFAULT_DISCLAIMER
+    disclaimer=st.text_area("Publication disclaimer",key="trade_report_disclaimer",height=180,help="Editable. This appears at the end of both PDF and HTML exports.")
+    ready=len(edited_com)==5 and len(edited_sec)==3 and len(edited_hor)==5; st.markdown("### 6 · Preview & export")
+    if not ready: st.info("Preview and export become available when five commercial, three security/operational-risk and five Horizon items are selected."); return
+    html_doc=_pc_report_html(report_title,report_type,report_date,subtitle,edited_com,edited_sec,edited_hor,disclaimer,include_logo)
+    try:
+        import streamlit.components.v1 as components; components.html(html_doc,height=820,scrolling=True)
+    except Exception: st.markdown(html_doc,unsafe_allow_html=True)
+    pdf_bytes=_pc_report_pdf(report_title,report_type,report_date,subtitle,edited_com,edited_sec,edited_hor,disclaimer,include_logo); slug=re.sub(r"[^a-z0-9]+","-",report_title.lower()).strip("-") or "pc-report"; date_slug=pd.Timestamp(report_date).strftime("%Y-%m-%d"); d1,d2=st.columns(2); d1.download_button("Download A4 PDF",data=pdf_bytes,file_name=f"{slug}-{date_slug}.pdf",mime="application/pdf",use_container_width=True,type="primary",key="trade_report_pdf_download"); d2.download_button("Download email-safe HTML",data=html_doc.encode("utf-8"),file_name=f"{slug}-{date_slug}.html",mime="text/html",use_container_width=True,key="trade_report_html_download")
 
 
 # ---------- workspace navigation ----------
