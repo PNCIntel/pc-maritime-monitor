@@ -770,101 +770,135 @@ def canonical_port_id(link_id, link_name):
         if not hit.empty: return str(hit.iloc[0].get("Port ID",""))
     return ""
 
+def _live_event_connected_context(event_id):
+    """Fetch canonical event links on demand so newly loaded edges surface immediately."""
+    eid=str(event_id or "").strip()
+    result={"assets":[],"companies":[],"mobile":[],"routes":[]}
+    if not eid:
+        return result
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return result
+        rows=(sb.table("pc_event_links")
+              .select("event_id,linked_type,linked_id,linked_name,relationship,confidence,source_id,metadata")
+              .eq("event_id",eid).limit(100).execute().data or [])
+        for r in rows:
+            lt=str(r.get("linked_type") or "").casefold()
+            lid=str(r.get("linked_id") or "")
+            lname=clean_display_text(r.get("linked_name",""))
+            base={"id":lid,"name":lname,"relationship":r.get("relationship"),"confidence":r.get("confidence")}
+            if lt=="asset":
+                obj={}
+                try:
+                    hit=(sb.table("pc_assets").select("asset_id,name,asset_type,subtype,country,region_city").eq("asset_id",lid).limit(1).execute().data or [])
+                    obj=hit[0] if hit else {}
+                except Exception: pass
+                result["assets"].append({**base,"name":clean_display_text(obj.get("name") or lname),"asset_type":clean_display_text(obj.get("asset_type")),"subtype":clean_display_text(obj.get("subtype")),"country":clean_display_text(obj.get("country")),"region_city":clean_display_text(obj.get("region_city"))})
+            elif lt=="entity":
+                obj={}
+                try:
+                    hit=(sb.table("pc_entities").select("entity_id,name,entity_type,hq_country").eq("entity_id",lid).limit(1).execute().data or [])
+                    obj=hit[0] if hit else {}
+                except Exception: pass
+                result["companies"].append({**base,"name":clean_display_text(obj.get("name") or lname),"entity_type":clean_display_text(obj.get("entity_type")),"hq_country":clean_display_text(obj.get("hq_country"))})
+            elif lt=="mobile_asset":
+                obj={}
+                try:
+                    hit=(sb.table("pc_mobile_assets").select("mobile_asset_id,name,asset_type,subtype,imo,mmsi,flag").eq("mobile_asset_id",lid).limit(1).execute().data or [])
+                    obj=hit[0] if hit else {}
+                except Exception: pass
+                result["mobile"].append({**base,"name":clean_display_text(obj.get("name") or lname),"asset_type":clean_display_text(obj.get("asset_type")),"subtype":clean_display_text(obj.get("subtype")),"imo":clean_display_text(obj.get("imo")),"flag":clean_display_text(obj.get("flag"))})
+            elif lt=="route":
+                obj={}
+                try:
+                    hit=(sb.table("pc_transport_routes").select("route_id,route_name,mode,countries,current_status").eq("route_id",lid).limit(1).execute().data or [])
+                    obj=hit[0] if hit else {}
+                except Exception: pass
+                result["routes"].append({**base,"name":clean_display_text(obj.get("route_name") or lname),"mode":clean_display_text(obj.get("mode")),"countries":obj.get("countries"),"status":clean_display_text(obj.get("current_status"))})
+    except Exception:
+        pass
+    return result
+
+
 def render_connected_context(event_id):
-    eid = str(event_id or "")
+    eid = str(event_id or "").strip()
+
+    live=_live_event_connected_context(eid)
+    if any(live.values()):
+        if live["assets"]:
+            st.markdown("**Associated assets / ports**")
+            for r in live["assets"]:
+                st.markdown(f"**{r.get('name') or r.get('id')}** · {pretty_enum(r.get('asset_type') or 'Asset')}")
+                if r.get("relationship"): st.caption(humanize_relationship(r.get("relationship")))
+                if r.get("id"):
+                    pc_drilldown_button("asset",r.get("id"),"Open asset",key=f"intel_live_asset_{eid}_{r.get('id')}",use_container_width=True)
+                bits=[x for x in [r.get("country"),r.get("region_city"),pretty_enum(r.get("subtype"))] if x]
+                if bits: st.caption(" · ".join(bits))
+
+        if live["companies"]:
+            st.markdown("**Associated companies**")
+            for r in live["companies"]:
+                st.markdown(f"**{r.get('name') or r.get('id')}**")
+                bits=[humanize_relationship(r.get("relationship")),pretty_enum(r.get("entity_type")),r.get("hq_country")]
+                bits=[x for x in bits if x]
+                if bits: st.caption(" · ".join(bits))
+                if r.get("id"):
+                    pc_drilldown_button("entity",r.get("id"),"Open company",key=f"intel_live_entity_{eid}_{r.get('id')}",use_container_width=True)
+
+        if live["mobile"]:
+            st.markdown("**Associated vessels / mobile assets**")
+            for r in live["mobile"]:
+                st.markdown(f"**{r.get('name') or r.get('id')}**")
+                bits=[humanize_relationship(r.get("relationship")),pretty_enum(r.get("subtype") or r.get("asset_type")),f"IMO {r.get('imo')}" if r.get('imo') else "",r.get("flag")]
+                bits=[x for x in bits if x]
+                if bits: st.caption(" · ".join(bits))
+                if r.get("id"):
+                    pc_drilldown_button("mobile_asset",r.get("id"),"Open mobile asset",key=f"intel_live_mobile_{eid}_{r.get('id')}",use_container_width=True)
+
+        if live["routes"]:
+            st.markdown("**Associated routes / corridors**")
+            for r in live["routes"]:
+                st.markdown(f"**{r.get('name') or r.get('id')}**")
+                bits=[humanize_relationship(r.get("relationship")),pretty_enum(r.get("mode")),r.get("status")]
+                bits=[x for x in bits if x]
+                if bits: st.caption(" · ".join(bits))
+        return
+
+    # Fallback to preloaded canonical/workbook frames when the direct read is unavailable.
     links = event_asset_links[text_col(event_asset_links, "Event ID").eq(eid)] if not event_asset_links.empty else pd.DataFrame()
     clinks = event_company_links[text_col(event_company_links, "Event ID").eq(eid)] if not event_company_links.empty else pd.DataFrame()
     slinks = event_system_links[text_col(event_system_links, "Event ID").eq(eid)] if not event_system_links.empty else pd.DataFrame()
+    try:
+        mlinks = event_mobile_asset_links[text_col(event_mobile_asset_links,"Event ID").eq(eid)] if not event_mobile_asset_links.empty else pd.DataFrame()
+    except Exception:
+        mlinks = pd.DataFrame()
 
-    if links.empty and clinks.empty and slinks.empty:
+    if links.empty and clinks.empty and slinks.empty and mlinks.empty:
         st.markdown('<div class="pc-empty">No connected canonical coverage has been mapped yet.</div>', unsafe_allow_html=True)
         return
 
     if not links.empty:
         st.markdown("**Associated assets / ports**")
         for _, r in links.iterrows():
-            name = clean_display_text(r.get("Asset", ""))
-            typ = clean_display_text(r.get("Asset Type", "Asset")) or "Asset"
-            rel = humanize_relationship(r.get("Relationship", ""))
-
+            name = clean_display_text(r.get("Asset", "")); typ = clean_display_text(r.get("Asset Type", "Asset")) or "Asset"
             st.markdown(f"**{name}** · {typ}")
-            if rel:
-                st.caption(rel)
-
-            aid = clean_display_text(r.get("Asset ID", ""))
-            if aid:
-                pc_drilldown_button("asset", aid, "Open asset", key=f"intel_asset_dd_{eid}_{aid}", use_container_width=True)
-
-            pid = canonical_port_id(r.get("Asset ID", ""), name)
-            if pid:
-                pr = ports[text_col(ports, "Port ID").eq(pid)]
-                if not pr.empty:
-                    rr = pr.iloc[0]
-                    bits = []
-                    for c in ["Country", "Operator", "Facility Type", "Key Role"]:
-                        v = clean_display_text(rr.get(c, ""))
-                        if v:
-                            bits.append(f"{c}: {v}")
-                    if bits:
-                        st.caption(" · ".join(bits[:4]))
-
+            rel=humanize_relationship(r.get("Relationship", ""))
+            if rel: st.caption(rel)
     if not clinks.empty:
         st.markdown("**Associated companies**")
         for _, r in clinks.iterrows():
-            cid = clean_display_text(r.get("Company ID", ""))
-            name = clean_display_text(r.get("Company", ""))
-            rel = humanize_relationship(r.get("Relationship", ""))
-
-            st.markdown(f"**{name}**")
-            if rel:
-                st.caption(rel)
-
-            if cid:
-                pc_drilldown_button("entity", cid, "Open company", key=f"intel_company_dd_{eid}_{cid}", use_container_width=True)
-
-            if cid and not companies.empty and "Company ID" in companies.columns:
-                cr = companies[text_col(companies, "Company ID").eq(cid)]
-                if not cr.empty:
-                    rr = cr.iloc[0]
-                    bits = []
-                    for c in ["HQ Country", "Ownership", "Business Segments", "Status"]:
-                        v = clean_display_text(rr.get(c, ""))
-                        if v:
-                            bits.append(f"{c}: {v}")
-                    if bits:
-                        st.caption(" · ".join(bits[:4]))
-
-    if not slinks.empty:
-        st.markdown("**Related systems / corridors**")
-        view = slinks.copy()
-        if "Relationship" in view.columns:
-            view["Relationship"] = view["Relationship"].map(humanize_relationship)
-        show_df(view, ["System", "Relationship", "Confidence"], 180)
-
-    # Canonical vessel/mobile-asset relationships loaded from pc_event_links.
-    try:
-        mlinks = event_mobile_asset_links[text_col(event_mobile_asset_links,"Event ID").eq(eid)] if not event_mobile_asset_links.empty else pd.DataFrame()
-    except Exception:
-        mlinks = pd.DataFrame()
+            name=clean_display_text(r.get("Company", "")); st.markdown(f"**{name}**")
+            rel=humanize_relationship(r.get("Relationship", ""))
+            if rel: st.caption(rel)
     if not mlinks.empty:
         st.markdown("**Associated vessels / mobile assets**")
         show_df(mlinks,["Mobile Asset","Asset Type","Subtype","IMO","Flag","Relationship","Confidence"],220)
-        for _,mr in mlinks.iterrows():
-            mid=clean_display_text(mr.get("Mobile Asset ID",""))
-            mname=clean_display_text(mr.get("Mobile Asset",""))
-            if mid:
-                pc_drilldown_button("mobile_asset",mid,f"Open {mname or 'mobile asset'}",key=f"intel_mobile_dd_{eid}_{mid}",use_container_width=True)
-
-    # Actor relationships are a separate canonical edge model.
-    try:
-        al = event_actor_links[text_col(event_actor_links,"event_id").eq(eid)] if not event_actor_links.empty else pd.DataFrame()
-        if not al.empty and not actor_directory.empty:
-            names=actor_directory[["actor_id","canonical_name","actor_class","actor_subtype"]].copy()
-            al=al.merge(names,on="actor_id",how="left")
-            st.markdown("**Associated actors / groups**")
-            show_df(al.rename(columns={"canonical_name":"Actor","actor_role":"Role","actor_class":"Class","actor_subtype":"Subtype","attribution_status":"Attribution"}),["Actor","Class","Subtype","Role","Attribution","confidence"],230)
-    except Exception:
-        pass
+    if not slinks.empty:
+        st.markdown("**Related systems / corridors**")
+        view=slinks.copy()
+        if "Relationship" in view.columns: view["Relationship"]=view["Relationship"].map(humanize_relationship)
+        show_df(view,["System","Relationship","Confidence"],180)
 
 
 
@@ -1405,7 +1439,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v4.5 latest-reporting-inline-context · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
+st.sidebar.caption(f"v4.6 live-canonical-context · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")

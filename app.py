@@ -4558,6 +4558,8 @@ def resolve_event_link_target(link_type, link_id, link_name=""):
     lt=str(link_type or "").lower(); lid=str(link_id or "").strip(); lname=str(link_name or "").strip()
     if "company" in lt:
         return ("Companies","company_pick_id",lid,lname)
+    if "route" in lt:
+        return (None,None,None,lname)
     if "system" in lt or lid.startswith("SYS") or lid.startswith("CORR"):
         return ("Corridors & Systems","system_pick_id",lid,lname)
     if "vessel" in lt or lid.startswith("VESSEL") or lid.startswith("VES_"):
@@ -4576,8 +4578,39 @@ def resolve_event_link_target(link_type, link_id, link_name=""):
     return (None,None,None,lname)
 
 def event_associations(event_id):
-    eid=str(event_id or "")
+    """Return canonical event-object edges, querying live DB first so new loads surface immediately."""
+    eid=str(event_id or "").strip()
     out=[]
+
+    # Fresh canonical links first. This deliberately bypasses cached workbook-shaped
+    # projections so a newly loaded event is visible on the next app rerun.
+    if eid:
+        try:
+            sb=pc_db_client(service=True)
+            if sb is not None:
+                rows=(sb.table("pc_event_links")
+                      .select("event_id,linked_type,linked_id,linked_name,relationship,confidence")
+                      .eq("event_id",eid).limit(100).execute().data or [])
+                for r in rows:
+                    lt=str(r.get("linked_type") or "Asset")
+                    lid=str(r.get("linked_id") or "")
+                    lname=str(r.get("linked_name") or "")
+                    rel=str(r.get("relationship") or "")
+                    conf=str(r.get("confidence") or "")
+                    out.append((lt,lid,lname,rel,conf))
+        except Exception:
+            pass
+
+    if out:
+        # Preserve one edge per canonical endpoint/relationship.
+        seen=set(); dedup=[]
+        for x in out:
+            k=(x[0].casefold(),x[1],x[2].casefold(),x[3].casefold())
+            if k in seen: continue
+            seen.add(k); dedup.append(x)
+        return dedup
+
+    # Fallback to existing workbook-shaped projections.
     eal=TABLES.get(("Events & Hazards","Event Asset Links"),pd.DataFrame())
     ecl=TABLES.get(("Events & Hazards","Event Company Links"),pd.DataFrame())
     esl=TABLES.get(("Events & Hazards","Event System Links"),pd.DataFrame())
@@ -4752,13 +4785,18 @@ def render_event_cards(events,max_items=40):
 
 
 def render_latest_reporting_trade(limit=4):
-    """Newest canonical records, independent of story-tagging, for quick discovery."""
+    """Newest observed canonical reporting; scheduled/horizon items are excluded."""
     events = TABLES.get(("Events & Hazards","Events"), pd.DataFrame()).copy()
     if events.empty:
         st.caption("No recent canonical reporting available.")
         return
+    events = exclude_horizon_calendar_events(events)
     if "Start Date" in events.columns:
         events["_latest_dt"] = pd.to_datetime(events["Start Date"], errors="coerce")
+        today = pd.Timestamp.utcnow().tz_localize(None).normalize()
+        # Latest reporting is observed/current reporting. Future dates belong in
+        # Important dates / Trade Horizon, not the reporting feed.
+        events = events[events["_latest_dt"].isna() | (events["_latest_dt"] <= today)]
         events = events.sort_values("_latest_dt", ascending=False, na_position="last")
     events = events.head(limit)
 
@@ -4786,6 +4824,33 @@ def render_latest_reporting_trade(limit=4):
             eid = str(row.get("Event ID", "") or "").strip()
             with st.expander("Full event context", expanded=False):
                 _render_trade_event_inline_context(row, eid=eid, include_links=True)
+
+
+def render_trade_horizon_sidebar_compact(limit=4):
+    """Compact future-date rail mirroring the Intelligence app layout."""
+    stories=_canonical_trade_story_frame()
+    if stories is None or stories.empty:
+        st.caption("No important dates currently classified.")
+        return
+    horizon=trade_horizon_events(stories)
+    if horizon is None or horizon.empty:
+        st.caption("No important dates currently classified.")
+        return
+    if "Start Date" in horizon.columns:
+        horizon["_hdt"]=pd.to_datetime(horizon["Start Date"],errors="coerce")
+        horizon=horizon.sort_values("_hdt",ascending=True,na_position="last")
+    for _,r in horizon.head(limit).iterrows():
+        date=pretty_date(r.get("Start Date",""))
+        title=str(r.get("Title","") or "Upcoming event").strip()
+        country=str(r.get("Country / Countries","") or "").strip()
+        st.markdown(
+            "<div class='pc-card' style='padding:10px 12px'>"
+            f"<div class='pc-label'>{html_lib.escape(date)}</div>"
+            f"<div class='pc-small' style='font-weight:700;margin-top:4px'>{html_lib.escape(title)}</div>"
+            + (f"<div class='pc-small'>{html_lib.escape(country)}</div>" if country else "")
+            + "</div>",
+            unsafe_allow_html=True,
+        )
 
 
 def entity_asset_ids_from_profile(prof):
@@ -7996,9 +8061,37 @@ def _render_connected_model_search(query):
 
 
 def _live_related_events(linked_type, linked_ids, limit=5000):
+    """Fresh canonical event lookup for an entity/asset/mobile object.
+
+    Company/asset profiles should reflect a load immediately, not wait for the
+    general cached live-frame TTL.
+    """
     ids={str(x) for x in linked_ids if x not in (None,"")}
     if not ids:
         return pd.DataFrame()
+    try:
+        sb=pc_db_client(service=True)
+        if sb is not None:
+            link_rows=[]
+            # Small scope sets are normal on a company page; query each ID to avoid
+            # backend-specific array-filter quirks.
+            for lid in sorted(ids):
+                rows=(sb.table("pc_event_links")
+                      .select("event_id,linked_type,linked_id,linked_name,relationship,confidence")
+                      .eq("linked_type",str(linked_type))
+                      .eq("linked_id",lid).limit(5000).execute().data or [])
+                link_rows.extend(rows)
+            event_ids=sorted({str(r.get("event_id")) for r in link_rows if r.get("event_id")})
+            if event_ids:
+                ev_rows=[]
+                for eid in event_ids:
+                    rows=(sb.table("pc_events").select("*").eq("event_id",eid).limit(1).execute().data or [])
+                    ev_rows.extend(rows)
+                if ev_rows:
+                    return pd.DataFrame(ev_rows)
+    except Exception:
+        pass
+
     links=_live_frame("pc_event_links","event_id,linked_type,linked_id,linked_name,relationship,confidence",25000)
     if links.empty:
         return pd.DataFrame()
@@ -11365,12 +11458,19 @@ def render_trade_developments_home():
         st.info("No canonical trade developments are currently available.")
         return
 
-    story_rows=stories[stories.get("Is Story",False).fillna(False)].copy() if "Is Story" in stories.columns else stories
-    leads=story_rows[story_rows.get("Lead Story",False).fillna(False)].copy() if "Lead Story" in story_rows.columns else pd.DataFrame()
-    if leads.empty:
-        leads=story_rows.head(5)
+    story_rows=stories[stories.get("Is Story",False).fillna(False)].copy() if "Is Story" in stories.columns else stories.copy()
+    # A home-page lead should be current. Keep future/horizon records in the
+    # Important dates rail and sort observed developments newest-first.
+    if "Horizon" in story_rows.columns:
+        story_rows=story_rows[~story_rows["Horizon"].fillna(False)].copy()
+    if "Start Date" in story_rows.columns:
+        story_rows["_lead_dt"]=pd.to_datetime(story_rows["Start Date"],errors="coerce")
+        today=pd.Timestamp.utcnow().tz_localize(None).normalize()
+        story_rows=story_rows[story_rows["_lead_dt"].isna() | (story_rows["_lead_dt"]<=today)]
+        story_rows=story_rows.sort_values("_lead_dt",ascending=False,na_position="last")
+    leads=story_rows.head(5)
 
-    st.markdown("### Lead developments")
+    st.markdown("### Current trade developments")
     _render_trade_story_cards(leads,5,key_prefix='overview_lead')
 
     companies=story_rows[
@@ -11406,9 +11506,15 @@ if page=="Overview":
 
     render_selected_trade_story_context()
 
-    st.markdown("### Latest reporting")
-    st.caption("Newest canonical event loads across trade, infrastructure, logistics and disruption — surfaced independently of story tagging.")
-    render_latest_reporting_trade(4)
+    latest_col, dates_col = st.columns([2.7,1.0], gap="large")
+    with latest_col:
+        st.markdown("### Latest reporting")
+        st.caption("Newest observed canonical reporting across trade, infrastructure, logistics and disruption. Future scheduled dates are excluded.")
+        render_latest_reporting_trade(4)
+    with dates_col:
+        st.markdown("### Important dates")
+        st.caption("Upcoming Trade Horizon dates are kept separate from live reporting.")
+        render_trade_horizon_sidebar_compact(4)
 
     st.markdown("---")
 
