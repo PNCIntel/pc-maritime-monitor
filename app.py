@@ -2735,6 +2735,69 @@ def _live_entity_registry():
 def _canonical_entity_info(entity_id):
     return _live_entity_registry().get(str(entity_id or "").strip(),{})
 
+def _normalise_entity_name_for_match(value):
+    s=str(value or "").strip().casefold()
+    if not s:
+        return ""
+    s=s.replace("&"," and ").replace("+"," plus ")
+    s=re.sub(r"[^a-z0-9]+"," ",s)
+    # Legal suffixes are useful for display but should not prevent canonical matching.
+    suffixes={"ltd","limited","inc","incorporated","corp","corporation","plc","ag","sa","nv","bv","pte","llc","group"}
+    parts=[x for x in s.split() if x not in suffixes]
+    return " ".join(parts).strip()
+
+@st.cache_data(show_spinner=False, ttl=60)
+def _live_entity_name_index():
+    idx={}
+    for eid,info in (_live_entity_registry() or {}).items():
+        nm=str((info or {}).get("name") or "").strip()
+        if not nm:
+            continue
+        for key in {nm.casefold(), _normalise_entity_name_for_match(nm)}:
+            if key and key not in idx:
+                idx[key]=eid
+    return idx
+
+def _canonical_entity_id_by_name(name):
+    raw=str(name or "").strip()
+    if not raw or raw=="Unresolved entity":
+        return ""
+    idx=_live_entity_name_index()
+    return str(idx.get(raw.casefold()) or idx.get(_normalise_entity_name_for_match(raw)) or "").strip()
+
+def _relationship_metadata_name(row, side):
+    """Best-effort display-name recovery for migration-era relationship endpoints.
+
+    The loader may resolve a canonical endpoint while an older relationship row retains
+    a stale/source-package ID.  Metadata and readable Source/Target fields are therefore
+    valid display fallbacks, but never replace canonical IDs when a live match exists.
+    """
+    side=str(side or "").strip().casefold()
+    candidates=[]
+    try:
+        if side=="source":
+            candidates.extend([row.get("Source"), row.get("Source Name"), row.get("Source Entity Name")])
+        else:
+            candidates.extend([row.get("Target"), row.get("Target Name"), row.get("Target Entity Name")])
+        meta=row.get("Metadata")
+        if isinstance(meta,dict):
+            keys=(
+                f"{side}_name",f"{side}_label",f"{side}_display_name",f"{side}_entity_name",
+                f"{side}_company_name",f"{side}_person_name",f"{side}_object_name"
+            )
+            for k in keys:
+                candidates.append(meta.get(k))
+    except Exception:
+        pass
+    for v in candidates:
+        txt=str(v or "").strip()
+        if not txt or txt=="Unresolved entity":
+            continue
+        if txt.startswith(("ENTITY_","ENT_","PERSON_","COMP_","ASSET_","VES_","VESSEL_","MOB_","MOBILE_")):
+            continue
+        return txt
+    return ""
+
 def _entity_kind(entity_id, fallback_type=""):
     info=_canonical_entity_info(entity_id)
     raw=(info.get("entity_type") or fallback_type or "").strip().casefold()
@@ -4301,10 +4364,20 @@ def readable_relationships(df, entity_id):
         src_type=str(r.get("Source Type","")).strip()
         tgt_type=str(r.get("Target Type","")).strip()
 
-        # Canonical object registries are authoritative for endpoint display names.
-        # Do not trust migration-era Source/Target display text.
+        # Canonical object registries are authoritative.  When an older relationship
+        # row retains a stale endpoint ID, recover the readable name from the row/metadata
+        # and use that name to find the current canonical entity.
         src_name=relationship_endpoint_label(src,src_type)
         tgt_name=relationship_endpoint_label(tgt,tgt_type)
+        if not src_name or src_name=="Unresolved entity":
+            src_name=_relationship_metadata_name(r,"source") or src_name
+        if not tgt_name or tgt_name=="Unresolved entity":
+            tgt_name=_relationship_metadata_name(r,"target") or tgt_name
+
+        src_live=_canonical_entity_id_by_name(src_name) if src_name and src_name!="Unresolved entity" else ""
+        tgt_live=_canonical_entity_id_by_name(tgt_name) if tgt_name and tgt_name!="Unresolved entity" else ""
+        src_action_id=src_live or src
+        tgt_action_id=tgt_live or tgt
 
         if str(src_name).startswith(("VES_","VESSEL_","MOB_","MOBILE_","ASSET_","ENTITY_","ENT_","PERSON_","COMP_","PORT_","TERM_","EVT_")):
             src_name=humanize_internal_object_id(src_name)
@@ -4321,7 +4394,7 @@ def readable_relationships(df, entity_id):
         )
 
         render_relationship_actions(
-            src,tgt,f"company_{entity_id}_{i}",
+            src_action_id,tgt_action_id,f"company_{entity_id}_{i}",
             current_entity_id=entity_id,
             source_name=src_name,
             target_name=tgt_name,
@@ -6420,15 +6493,47 @@ def render_relationship_actions(
     source_id, target_id, row_key, current_entity_id=None,
     source_name=None, target_name=None, source_type=None, target_type=None
 ):
+    """Render actions for the *other* relationship endpoint.
+
+    A company profile must never offer a button back to itself simply because a
+    migration-era relationship row retained a stale endpoint ID.  Resolve by canonical
+    ID first, then by the readable endpoint name.
+    """
     actions=[]; seen=set()
+    current_id=str(current_entity_id or "").strip()
+    current_name=str((_canonical_entity_info(current_id) or {}).get("name") or "").strip()
+    current_norm=_normalise_entity_name_for_match(current_name)
+
     for endpoint_id,resolved_name,endpoint_type in [(source_id,source_name,source_type),(target_id,target_name,target_type)]:
-        eid=str(endpoint_id or "").strip()
-        if not eid or eid in seen or (current_entity_id and eid==str(current_entity_id)): continue
+        raw_id=str(endpoint_id or "").strip()
+        name=str(resolved_name or "").strip()
+        if not name or name=="Unresolved entity":
+            name=relationship_endpoint_label(raw_id,endpoint_type)
+
+        # If a stale endpoint ID does not resolve, recover the live canonical ID by name.
+        canonical_id=raw_id if _canonical_entity_info(raw_id) else ""
+        if not canonical_id and name and name!="Unresolved entity":
+            canonical_id=_canonical_entity_id_by_name(name)
+        eid=canonical_id or raw_id
+
+        # Skip the current profile by BOTH ID and normalised name.
+        if current_id and eid==current_id:
+            continue
+        if current_norm and _normalise_entity_name_for_match(name)==current_norm:
+            continue
+        if not eid or eid in seen:
+            continue
         seen.add(eid)
-        name=relationship_endpoint_label(eid,endpoint_type)
-        if not name or name=="Unresolved entity": continue
+
+        # A human-readable name is mandatory for a user-facing action.
+        if (not name or name=="Unresolved entity") and canonical_id:
+            name=str((_canonical_entity_info(canonical_id) or {}).get("name") or "").strip()
+        if not name or name=="Unresolved entity":
+            continue
+
         page,key,route_id=object_route(endpoint_type or '',eid,name)
-        if not page: continue
+        if not page:
+            continue
         if page=='Companies': kind='Company'
         elif page=='Ports' and ("terminal" in str(endpoint_type or '').lower() or eid.startswith('TERM')): kind='Terminal'
         elif page=='Ports': kind='Port'
@@ -6438,6 +6543,7 @@ def render_relationship_actions(
         elif page=='Rail': kind='Rail object'
         else: kind='Object'
         actions.append((f"View {kind}: {name}",page,key,route_id,name,eid))
+
     if actions:
         cols=st.columns(min(len(actions),3))
         for j,(caption,page,key,route_id,name,eid) in enumerate(actions):
