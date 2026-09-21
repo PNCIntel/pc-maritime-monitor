@@ -4849,70 +4849,146 @@ def _live_trade_event_rows(limit=100):
     except Exception:
         return pd.DataFrame()
 
+def _clean_trade_text(value):
+    """Return display-safe text; never leak pandas/DB null sentinels into cards."""
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    text=str(value).strip()
+    return "" if text.casefold() in {"nan","none","null","nat","<na>"} else text
+
+
+def _trade_consequence_text(row):
+    """Best concise statement of what the development means for trade/business."""
+    commercial=_clean_trade_text(row.get("Trade / Commercial Impact"))
+    operational=_clean_trade_text(row.get("Operational Impact"))
+    description=_clean_trade_text(row.get("Description"))
+
+    # Prefer consequences. Description is only a fallback when the canonical record
+    # lacks a separate impact field.
+    text=commercial or operational or description
+    if len(text)>360:
+        text=text[:357].rstrip()+"…"
+    return text
+
+
+def _trade_home_eligible(row):
+    """Whether a current event deserves scarce lead space on the Trade homepage.
+
+    Security events must demonstrate an actual movement/capacity/cost/business consequence;
+    severity by itself is never enough. Corporate/infrastructure/market developments can qualify
+    when they materially change capacity, ownership, routes, contracts, rates or investment.
+    """
+    commercial=_clean_trade_text(row.get("Trade / Commercial Impact"))
+    operational=_clean_trade_text(row.get("Operational Impact"))
+    description=_clean_trade_text(row.get("Description"))
+    title=_clean_trade_text(row.get("Title"))
+    family=_clean_trade_text(row.get("Event Family"))
+    etype=_clean_trade_text(row.get("Event Type"))
+    domain=_clean_trade_text(row.get("Event Domain"))
+    nature=_clean_trade_text(row.get("Event Nature"))
+    blob=" ".join([title,family,etype,domain,nature,description,operational,commercial]).casefold()
+    impact_blob=" ".join([commercial,operational]).casefold()
+
+    consequence_terms=[
+        "congestion","capacity","throughput","delay","closure","closed","disruption",
+        "diversion","rerout","queue","storage","warehouse","terminal","berth","port",
+        "rail","border","truck","trucking","customs","corridor","canal","chokepoint",
+        "freight","rate","cost","demurrage","charter","tariff","sanction","compliance",
+        "cargo","commodity","oil","gas","lng","refinery","pipeline","airport","air cargo",
+        "supply chain","logistics","service launch","route launch","investment","capex",
+        "contract","concession","acquisition","sale","newbuild","fleet","ipo","financing"
+    ]
+    meaningful_impact=len(commercial)>=35 or len(operational)>=35
+    impact_signal=any(t in impact_blob for t in consequence_terms)
+
+    # Security/incident records are only Trade leads when their canonical impact fields
+    # explain the trade consequence. A dramatic title alone does not qualify.
+    securityish=any(t in blob for t in [
+        "attack","missile","drone","explosion","conflict","war","security","sabotage",
+        "piracy","boarding","seizure","casualty"
+    ])
+    if securityish and not (meaningful_impact and impact_signal):
+        return False
+
+    # Generic political/civic calendar events and commentary do not lead Trade without
+    # an explicit commercial/operational effect.
+    generic=any(t in blob for t in [
+        "independence day","national day","public holiday","election","referendum",
+        "olympic","games","anniversary","commentary","opinion"
+    ])
+    if generic and not (meaningful_impact and impact_signal):
+        return False
+
+    # Everything else needs either a proper impact statement or a strong current
+    # infrastructure/market/business signal in the record itself.
+    strong_record=any(t in blob for t in consequence_terms)
+    return bool(meaningful_impact or strong_record)
+
+
 def _trade_priority_score(row, today=None):
-    """Rank current Trade developments by operational/commercial significance, not timestamp alone."""
+    """Rank current Trade developments by real movement/capacity/cost/business consequence."""
     today=today or pd.Timestamp.utcnow().tz_localize(None).normalize()
     score=0.0
 
-    # Recency matters, but it should not overpower trade consequence.
     d=pd.to_datetime(row.get("Start Date"),errors="coerce",utc=True)
     if pd.notna(d):
         d=d.tz_convert(None).normalize()
         age=max(0,(today-d).days)
-        if age <= 1: score += 24
-        elif age <= 3: score += 18
-        elif age <= 7: score += 12
-        elif age <= 30: score += 5
+        if age <= 1: score += 18
+        elif age <= 3: score += 14
+        elif age <= 7: score += 9
+        elif age <= 30: score += 3
 
-    commercial=str(row.get("Trade / Commercial Impact") or "").strip()
-    operational=str(row.get("Operational Impact") or "").strip()
-    if commercial: score += 24
-    if operational: score += 18
+    commercial=_clean_trade_text(row.get("Trade / Commercial Impact"))
+    operational=_clean_trade_text(row.get("Operational Impact"))
+    if len(commercial)>=35: score += 32
+    elif commercial: score += 14
+    if len(operational)>=35: score += 24
+    elif operational: score += 10
 
-    severity=str(row.get("Severity") or "").casefold()
-    score += {"critical":18,"severe":15,"high":12,"medium":6,"moderate":6,"low":2}.get(severity,0)
-
-    blob=" ".join(str(row.get(c) or "") for c in [
+    blob=" ".join(_clean_trade_text(row.get(c)) for c in [
         "Title","Description","Event Nature","Event Domain","Event Family","Event Type",
         "Mode","Status","Location","Country / Countries","Operational Impact","Trade / Commercial Impact"
     ]).casefold()
 
-    # High-value P&C trade signals: movement, capacity, routing, cost and infrastructure.
-    strong_terms=[
-        "congestion","capacity","terminal","port","rail","corridor","route","rerout",
-        "warehouse","storage","truck","trucking","border","customs","canal","chokepoint",
-        "freight","rate","tariff","sanction","strike","closure","closed","disruption",
-        "delay","throughput","supply chain","logistics","cargo","commodity","oil","gas","lng",
-        "refinery","pipeline","airport","air cargo","dredging","berth","intermodal"
-    ]
-    hits=sum(1 for t in strong_terms if t in blob)
-    score += min(hits*3,30)
+    # Weight commercially useful signals more heavily than generic incident severity.
+    weighted_terms={
+        "congestion":8,"capacity":8,"throughput":8,"freight":8,"rate":8,
+        "tariff":8,"sanction":7,"closure":7,"closed":7,"delay":7,"diversion":7,
+        "rerout":7,"warehouse":6,"storage":6,"truck":6,"border":6,"customs":6,
+        "corridor":7,"canal":7,"chokepoint":7,"cargo":5,"commodity":5,"oil":5,
+        "gas":5,"lng":5,"refinery":6,"pipeline":6,"rail":6,"terminal":6,"port":5,
+        "air cargo":6,"demurrage":8,"charter":6,"contract":5,"concession":6,
+        "investment":5,"capex":5,"acquisition":4,"newbuild":3,"fleet":4,"financing":4
+    }
+    for term,w in weighted_terms.items():
+        if term in blob:
+            score += w
+    score=min(score,150)
 
-    # Explicit disruption/current operating states deserve prominence.
-    if any(t in blob for t in ["disruption","congestion","strike","closure","attack","fire","collision","grounding"]):
-        score += 10
+    # Severity is only a modest modifier; it cannot manufacture Trade relevance.
+    severity=_clean_trade_text(row.get("Severity")).casefold()
+    score += {"critical":8,"severe":7,"high":5,"medium":3,"moderate":3,"low":1}.get(severity,0)
 
-    # Strategic business moves remain important, but should not automatically outrank live trade effects.
-    if any(t in blob for t in ["acquisition","newbuild","order","alliance","joint venture","ipo","appointment"]):
-        score += 4
-    if any(t in blob for t in ["opinion","commentary","interview"]):
-        score -= 8
-
-    # Respect explicit story metadata when present.
     meta=_pc_meta_dict(row.get("Metadata"))
     story=meta.get("story") if isinstance(meta.get("story"),dict) else {}
     disruption=meta.get("disruption") if isinstance(meta.get("disruption"),dict) else {}
-    if story.get("lead_story"): score += 20
-    elif story.get("is_story"): score += 6
-    if disruption.get("primary_disruption"): score += 18
-    elif disruption.get("is_disruption"): score += 10
+    if story.get("lead_story"): score += 10
+    elif story.get("is_story"): score += 3
+    if disruption.get("primary_disruption"): score += 10
+    elif disruption.get("is_disruption"): score += 5
 
     return float(score)
 
 
 def render_latest_reporting_trade(limit=4):
-    """Priority current Trade intelligence; fresh DB first, Horizon rows excluded."""
-    events=_live_trade_event_rows(max(100,limit*20))
+    """Priority current Trade intelligence; consequence first, chronology second."""
+    events=_live_trade_event_rows(max(150,limit*30))
     if events.empty:
         events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     if events.empty:
@@ -4925,41 +5001,40 @@ def render_latest_reporting_trade(limit=4):
         events["_latest_dt"]=pd.to_datetime(events["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
         events=events[events["_latest_dt"].isna() | (events["_latest_dt"] < today + pd.Timedelta(days=1))].copy()
 
-    # Rank by trade consequence first, then by recency. This prevents a fresh but low-impact
-    # corporate item from displacing a materially important congestion/capacity/corridor story.
+    # Sparse canonical events are useful elsewhere, but they do not belong in the
+    # limited lead rail until they contain a real Trade consequence.
+    eligible=events.apply(_trade_home_eligible,axis=1)
+    events=events[eligible].copy()
+    if events.empty:
+        st.caption("No current developments yet have enough trade-impact context for the priority rail.")
+        return
+
     events["_trade_priority"]=events.apply(lambda r:_trade_priority_score(r,today=today),axis=1)
     sort_cols=["_trade_priority"] + (["_latest_dt"] if "_latest_dt" in events.columns else [])
     events=events.sort_values(sort_cols,ascending=[False]*len(sort_cols),na_position="last").head(limit)
 
     for _,row in events.iterrows():
-        title=str(row.get("Title","Event") or "Event").strip()
+        title=_clean_trade_text(row.get("Title")) or "Trade development"
         date=pc_pretty_date(row.get("Start Date",""))
-        etype=pretty_enum(str(row.get("Event Type","") or "Event"))
-        location=str(row.get("Location","") or row.get("Country / Countries","") or "").strip()
-
-        # Lead with what changed and why it matters commercially, not monitoring indicators.
-        description=str(row.get("Description","") or "").strip()
-        commercial=str(row.get("Trade / Commercial Impact","") or "").strip()
-        operational=str(row.get("Operational Impact","") or "").strip()
-        summary=commercial or operational or description
-        if len(summary)>360:
-            summary=summary[:357].rstrip()+"…"
+        etype=pretty_enum(_clean_trade_text(row.get("Event Type")) or "Development")
+        location=_clean_trade_text(row.get("Location")) or _clean_trade_text(row.get("Country / Countries"))
+        summary=_trade_consequence_text(row)
 
         st.markdown(
             "<div class='pc-card'>"
             f"<div class='pc-label'>{html_lib.escape(date)} · {html_lib.escape(etype)}</div>"
             f"<div class='pc-big' style='margin-top:5px'>{html_lib.escape(title)}</div>"
-            f"<div class='pc-small' style='margin-top:4px'>{html_lib.escape(location)}</div>"
-            f"<div class='pc-search-details' style='margin-top:9px'>{html_lib.escape(summary)}</div>"
-            "</div>",unsafe_allow_html=True
+            + (f"<div class='pc-small' style='margin-top:4px'>{html_lib.escape(location)}</div>" if location else "")
+            + (f"<div class='pc-search-details' style='margin-top:9px'>{html_lib.escape(summary)}</div>" if summary else "")
+            + "</div>",unsafe_allow_html=True
         )
-        eid=str(row.get("Event ID","") or "").strip()
+        eid=_clean_trade_text(row.get("Event ID"))
         with st.expander("Full event context",expanded=False):
             _render_trade_event_inline_context(row,eid=eid,include_links=True)
 
 
 def render_trade_horizon_sidebar_compact(limit=4):
-    """Compact future-date rail mirroring the Intelligence app layout."""
+    """Homepage rail: genuinely future, materially trade-relevant dates only."""
     stories=_canonical_trade_story_frame()
     if stories is None or stories.empty:
         st.caption("No important dates currently classified.")
@@ -4968,20 +5043,70 @@ def render_trade_horizon_sidebar_compact(limit=4):
     if horizon is None or horizon.empty:
         st.caption("No important dates currently classified.")
         return
+
     if "Start Date" in horizon.columns:
         horizon["_hdt"]=pd.to_datetime(horizon["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
         today=pd.Timestamp.utcnow().tz_localize(None).normalize()
-        # Homepage Important Dates is strictly forward-looking. Historical Horizon rows remain
-        # available in the full Trade Horizon workspace but must never appear as upcoming dates.
-        horizon=horizon[horizon["_hdt"].notna() & (horizon["_hdt"] >= today)].copy()
-        horizon=horizon.sort_values("_hdt",ascending=True,na_position="last")
+        # Strictly future. Same-day announcements/orders are current reporting, not dates.
+        horizon=horizon[horizon["_hdt"].notna() & (horizon["_hdt"] > today)].copy()
+
     if horizon.empty:
         st.caption("No upcoming important dates currently classified.")
         return
+
+    def _homepage_date_relevant(r):
+        title=_clean_trade_text(r.get("Title"))
+        family=_clean_trade_text(r.get("Event Family"))
+        etype=_clean_trade_text(r.get("Event Type"))
+        commercial=_clean_trade_text(r.get("Trade / Commercial Impact"))
+        operational=_clean_trade_text(r.get("Operational Impact"))
+        htype=_clean_trade_text(r.get("Horizon Type"))
+        blob=" ".join([title,family,etype,commercial,operational,htype]).casefold()
+
+        # Exclude generic civic/holiday dates unless the record itself explains a
+        # material trade consequence.
+        generic=any(x in blob for x in [
+            "independence day","national day","public holiday","bank holiday",
+            "olympic","games","festival","anniversary"
+        ])
+        impact=" ".join([commercial,operational]).casefold()
+        consequence=any(x in impact for x in [
+            "closure","delay","capacity","cargo","port","rail","border","customs",
+            "freight","rate","supply chain","logistics","terminal","airport","trade"
+        ])
+        if generic and not consequence:
+            return False
+
+        # Future announcements/newbuild orders are not dates simply because they were
+        # classified broadly as Horizon. Require a scheduled milestone/watch/deadline.
+        milestone=any(x in blob for x in [
+            "deadline","opening","launch","service start","route launch","commission",
+            "tender","award","auction","expiry","strike","vote","election","referendum",
+            "season","monsoon","hurricane","cyclone","summit","conference","delivery",
+            "completion","regulatory","review","decision","hearing","milestone"
+        ])
+        meta=_pc_meta_dict(r.get("Metadata"))
+        h=meta.get("horizon") if isinstance(meta.get("horizon"),dict) else {}
+        explicit=bool(h.get("show_in_trade_horizon")) and bool(
+            h.get("next_milestone") or h.get("target_date") or h.get("window") or h.get("horizon_type")
+        )
+        return bool(milestone or explicit)
+
+    horizon=horizon[horizon.apply(_homepage_date_relevant,axis=1)].copy()
+    if horizon.empty:
+        st.caption("No upcoming important dates currently classified.")
+        return
+
+    horizon=horizon.sort_values("_hdt",ascending=True,na_position="last")
+    # Prevent duplicate cards for the same date/title/country.
+    dedupe=[c for c in ["Start Date","Title","Country / Countries"] if c in horizon.columns]
+    if dedupe:
+        horizon=horizon.drop_duplicates(subset=dedupe)
+
     for _,r in horizon.head(limit).iterrows():
         date=pc_pretty_date(r.get("Start Date",""))
-        title=str(r.get("Title","") or "Upcoming event").strip()
-        country=str(r.get("Country / Countries","") or "").strip()
+        title=_clean_trade_text(r.get("Title")) or "Upcoming trade milestone"
+        country=_clean_trade_text(r.get("Country / Countries")) or _clean_trade_text(r.get("Location"))
         st.markdown(
             "<div class='pc-card' style='padding:10px 12px'>"
             f"<div class='pc-label'>{html_lib.escape(date)}</div>"
@@ -11663,7 +11788,7 @@ if page=="Overview":
     latest_col, dates_col = st.columns([2.7,1.0], gap="large")
     with latest_col:
         st.markdown("### Priority developments")
-        st.caption("Current trade intelligence ranked by operational and commercial consequence, then recency.")
+        st.caption("Developments with a demonstrated effect on movement, capacity, cost, infrastructure or commercial exposure — ranked by consequence, then recency.")
         render_latest_reporting_trade(5)
     with dates_col:
         st.markdown("### Important dates")

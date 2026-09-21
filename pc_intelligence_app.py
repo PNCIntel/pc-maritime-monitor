@@ -3030,6 +3030,75 @@ def _horizon_id_set():
     return set(text_col(h, "Event ID").astype(str))
 
 
+def intelligence_operational_frame(df):
+    """Security/operational intelligence for the Intel product.
+
+    The Intel operating picture is intentionally narrower than Trade: incidents,
+    disruption, conflict, safety/security, sanctions/compliance and labour action
+    remain; ordinary market, financing, fleet-order and corporate-development
+    stories do not lead Intel unless they also contain a concrete operational or
+    security consequence.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+
+    out=df.copy()
+    blob=_event_text_blob(out)
+
+    # Strong security / disruption signals. Labour strikes are deliberately kept.
+    keep_pat=(
+        r"attack|airstrike|drone|missile|rocket|bomb|explosion|shelling|war|conflict|"
+        r"military|naval|coast guard|intercept|incursion|hostil|security|marsec|"
+        r"piracy|boarding|hijack|seizure|detention|smuggl|traffick|interdiction|"
+        r"sanction|designation|watchlist|compliance|embargo|blockade|closure|closed|"
+        r"sabotage|cyber|hack|malware|ransomware|gps spoof|jamming|ais spoof|"
+        r"collision|grounding|allision|fire|casualty|fatal|injur|sar\b|search and rescue|"
+        r"pollution|spill|disabled|breakdown|outage|disruption|disrupted|delay|diversion|"
+        r"protest|labou?r strike|dock strike|port strike|walkout|industrial action|strike action|"
+        r"border restriction|airspace closure|flight suspension|evacuation|emergency"
+    )
+    keep=blob.str.contains(keep_pat,case=False,regex=True,na=False)
+
+    # Structured classifications can establish relevance even when prose is terse.
+    structured=pd.Series("",index=out.index,dtype="string")
+    for c in ["Event Nature","Event Domain","Event Family","Event Type","Mode","Event Category","Event Subcategory"]:
+        if c in out.columns:
+            structured=structured.str.cat(text_col(out,c),sep=" ")
+    keep |= structured.str.contains(
+        r"security|conflict|maritime_security|marsec|incident|hazard|casualty|cyber|"
+        r"sanction|compliance|piracy|smuggling|interdiction|labou?r|strike|protest|"
+        r"accident|collision|grounding|fire|pollution|closure|disruption",
+        case=False,regex=True,na=False
+    )
+
+    # Purely commercial/market stories should not enter Intel just because they
+    # mention ships, ports or a high monetary value. A strong keep signal above
+    # overrides this exclusion when there is an actual incident/disruption.
+    commercial_pat=(
+        r"freight rate|spot rate|clarksea|earnings|asset value|secondhand|sale price|"
+        r"ipo|listing|private placement|financing|equity raise|acquisition|acquires|"
+        r"merger|joint venture|strategic cooperation|alliance|lease-and-operate|"
+        r"newbuild|newbuilding|ship order|orders? .*vessel|fleet expansion|fleet renewal|"
+        r"contract award|tender bid|capacity expansion|terminal expansion|green hydrogen|"
+        r"commercial start|commercial operation|market index|throughput observation"
+    )
+    commercial=blob.str.contains(commercial_pat,case=False,regex=True,na=False)
+
+    # Security/operational evidence wins; otherwise commercial-only rows are removed.
+    out=out[keep & (~commercial | keep)].copy()
+
+    # The expression above intentionally retains every strong keep match. Remove
+    # rows whose only apparent relevance is commercial wording and which lack a
+    # concrete security/disruption signal in the most incident-specific fields.
+    incident_blob=pd.Series("",index=out.index,dtype="string")
+    for c in ["Event Nature","Event Domain","Event Family","Event Type","Title","Operational Impact","Mode"]:
+        if c in out.columns:
+            incident_blob=incident_blob.str.cat(text_col(out,c),sep=" ")
+    incident_keep=incident_blob.str.contains(keep_pat,case=False,regex=True,na=False)
+    out=out[~commercial.loc[out.index] | incident_keep].copy()
+    return out
+
+
 def operational_latest_frame(df):
     """Observed/current intelligence only. Scheduled horizon entries never lead Latest Intelligence."""
     if df is None or df.empty:
@@ -3295,15 +3364,16 @@ def _build_report_markdown(name,as_of,sections,edits,horizon_rows):
 if page == "Operating Picture":
     active_mon = monitoring[text_col(monitoring, "Status").str.contains("Active", case=False, na=False)] if not monitoring.empty else monitoring
     security_terms = ["Security", "Conflict", "Maritime", "Piracy", "Attack", "Ground", "Explosion", "SAR", "Pollution", "Drone", "Missile", "Seizure", "Boarding"]
-    sec_events = hazard_events[contains_any(hazard_events, ["Event Family", "Event Type", "Mode", "Title"], security_terms)] if not hazard_events.empty else hazard_events
-    high_events = hazard_events[text_col(hazard_events, "Severity").str.contains("High|Severe|Critical", case=False, regex=True, na=False)] if not hazard_events.empty else hazard_events
+    intel_operational_events = intelligence_operational_frame(operational_latest_frame(hazard_events)) if not hazard_events.empty else hazard_events
+    sec_events = intel_operational_events[contains_any(intel_operational_events, ["Event Family", "Event Type", "Mode", "Title"], security_terms)] if not intel_operational_events.empty else intel_operational_events
+    high_events = intel_operational_events[text_col(intel_operational_events, "Severity").str.contains("High|Severe|Critical", case=False, regex=True, na=False)] if not intel_operational_events.empty else intel_operational_events
     pgsa = compliance_designations[text_col(compliance_designations, "Regime ID").eq("REGIME_PGSA")] if not compliance_designations.empty else compliance_designations
     marsec_feeds = source_feeds[text_col(source_feeds, "Default Event Families").str.contains("ground|collision|sar|pollution|casualty|maritime|fire|rescue", case=False, regex=True, na=False)] if not source_feeds.empty else source_feeds
 
     latest_col, horizon_col = st.columns([2.7,1.0], gap="large")
     with latest_col:
-        section("Latest intelligence", "Latest intelligence", "Newest observed reporting and assessed incidents — scheduled holidays, anniversaries and other horizon dates are excluded.")
-        latest = operational_latest_frame(hazard_events)
+        section("Latest intelligence", "Latest intelligence", "Current security, disruption and operational incidents — commercial market stories remain in Trade.")
+        latest = intelligence_operational_frame(operational_latest_frame(hazard_events))
         if not latest.empty:
             if "Start Date" in latest.columns:
                 latest["_date"]=pd.to_datetime(latest["Start Date"],errors="coerce")
@@ -3343,8 +3413,8 @@ if page == "Operating Picture":
 
     left, right = st.columns([1.55,1.0],gap="large")
     with left:
-        section("01 · Immediate", "Priority operating picture", "What matters now — ranked by severity, recency and operational consequence.")
-        priority=ranked_operating_picture(operational_latest_frame(hazard_events),5) if not hazard_events.empty else pd.DataFrame()
+        section("01 · Immediate", "Priority operating picture", "Security and operational disruption ranked by severity, recency and consequence. Commercial market developments remain in Trade.")
+        priority=ranked_operating_picture(intelligence_operational_frame(operational_latest_frame(hazard_events)),5) if not hazard_events.empty else pd.DataFrame()
         if not priority.empty:
             for j,(_,r) in enumerate(priority.iterrows()):
                 event_card(r,key_prefix=f"priority_{j}")
@@ -3378,11 +3448,11 @@ if page == "Operating Picture":
     ]
     theatre_rows=[]
     for theatre,terms in theatre_defs:
-        if hazard_events.empty:
+        if intel_operational_events.empty:
             hits=pd.DataFrame()
         else:
-            hits=hazard_events[contains_any(
-                hazard_events,
+            hits=intel_operational_events[contains_any(
+                intel_operational_events,
                 ["Country / Countries","Location","Title","Description","Operational Impact","Trade / Commercial Impact"],
                 terms
             )].copy()
