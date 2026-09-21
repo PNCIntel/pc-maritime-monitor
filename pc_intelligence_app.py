@@ -3405,11 +3405,21 @@ if page == "Operating Picture":
         except Exception:
             pass
         section("Latest reporting", "Latest reporting", "Newest canonical records across security, maritime, trade, infrastructure and logistics. These are surfaced before the stricter intelligence-routing filter.")
-        latest_reporting = latest_reporting.head(4)
+        latest_reporting_primary = latest_reporting.head(4)
         lr_cols = st.columns(2)
-        for lr_i, (_, lr_row) in enumerate(latest_reporting.iterrows()):
+        for lr_i, (_, lr_row) in enumerate(latest_reporting_primary.iterrows()):
             with lr_cols[lr_i % 2]:
                 event_card(lr_row, key_prefix=f"latest_reporting_{lr_i}", compact=True)
+        # Keep the landing page concise, but do not make slightly older current
+        # incidents disappear simply because four newer records were loaded.
+        # The next eight remain one click away in date order.
+        latest_reporting_more = latest_reporting.iloc[4:12]
+        if not latest_reporting_more.empty:
+            with st.expander(f"More recent reporting ({len(latest_reporting_more)})", expanded=False):
+                more_cols = st.columns(2)
+                for lr_j, (_, lr_row) in enumerate(latest_reporting_more.iterrows(), start=4):
+                    with more_cols[(lr_j-4) % 2]:
+                        event_card(lr_row, key_prefix=f"latest_reporting_more_{lr_j}", compact=True)
         st.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 
     active_mon = monitoring[text_col(monitoring, "Status").str.contains("Active", case=False, na=False)] if not monitoring.empty else monitoring

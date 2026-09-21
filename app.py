@@ -8097,6 +8097,18 @@ def _render_connected_model_search(query):
         return 0
 
     specs=[
+        # Core canonical objects first so newly loaded events/vessels/assets/companies
+        # are immediately searchable without waiting for the legacy workbook index.
+        ("Events","pc_events",
+         "event_id,start_date,event_type,event_family,status,countries,location,title,description,operational_impact,commercial_impact,confidence,verification_status"),
+        ("Vessels / mobile assets","pc_mobile_assets",
+         "mobile_asset_id,name,asset_type,subtype,imo,mmsi,flag,status,metadata"),
+        ("Assets","pc_assets",
+         "asset_id,name,asset_type,subtype,country,region_city,status,record_status,metadata"),
+        ("Companies / entities","pc_entities",
+         "entity_id,name,entity_type,subtype,hq_city,hq_country,status,record_status,metadata"),
+        ("Routes / corridors","pc_transport_routes",
+         "route_id,route_name,mode,countries,current_status,operator_entity_id,origin_type,origin_id,destination_type,destination_id,metadata"),
         ("Transport services","pc_transport_services",
          "transport_service_id,service_name,service_code,mode,service_type,trade_lane,status,effective_start,effective_end,source_url"),
         ("Projects","pc_project_details","*"),
@@ -11528,7 +11540,7 @@ def render_trade_developments_home():
     if "Horizon" in story_rows.columns:
         story_rows=story_rows[~story_rows["Horizon"].fillna(False)].copy()
     if "Start Date" in story_rows.columns:
-        story_rows["_lead_dt"]=pd.to_datetime(story_rows["Start Date"],errors="coerce")
+        story_rows["_lead_dt"]=pd.to_datetime(story_rows["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
         today=pd.Timestamp.utcnow().tz_localize(None).normalize()
         story_rows=story_rows[story_rows["_lead_dt"].isna() | (story_rows["_lead_dt"]<=today)]
         story_rows=story_rows.sort_values("_lead_dt",ascending=False,na_position="last")
@@ -11598,9 +11610,14 @@ if page=="Overview":
     q=st.text_input("Search the trade system",placeholder="Company, trucking fleet, rail network, warehouse, port, vessel, air cargo, corridor, contract, project...",key="trade_home_search_top")
     if q.strip():
         hits=ranked_search(q.strip(),limit=25)
-        if hits.empty: st.info("No matching records.")
-        else:
+        if not hits.empty:
             for _,h in hits.head(10).iterrows(): readable_search_card(h)
+        # Always search the live canonical database as well. This is what makes
+        # newly loaded incidents such as the Singapore collision discoverable
+        # immediately by title, vessel name, IMO, location or linked object.
+        live_hits=_render_connected_model_search(q.strip())
+        if hits.empty and live_hits==0:
+            st.info("No matching records.")
 
     st.markdown("---")
     left,right=st.columns([1.55,1.0],gap="large")
