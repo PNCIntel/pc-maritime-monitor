@@ -44,7 +44,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v5.0-report-studio"
+APP_VERSION = "v5.2-report-studio"
 RELEASE_NAME = "End-to-End Logistics Operating Picture · Companies, Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -10166,30 +10166,55 @@ def _pc_report_event_blob(df):
 
 
 def _pc_report_security_mask(df):
-    """Strict security/operational-risk candidates; routine commercial developments stay out."""
+    """Security + operational-risk candidates for Trade Report Studio.
+
+    Broader than the Intelligence security filter: genuine operational disruptions
+    qualify alongside conflict/security incidents, while routine commercial stories do not.
+    """
     if df is None or df.empty:
         return pd.Series(False, index=getattr(df, "index", None), dtype=bool)
+
     blob = _pc_report_event_blob(df)
-    pat = (
+    security_pat = (
         r"attack|airstrike|air strike|missile|drone|uav|war|conflict|hostilit|military|naval|"
         r"piracy|boarding|hijack|seizure|sabotage|terror|explosion|mine|weapon|intercept|"
         r"cyber|jamming|spoofing|sanction|blockade|border closure|airspace|armed group|"
         r"security incident|war risk|threat|detention"
     )
+    operational_pat = (
+        r"collision|allision|grounding|capsiz|fire|spill|pollution|casualt|fatal|injur|"
+        r"closure|closed|shutdown|outage|failure|breakdown|derail|strike|industrial action|"
+        r"labour|labor|protest|congestion|queue|delay|disruption|restriction|emergency|"
+        r"evacuat|storm|cyclone|typhoon|hurricane|flood|earthquake|weather warning|accident"
+    )
+
     explicit = df.get("Is Disruption", pd.Series(False, index=df.index)).fillna(False).astype(bool)
-    keyword_security = blob.str.contains(pat, case=False, regex=True, na=False)
-    # Current canonical loads may arrive before disruption metadata is enriched.
-    # Strongly security-specific event types still belong in the security pool.
+    primary = df.get("Primary Disruption", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    security_kw = blob.str.contains(security_pat, case=False, regex=True, na=False)
+    operational_kw = blob.str.contains(operational_pat, case=False, regex=True, na=False)
+
     nature_cols = [c for c in ["Event Nature", "Event Domain", "Event Family", "Event Type"] if c in df.columns]
     if nature_cols:
         nblob = df[nature_cols[0]].fillna("").astype(str)
         for c in nature_cols[1:]:
             nblob = nblob.str.cat(df[c].fillna("").astype(str), sep=" ")
         nblob = nblob.str.casefold()
-        strong = nblob.str.contains(r"attack|airstrike|missile|drone|uav|conflict|military|naval|piracy|hijack|seizure|sabotage|cyber|war[_ -]?risk|armed|intercept|blockade", regex=True, na=False)
+        strong_security = nblob.str.contains(
+            r"attack|airstrike|missile|drone|uav|conflict|military|naval|piracy|hijack|seizure|sabotage|cyber|war[_ -]?risk|armed|intercept|blockade|sanction",
+            regex=True, na=False
+        )
+        strong_operational = nblob.str.contains(
+            r"collision|allision|grounding|capsiz|fire|spill|pollution|casualty|closure|shutdown|outage|derail|strike|congestion|disruption|accident",
+            regex=True, na=False
+        )
     else:
-        strong = pd.Series(False, index=df.index)
-    return keyword_security & (explicit | strong)
+        strong_security = pd.Series(False, index=df.index)
+        strong_operational = pd.Series(False, index=df.index)
+
+    # Strong security terms are admitted even before disruption metadata catches up.
+    # Operational-risk events qualify when either the event type is clearly disruptive
+    # or canonical disruption metadata is present.
+    return security_kw | strong_security | ((explicit | primary | strong_operational) & operational_kw)
 
 
 def _pc_report_window(df, report_date, report_type):
@@ -10460,10 +10485,11 @@ def _render_trade_report_studio():
         st.warning(f"Select exactly five commercial stories. Current selection: {len(cpicks)}.")
 
     st.markdown("### 2 · Select three security / operational-risk developments")
+    st.caption("Includes attacks and conflict, plus material operational disruptions such as strikes, closures, collisions, fires, outages, cyber incidents, sanctions restrictions, severe congestion and major weather disruption.")
     sopts = list(security.index)
-    spicks = st.multiselect("Security stories", sopts, default=sopts[:min(3,len(sopts))], format_func=lambda i:_pc_report_story_label(security.loc[i]), key="trade_report_security_picks")
+    spicks = st.multiselect("Security / operational-risk stories", sopts, default=sopts[:min(3,len(sopts))], format_func=lambda i:_pc_report_story_label(security.loc[i]), key="trade_report_security_picks")
     if len(spicks) != 3:
-        st.warning(f"Select exactly three security stories. Current selection: {len(spicks)}.")
+        st.warning(f"Select exactly three security / operational-risk stories. Current selection: {len(spicks)}.")
 
     edited_com, edited_sec = [], []
     if cpicks or spicks:
