@@ -3735,6 +3735,7 @@ def _overlay_live_company_events(prof, entity_id):
     prof["live_event_feed_error"] = error
 
     if not live_events.empty:
+        prof["canonical_live_events"] = live_events.copy()
         existing = prof.get("events", pd.DataFrame())
         if existing is None or existing.empty:
             prof["events"] = live_events.copy()
@@ -3761,6 +3762,7 @@ def _overlay_live_company_events(prof, entity_id):
         event_news["Notes"] = event_news.get("Operational Impact", "")
         prof["canonical_event_news"] = event_news
     else:
+        prof["canonical_live_events"] = pd.DataFrame()
         prof["canonical_event_news"] = pd.DataFrame()
 
     if not live_locations.empty:
@@ -4784,46 +4786,105 @@ def render_event_cards(events,max_items=40):
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
 
+def exclude_horizon_calendar_events(df: pd.DataFrame) -> pd.DataFrame:
+    """Exclude scheduled/calendar records from live/latest reporting.
+
+    This is intentionally conservative: election/holiday/anniversary/summit/calendar
+    rows belong in Important dates / Trade Horizon, not in the current-reporting feed.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+    x=df.copy()
+    blob=pd.Series("",index=x.index,dtype="string")
+    for c in [
+        "Event Nature","Event Domain","Event Family","Event Type",
+        "Event Temporality","Event Phase","Event Category","Event Subcategory",
+        "Mode","Title"
+    ]:
+        if c in x.columns:
+            blob=blob.str.cat(x[c].fillna("").astype(str),sep=" ")
+    pat=(
+        r"\banniversar(?:y|ies)?\b|\bholiday\b|\bcommemorat(?:ion|ive)\b|"
+        r"\belection\b|\breferendum\b|\bsummit\b|\bconference\b|"
+        r"\bfestival\b|\bsporting event\b|\bhorizon calendar\b|"
+        r"\bforward calendar\b|\bcalendar event\b"
+    )
+    is_horizon=blob.str.contains(pat,case=False,regex=True,na=False)
+    if "Metadata" in x.columns:
+        def _mh(v):
+            m=_pc_meta_dict(v)
+            h=m.get("horizon") if isinstance(m,dict) else {}
+            return bool(h.get("show_in_trade_horizon")) if isinstance(h,dict) else False
+        is_horizon |= x["Metadata"].map(_mh)
+    return x[~is_horizon].copy()
+
+
+def _live_trade_event_rows(limit=100):
+    """Fresh canonical pc_events projection for home-page reporting.
+
+    Avoids stale workbook/cache projections immediately after Power Admin loads.
+    """
+    try:
+        sb=pc_db_client(service=True)
+        if sb is None:
+            return pd.DataFrame()
+        cols=(
+            "event_id,start_date,end_date,event_nature,event_domain,event_family,event_type,"
+            "severity,status,mode,countries,location,title,description,operational_impact,"
+            "commercial_impact,confidence,verification_status,metadata"
+        )
+        rows=(sb.table("pc_events").select(cols).order("start_date",desc=True).limit(max(20,int(limit))).execute().data or [])
+        if not rows:
+            return pd.DataFrame()
+        df=pd.DataFrame(rows).rename(columns={
+            "event_id":"Event ID","start_date":"Start Date","end_date":"End Date",
+            "event_nature":"Event Nature","event_domain":"Event Domain","event_family":"Event Family",
+            "event_type":"Event Type","severity":"Severity","status":"Status","mode":"Mode",
+            "countries":"Country / Countries","location":"Location","title":"Title",
+            "description":"Description","operational_impact":"Operational Impact",
+            "commercial_impact":"Trade / Commercial Impact","confidence":"Confidence",
+            "verification_status":"Verification Status","metadata":"Metadata"
+        })
+        return df
+    except Exception:
+        return pd.DataFrame()
+
 def render_latest_reporting_trade(limit=4):
-    """Newest observed canonical reporting; scheduled/horizon items are excluded."""
-    events = TABLES.get(("Events & Hazards","Events"), pd.DataFrame()).copy()
+    """Newest observed canonical reporting; fresh DB first, horizon rows excluded."""
+    events=_live_trade_event_rows(max(50,limit*8))
+    if events.empty:
+        events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     if events.empty:
         st.caption("No recent canonical reporting available.")
         return
-    events = exclude_horizon_calendar_events(events)
+    events=exclude_horizon_calendar_events(events)
     if "Start Date" in events.columns:
-        events["_latest_dt"] = pd.to_datetime(events["Start Date"], errors="coerce")
-        today = pd.Timestamp.utcnow().tz_localize(None).normalize()
-        # Latest reporting is observed/current reporting. Future dates belong in
-        # Important dates / Trade Horizon, not the reporting feed.
-        events = events[events["_latest_dt"].isna() | (events["_latest_dt"] <= today)]
-        events = events.sort_values("_latest_dt", ascending=False, na_position="last")
-    events = events.head(limit)
+        events["_latest_dt"]=pd.to_datetime(events["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+        today=pd.Timestamp.utcnow().tz_localize(None).normalize()
+        events=events[events["_latest_dt"].isna() | (events["_latest_dt"]<=today)]
+        events=events.sort_values("_latest_dt",ascending=False,na_position="last")
+    events=events.head(limit)
 
-    cols = st.columns(2)
-    for i, (_, row) in enumerate(events.iterrows()):
-        with cols[i % 2]:
-            title = str(row.get("Title", "Event") or "Event").strip()
-            date = str(row.get("Start Date", "") or "")[:10]
-            etype = pretty_enum(str(row.get("Event Type", "") or "Event"))
-            location = str(row.get("Location", "") or row.get("Country / Countries", "") or "").strip()
-            ext = _event_extended_context(row)
-            summary = ext["analysis"] or str(row.get("Description", "") or "").strip()
-            if len(summary) > 420:
-                summary = summary[:417].rstrip() + "…"
-
-            st.markdown(
-                "<div class='pc-card'>"
-                f"<div class='pc-label'>{html_lib.escape(date)} · {html_lib.escape(etype)}</div>"
-                f"<div class='pc-big' style='margin-top:5px'>{html_lib.escape(title)}</div>"
-                f"<div class='pc-small' style='margin-top:4px'>{html_lib.escape(location)}</div>"
-                f"<div class='pc-search-details' style='margin-top:9px'>{html_lib.escape(summary)}</div>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-            eid = str(row.get("Event ID", "") or "").strip()
-            with st.expander("Full event context", expanded=False):
-                _render_trade_event_inline_context(row, eid=eid, include_links=True)
+    for _,row in events.iterrows():
+        title=str(row.get("Title","Event") or "Event").strip()
+        date=pretty_date(row.get("Start Date",""))
+        etype=pretty_enum(str(row.get("Event Type","") or "Event"))
+        location=str(row.get("Location","") or row.get("Country / Countries","") or "").strip()
+        ext=_event_extended_context(row)
+        summary=ext["analysis"] or str(row.get("Description","") or "").strip()
+        if len(summary)>360:
+            summary=summary[:357].rstrip()+"…"
+        st.markdown(
+            "<div class='pc-card'>"
+            f"<div class='pc-label'>{html_lib.escape(date)} · {html_lib.escape(etype)}</div>"
+            f"<div class='pc-big' style='margin-top:5px'>{html_lib.escape(title)}</div>"
+            f"<div class='pc-small' style='margin-top:4px'>{html_lib.escape(location)}</div>"
+            f"<div class='pc-search-details' style='margin-top:9px'>{html_lib.escape(summary)}</div>"
+            "</div>",unsafe_allow_html=True
+        )
+        eid=str(row.get("Event ID","") or "").strip()
+        with st.expander("Full event context",expanded=False):
+            _render_trade_event_inline_context(row,eid=eid,include_links=True)
 
 
 def render_trade_horizon_sidebar_compact(limit=4):
@@ -5499,7 +5560,10 @@ def render_company_profile(entity_id, entity_name):
             display_df(prof["programmes"],300)
 
     with tabs[5]:
-        ev=bundle.get("events",pd.DataFrame())
+        # Fresh canonical company-event feed is authoritative; bundle events can lag a new load.
+        ev=prof.get("canonical_live_events",pd.DataFrame())
+        if ev is None or ev.empty:
+            ev=bundle.get("events",pd.DataFrame())
         if isinstance(ev,pd.DataFrame) and not ev.empty:
             st.markdown("### Canonical linked events")
             display_df(ev,460)

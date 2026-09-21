@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "539-resolve-enrich-before-create-2026-09-21"
+LOADER_BUILD = "540-canonical-completeness-gate-2026-09-21"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4262,6 +4262,8 @@ def _simple_direct_write_records(sb, result):
     grouped={t:[r for r in clean if str(r.get("target_table") or "")==t] for t in table_order}
 
     applied=0; failures=[]; by_table={}; attempted_by_table={}
+    expected_event_links=[]
+    expected_relationships=[]
 
     def _record_failure(table,natural_key,exc,p=None):
         failures.append({
@@ -4320,6 +4322,10 @@ def _simple_direct_write_records(sb, result):
                 p=_jsonable(p)
                 if not p:
                     raise ValueError("prepared payload is empty")
+                if table=="pc_event_links":
+                    expected_event_links.append({k:p.get(k) for k in ["event_id","linked_type","linked_id","linked_name","relationship"]})
+                elif table=="pc_relationships":
+                    expected_relationships.append({k:p.get(k) for k in ["source_type","source_id","relationship_type","target_type","target_id"]})
                 can_upsert=bool(keys) and all(p.get(k) not in (None,"") for k in keys)
                 (upsert_rows if can_upsert else insert_rows).append((natural_key,p))
             except Exception as exc:
@@ -4336,10 +4342,38 @@ def _simple_direct_write_records(sb, result):
     for f in failures:
         t=str(f.get("table") or "unknown")
         failed_by_table[t]=failed_by_table.get(t,0)+1
+    # Canonical completeness gate: a load is not complete merely because pc_events wrote.
+    # Every supplied event link / relationship must exist against a resolved canonical endpoint.
+    completeness_issues=[]
+    for edge in expected_event_links:
+        try:
+            eid=str(edge.get("event_id") or "").strip(); lt=str(edge.get("linked_type") or "").strip(); lid=str(edge.get("linked_id") or "").strip()
+            if not (eid and lt and lid):
+                completeness_issues.append({"kind":"event_link","reason":"unresolved endpoint","edge":edge}); continue
+            hit=(sb.table("pc_event_links").select("event_link_id").eq("event_id",eid).eq("linked_type",lt).eq("linked_id",lid).limit(1).execute().data or [])
+            if not hit:
+                completeness_issues.append({"kind":"event_link","reason":"missing canonical edge after load","edge":edge})
+        except Exception as exc:
+            completeness_issues.append({"kind":"event_link","reason":str(exc),"edge":edge})
+    for edge in expected_relationships:
+        try:
+            sid=str(edge.get("source_id") or "").strip(); tid=str(edge.get("target_id") or "").strip(); rel=str(edge.get("relationship_type") or "").strip()
+            if not (sid and tid and rel):
+                completeness_issues.append({"kind":"relationship","reason":"unresolved endpoint","edge":edge}); continue
+            q=(sb.table("pc_relationships").select("relationship_id").eq("source_id",sid).eq("target_id",tid).eq("relationship_type",rel).limit(1))
+            hit=q.execute().data or []
+            if not hit:
+                completeness_issues.append({"kind":"relationship","reason":"missing canonical edge after load","edge":edge})
+        except Exception as exc:
+            completeness_issues.append({"kind":"relationship","reason":str(exc),"edge":edge})
+
     return {
         "attempted":len(clean),"applied":applied,"blocked":len(failures),"failed":len(failures),
         "failures":failures,"by_table":by_table,"attempted_by_table":attempted_by_table,
         "failed_by_table":failed_by_table,
+        "canonical_complete":len(completeness_issues)==0,
+        "completeness_issue_count":len(completeness_issues),
+        "completeness_issues":completeness_issues,
         "error_summary":[{"error":k,"count":v} for k,v in sorted(error_counts.items(),key=lambda x:(-x[1],x[0]))],
         "mode":"source_to_canonical_direct_batched",
     }
@@ -4384,7 +4418,7 @@ def _research_load_report_exports(report, workbook_name="research_workbook"):
         buf=io.BytesIO()
         with pd.ExcelWriter(buf,engine="openpyxl") as writer:
             summary_rows=[]
-            for key in ["workbook_type","file_sha256","records_generated","attempted","applied","blocked","failed","mode"]:
+            for key in ["workbook_type","file_sha256","records_generated","attempted","applied","blocked","failed","canonical_complete","completeness_issue_count","mode"]:
                 if key in report:
                     summary_rows.append({"metric":key,"value":report.get(key)})
             pd.DataFrame(summary_rows).to_excel(writer,sheet_name="Summary",index=False)
@@ -4407,6 +4441,19 @@ def _research_load_report_exports(report, workbook_name="research_workbook"):
                 writer,sheet_name="Error Summary",index=False
             )
             fail_df.to_excel(writer,sheet_name="Row Failures",index=False)
+            comp_rows=[]
+            for issue in report.get("completeness_issues") or []:
+                if isinstance(issue,dict):
+                    comp_rows.append({
+                        "kind":issue.get("kind"),
+                        "reason":issue.get("reason"),
+                        "edge":json.dumps(_jsonable(issue.get("edge") or {}),ensure_ascii=False,default=str),
+                    })
+                else:
+                    comp_rows.append({"kind":"","reason":str(issue),"edge":""})
+            pd.DataFrame(comp_rows,columns=["kind","reason","edge"]).to_excel(
+                writer,sheet_name="Completeness Issues",index=False
+            )
             pd.DataFrame([{"full_report_json":json.dumps(_jsonable(report),ensure_ascii=False,default=str)}]).to_excel(
                 writer,sheet_name="Raw Report",index=False
             )

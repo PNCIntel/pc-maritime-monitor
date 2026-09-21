@@ -631,7 +631,7 @@ def humanize_relationship(v):
         return ""
     if s in RELATIONSHIP_LABELS:
         return RELATIONSHIP_LABELS[s]
-    return pc_pretty_enum(s)
+    return pc_pc_pretty_enum(s)
 
 
 def show_df(df, cols=None, height=420):
@@ -829,18 +829,18 @@ def render_connected_context(event_id):
         if live["assets"]:
             st.markdown("**Associated assets / ports**")
             for r in live["assets"]:
-                st.markdown(f"**{r.get('name') or r.get('id')}** · {pretty_enum(r.get('asset_type') or 'Asset')}")
+                st.markdown(f"**{r.get('name') or r.get('id')}** · {pc_pretty_enum(r.get('asset_type') or 'Asset')}")
                 if r.get("relationship"): st.caption(humanize_relationship(r.get("relationship")))
                 if r.get("id"):
                     pc_drilldown_button("asset",r.get("id"),"Open asset",key=f"intel_live_asset_{eid}_{r.get('id')}",use_container_width=True)
-                bits=[x for x in [r.get("country"),r.get("region_city"),pretty_enum(r.get("subtype"))] if x]
+                bits=[x for x in [r.get("country"),r.get("region_city"),pc_pretty_enum(r.get("subtype"))] if x]
                 if bits: st.caption(" · ".join(bits))
 
         if live["companies"]:
             st.markdown("**Associated companies**")
             for r in live["companies"]:
                 st.markdown(f"**{r.get('name') or r.get('id')}**")
-                bits=[humanize_relationship(r.get("relationship")),pretty_enum(r.get("entity_type")),r.get("hq_country")]
+                bits=[humanize_relationship(r.get("relationship")),pc_pretty_enum(r.get("entity_type")),r.get("hq_country")]
                 bits=[x for x in bits if x]
                 if bits: st.caption(" · ".join(bits))
                 if r.get("id"):
@@ -850,7 +850,7 @@ def render_connected_context(event_id):
             st.markdown("**Associated vessels / mobile assets**")
             for r in live["mobile"]:
                 st.markdown(f"**{r.get('name') or r.get('id')}**")
-                bits=[humanize_relationship(r.get("relationship")),pretty_enum(r.get("subtype") or r.get("asset_type")),f"IMO {r.get('imo')}" if r.get('imo') else "",r.get("flag")]
+                bits=[humanize_relationship(r.get("relationship")),pc_pretty_enum(r.get("subtype") or r.get("asset_type")),f"IMO {r.get('imo')}" if r.get('imo') else "",r.get("flag")]
                 bits=[x for x in bits if x]
                 if bits: st.caption(" · ".join(bits))
                 if r.get("id"):
@@ -860,7 +860,7 @@ def render_connected_context(event_id):
             st.markdown("**Associated routes / corridors**")
             for r in live["routes"]:
                 st.markdown(f"**{r.get('name') or r.get('id')}**")
-                bits=[humanize_relationship(r.get("relationship")),pretty_enum(r.get("mode")),r.get("status")]
+                bits=[humanize_relationship(r.get("relationship")),pc_pretty_enum(r.get("mode")),r.get("status")]
                 bits=[x for x in bits if x]
                 if bits: st.caption(" · ".join(bits))
         return
