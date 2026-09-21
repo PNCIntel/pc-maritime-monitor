@@ -4674,53 +4674,284 @@ def _event_extended_context(row):
     }
 
 
+def _render_inline_company_context(entity_id, entity_name, key_prefix="inline_company"):
+    """Compact company context that stays inline with the story that opened it."""
+    entity_id=str(entity_id or "").strip()
+    entity_name=str(entity_name or entity_id or "Company").strip()
+    if not entity_id:
+        st.caption("No canonical company ID is available for this linked object.")
+        return
+
+    prof=build_company_profile(entity_id,entity_name)
+    bundle=_company_live_logistics_bundle(entity_id,entity_name)
+    rec=company_record(entity_id)
+
+    st.markdown(f"#### {html_lib.escape(entity_name)}")
+    summary=[]
+    live_profile=bundle.get("profile",pd.DataFrame())
+    if isinstance(live_profile,pd.DataFrame) and not live_profile.empty:
+        pr=live_profile.iloc[0]
+        for col,label_txt in [
+            ("company_class","Class"),("sector","Sector"),("industry","Industry"),
+            ("incorporation_country","Country"),("business_description","Business"),
+            ("products_services","Products / services")]:
+            val=_clean_trade_text(pr.get(col))
+            if val:
+                summary.append(f"**{label_txt}:** {val}")
+    elif rec is not None:
+        for col in ["Entity Type","Industrial Model","HQ Country","Country / Geography","Business Segments","Markets"]:
+            try: val=_clean_trade_text(rec.get(col,""))
+            except Exception: val=""
+            if val:
+                summary.append(f"**{col}:** {val}")
+    if summary:
+        st.markdown("  \n".join(summary[:6]))
+
+    # A compact set of counts gives immediate orientation without forcing a full company page.
+    metric_items=[]
+    for lab,key in [
+        ("Assets","live_assets"),("Vessels","live_mobile"),("Services / routes","services"),
+        ("Events","events"),("Transactions","transactions")]:
+        df=bundle.get(key,pd.DataFrame())
+        if isinstance(df,pd.DataFrame) and not df.empty:
+            metric_items.append((lab,len(df)))
+    if metric_items:
+        cols=st.columns(min(len(metric_items),5))
+        for c,(lab,val) in zip(cols,metric_items[:5]):
+            c.metric(lab,val)
+
+    with st.expander("Profile",expanded=True):
+        if isinstance(live_profile,pd.DataFrame) and not live_profile.empty:
+            display_df(live_profile,220)
+        elif rec is not None:
+            try:
+                rdf=pd.DataFrame([rec.to_dict() if hasattr(rec,'to_dict') else dict(rec)])
+                display_df(rdf,220)
+            except Exception:
+                st.caption("No additional company-profile fields are available.")
+        else:
+            st.caption("No extended company profile is available yet.")
+
+    with st.expander("Ownership & relationships",expanded=False):
+        rels=bundle.get("live_relationships",pd.DataFrame())
+        if not isinstance(rels,pd.DataFrame) or rels.empty:
+            rels=prof.get("relationships",pd.DataFrame())
+        if isinstance(rels,pd.DataFrame) and not rels.empty:
+            display_df(rels,300)
+        else:
+            st.caption("No canonical ownership or operating relationships are linked yet.")
+
+    with st.expander("Assets, fleet & infrastructure",expanded=False):
+        shown=False
+        for label_txt,key in [
+            ("Fixed assets","live_assets"),("Ports","live_ports"),("Terminals","live_terminals"),
+            ("Vessels / mobile assets","live_mobile"),("Rail networks","rail_networks")]:
+            df=bundle.get(key,pd.DataFrame())
+            if isinstance(df,pd.DataFrame) and not df.empty:
+                shown=True; st.markdown(f"**{label_txt}**"); display_df(df,260)
+        if not shown:
+            st.caption("No canonical operating assets are linked yet.")
+
+    with st.expander("Routes & services",expanded=False):
+        shown=False
+        for label_txt,key in [
+            ("Transport services","services"),("Service stops","service_stops"),
+            ("Road corridors","road_corridors"),("Rail links","rail_links")]:
+            df=bundle.get(key,pd.DataFrame())
+            if isinstance(df,pd.DataFrame) and not df.empty:
+                shown=True; st.markdown(f"**{label_txt}**"); display_df(df,260)
+        if not shown:
+            st.caption("No canonical route or service records are linked yet.")
+
+    with st.expander("Current events & developments",expanded=False):
+        ev=bundle.get("events",pd.DataFrame())
+        if isinstance(ev,pd.DataFrame) and not ev.empty:
+            display_df(ev,320)
+        else:
+            st.caption("No directly linked current canonical events were returned.")
+
+    with st.expander("Transactions, contracts & projects",expanded=False):
+        shown=False
+        for label_txt,key in [
+            ("Transactions","transactions"),("Contracts","contracts"),
+            ("Projects","projects"),("Financing","financing")]:
+            df=bundle.get(key,pd.DataFrame())
+            if isinstance(df,pd.DataFrame) and not df.empty:
+                shown=True; st.markdown(f"**{label_txt}**"); display_df(df,260)
+        if not shown:
+            st.caption("No transaction, contract, project or financing records are linked yet.")
+
+    with st.expander("Sources & provenance",expanded=False):
+        urls=[]
+        if isinstance(live_profile,pd.DataFrame) and not live_profile.empty and "metadata" in live_profile.columns:
+            for raw in live_profile["metadata"].tolist():
+                m=_pc_meta_dict(raw)
+                for u in m.get("research_sources") or []:
+                    if isinstance(u,str) and u.startswith(("http://","https://")):
+                        urls.append(u)
+        try:
+            if rec is not None:
+                m=_pc_meta_dict(rec.get("Metadata",{}) if hasattr(rec,'get') else {})
+                for u in m.get("research_sources") or []:
+                    if isinstance(u,str) and u.startswith(("http://","https://")):
+                        urls.append(u)
+        except Exception:
+            pass
+        urls=list(dict.fromkeys(urls))
+        if urls:
+            for i,u in enumerate(urls,1): st.markdown(f"**Source {i}:** [{u}]({u})")
+        else:
+            st.caption("No source URLs were exposed in the current company-profile projection.")
+
+
+def _render_inline_linked_object_context(obj_type, oid, name, event_ctx, key_prefix):
+    """Inline linked-object context; avoids jumping to the global top drill-down."""
+    obj_type=str(obj_type or "").strip()
+    oid=str(oid or "").strip()
+    name=str(name or oid or "Linked object").strip()
+    if not oid:
+        return
+    if obj_type=="entity":
+        _render_inline_company_context(oid,name,key_prefix=key_prefix)
+        return
+
+    collections={
+        "asset":("assets","asset_id"),
+        "mobile_asset":("mobile_assets","mobile_asset_id"),
+        "route":("routes","route_id"),
+    }
+    col,id_key=collections.get(obj_type,(None,None))
+    rows=(event_ctx or {}).get(col) or [] if col else []
+    rec=next((r for r in rows if str(r.get(id_key) or "")==oid),{}) if id_key else {}
+    st.markdown(f"#### {html_lib.escape(name)}")
+    if rec:
+        fields=[]
+        for k,v in rec.items():
+            txt=_clean_trade_text(v)
+            if txt and k not in {"created_at","updated_at","metadata"}:
+                fields.append({"Field":pretty_enum(k),"Value":txt})
+        if fields:
+            display_df(pd.DataFrame(fields),260)
+    rels=(event_ctx or {}).get("relationships") or []
+    touching=[r for r in rels if str(r.get("source_id") or "")==oid or str(r.get("target_id") or "")==oid]
+    if touching:
+        with st.expander("Relationships",expanded=False):
+            display_df(_human_record_table(touching),240)
+    # The full shared drill-down remains available as an optional deeper layer,
+    # but the user no longer needs it for basic context.
+    pc_drilldown_button(
+        obj_type,oid,"Open full canonical record",
+        key=f"{key_prefix}_full_{obj_type}_{oid}",use_container_width=True
+    )
+
+
+def _render_connected_network_inline(ctx, eid, key_prefix="eventctx"):
+    """Compact connected graph with one inline-selected object at a time."""
+    groups=[
+        ("Companies / entities","entity",ctx.get("entities") or [],"entity_id","name"),
+        ("Infrastructure / assets","asset",ctx.get("assets") or [],"asset_id","name"),
+        ("Vessels / mobile assets","mobile_asset",ctx.get("mobile_assets") or [],"mobile_asset_id","name"),
+        ("Routes / corridors","route",ctx.get("routes") or [],"route_id","route_name"),
+    ]
+    selected_key=f"{key_prefix}_selected_object"
+    any_rows=False
+    for group_label,obj_type,rows,id_key,name_key in groups:
+        if not rows: continue
+        any_rows=True
+        st.markdown(f"**{group_label}**")
+        for i,rec in enumerate(rows):
+            oid=_clean_trade_text(rec.get(id_key))
+            name=_clean_trade_text(rec.get(name_key)) or oid
+            bits=[]
+            for field in ["entity_type","subtype","hq_country","country","region_city","mode","origin_name","destination_name","imo","flag","status"]:
+                val=_clean_trade_text(rec.get(field))
+                if val and val not in bits: bits.append(val)
+            c1,c2=st.columns([4,1])
+            with c1:
+                st.markdown(f"**{html_lib.escape(name)}**" + (f" · {html_lib.escape(' · '.join(bits[:4]))}" if bits else ""))
+            with c2:
+                label={"entity":"Company","asset":"Asset","mobile_asset":"Vessel","route":"Route"}[obj_type]
+                if st.button(f"Open {label}",key=f"{key_prefix}_{obj_type}_{oid}_{i}",use_container_width=True):
+                    st.session_state[selected_key]={"type":obj_type,"id":oid,"name":name}
+                    st.rerun()
+    if not any_rows:
+        st.caption("No linked canonical objects were returned for this event.")
+
+    selected=st.session_state.get(selected_key)
+    if isinstance(selected,dict) and selected.get("id"):
+        st.markdown("---")
+        cc1,cc2=st.columns([5,1])
+        with cc1: st.markdown("#### Selected linked context")
+        with cc2:
+            if st.button("Close",key=f"{selected_key}_close",use_container_width=True):
+                st.session_state.pop(selected_key,None); st.rerun()
+        _render_inline_linked_object_context(
+            selected.get("type"),selected.get("id"),selected.get("name"),ctx,
+            key_prefix=f"{key_prefix}_selected"
+        )
+
+    links=ctx.get("links") or []
+    if links:
+        with st.expander("Relationship detail",expanded=False):
+            display_df(_human_record_table(links,["linked_type","linked_name","relationship","confidence","linked_id"]),240)
+    rels=ctx.get("relationships") or []
+    if rels:
+        with st.expander("Ownership & operating relationships",expanded=False):
+            display_df(_human_record_table(rels,["source_name","source_type","relationship_type","target_name","target_type","confidence"]),260)
+
+
 def _render_trade_event_inline_context(row, eid="", include_links=False):
-    """Keep full event detail exactly where the user opened it."""
+    """Readable nested context that stays exactly where the event was opened."""
     ctx = _event_extended_context(row)
-    description = str(row.get("Description", "") or "").strip()
-    operational = str(row.get("Operational Impact", "") or "").strip()
-    commercial = str(row.get("Trade / Commercial Impact", "") or "").strip()
-    status = str(row.get("Status", "") or "").strip()
-    confidence = str(row.get("Confidence", "") or "").strip()
-    verification = str(row.get("Verification Status", "") or "").strip()
+    description = _clean_trade_text(row.get("Description", ""))
+    operational = _clean_trade_text(row.get("Operational Impact", ""))
+    commercial = _clean_trade_text(row.get("Trade / Commercial Impact", ""))
+    status = _clean_trade_text(row.get("Status", ""))
+    confidence = _clean_trade_text(row.get("Confidence", ""))
+    verification = _clean_trade_text(row.get("Verification Status", ""))
 
-    if ctx["analysis"]:
-        st.markdown("**Assessment · 60–90 words**")
-        st.write(ctx["analysis"])
-    if description:
-        st.markdown("**What happened**")
-        st.write(description)
-    if ctx["why"]:
-        st.markdown("**Why it matters**")
-        st.write(ctx["why"])
-    if ctx["means"]:
-        st.markdown("**What it means**")
-        st.write(ctx["means"])
-
-    c1, c2 = st.columns(2)
-    with c1:
-        if operational:
-            st.markdown("**Operational impact**")
-            st.write(operational)
-    with c2:
-        if commercial:
-            st.markdown("**Trade / commercial impact**")
-            st.write(commercial)
-
-    if ctx["monitoring"]:
-        st.markdown("**Monitoring & indicators**")
-        st.write(ctx["monitoring"])
-
-    bits = [x for x in [
-        f"Status: {status}" if status and status.lower() != "nan" else "",
-        f"Verification: {verification}" if verification and verification.lower() != "nan" else "",
-        f"Confidence: {confidence}" if confidence and confidence.lower() != "nan" else "",
-    ] if x]
-    if bits:
-        st.caption(" · ".join(bits))
+    with st.expander("Assessment & implications",expanded=True):
+        if ctx["analysis"]:
+            st.markdown("**Assessment**"); st.write(ctx["analysis"])
+        if description:
+            st.markdown("**What happened**"); st.write(description)
+        if ctx["why"]:
+            st.markdown("**Why it matters**"); st.write(ctx["why"])
+        if ctx["means"]:
+            st.markdown("**Implications**"); st.write(ctx["means"])
+        c1,c2=st.columns(2)
+        with c1:
+            if operational: st.markdown("**Operational impact**"); st.write(operational)
+        with c2:
+            if commercial: st.markdown("**Trade / commercial impact**"); st.write(commercial)
 
     if include_links and eid:
-        render_event_associations(eid, key_prefix=f"inline_context_{eid}")
+        event_ctx=_load_trade_event_database_context(eid)
+        with st.expander("Connected network",expanded=True):
+            _render_connected_network_inline(event_ctx,eid,key_prefix=f"{eid}_event_network")
+
+    if ctx["monitoring"]:
+        with st.expander("Monitoring & indicators",expanded=False):
+            st.write(ctx["monitoring"])
+
+    with st.expander("Event details",expanded=False):
+        bits=[]
+        for label_txt,val in [("Status",status),("Verification",verification),("Confidence",confidence)]:
+            if val: bits.append({"Field":label_txt,"Value":val})
+        for label_txt,key in [("Start","Start Date"),("End","End Date"),("Type","Event Type"),("Family","Event Family"),("Country","Country / Countries"),("Location","Location")]:
+            val=_clean_trade_text(row.get(key,""))
+            if val: bits.append({"Field":label_txt,"Value":val})
+        if bits: display_df(pd.DataFrame(bits),220)
+        else: st.caption("No additional event-detail fields are available.")
+
+    if eid:
+        event_ctx=_load_trade_event_database_context(eid)
+        with st.expander("Evidence & sources",expanded=False):
+            urls=_event_source_urls(event_ctx)
+            if urls:
+                for i,u in enumerate(urls,1): st.markdown(f"**Source {i}:** [{u}]({u})")
+            else: st.caption("No source URL was found in the canonical event metadata.")
+
 
 
 def render_event_cards(events,max_items=40):
@@ -4774,10 +5005,7 @@ def render_event_cards(events,max_items=40):
         card_prefix = f"eventblock_{render_scope}_card_{idx}"
 
         with st.expander("Full event context", expanded=False):
-            _render_trade_event_inline_context(row, eid=eid, include_links=False)
-
-        # Commercially relevant linked network sits immediately beneath the event card.
-        render_event_associations(eid, key_prefix=card_prefix)
+            _render_trade_event_inline_context(row, eid=eid, include_links=True)
 
         url = str(row.get("Primary Source URL", "")).strip()
         if url.startswith("http"):
@@ -11659,126 +11887,60 @@ def render_selected_trade_story_context():
 
 
 def _render_inline_trade_story_context(event_id, key_prefix="storyctx"):
-    """Render connected canonical context inline beneath a Trade story.
-
-    The Trade home should not force the analyst to jump to a page-level context block.
-    Linked canonical objects remain actionable through the shared drill-down panel.
-    """
+    """Reusable inline context pattern for Trade story cards."""
     eid=str(event_id or "").strip()
     if not eid:
         st.caption("No canonical event ID is attached to this story.")
         return
-
     ctx=_load_trade_event_database_context(eid)
     ev=ctx.get("event") or {}
     if not ev:
         st.caption("No connected canonical context was returned for this event.")
         return
-
     meta=_pc_meta_dict(ev.get("metadata"))
     story=meta.get("story") if isinstance(meta.get("story"),dict) else {}
     disruption=meta.get("disruption") if isinstance(meta.get("disruption"),dict) else {}
     horizon=meta.get("horizon") if isinstance(meta.get("horizon"),dict) else {}
 
-    def _clean_ctx(v):
-        try:
-            if pd.isna(v):
-                return ""
-        except Exception:
-            pass
-        txt=str(v or "").strip()
-        return "" if txt.casefold() in {"nan","none","null","nat"} else txt
-
-    title=_clean_ctx(story.get("card_title") or ev.get("title")) or "Selected trade development"
-    deck=_clean_ctx(story.get("card_deck") or ev.get("description"))
-    operational=_clean_ctx(ev.get("operational_impact") or disruption.get("operational_effect"))
-    commercial=_clean_ctx(ev.get("commercial_impact") or disruption.get("commercial_effect") or story.get("why_it_matters"))
+    title=_clean_trade_text(story.get("card_title") or ev.get("title")) or "Selected trade development"
+    deck=_clean_trade_text(story.get("card_deck") or ev.get("description"))
+    operational=_clean_trade_text(ev.get("operational_impact") or disruption.get("operational_effect"))
+    commercial=_clean_trade_text(ev.get("commercial_impact") or disruption.get("commercial_effect") or story.get("why_it_matters"))
 
     st.markdown(f"**{html_lib.escape(title)}**")
-    if deck:
-        st.caption(deck)
+    if deck: st.caption(deck)
 
-    c1,c2=st.columns(2,gap="large")
-    with c1:
-        if operational:
-            st.markdown("**Operational effect**")
-            st.write(operational)
-    with c2:
-        if commercial:
-            st.markdown("**Trade / commercial effect**")
-            st.write(commercial)
+    with st.expander("Assessment & implications",expanded=True):
+        ext=_event_extended_context(pd.Series({
+            "Metadata":meta,
+            "Description":ev.get("description"),
+            "Operational Impact":ev.get("operational_impact"),
+            "Trade / Commercial Impact":ev.get("commercial_impact"),
+        }))
+        if ext.get("analysis"): st.markdown("**Assessment**"); st.write(ext["analysis"])
+        why=_clean_trade_text(story.get("why_it_matters") or ext.get("why"))
+        if why: st.markdown("**Why it matters**"); st.write(why)
+        means=_clean_trade_text(ext.get("means"))
+        if means: st.markdown("**Implications**"); st.write(means)
+        c1,c2=st.columns(2,gap="large")
+        with c1:
+            if operational: st.markdown("**Operational effect**"); st.write(operational)
+        with c2:
+            if commercial: st.markdown("**Trade / commercial effect**"); st.write(commercial)
 
-    linked_tabs=st.tabs(["Connected network","Event details","Evidence"])
+    with st.expander("Connected network",expanded=True):
+        _render_connected_network_inline(ctx,eid,key_prefix=f"{key_prefix}_{eid}")
 
-    with linked_tabs[0]:
-        groups=[
-            ("Companies / entities","entity",ctx.get("entities") or [],"entity_id","name"),
-            ("Infrastructure / assets","asset",ctx.get("assets") or [],"asset_id","name"),
-            ("Vessels / mobile assets","mobile_asset",ctx.get("mobile_assets") or [],"mobile_asset_id","name"),
-            ("Routes / corridors","route",ctx.get("routes") or [],"route_id","route_name"),
-        ]
-        any_rows=False
-        for group_label,obj_type,rows,id_key,name_key in groups:
-            if not rows:
-                continue
-            any_rows=True
-            st.markdown(f"**{group_label}**")
-            for i,rec in enumerate(rows):
-                oid=_clean_ctx(rec.get(id_key))
-                name=_clean_ctx(rec.get(name_key)) or oid
-                # Short human-readable object summary before the action.
-                bits=[]
-                for field in ["entity_type","subtype","hq_country","country","region_city","mode","origin_name","destination_name","imo","flag","status"]:
-                    val=_clean_ctx(rec.get(field))
-                    if val and val not in bits:
-                        bits.append(val)
-                st.markdown(f"**{html_lib.escape(name)}**" + (f" · {html_lib.escape(' · '.join(bits[:4]))}" if bits else ""))
-                if oid:
-                    pc_drilldown_button(
-                        obj_type,
-                        oid,
-                        f"Open { {'entity':'company','asset':'asset','mobile_asset':'vessel / mobile asset','route':'route'}[obj_type] }",
-                        key=f"{key_prefix}_{eid}_{obj_type}_{oid}_{i}",
-                        use_container_width=True,
-                    )
-
-        if not any_rows:
-            st.caption("No linked canonical objects were returned for this event.")
-
-        links=ctx.get("links") or []
-        if links:
-            with st.expander("Relationship detail",expanded=False):
-                ldf=_human_record_table(
-                    links,
-                    ["linked_type","linked_name","relationship","confidence","linked_id"]
-                )
-                display_df(ldf,240)
-
-        rels=ctx.get("relationships") or []
-        if rels:
-            with st.expander("Ownership & operating relationships",expanded=False):
-                display_df(
-                    _human_record_table(
-                        rels,
-                        ["source_name","source_type","relationship_type","target_name","target_type","confidence"]
-                    ),
-                    260,
-                )
-
-    with linked_tabs[1]:
-        fields=[
-            ("Start", "start_date"),("End", "end_date"),("Nature", "event_nature"),
-            ("Domain", "event_domain"),("Family", "event_family"),("Type", "event_type"),
-            ("Status", "status"),("Mode", "mode"),("Countries", "countries"),
-            ("Location", "location"),("Confidence", "confidence"),
-        ]
+    with st.expander("Event details",expanded=False):
         rows=[]
-        for label_txt,key in fields:
-            val=_clean_ctx(ev.get(key))
-            if val:
-                rows.append({"Field":label_txt,"Value":val})
-        if rows:
-            display_df(pd.DataFrame(rows),260)
+        for label_txt,key in [
+            ("Start","start_date"),("End","end_date"),("Nature","event_nature"),
+            ("Domain","event_domain"),("Family","event_family"),("Type","event_type"),
+            ("Status","status"),("Mode","mode"),("Countries","countries"),
+            ("Location","location"),("Confidence","confidence")]:
+            val=_clean_trade_text(ev.get(key))
+            if val: rows.append({"Field":label_txt,"Value":val})
+        if rows: display_df(pd.DataFrame(rows),260)
         locs=ctx.get("locations") or []
         if locs:
             st.markdown("**Affected locations**")
@@ -11786,20 +11948,16 @@ def _render_inline_trade_story_context(event_id, key_prefix="storyctx"):
         if horizon:
             hm=[]
             for label_txt,key in [("Horizon type","horizon_type"),("Next milestone","next_milestone")]:
-                val=_clean_ctx(horizon.get(key))
-                if val:
-                    hm.append({"Field":label_txt,"Value":val})
+                val=_clean_trade_text(horizon.get(key))
+                if val: hm.append({"Field":label_txt,"Value":val})
             if hm:
-                st.markdown("**Forward context**")
-                display_df(pd.DataFrame(hm),160)
+                st.markdown("**Forward context**"); display_df(pd.DataFrame(hm),160)
 
-    with linked_tabs[2]:
+    with st.expander("Evidence & sources",expanded=False):
         urls=_event_source_urls(ctx)
         if urls:
-            for i,u in enumerate(urls,1):
-                st.markdown(f"**Source {i}:** [{u}]({u})")
-        else:
-            st.caption("No source URL was found in the event/source metadata.")
+            for i,u in enumerate(urls,1): st.markdown(f"**Source {i}:** [{u}]({u})")
+        else: st.caption("No source URL was found in the event/source metadata.")
 
 
 def _render_trade_story_cards(df,max_items=8,show_why=True,key_prefix="story"):
@@ -11839,8 +11997,10 @@ def _render_trade_story_cards(df,max_items=8,show_why=True,key_prefix="story"):
         st.markdown(body,unsafe_allow_html=True)
 
         if eid:
-            with st.expander("Connected context",expanded=False):
-                _render_inline_trade_story_context(eid,key_prefix=f"{key_prefix}_ctx_{card_i}")
+            _ctx_prefix=f"{key_prefix}_ctx_{card_i}"
+            _selected_key=f"{_ctx_prefix}_{eid}_selected_object"
+            with st.expander("Connected context",expanded=bool(st.session_state.get(_selected_key))):
+                _render_inline_trade_story_context(eid,key_prefix=_ctx_prefix)
         sources=r.get("Research Sources") or []
         if isinstance(sources,list) and sources:
             good=[str(x) for x in sources if str(x).startswith(("http://","https://"))]
