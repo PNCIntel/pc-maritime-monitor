@@ -10177,7 +10177,19 @@ def _pc_report_security_mask(df):
         r"security incident|war risk|threat|detention"
     )
     explicit = df.get("Is Disruption", pd.Series(False, index=df.index)).fillna(False).astype(bool)
-    return explicit & blob.str.contains(pat, case=False, regex=True, na=False)
+    keyword_security = blob.str.contains(pat, case=False, regex=True, na=False)
+    # Current canonical loads may arrive before disruption metadata is enriched.
+    # Strongly security-specific event types still belong in the security pool.
+    nature_cols = [c for c in ["Event Nature", "Event Domain", "Event Family", "Event Type"] if c in df.columns]
+    if nature_cols:
+        nblob = df[nature_cols[0]].fillna("").astype(str)
+        for c in nature_cols[1:]:
+            nblob = nblob.str.cat(df[c].fillna("").astype(str), sep=" ")
+        nblob = nblob.str.casefold()
+        strong = nblob.str.contains(r"attack|airstrike|missile|drone|uav|conflict|military|naval|piracy|hijack|seizure|sabotage|cyber|war[_ -]?risk|armed|intercept|blockade", regex=True, na=False)
+    else:
+        strong = pd.Series(False, index=df.index)
+    return keyword_security & (explicit | strong)
 
 
 def _pc_report_window(df, report_date, report_type):
@@ -10199,8 +10211,66 @@ def _pc_report_window(df, report_date, report_type):
     return out.sort_values("_report_dt", ascending=False, na_position="last")
 
 
+def _pc_report_live_story_frame(limit=1200):
+    """Build the report-story projection from fresh canonical pc_events.
+
+    Report Studio must not depend on the older workbook/TABLES snapshot because
+    Power Admin loads land in Supabase first. The live event projection mirrors
+    _canonical_trade_story_frame closely enough for report selection, while
+    retaining the legacy frame as a fallback when the database is unavailable.
+    """
+    ev = _live_trade_event_rows(limit).copy()
+    if ev.empty:
+        return ev
+
+    rows = []
+    for _, r in ev.iterrows():
+        m = _pc_meta_dict(r.get("Metadata"))
+        story = m.get("story") if isinstance(m.get("story"), dict) else {}
+        disruption = m.get("disruption") if isinstance(m.get("disruption"), dict) else {}
+        horizon = m.get("horizon") if isinstance(m.get("horizon"), dict) else {}
+
+        item = dict(r)
+        # Newer research rows sometimes have strong canonical content before the
+        # optional presentation metadata has been fully enriched. Treat a titled,
+        # dated event as selectable unless metadata explicitly says otherwise.
+        explicit_is_story = story.get("is_story")
+        if explicit_is_story is None:
+            is_story = bool(_pc_report_clean(r.get("Title")))
+        else:
+            is_story = bool(explicit_is_story)
+
+        item.update({
+            "Is Story": is_story,
+            "Lead Story": bool(story.get("lead_story")),
+            "Story Category": str(story.get("story_category") or r.get("Event Family") or ""),
+            "Card Title": str(story.get("card_title") or r.get("Title") or ""),
+            "Card Deck": str(story.get("card_deck") or r.get("Description") or ""),
+            "Why It Matters": str(story.get("why_it_matters") or r.get("Trade / Commercial Impact") or r.get("Operational Impact") or ""),
+            "Is Disruption": bool(disruption.get("is_disruption")),
+            "Primary Disruption": bool(disruption.get("primary_disruption")),
+            "Disruption Domains": ", ".join(str(x) for x in (disruption.get("disruption_domains") or [])),
+            "Disruption Type": str(disruption.get("disruption_type") or ""),
+            "Disruption Status": str(disruption.get("status") or ""),
+            "Horizon": bool(horizon.get("show_in_trade_horizon")),
+            "Horizon Type": str(horizon.get("horizon_type") or ""),
+            "Next Milestone": str(horizon.get("next_milestone") or ""),
+        })
+        rows.append(item)
+
+    out = pd.DataFrame(rows)
+    if "Start Date" in out.columns:
+        out["_dt"] = pd.to_datetime(out["Start Date"], errors="coerce", utc=True).dt.tz_convert(None)
+        out = out.sort_values("_dt", ascending=False, na_position="last")
+    return out
+
+
 def _pc_report_candidates(report_date, report_type):
-    stories = _canonical_trade_story_frame().copy()
+    # Live canonical database first so newly loaded events are immediately
+    # available in Report Studio. Fall back to the legacy presentation frame.
+    stories = _pc_report_live_story_frame().copy()
+    if stories.empty:
+        stories = _canonical_trade_story_frame().copy()
     if stories.empty:
         return pd.DataFrame(), pd.DataFrame()
     window = _pc_report_window(stories, report_date, report_type)
@@ -10380,6 +10450,8 @@ def _render_trade_report_studio():
     start_days = 1 if report_type in {"Daily", "Special Brief", "Client Brief"} else 6
     start_label = (pd.Timestamp(report_date) - pd.Timedelta(days=start_days)).strftime("%d %b %Y")
     st.caption(f"Candidate window · {start_label} to {pd.Timestamp(report_date).strftime('%d %b %Y')} · {len(commercial)} commercial · {len(security)} security/operational-risk candidates")
+    if commercial.empty and security.empty:
+        st.error("No live canonical events were found in the selected report window. Check the report date or confirm that pc_events contains dated records for this period.")
 
     st.markdown("### 1 · Select five commercial developments")
     copts = list(commercial.index)
