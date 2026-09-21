@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "537-expanded-event-analysis-2026-09-21"
+LOADER_BUILD = "539-resolve-enrich-before-create-2026-09-21"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -1064,6 +1064,8 @@ _SIMPLE_LOAD_CACHE = {
     "entities": {},
     "assets": {},
     "mobile_assets": {},
+    "routes": {},
+    "events": {},
 }
 
 def _reset_simple_load_cache():
@@ -6732,6 +6734,10 @@ def _generic_schema_driven_workbook_records(sections):
                 "route_name":name,
                 "mode":_generic_first(row,"mode","transport_mode") or "multimodal",
                 "operator_entity_name":operator,
+                "origin_name":_generic_first(row,"origin_name","origin"),
+                "destination_name":_generic_first(row,"destination_name","destination"),
+                "origin_asset_type":_generic_first(row,"origin_asset_type","origin_type") or "asset",
+                "destination_asset_type":_generic_first(row,"destination_asset_type","destination_type") or "asset",
                 "countries":countries,
                 "current_status":_generic_first(row,"current_status","status"),
                 "source_url":url,
@@ -7479,6 +7485,62 @@ def _simple_clean_name(v):
     return re.sub(r"\s+"," ",str(v or "").strip())
 
 
+def _simple_identity_key(v):
+    """Exact-ish comparison key: punctuation/case/spacing insensitive, never fuzzy."""
+    s=_simple_clean_name(v).casefold()
+    s=re.sub(r"[^\w]+"," ",s,flags=re.UNICODE)
+    return re.sub(r"\s+"," ",s).strip()
+
+
+def _simple_country_key(v):
+    s=_simple_identity_key(v)
+    aliases={
+        "uae":"united arab emirates","u a e":"united arab emirates",
+        "turkey":"turkiye","türkiye":"turkiye",
+        "usa":"united states","u s a":"united states","us":"united states",
+        "uk":"united kingdom","u k":"united kingdom",
+    }
+    return aliases.get(s,s)
+
+
+def _simple_country_compatible(existing, incoming):
+    if not existing or not incoming:
+        return True
+    return _simple_country_key(existing)==_simple_country_key(incoming)
+
+
+def _simple_name_variants(name, kind=""):
+    """Safe deterministic aliases for common infrastructure naming forms."""
+    raw=_simple_clean_name(name)
+    if not raw:
+        return []
+    vals=[raw]
+    # Parenthetical acronym / long-form, e.g. Industrial City of Abu Dhabi (ICAD).
+    m=re.match(r"^(.*?)\s*\(([^()]{2,12})\)\s*$",raw)
+    if m:
+        vals.extend([m.group(1).strip(),m.group(2).strip()])
+    k=str(kind or "").casefold()
+    key=_simple_identity_key(raw)
+    if "port" in k or "terminal" in k or "port" in key:
+        if key.startswith("port of "):
+            base=re.sub(r"^port\s+of\s+","",raw,flags=re.I).strip()
+            if base: vals.append(f"{base} Port")
+        elif key.endswith(" port"):
+            base=re.sub(r"\s+port$","",raw,flags=re.I).strip()
+            if base: vals.append(f"Port of {base}")
+    out=[]; seen=set()
+    for v in vals:
+        kk=_simple_identity_key(v)
+        if kk and kk not in seen:
+            seen.add(kk); out.append(v)
+    return out
+
+
+def _simple_event_date_key(v):
+    s=str(v or "").strip()
+    return s[:10] if len(s)>=10 else s
+
+
 def _simple_source_id(sb, payload):
     """Resolve or create the canonical pc_sources row required by a payload.
 
@@ -7562,41 +7624,62 @@ def _simple_source_id(sb, payload):
 
 
 def _simple_ensure_entity(sb, name, country=None, entity_type="company", source_id=None, extra=None):
-    """Exact canonical entity lookup; create a minimal source-backed entity if absent."""
+    """Resolve canonical entity by exact normalized name/alias before creating.
+
+    This deliberately avoids fuzzy company matching. Existing canonical names and
+    pc_entity_aliases win; country is used as a guard where available. If an
+    existing object is found, missing provenance/basic fields are enriched rather
+    than creating a duplicate.
+    """
     name=_simple_clean_name(name)
     if not name:
         return None
-    cache_key=(name.casefold(),str(country or "").strip().casefold(),str(entity_type or "company").casefold())
+    cache_key=(_simple_identity_key(name),_simple_country_key(country),_simple_identity_key(entity_type or "company"))
     if cache_key in _SIMPLE_LOAD_CACHE["entities"]:
         return _SIMPLE_LOAD_CACHE["entities"][cache_key]
+
+    candidates=[]
     try:
-        hits=(sb.table("pc_entities").select("entity_id,name,hq_country,entity_type")
+        hits=(sb.table("pc_entities").select("entity_id,name,hq_country,entity_type,subtype,source_id,record_status,data_quality")
               .ilike("name",name).limit(25).execute().data or [])
-        if country:
-            ck=str(country).strip().casefold()
-            same=[x for x in hits if not x.get("hq_country") or str(x.get("hq_country")).strip().casefold()==ck]
-            if same: hits=same
-        if hits:
-            eid=hits[0]["entity_id"]
-            patch={}
-            if source_id and not hits[0].get("source_id"): patch["source_id"]=source_id
-            if patch:
-                try: sb.table("pc_entities").update(patch).eq("entity_id",eid).execute()
-                except Exception: pass
-            _SIMPLE_LOAD_CACHE["entities"][cache_key]=eid
-            return eid
+        candidates.extend(hits)
     except Exception:
         pass
+    if not candidates:
+        try:
+            aliases=(sb.table("pc_entity_aliases").select("entity_id,alias").ilike("alias",name).limit(25).execute().data or [])
+            ids=[str(a.get("entity_id")) for a in aliases if a.get("entity_id")]
+            for eid in ids:
+                hit=(sb.table("pc_entities").select("entity_id,name,hq_country,entity_type,subtype,source_id,record_status,data_quality")
+                     .eq("entity_id",eid).limit(1).execute().data or [])
+                candidates.extend(hit)
+        except Exception:
+            pass
+    if candidates:
+        same=[x for x in candidates if _simple_country_compatible(x.get("hq_country"),country)]
+        if same:
+            candidates=same
+        # Prefer stronger existing records over provisional AUTO/AI objects.
+        candidates=sorted(candidates,key=lambda x:(
+            1 if str(x.get("entity_id") or "").startswith(("ENTITY_AI","AUTO")) else 0,
+            1 if str(x.get("record_status") or "").casefold()=="provisional" else 0,
+            1 if str(x.get("data_quality") or "").casefold() in {"low",""} else 0,
+        ))
+        eid=candidates[0]["entity_id"]
+        patch={}
+        if source_id and not candidates[0].get("source_id"): patch["source_id"]=source_id
+        if country and not candidates[0].get("hq_country"): patch["hq_country"]=country
+        if patch:
+            try: sb.table("pc_entities").update(patch).eq("entity_id",eid).execute()
+            except Exception: pass
+        _SIMPLE_LOAD_CACHE["entities"][cache_key]=eid
+        return eid
+
     eid=_simple_hash_id("ENTITY_AI",name,country or "",entity_type or "entity")
     row={
-        "entity_id":eid,
-        "name":name,
-        "entity_type":entity_type or "company",
-        "hq_country":country,
-        "record_status":"provisional",
-        "data_quality":"medium",
-        "source_id":source_id,
-        "metadata":{"created_by":"simple_key_first_loader"},
+        "entity_id":eid,"name":name,"entity_type":entity_type or "company","hq_country":country,
+        "record_status":"provisional","data_quality":"medium","source_id":source_id,
+        "metadata":{"created_by":"simple_key_first_loader","resolution":"created_after_exact_name_alias_miss"},
     }
     if isinstance(extra,dict):
         for k,v in extra.items():
@@ -7607,41 +7690,58 @@ def _simple_ensure_entity(sb, name, country=None, entity_type="company", source_
     _SIMPLE_LOAD_CACHE["entities"][cache_key]=eid
     return eid
 
-
 def _simple_ensure_asset(sb, name, country=None, asset_type="asset", subtype=None, source_id=None, operator_entity_id=None, owner_entity_id=None):
-    """Exact canonical asset lookup; create the key when the object is genuinely new."""
+    """Resolve canonical fixed asset before create, with safe infrastructure aliases."""
     name=_simple_clean_name(name)
     if not name:
         return None
-    cache_key=(name.casefold(),str(country or "").strip().casefold(),str(asset_type or "asset").casefold(),str(subtype or "").casefold())
+    cache_key=(_simple_identity_key(name),_simple_country_key(country),_simple_identity_key(asset_type or "asset"),_simple_identity_key(subtype or ""))
     if cache_key in _SIMPLE_LOAD_CACHE["assets"]:
         return _SIMPLE_LOAD_CACHE["assets"][cache_key]
-    try:
-        hits=(sb.table("pc_assets").select("asset_id,name,country,asset_type,subtype")
-              .ilike("name",name).limit(25).execute().data or [])
-        if country:
-            ck=str(country).strip().casefold()
-            same=[x for x in hits if not x.get("country") or str(x.get("country")).strip().casefold()==ck]
-            if same: hits=same
-        if hits:
-            aid=hits[0]["asset_id"]
-            _SIMPLE_LOAD_CACHE["assets"][cache_key]=aid
-            return aid
-    except Exception:
-        pass
+
+    hits=[]
+    for variant in _simple_name_variants(name,asset_type):
+        try:
+            part=(sb.table("pc_assets").select("asset_id,name,country,asset_type,subtype,operator_entity_id,owner_entity_id,source_id,record_status,data_quality,status")
+                  .ilike("name",variant).limit(25).execute().data or [])
+            for x in part:
+                if str(x.get("asset_id")) not in {str(h.get("asset_id")) for h in hits}:
+                    hits.append(x)
+        except Exception:
+            pass
+    if hits:
+        same=[x for x in hits if _simple_country_compatible(x.get("country"),country)]
+        if same:
+            hits=same
+        wanted=_simple_identity_key(asset_type or "")
+        if wanted and wanted not in {"asset","facility"}:
+            typed=[x for x in hits if wanted in _simple_identity_key(x.get("asset_type")) or _simple_identity_key(x.get("asset_type")) in wanted]
+            if typed:
+                hits=typed
+        hits=sorted(hits,key=lambda x:(
+            1 if str(x.get("asset_id") or "").startswith(("ASSET_AI","AUTO")) else 0,
+            1 if str(x.get("record_status") or "").casefold()=="provisional" else 0,
+            1 if str(x.get("data_quality") or "").casefold() in {"low",""} else 0,
+        ))
+        aid=hits[0]["asset_id"]
+        patch={}
+        if source_id and not hits[0].get("source_id"): patch["source_id"]=source_id
+        if country and not hits[0].get("country"): patch["country"]=country
+        if subtype and not hits[0].get("subtype"): patch["subtype"]=subtype
+        if operator_entity_id and not hits[0].get("operator_entity_id"): patch["operator_entity_id"]=operator_entity_id
+        if owner_entity_id and not hits[0].get("owner_entity_id"): patch["owner_entity_id"]=owner_entity_id
+        if patch:
+            try: sb.table("pc_assets").update(patch).eq("asset_id",aid).execute()
+            except Exception: pass
+        _SIMPLE_LOAD_CACHE["assets"][cache_key]=aid
+        return aid
+
     aid=_deterministic_asset_id(name,country or "",asset_type or "asset")
     row={
-        "asset_id":aid,
-        "name":name,
-        "asset_type":asset_type or "asset",
-        "subtype":subtype,
-        "country":country,
-        "operator_entity_id":operator_entity_id,
-        "owner_entity_id":owner_entity_id,
-        "record_status":"provisional",
-        "data_quality":"medium",
-        "source_id":source_id,
-        "metadata":{"created_by":"simple_key_first_loader"},
+        "asset_id":aid,"name":name,"asset_type":asset_type or "asset","subtype":subtype,"country":country,
+        "operator_entity_id":operator_entity_id,"owner_entity_id":owner_entity_id,
+        "record_status":"provisional","data_quality":"medium","source_id":source_id,
+        "metadata":{"created_by":"simple_key_first_loader","resolution":"created_after_exact_variant_miss"},
     }
     writable=set(_table_write_columns_live(sb,"pc_assets"))
     row={k:v for k,v in row.items() if k in writable and v not in (None,"")}
@@ -7649,81 +7749,135 @@ def _simple_ensure_asset(sb, name, country=None, asset_type="asset", subtype=Non
     _SIMPLE_LOAD_CACHE["assets"][cache_key]=aid
     return aid
 
-
 def _simple_ensure_route(sb, name, mode=None, countries=None, source_id=None, operator_entity_id=None, metadata=None):
-    """Exact canonical route lookup; create a provisional route when genuinely new."""
+    """Resolve canonical route by exact normalized name+mode before provisional create."""
     name=_simple_clean_name(name)
     if not name:
         return None
+    cache_key=(_simple_identity_key(name),_simple_identity_key(mode or ""))
+    if cache_key in _SIMPLE_LOAD_CACHE["routes"]:
+        return _SIMPLE_LOAD_CACHE["routes"][cache_key]
+    hits=[]
     try:
-        hits=(sb.table("pc_transport_routes").select("route_id,route_name,mode")
-              .ilike("route_name",name).limit(10).execute().data or [])
-        if mode:
-            mk=str(mode).strip().casefold()
-            same=[x for x in hits if not x.get("mode") or str(x.get("mode")).strip().casefold()==mk]
-            if same: hits=same
-        if hits:
-            return hits[0]["route_id"]
+        hits=(sb.table("pc_transport_routes").select("route_id,route_name,mode,operator_entity_id,source_id")
+              .ilike("route_name",name).limit(20).execute().data or [])
     except Exception:
-        pass
+        hits=[]
+    if hits and mode:
+        mk=_simple_identity_key(mode)
+        same=[x for x in hits if not x.get("mode") or _simple_identity_key(x.get("mode"))==mk]
+        if same: hits=same
+    if hits:
+        rid=hits[0]["route_id"]
+        patch={}
+        if source_id and not hits[0].get("source_id"): patch["source_id"]=source_id
+        if operator_entity_id and not hits[0].get("operator_entity_id"): patch["operator_entity_id"]=operator_entity_id
+        if patch:
+            try: sb.table("pc_transport_routes").update(patch).eq("route_id",rid).execute()
+            except Exception: pass
+        _SIMPLE_LOAD_CACHE["routes"][cache_key]=rid
+        return rid
     rid=_simple_hash_id("ROUTE_AI",name,mode or "")
     row={
-        "route_id":rid,
-        "route_name":name,
-        "mode":mode or "multimodal",
-        "operator_entity_id":operator_entity_id,
-        "countries":countries if isinstance(countries,list) else None,
-        "current_status":"active",
-        "source_id":source_id,
-        "metadata":dict(metadata or {}, created_by="simple_key_first_loader"),
+        "route_id":rid,"route_name":name,"mode":mode or "multimodal","operator_entity_id":operator_entity_id,
+        "countries":countries if isinstance(countries,list) else None,"current_status":"active","source_id":source_id,
+        "metadata":dict(metadata or {}, created_by="simple_key_first_loader", resolution="created_after_exact_route_miss"),
     }
     writable=set(_table_write_columns_live(sb,"pc_transport_routes"))
     row={k:v for k,v in row.items() if k in writable and v not in (None,"")}
     sb.table("pc_transport_routes").upsert(row,on_conflict="route_id").execute()
+    _SIMPLE_LOAD_CACHE["routes"][cache_key]=rid
     return rid
 
-
 def _simple_ensure_mobile_asset(sb, name=None, imo=None, mmsi=None, flag=None, subtype=None, source_id=None):
-    """IMO -> MMSI -> exact name/flag lookup; otherwise create canonical mobile asset."""
+    """IMO -> MMSI -> exact normalized name+flag; enrich existing, otherwise create."""
     name=_simple_clean_name(name)
     imo=str(imo or "").strip()
     mmsi=str(mmsi or "").strip()
+    cache_key=(imo,mmsi,_simple_identity_key(name),_simple_country_key(flag))
+    if cache_key in _SIMPLE_LOAD_CACHE["mobile_assets"]:
+        return _SIMPLE_LOAD_CACHE["mobile_assets"][cache_key]
+    hits=[]
     try:
         if imo:
-            hit=(sb.table("pc_mobile_assets").select("mobile_asset_id").eq("imo",imo).limit(1).execute().data or [])
-            if hit: return hit[0]["mobile_asset_id"]
-        if mmsi:
-            hit=(sb.table("pc_mobile_assets").select("mobile_asset_id").eq("mmsi",mmsi).limit(1).execute().data or [])
-            if hit: return hit[0]["mobile_asset_id"]
-        if name:
-            hits=(sb.table("pc_mobile_assets").select("mobile_asset_id,name,flag").ilike("name",name).limit(25).execute().data or [])
+            hits=(sb.table("pc_mobile_assets").select("mobile_asset_id,name,imo,mmsi,flag,subtype,source_id")
+                  .eq("imo",imo).limit(5).execute().data or [])
+        if not hits and mmsi:
+            hits=(sb.table("pc_mobile_assets").select("mobile_asset_id,name,imo,mmsi,flag,subtype,source_id")
+                  .eq("mmsi",mmsi).limit(5).execute().data or [])
+        if not hits and name:
+            hits=(sb.table("pc_mobile_assets").select("mobile_asset_id,name,imo,mmsi,flag,subtype,source_id")
+                  .ilike("name",name).limit(25).execute().data or [])
             if flag:
-                fk=str(flag).strip().casefold()
-                same=[x for x in hits if not x.get("flag") or str(x.get("flag")).strip().casefold()==fk]
+                same=[x for x in hits if not x.get("flag") or _simple_country_key(x.get("flag"))==_simple_country_key(flag)]
                 if same: hits=same
-            if hits: return hits[0]["mobile_asset_id"]
+        if hits:
+            row0=hits[0]; mid=row0["mobile_asset_id"]
+            patch={}
+            if name and not row0.get("name"): patch["name"]=name
+            if imo and not row0.get("imo"): patch["imo"]=imo
+            if mmsi and not row0.get("mmsi"): patch["mmsi"]=mmsi
+            if flag and not row0.get("flag"): patch["flag"]=flag
+            if subtype and not row0.get("subtype"): patch["subtype"]=subtype
+            if source_id and not row0.get("source_id"): patch["source_id"]=source_id
+            if patch:
+                try: sb.table("pc_mobile_assets").update(patch).eq("mobile_asset_id",mid).execute()
+                except Exception: pass
+            _SIMPLE_LOAD_CACHE["mobile_assets"][cache_key]=mid
+            return mid
     except Exception:
         pass
     if not (name or imo or mmsi):
         return None
     mid=_simple_hash_id("MOBILE_AI",imo or mmsi or name,flag or "")
     row={
-        "mobile_asset_id":mid,
-        "name":name or (f"IMO {imo}" if imo else f"MMSI {mmsi}"),
-        "asset_type":"vessel",
-        "subtype":subtype,
-        "imo":imo or None,
-        "mmsi":mmsi or None,
-        "flag":flag,
-        "record_status":"provisional",
-        "data_quality":"medium",
-        "source_id":source_id,
-        "metadata":{"created_by":"simple_key_first_loader"},
+        "mobile_asset_id":mid,"name":name or (f"IMO {imo}" if imo else f"MMSI {mmsi}"),
+        "asset_type":"vessel","subtype":subtype,"imo":imo or None,"mmsi":mmsi or None,"flag":flag,
+        "record_status":"provisional","data_quality":"medium","source_id":source_id,
+        "metadata":{"created_by":"simple_key_first_loader","resolution":"created_after_imo_mmsi_name_miss"},
     }
     writable=set(_table_write_columns_live(sb,"pc_mobile_assets"))
     row={k:v for k,v in row.items() if k in writable and v not in (None,"")}
     sb.table("pc_mobile_assets").upsert(row,on_conflict="mobile_asset_id").execute()
+    _SIMPLE_LOAD_CACHE["mobile_assets"][cache_key]=mid
     return mid
+
+
+
+
+def _simple_resolve_event_id(sb, payload):
+    """Resolve reloads to an existing canonical event before creating a new ID."""
+    p=payload or {}
+    submitted=str(p.get("event_id") or "").strip()
+    title=_simple_clean_name(p.get("title"))
+    dkey=_simple_event_date_key(p.get("start_date"))
+    cache_key=(submitted,_simple_identity_key(title),dkey)
+    if cache_key in _SIMPLE_LOAD_CACHE["events"]:
+        return _SIMPLE_LOAD_CACHE["events"][cache_key]
+    if submitted:
+        try:
+            hit=(sb.table("pc_events").select("event_id").eq("event_id",submitted).limit(1).execute().data or [])
+            if hit:
+                _SIMPLE_LOAD_CACHE["events"][cache_key]=submitted
+                return submitted
+        except Exception:
+            pass
+    if title:
+        try:
+            hits=(sb.table("pc_events").select("event_id,title,start_date,location,countries")
+                  .eq("title",title).limit(25).execute().data or [])
+            if dkey:
+                same=[x for x in hits if _simple_event_date_key(x.get("start_date"))==dkey]
+                if same: hits=same
+            if len(hits)==1:
+                eid=hits[0]["event_id"]
+                _SIMPLE_LOAD_CACHE["events"][cache_key]=eid
+                return eid
+        except Exception:
+            pass
+    eid=submitted or _simple_hash_id("EVENT_AI",title,dkey,p.get("location") or "")
+    _SIMPLE_LOAD_CACHE["events"][cache_key]=eid
+    return eid
 
 
 _SIMPLE_ENTITY_REFS = {
@@ -7958,6 +8112,10 @@ def _simple_prepare_payload(sb, table, payload, natural_key):
 
     country=p.get("country") or p.get("hq_country") or p.get("jurisdiction")
 
+    # Event identity: reuse an existing event on reload before creating a new row.
+    if table=="pc_events":
+        p["event_id"]=_simple_resolve_event_id(sb,p)
+
     # Entity dependencies.
     for name_field,id_field in _SIMPLE_ENTITY_REFS.items():
         if p.get(id_field) in (None,"") and p.get(name_field):
@@ -8010,10 +8168,22 @@ def _simple_prepare_payload(sb, table, payload, natural_key):
     if table=="pc_mobile_assets" and not p.get("mobile_asset_id"):
         p["mobile_asset_id"]=_simple_ensure_mobile_asset(sb,p.get("name"),p.get("imo"),p.get("mmsi"),p.get("flag"),p.get("subtype"),sid)
 
-    if table=="pc_transport_routes" and not p.get("route_id"):
-        p["route_id"]=_simple_ensure_route(
-            sb,p.get("route_name") or p.get("name"),p.get("mode"),p.get("countries"),sid,p.get("operator_entity_id"),p.get("metadata")
-        )
+    if table=="pc_transport_routes":
+        # Human workbook endpoints are resolved to existing canonical assets first.
+        if p.get("origin_id") in (None,"") and p.get("origin_name"):
+            p["origin_type"]="asset"
+            p["origin_id"]=_simple_ensure_asset(
+                sb,p.get("origin_name"),country,p.get("origin_asset_type") or "asset",None,sid
+            )
+        if p.get("destination_id") in (None,"") and p.get("destination_name"):
+            p["destination_type"]="asset"
+            p["destination_id"]=_simple_ensure_asset(
+                sb,p.get("destination_name"),country,p.get("destination_asset_type") or "asset",None,sid
+            )
+        if not p.get("route_id"):
+            p["route_id"]=_simple_ensure_route(
+                sb,p.get("route_name") or p.get("name"),p.get("mode"),p.get("countries"),sid,p.get("operator_entity_id"),p.get("metadata")
+            )
 
     # Generic graph relationships: research workbooks often carry endpoint names
     # rather than canonical IDs. Resolve/create those endpoints before the write.
@@ -8026,6 +8196,9 @@ def _simple_prepare_payload(sb, table, payload, natural_key):
             elif stype in {"mobile_asset","vessel","ship","aircraft"}:
                 p["source_type"]="mobile_asset"
                 p["source_id"]=_simple_ensure_mobile_asset(sb,p.get("source_name"),p.get("source_imo"),p.get("source_mmsi"),p.get("source_flag"),p.get("source_subtype"),sid)
+            elif stype in {"route","transport_route","corridor","network"}:
+                p["source_type"]="route"
+                p["source_id"]=_simple_ensure_route(sb,p.get("source_name"),p.get("source_mode"),p.get("source_countries"),sid,None,p.get("metadata"))
             else:
                 p["source_type"]="asset"
                 p["source_id"]=_simple_ensure_asset(sb,p.get("source_name"),p.get("source_country") or country,p.get("source_asset_type") or "asset",p.get("source_subtype"),sid)
@@ -8037,6 +8210,9 @@ def _simple_prepare_payload(sb, table, payload, natural_key):
             elif ttype in {"mobile_asset","vessel","ship","aircraft"}:
                 p["target_type"]="mobile_asset"
                 p["target_id"]=_simple_ensure_mobile_asset(sb,p.get("target_name"),p.get("target_imo"),p.get("target_mmsi"),p.get("target_flag"),p.get("target_subtype"),sid)
+            elif ttype in {"route","transport_route","corridor","network"}:
+                p["target_type"]="route"
+                p["target_id"]=_simple_ensure_route(sb,p.get("target_name"),p.get("target_mode"),p.get("target_countries"),sid,None,p.get("metadata"))
             else:
                 p["target_type"]="asset"
                 p["target_id"]=_simple_ensure_asset(sb,p.get("target_name"),p.get("target_country") or country,p.get("target_asset_type") or "asset",p.get("target_subtype"),sid)
