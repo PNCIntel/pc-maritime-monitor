@@ -6411,7 +6411,7 @@ def _generic_schema_driven_workbook_records(sections):
     records=[]
     records.extend(_rw_sources_records(kind,sections))
 
-    skip_sheets={"readme","summary","loader_notes","methodology","data_quality","notes","instructions","sources"}
+    skip_sheets={"readme","summary","loader_notes","methodology","data_quality","notes","instructions","sources","qa","expected_results","validation"}
 
     # ------------------------------------------------------------------
     # Normalize every data sheet once.
@@ -6518,9 +6518,15 @@ def _generic_schema_driven_workbook_records(sections):
         # Canonical transport routes/corridors belong in pc_transport_routes.
         # A Routes/Corridors research sheet should not be downgraded to the
         # transport-service layer merely because it also carries route_id/name.
-        if "route_id" in c and "route_name" in c and (
+        # Route IDs are optional in analyst/ChatGPT workbooks. A completely blank
+        # route_id column may be dropped by Excel/DataFrame parsing, so route_name
+        # plus route/corridor semantics must still classify as a canonical route.
+        if "route_name" in c and (
             "route" in str(sn).casefold() or "corridor" in str(sn).casefold()
-            or c.intersection({"origin_type","origin_id","destination_type","destination_id","countries","current_status","known_bottlenecks","freight_types"})
+            or c.intersection({"origin_type","origin_id","origin_name","origin",
+                               "destination_type","destination_id","destination_name","destination",
+                               "countries","current_status","known_bottlenecks","freight_types",
+                               "distance_km","operator_entity_name"})
         ):
             return "route"
         if c.intersection({"transport_service_id","service_id","route_id"}) and c.intersection({"service_name","route_name"}):
