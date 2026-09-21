@@ -653,7 +653,78 @@ def section(kicker, title, copy=None):
         st.markdown(f'<div class="pc-section-copy">{copy}</div>', unsafe_allow_html=True)
 
 
-def event_card(row,key_prefix="event"):
+def _event_analysis_payload(row):
+    """Return the expanded P&C event narrative carried in canonical metadata."""
+    analysis = _meta_value(row, [
+        "analysis_60_90", "analysis_60-90", "summary_60_90", "summary_60-90",
+        "brief_75", "publication_summary", "intelligence_summary"
+    ])
+    why = _meta_value(row, [
+        "why_it_matters", "why_it_matters_60_90", "commercial_significance",
+        "strategic_significance"
+    ])
+    means = _meta_value(row, [
+        "what_it_means", "implications", "assessment", "assessment_impact"
+    ])
+    monitoring = _meta_value(row, [
+        "monitoring_indicators", "monitoring", "indicators", "watch_items"
+    ])
+    return analysis, why, means, monitoring
+
+
+def _render_inline_event_context(row, key_prefix="event"):
+    """Readable event detail directly beneath the card; no jump-to-top rerun."""
+    eid = str(row.get("Event ID", row.get("event_id", "")) or "").strip()
+    analysis, why, means, monitoring = _event_analysis_payload(row)
+    description = clean_display_text(row.get("Description", ""))
+    operational = clean_display_text(row.get("Operational Impact", ""))
+    commercial = clean_display_text(row.get("Trade / Commercial Impact", ""))
+    verification = clean_display_text(row.get("Verification Status", ""))
+    confidence = clean_display_text(row.get("Confidence", ""))
+    status = clean_display_text(row.get("Status", ""))
+
+    with st.expander("Full event context", expanded=False):
+        if analysis:
+            st.markdown("**Assessment · 60–90 words**")
+            st.write(analysis)
+        if description:
+            st.markdown("**What happened**")
+            st.write(description)
+        if why:
+            st.markdown("**Why it matters**")
+            st.write(why)
+        if means:
+            st.markdown("**What it means**")
+            st.write(means)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if operational:
+                st.markdown("**Operational impact**")
+                st.write(operational)
+        with c2:
+            if commercial:
+                st.markdown("**Trade / commercial impact**")
+                st.write(commercial)
+
+        if monitoring:
+            st.markdown("**Monitoring & indicators**")
+            st.write(monitoring)
+
+        meta_bits = [x for x in [
+            f"Status: {status}" if status else "",
+            f"Verification: {verification}" if verification else "",
+            f"Confidence: {confidence}" if confidence else "",
+        ] if x]
+        if meta_bits:
+            st.caption(" · ".join(meta_bits))
+
+        if eid:
+            st.markdown("#### Connected canonical context")
+            render_connected_context(eid)
+
+
+def event_card(row,key_prefix="event",compact=False):
     title = clean_display_text(row.get("Title", "Untitled event"))
     date = pc_pretty_date(row.get("Start Date", row.get("Date", "")))
     etype = pc_display_value(row.get("Event Type", row.get("Event Family", "Event")),"Event Type")
@@ -662,27 +733,30 @@ def event_card(row,key_prefix="event"):
         pc_display_value(row.get("Location", ""),"Location")
         or pc_pretty_countries(row.get("Country / Countries", ""))
     )
-    body = clean_display_text(row.get("Description", ""))
+    description = clean_display_text(row.get("Description", ""))
+    analysis, _, _, _ = _event_analysis_payload(row)
+    body = analysis or description
     impact = clean_display_text(row.get("Operational Impact", ""))
-    st.markdown(
-        f'''<div class="pc-card pc-card-priority">
-        <div class="pc-card-meta">{date} · {etype} · {sev} · {loc}</div>
-        <div class="pc-card-title">{title}</div>
-        <div class="pc-card-body">{body}</div>
-        <div class="pc-card-impact"><b>Operational impact:</b> {impact}</div>
-        </div>''',
-        unsafe_allow_html=True,
-    )
+    commercial = clean_display_text(row.get("Trade / Commercial Impact", ""))
 
-    eid = str(row.get("Event ID", row.get("event_id", "")) or "").strip()
-    if eid:
-        pc_drilldown_button(
-            "event",
-            eid,
-            "Open full event context",
-            key=f"{key_prefix}_event_card_dd_{eid}",
-            use_container_width=True,
-        )
+    if compact and len(body) > 420:
+        body = body[:417].rstrip() + "…"
+
+    parts = [
+        '<div class="pc-card pc-card-priority">',
+        f'<div class="pc-card-meta">{html_lib.escape(date)} · {html_lib.escape(etype)} · {html_lib.escape(sev)} · {html_lib.escape(loc)}</div>',
+        f'<div class="pc-card-title">{html_lib.escape(title)}</div>',
+    ]
+    if body:
+        parts.append(f'<div class="pc-card-body">{html_lib.escape(body)}</div>')
+    if impact and not compact:
+        parts.append(f'<div class="pc-card-impact"><b>Operational impact:</b> {html_lib.escape(impact)}</div>')
+    if commercial and not compact:
+        parts.append(f'<div class="pc-card-impact"><b>Trade / commercial impact:</b> {html_lib.escape(commercial)}</div>')
+    parts.append("</div>")
+    st.markdown("".join(parts), unsafe_allow_html=True)
+
+    _render_inline_event_context(row, key_prefix=key_prefix)
 
 
 def canonical_port_id(link_id, link_name):
@@ -1331,7 +1405,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v4.4 model coverage · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
+st.sidebar.caption(f"v4.5 latest-reporting-inline-context · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -2664,7 +2738,7 @@ def publication_summary(row):
             if v:
                 return v
     v = _meta_value(row, [
-        "brief_75", "brief75", "summary_60_90", "summary_60-90", "ai_summary_60_90",
+        "analysis_60_90", "analysis_60-90", "brief_75", "brief75", "summary_60_90", "summary_60-90", "ai_summary_60_90",
         "publication_summary", "intelligence_summary"
     ])
     if v:
@@ -3284,6 +3358,26 @@ def _build_report_markdown(name,as_of,sections,edits,horizon_rows):
     return "\n".join(lines)
 
 if page == "Operating Picture":
+    # Broad canonical intake: surface the newest loaded reporting before applying
+    # the stricter Intelligence routing gate. This keeps fresh trade/logistics
+    # developments visible without weakening the assessed intelligence filter.
+    latest_reporting = exclude_horizon_calendar_events(hazard_events_raw.copy()) if isinstance(hazard_events_raw, pd.DataFrame) else pd.DataFrame()
+    if not latest_reporting.empty:
+        if "Start Date" in latest_reporting.columns:
+            latest_reporting["_latest_reporting_dt"] = pd.to_datetime(latest_reporting["Start Date"], errors="coerce")
+            latest_reporting = latest_reporting.sort_values("_latest_reporting_dt", ascending=False, na_position="last")
+        try:
+            latest_reporting = latest_reporting[~_is_compliance_watchlist_event(latest_reporting)].copy()
+        except Exception:
+            pass
+        section("Latest reporting", "Latest reporting", "Newest canonical records across security, maritime, trade, infrastructure and logistics. These are surfaced before the stricter intelligence-routing filter.")
+        latest_reporting = latest_reporting.head(4)
+        lr_cols = st.columns(2)
+        for lr_i, (_, lr_row) in enumerate(latest_reporting.iterrows()):
+            with lr_cols[lr_i % 2]:
+                event_card(lr_row, key_prefix=f"latest_reporting_{lr_i}", compact=True)
+        st.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
+
     active_mon = monitoring[text_col(monitoring, "Status").str.contains("Active", case=False, na=False)] if not monitoring.empty else monitoring
     security_terms = ["Security", "Conflict", "Maritime", "Piracy", "Attack", "Ground", "Explosion", "SAR", "Pollution", "Drone", "Missile", "Seizure", "Boarding"]
     sec_events = hazard_events[contains_any(hazard_events, ["Event Family", "Event Type", "Mode", "Title"], security_terms)] if not hazard_events.empty else hazard_events

@@ -42,7 +42,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.7.1-connected-logistics-network"
+APP_VERSION = "v3.8.0-latest-reporting-inline-context"
 RELEASE_NAME = "End-to-End Logistics Operating Picture · Companies, Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -4614,6 +4614,80 @@ def render_event_associations(event_id, key_prefix="event"):
                 if st.button("Open ↗",key=widget_key,use_container_width=True):
                     request_nav(page,key,resolved_id,resolved_name or name); st.rerun()
 
+def _event_extended_context(row):
+    """Expanded narrative fields stored by the canonical loader in event metadata."""
+    meta = _pc_meta_dict(row.get("Metadata")) if hasattr(row, "get") else {}
+    pools = [meta]
+    for k in ["analysis", "ai_enrichment", "enrichment", "publication"]:
+        v = meta.get(k) if isinstance(meta, dict) else None
+        if isinstance(v, dict):
+            pools.append(v)
+
+    def pick(*keys):
+        for pool in pools:
+            for key in keys:
+                v = pool.get(key) if isinstance(pool, dict) else None
+                if v not in (None, "", [], {}):
+                    return str(v).strip()
+        return ""
+
+    return {
+        "analysis": pick("analysis_60_90", "analysis_60-90", "summary_60_90", "summary_60-90", "brief_75"),
+        "why": pick("why_it_matters", "why_it_matters_60_90", "commercial_significance", "strategic_significance"),
+        "means": pick("what_it_means", "implications", "assessment", "assessment_impact"),
+        "monitoring": pick("monitoring_indicators", "monitoring", "indicators", "watch_items"),
+    }
+
+
+def _render_trade_event_inline_context(row, eid="", include_links=False):
+    """Keep full event detail exactly where the user opened it."""
+    ctx = _event_extended_context(row)
+    description = str(row.get("Description", "") or "").strip()
+    operational = str(row.get("Operational Impact", "") or "").strip()
+    commercial = str(row.get("Trade / Commercial Impact", "") or "").strip()
+    status = str(row.get("Status", "") or "").strip()
+    confidence = str(row.get("Confidence", "") or "").strip()
+    verification = str(row.get("Verification Status", "") or "").strip()
+
+    if ctx["analysis"]:
+        st.markdown("**Assessment · 60–90 words**")
+        st.write(ctx["analysis"])
+    if description:
+        st.markdown("**What happened**")
+        st.write(description)
+    if ctx["why"]:
+        st.markdown("**Why it matters**")
+        st.write(ctx["why"])
+    if ctx["means"]:
+        st.markdown("**What it means**")
+        st.write(ctx["means"])
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if operational:
+            st.markdown("**Operational impact**")
+            st.write(operational)
+    with c2:
+        if commercial:
+            st.markdown("**Trade / commercial impact**")
+            st.write(commercial)
+
+    if ctx["monitoring"]:
+        st.markdown("**Monitoring & indicators**")
+        st.write(ctx["monitoring"])
+
+    bits = [x for x in [
+        f"Status: {status}" if status and status.lower() != "nan" else "",
+        f"Verification: {verification}" if verification and verification.lower() != "nan" else "",
+        f"Confidence: {confidence}" if confidence and confidence.lower() != "nan" else "",
+    ] if x]
+    if bits:
+        st.caption(" · ".join(bits))
+
+    if include_links and eid:
+        render_event_associations(eid, key_prefix=f"inline_context_{eid}")
+
+
 def render_event_cards(events,max_items=40):
     if events is None or events.empty:
         st.info("No linked events.")
@@ -4639,28 +4713,33 @@ def render_event_cards(events,max_items=40):
         description = str(row.get("Description", "")).strip()
         operational = str(row.get("Operational Impact", "")).strip()
         commercial = str(row.get("Trade / Commercial Impact", "")).strip()
+        ext = _event_extended_context(row)
+        lead_text = ext["analysis"] or description
 
-        # Build a trade-facing event card: incident first, consequence second.
+        # Build a trade-facing event card: concise assessment first, consequence second.
         card = [
             "<div class='pc-card'>",
-            f"<div class='pc-search-details' style='color:#D8B45A; text-transform:uppercase; letter-spacing:.08em;'>{' · '.join(meta)}</div>",
-            f"<div class='pc-big' style='margin-top:10px;'>{title}</div>",
+            f"<div class='pc-search-details' style='color:#D8B45A; text-transform:uppercase; letter-spacing:.08em;'>{html_lib.escape(' · '.join(meta))}</div>",
+            f"<div class='pc-big' style='margin-top:10px;'>{html_lib.escape(title)}</div>",
         ]
-        if description and description.lower() != "nan":
-            card.append(f"<div class='pc-search-details' style='margin-top:10px;'>{description}</div>")
+        if lead_text and lead_text.lower() != "nan":
+            card.append(f"<div class='pc-search-details' style='margin-top:10px;'>{html_lib.escape(lead_text)}</div>")
         if operational and operational.lower() != "nan":
             card.append(
-                f"<div style='margin-top:12px;'><b>Operational impact:</b> {operational}</div>"
+                f"<div style='margin-top:12px;'><b>Operational impact:</b> {html_lib.escape(operational)}</div>"
             )
         if commercial and commercial.lower() != "nan":
             card.append(
                 f"<div style='margin-top:8px; padding-top:8px; border-top:1px solid #33414C;'>"
-                f"<b style='color:#D8B45A;'>Trade / commercial impact:</b> {commercial}</div>"
+                f"<b style='color:#D8B45A;'>Trade / commercial impact:</b> {html_lib.escape(commercial)}</div>"
             )
         card.append("</div>")
         st.markdown("".join(card), unsafe_allow_html=True)
 
         card_prefix = f"eventblock_{render_scope}_card_{idx}"
+
+        with st.expander("Full event context", expanded=False):
+            _render_trade_event_inline_context(row, eid=eid, include_links=False)
 
         # Commercially relevant linked network sits immediately beneath the event card.
         render_event_associations(eid, key_prefix=card_prefix)
@@ -4670,6 +4749,43 @@ def render_event_cards(events,max_items=40):
             st.link_button("Open source ↗", url, key=f"{card_prefix}_{eid}_source")
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+
+def render_latest_reporting_trade(limit=4):
+    """Newest canonical records, independent of story-tagging, for quick discovery."""
+    events = TABLES.get(("Events & Hazards","Events"), pd.DataFrame()).copy()
+    if events.empty:
+        st.caption("No recent canonical reporting available.")
+        return
+    if "Start Date" in events.columns:
+        events["_latest_dt"] = pd.to_datetime(events["Start Date"], errors="coerce")
+        events = events.sort_values("_latest_dt", ascending=False, na_position="last")
+    events = events.head(limit)
+
+    cols = st.columns(2)
+    for i, (_, row) in enumerate(events.iterrows()):
+        with cols[i % 2]:
+            title = str(row.get("Title", "Event") or "Event").strip()
+            date = str(row.get("Start Date", "") or "")[:10]
+            etype = pretty_enum(str(row.get("Event Type", "") or "Event"))
+            location = str(row.get("Location", "") or row.get("Country / Countries", "") or "").strip()
+            ext = _event_extended_context(row)
+            summary = ext["analysis"] or str(row.get("Description", "") or "").strip()
+            if len(summary) > 420:
+                summary = summary[:417].rstrip() + "…"
+
+            st.markdown(
+                "<div class='pc-card'>"
+                f"<div class='pc-label'>{html_lib.escape(date)} · {html_lib.escape(etype)}</div>"
+                f"<div class='pc-big' style='margin-top:5px'>{html_lib.escape(title)}</div>"
+                f"<div class='pc-small' style='margin-top:4px'>{html_lib.escape(location)}</div>"
+                f"<div class='pc-search-details' style='margin-top:9px'>{html_lib.escape(summary)}</div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            eid = str(row.get("Event ID", "") or "").strip()
+            with st.expander("Full event context", expanded=False):
+                _render_trade_event_inline_context(row, eid=eid, include_links=True)
 
 
 def entity_asset_ids_from_profile(prof):
@@ -11289,6 +11405,12 @@ if page=="Overview":
     header("Trade System","End-to-end logistics intelligence across companies, road, rail, maritime, aviation, facilities, corridors, markets, infrastructure and disruption.")
 
     render_selected_trade_story_context()
+
+    st.markdown("### Latest reporting")
+    st.caption("Newest canonical event loads across trade, infrastructure, logistics and disruption — surfaced independently of story tagging.")
+    render_latest_reporting_trade(4)
+
+    st.markdown("---")
 
     # Canonical developments lead the Trade app. Open-source discovery is supporting evidence,
     # not the primary operating picture.
