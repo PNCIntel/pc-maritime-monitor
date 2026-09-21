@@ -10415,228 +10415,330 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
 
 
 def _pc_report_pdf_fpdf(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows, disclaimer, include_logo=True):
-    """Branded A4 PDF renderer using fpdf2.
+    """Editorial A4 renderer designed to mirror the approved P&C HTML report.
 
-    This is the preferred lightweight renderer for Streamlit deployments where
-    ReportLab is not installed. It supports Unicode fonts, live hyperlinks and
-    predictable page-breaking while preserving the visual hierarchy of the
-    HTML report.
+    Uses fpdf2 with embedded Unicode system fonts, a serif editorial headline
+    face, compact left-aligned story blocks, full source URLs, and predictable
+    page breaks. It deliberately avoids the boxed-card layout that made earlier
+    PDFs feel like a dashboard export.
     """
-    import io, os, base64, html as _html
+    import io, os, base64, re
     from fpdf import FPDF
+    from fpdf.enums import MethodReturnValue
 
-    NAVY = (7, 27, 46)
-    BLUE = (7, 141, 184)
-    GOLD = (179, 139, 50)
-    MUTED = (95, 111, 124)
-    LINE = (215, 224, 231)
-    PALE = (246, 248, 250)
+    NAVY = (23, 35, 45)
+    BLUE = (73, 151, 191)
+    GOLD = (177, 138, 69)
+    GOLD_DARK = (143, 106, 49)
+    MUTED = (86, 99, 108)
+    LINE = (221, 218, 210)
+    PALE = (247, 245, 240)
     WHITE = (255, 255, 255)
 
     class PCPDF(FPDF):
         def header(self):
             if self.page_no() == 1:
                 return
-            self.set_draw_color(*BLUE)
+            self.set_draw_color(*GOLD)
             self.set_line_width(0.45)
-            self.line(18, 16, 192, 16)
-            self.set_text_color(*NAVY)
-            self.set_font("PC", "B", 8.4)
-            self.set_xy(18, 8.7)
-            self.cell(0, 5, "POWER & CORRIDORS INTELLIGENCE", new_x="LMARGIN", new_y="NEXT")
-            self.ln(5)
+            self.line(18, 14.5, 192, 14.5)
+            self.set_xy(18, 7.5)
+            self.set_text_color(*MUTED)
+            self.set_font("PCSANS", "B", 7.4)
+            self.cell(0, 4.5, "POWER & CORRIDORS INTELLIGENCE", new_x="LMARGIN", new_y="NEXT")
+            self.ln(4)
 
         def footer(self):
-            self.set_y(-14)
+            self.set_y(-13.5)
             self.set_draw_color(*LINE)
             self.set_line_width(0.25)
             self.line(18, self.get_y(), 192, self.get_y())
-            self.set_y(-10.5)
-            self.set_font("PC", "", 7.2)
+            self.set_y(-10)
             self.set_text_color(*MUTED)
-            self.cell(90, 4, "Power & Corridors Intelligence  |  powerncorridors.com")
-            self.cell(0, 4, str(self.page_no()), align="R")
+            self.set_font("PCSANS", "", 6.8)
+            self.cell(130, 3.8, "Power & Corridors Intelligence  |  powerncorridors.com")
+            self.cell(44, 3.8, str(self.page_no()), align="R")
 
     pdf = PCPDF("P", "mm", "A4")
     pdf.set_margins(18, 18, 18)
-    pdf.set_auto_page_break(True, 18)
+    pdf.set_auto_page_break(True, 17)
     pdf.set_title(str(report_title or "Power & Corridors Intelligence"))
     pdf.set_author("Power & Corridors Intelligence")
 
-    # Prefer embedded Unicode system fonts; use core Helvetica only as a last resort.
-    regular_candidates = [
+    # Use common system fonts only; the files stay in the runtime and are not shared.
+    sans_reg = next((x for x in [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    ]
-    bold_candidates = [
+    ] if os.path.exists(x)), None)
+    sans_bld = next((x for x in [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
-    ]
-    reg = next((x for x in regular_candidates if os.path.exists(x)), None)
-    bld = next((x for x in bold_candidates if os.path.exists(x)), None)
-    unicode_font = bool(reg and bld)
-    if unicode_font:
-        pdf.add_font("PC", "", reg)
-        pdf.add_font("PC", "B", bld)
+    ] if os.path.exists(x)), None)
+    serif_reg = next((x for x in [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSerif.ttf",
+    ] if os.path.exists(x)), None)
+    serif_bld = next((x for x in [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSerif-Bold.ttf",
+    ] if os.path.exists(x)), None)
+    unicode_fonts = all([sans_reg, sans_bld, serif_reg, serif_bld])
+    if unicode_fonts:
+        pdf.add_font("PCSANS", "", sans_reg)
+        pdf.add_font("PCSANS", "B", sans_bld)
+        pdf.add_font("PCSERIF", "", serif_reg)
+        pdf.add_font("PCSERIF", "B", serif_bld)
     else:
-        pdf.add_font("PC", "", fname="") if False else None
-        # Aliases through the core font. Text is normalised below when necessary.
-        pdf.set_font("Helvetica", "", 10)
+        # Keep core-font fallback functional even on stripped-down deployments.
+        # clean() below normalises punctuation to Latin-1 in this case.
+        pass
 
     def clean(v, fallback=""):
         t = _pc_report_clean(v, fallback)
-        if unicode_font:
+        t = re.sub(r"\s+", " ", str(t)).strip()
+        if unicode_fonts:
             return t
         return (t.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
                  .replace("–", "-").replace("—", "-").replace("•", "-").replace("…", "...")
                  .replace("→", "->").replace("·", "|").encode("latin-1", "replace").decode("latin-1"))
 
-    def font(style="", size=10):
-        pdf.set_font("PC" if unicode_font else "Helvetica", style, size)
+    def set_font(family="sans", style="", size=10):
+        if unicode_fonts:
+            pdf.set_font("PCSERIF" if family == "serif" else "PCSANS", style, size)
+        else:
+            pdf.set_font("Times" if family == "serif" else "Helvetica", style, size)
 
-    def rgb(c): pdf.set_text_color(*c)
+    def color(rgb):
+        pdf.set_text_color(*rgb)
 
-    def add_logo(max_w=56):
+    def multi(text, *, x=18, w=174, h=5, family="sans", style="", size=9, rgb=NAVY, align="L", link=""):
+        pdf.set_x(x)
+        set_font(family, style, size)
+        color(rgb)
+        pdf.multi_cell(w, h, clean(text), align=align, link=link)
+
+    def measure(text, *, w, h, family="sans", style="", size=9):
+        set_font(family, style, size)
+        try:
+            return float(pdf.multi_cell(w, h, clean(text), dry_run=True, output=MethodReturnValue.HEIGHT))
+        except Exception:
+            # Conservative approximation if a different fpdf2 build is present.
+            return max(h, (len(clean(text)) / max(30, w * 2.4)) * h)
+
+    def add_logo(x=18, y=22, w=65):
         if not include_logo or not _PC_REPORT_LOGO_B64:
             return False
         try:
             raw = base64.b64decode(_PC_REPORT_LOGO_B64)
-            bio = io.BytesIO(raw)
-            pdf.image(bio, x=18, y=20, w=max_w)
+            pdf.image(io.BytesIO(raw), x=x, y=y, w=w)
             return True
         except Exception:
             return False
 
-    def paragraph(text, size=9.6, leading=4.8, color=NAVY, style="", x=None, w=None, align="L"):
-        if x is not None: pdf.set_x(x)
-        font(style, size); rgb(color)
-        if w is None: w = 174
-        pdf.multi_cell(w, leading, clean(text), align=align)
-
-    def kicker(text):
-        font("B", 8.4); rgb(GOLD)
-        pdf.cell(0, 4.5, clean(text).upper(), new_x="LMARGIN", new_y="NEXT")
-
-    def section_heading(k, h):
-        pdf.add_page()
-        kicker(k)
-        font("B", 19); rgb(NAVY)
-        pdf.multi_cell(174, 8.2, clean(h))
-        pdf.ln(2)
-
-    def story_height(r, kind):
-        # Conservative estimate for page-break decisions.
-        title = clean(r.get("_report_title") or r.get("Title") or r.get("Card Title") or r.get("Next Milestone"), "Untitled development")
-        body = clean(r.get("_report_text"), _pc_report_horizon_default_text(r) if kind == "horizon" else _pc_report_default_summary(r, kind == "security"))
-        watch = clean(r.get("_report_watch"))
-        n = len(title)/65 + len(body)/105 + len(watch)/115
-        return max(45, min(95, 29 + n*5.0))
-
-    def source_links(r, article_no):
-        urls = r.get("_report_sources") or _pc_report_row_source_urls(r)
-        if not urls:
-            return
-        refs=[f"{article_no:02d}" + (chr(97+j) if len(urls)>1 else "") for j,_ in enumerate(urls[:6])]
-        pdf.set_x(24); font("B",7.4); rgb(MUTED); pdf.cell(15,4,"Sources:")
-        font("",7.4); rgb(BLUE); pdf.cell(0,4,", ".join(refs)); pdf.ln(5.2)
-
-    def story_card(r, i, kind, accent):
-        est = story_height(r, kind)
-        if pdf.will_page_break(est):
-            pdf.add_page()
-        x0 = 18; y0 = pdf.get_y()
-        # Left visual accent and top rule. Box is drawn after text once final height is known.
-        pdf.set_x(24)
-        dt = _pc_report_date_value(r.get("Start Date"))
-        ds = dt.strftime("%d %b %Y") if dt else ""
-        meta = "  |  ".join(x for x in [ds, clean(r.get("Severity")).upper(), clean(r.get("Location") or r.get("Country / Countries"))] if x)
-        font("", 7.7); rgb(MUTED)
-        pdf.multi_cell(162, 4.2, clean(meta))
-        title = clean(r.get("_report_title") or r.get("Title") or r.get("Card Title") or r.get("Next Milestone"), "Untitled development")
-        font("B", 12.8); rgb(NAVY)
-        pdf.set_x(24); pdf.multi_cell(162, 6.1, f"{i:02d}  |  {title}")
-        pdf.ln(1)
-        body = clean(r.get("_report_text"), _pc_report_horizon_default_text(r) if kind == "horizon" else _pc_report_default_summary(r, kind == "security"))
-        font("", 9.1); rgb(NAVY)
-        pdf.set_x(24); pdf.multi_cell(162, 4.8, body)
-        watch = clean(r.get("_report_watch"))
-        if watch:
-            pdf.ln(0.8); pdf.set_x(24)
-            font("B", 8.1); rgb(NAVY); pdf.write(4.3, "Watch: ")
-            font("", 8.1); pdf.write(4.3, watch); pdf.ln(5)
-        source_links(r, i)
-        y1 = pdf.get_y() + 2
-        pdf.set_draw_color(*LINE); pdf.set_line_width(0.25)
-        pdf.rect(x0, y0, 174, y1-y0)
-        pdf.set_fill_color(*accent)
-        pdf.rect(x0, y0, 2.2, y1-y0, style="F")
-        pdf.set_y(y1 + 4)
-
-    # Cover
-    pdf.add_page()
-    add_logo(62)
-    pdf.set_y(46)
-    pdf.set_draw_color(*BLUE); pdf.set_line_width(0.65); pdf.line(18, 44, 192, 44)
-    kicker(f"P&C TRADE INTELLIGENCE  |  {report_type}")
-    font("B", 25); rgb(NAVY)
-    pdf.multi_cell(174, 10.5, clean(report_title))
-    pdf.ln(2)
-    font("", 11); rgb(MUTED)
-    pdf.multi_cell(156, 6, clean(subtitle or "Trade, logistics, infrastructure, markets and operational risk"))
-    pdf.ln(5)
-    font("B", 10); rgb(NAVY)
-    pdf.cell(0, 6, pd.Timestamp(report_date).strftime("%d %B %Y"), new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(9)
-    # Summary bar gives the cover useful visual weight without filling it with copy.
-    pdf.set_fill_color(*PALE); pdf.set_draw_color(*LINE)
-    yb = pdf.get_y(); pdf.rect(18, yb, 174, 24, style="DF")
-    pdf.set_xy(24, yb+5)
-    font("B", 8.8); rgb(NAVY)
-    pdf.multi_cell(162, 5.2, "5 COMMERCIAL   |   3 SECURITY / OPERATIONAL RISK   |   5 HORIZON")
-    pdf.set_y(248)
-    pdf.set_fill_color(*GOLD); pdf.rect(18, 248, 2.4, 18, style="F")
-    pdf.set_xy(24, 248)
-    font("B", 8); rgb(GOLD); pdf.cell(0, 4.5, "POWER & CORRIDORS INTELLIGENCE", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_x(24); font("", 8); rgb(MUTED)
-    pdf.multi_cell(150, 4.5, "Independent monitoring of trade, logistics, infrastructure, markets and operational risk.")
-
-    # Sections
-    section_heading("Commercial developments", "Five developments shaping trade")
-    for i, r in enumerate(commercial_rows, 1): story_card(r, i, "commercial", BLUE)
-
-    section_heading("Security & operational risk", "Three developments to monitor")
-    for i, r in enumerate(security_rows, 6): story_card(r, i, "security", GOLD)
-
-    section_heading("Horizon outlook", "Five dates and milestones ahead")
-    for i, r in enumerate(horizon_rows, 9): story_card(r, i, "horizon", NAVY)
-
-    section_heading("Sources & references", "Source list by article number")
-    for item in _pc_report_sources_catalog(commercial_rows,security_rows,horizon_rows):
-        n=item["article_no"]; title=clean(item["title"]); urls=item["urls"] or []
-        font("B",8.5); rgb(NAVY); pdf.multi_cell(174,4.7,f"{n:02d}  |  {title}")
-        if urls:
-            for j,u in enumerate(urls[:6]):
-                ref=f"{n:02d}" + (chr(97+j) if len(urls)>1 else "")
-                pdf.set_x(24); font("B",7.1); rgb(GOLD); pdf.cell(11,4,ref)
-                font("",7.1); rgb(BLUE); pdf.multi_cell(151,4,clean(u),link=str(u))
+    def section_intro(kicker_text, heading, description=None, dark=False):
+        if dark:
+            if pdf.get_y() > 235:
+                pdf.add_page()
+            y = pdf.get_y()
+            pdf.set_fill_color(*NAVY)
+            pdf.set_draw_color(*GOLD)
+            pdf.set_line_width(0.9)
+            box_h = 29 if not description else 37
+            pdf.rect(18, y, 174, box_h, style="F")
+            pdf.line(18, y, 192, y)
+            pdf.set_xy(24, y + 6)
+            set_font("sans", "B", 7.5); color((214, 180, 111))
+            pdf.cell(0, 4, clean(kicker_text).upper(), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_x(24); set_font("serif", "B", 17); color(WHITE)
+            pdf.multi_cell(160, 7.2, clean(heading))
+            if description:
+                pdf.set_x(24); set_font("sans", "", 7.8); color((232, 237, 240))
+                pdf.multi_cell(160, 4.5, clean(description))
+            pdf.set_y(y + box_h + 7)
         else:
-            pdf.set_x(24); font("",7.1); rgb(MUTED); pdf.multi_cell(162,4,"No source URL currently attached to the canonical event.")
-        pdf.ln(1.5)
+            set_font("sans", "B", 7.6); color(GOLD_DARK)
+            pdf.cell(0, 4, clean(kicker_text).upper(), new_x="LMARGIN", new_y="NEXT")
+            set_font("serif", "B", 19); color(NAVY)
+            pdf.multi_cell(174, 8.2, clean(heading))
+            if description:
+                pdf.ln(1)
+                multi(description, h=4.7, size=8.2, rgb=MUTED)
+            pdf.ln(4)
 
-    # Disclaimer gets its own restrained closing page if it will not fit comfortably.
-    if pdf.get_y() > 185:
-        pdf.add_page()
+    def source_refs(row, article_no):
+        urls = row.get("_report_sources") or _pc_report_row_source_urls(row)
+        urls = [str(u).strip() for u in (urls or []) if str(u).strip()][:6]
+        refs = [f"{article_no:02d}" + (chr(97+j) if len(urls) > 1 else "") for j in range(len(urls))]
+        return urls, refs
+
+    def story_block(row, article_no, kind):
+        title = clean(row.get("_report_title") or row.get("Title") or row.get("Card Title") or row.get("Next Milestone"), "Untitled development")
+        body = clean(row.get("_report_text"), _pc_report_horizon_default_text(row) if kind == "horizon" else _pc_report_default_summary(row, kind == "security"))
+        watch = clean(row.get("_report_watch"))
+        dt = _pc_report_date_value(row.get("Start Date"))
+        ds = dt.strftime("%d %b %Y").upper() if dt else ""
+        location = clean(row.get("Location") or row.get("Country / Countries") or row.get("Region"))
+        meta = "  •  ".join([x for x in (ds, location.upper()) if x])
+        urls, refs = source_refs(row, article_no)
+
+        # Estimate full block to avoid orphaned title/body starts.
+        body_w = 160
+        est = 8 + measure(meta, w=body_w, h=4, size=7.2, style="B")
+        est += measure(f"{article_no:02d} · {title}", w=body_w, h=6.5, family="serif", style="B", size=13.5)
+        est += 3 + measure(body, w=body_w, h=5.1, size=9.2)
+        if watch:
+            est += 3 + measure("Watch: " + watch, w=body_w, h=4.6, size=8.0)
+        if refs:
+            est += 7
+        est += 8
+        if pdf.get_y() + min(est, 92) > 276:
+            pdf.add_page()
+
+        y0 = pdf.get_y()
+        accent = BLUE if kind == "commercial" else GOLD if kind == "security" else LINE
+        pdf.set_fill_color(*accent)
+        pdf.rect(18, y0, 1.6, max(14, min(est, 100)), style="F")
+        x = 25
+
+        if meta:
+            pdf.set_x(x); set_font("sans", "B", 7.1); color(MUTED)
+            pdf.multi_cell(160, 4.2, meta)
+            pdf.ln(1.4)
+        pdf.set_x(x); set_font("serif", "B", 13.3); color(NAVY)
+        pdf.multi_cell(160, 6.4, f"{article_no:02d} · {title}")
+        pdf.ln(2.4)
+        pdf.set_x(x); set_font("sans", "", 9.0); color((40, 45, 49))
+        pdf.multi_cell(160, 5.0, body)
+
+        if watch:
+            pdf.ln(1.7)
+            box_y = pdf.get_y()
+            watch_h = measure(watch, w=149, h=4.5, size=7.8) + 10
+            if box_y + watch_h > 277:
+                pdf.add_page(); box_y = pdf.get_y()
+            pdf.set_fill_color(*PALE)
+            pdf.set_draw_color(*LINE)
+            pdf.rect(x, box_y, 160, watch_h, style="DF")
+            pdf.set_xy(x + 5, box_y + 4)
+            set_font("sans", "B", 7.3); color(GOLD_DARK)
+            pdf.cell(0, 4, "WHAT TO WATCH", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_x(x + 5); set_font("sans", "", 7.8); color(MUTED)
+            pdf.multi_cell(149, 4.5, watch)
+            pdf.set_y(box_y + watch_h + 2.5)
+
+        if refs:
+            pdf.set_x(x); set_font("sans", "B", 7.2); color(MUTED)
+            pdf.cell(13, 4, "Sources:")
+            set_font("sans", "", 7.2); color(GOLD_DARK)
+            pdf.cell(0, 4, ", ".join(refs), new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(7)
+
+        # Extend accent line to the actual block end without drawing a surrounding box.
+        y1 = pdf.get_y() - 4
+        pdf.set_fill_color(*accent)
+        pdf.rect(18, y0, 1.6, max(10, y1 - y0), style="F")
+
+    # COVER
+    pdf.add_page()
+    logo_ok = add_logo()
+    pdf.set_y(54 if logo_ok else 26)
+    pdf.set_draw_color(*GOLD)
+    pdf.set_line_width(0.8)
+    pdf.line(18, pdf.get_y(), 192, pdf.get_y())
+    pdf.ln(12)
+    set_font("sans", "B", 8.0); color(GOLD_DARK)
+    pdf.cell(0, 4.5, f"P&C TRADE INTELLIGENCE  •  {clean(report_type).upper()}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+    set_font("serif", "B", 26); color(NAVY)
+    pdf.multi_cell(174, 11, clean(report_title))
     pdf.ln(3)
-    kicker("Disclaimer")
+    set_font("serif", "", 13); color(MUTED)
+    pdf.multi_cell(165, 7, clean(subtitle or "Trade, logistics, infrastructure, markets and operational risk"))
+    pdf.ln(6)
+    set_font("sans", "B", 9); color(NAVY)
+    pdf.cell(0, 5, pd.Timestamp(report_date).strftime("%d %B %Y"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(13)
+    y = pdf.get_y()
     pdf.set_fill_color(*PALE); pdf.set_draw_color(*LINE)
-    x, y = 18, pdf.get_y()+1
-    # Let the text flow first; draw background based on final height.
-    pdf.set_xy(24, y+5)
-    font("", 7.9); rgb(MUTED)
-    pdf.multi_cell(162, 4.5, clean(disclaimer))
-    end_y = pdf.get_y()+5
-    # draw behind by restoring order is not possible; use border only to avoid covering text
-    pdf.set_draw_color(*LINE); pdf.rect(x, y, 174, max(32, end_y-y))
+    pdf.rect(18, y, 174, 22, style="DF")
+    pdf.set_xy(24, y + 6)
+    set_font("sans", "B", 8.0); color(NAVY)
+    pdf.multi_cell(162, 5, "5 COMMERCIAL DEVELOPMENTS  •  3 SECURITY / OPERATIONAL RISKS  •  5 HORIZON MILESTONES")
+    pdf.set_y(250)
+    pdf.set_draw_color(*GOLD); pdf.set_line_width(0.7); pdf.line(18, 249, 192, 249)
+    set_font("sans", "B", 7.2); color(GOLD_DARK)
+    pdf.cell(0, 4, "POWER & CORRIDORS INTELLIGENCE", new_x="LMARGIN", new_y="NEXT")
+    set_font("sans", "", 7.4); color(MUTED)
+    pdf.multi_cell(156, 4.2, "Independent monitoring of trade, logistics, infrastructure, markets and operational risk.")
+
+    # COMMERCIAL
+    pdf.add_page()
+    section_intro("Commercial developments", "Five developments shaping trade")
+    for n, r in enumerate(commercial_rows, 1):
+        story_block(r, n, "commercial")
+
+    # SECURITY
+    if pdf.get_y() > 225:
+        pdf.add_page()
+    else:
+        pdf.ln(2)
+    section_intro("Security & operational risk", "Three developments to monitor", dark=True)
+    for n, r in enumerate(security_rows, 6):
+        story_block(r, n, "security")
+
+    # HORIZON
+    if pdf.get_y() > 225:
+        pdf.add_page()
+    else:
+        pdf.ln(2)
+    section_intro("Horizon outlook", "Five dates and milestones ahead", "Forward events that may alter cargo movement, operating conditions, policy or commercial planning.")
+    for n, r in enumerate(horizon_rows, 9):
+        story_block(r, n, "horizon")
+
+    # REFERENCES
+    pdf.add_page()
+    section_intro("Sources & references", "Reference list by article number")
+    catalog = _pc_report_sources_catalog(commercial_rows, security_rows, horizon_rows)
+    for item in catalog:
+        n = int(item["article_no"])
+        title = clean(item["title"])
+        urls = [str(u).strip() for u in (item.get("urls") or []) if str(u).strip()][:6]
+        # Keep reference entries together when possible.
+        est = measure(f"{n:02d} · {title}", w=174, h=5.2, family="serif", style="B", size=10.0) + max(6, len(urls) * 8) + 5
+        if pdf.get_y() + est > 276:
+            pdf.add_page()
+        set_font("serif", "B", 10.0); color(NAVY)
+        pdf.multi_cell(174, 5.2, f"{n:02d} · {title}")
+        if urls:
+            for j, u in enumerate(urls):
+                ref = f"{n:02d}" + (chr(97+j) if len(urls) > 1 else "")
+                pdf.set_x(23); set_font("sans", "B", 6.9); color(GOLD_DARK)
+                pdf.cell(12, 4.0, ref)
+                set_font("sans", "", 6.9); color((65, 102, 130))
+                # Full URL remains visible and clickable; wrap cleanly rather than clipping.
+                pdf.multi_cell(157, 4.0, clean(u), link=u)
+        else:
+            pdf.set_x(23); set_font("sans", "", 7.0); color(MUTED)
+            pdf.multi_cell(160, 4.2, "No source URL currently attached to the canonical event.")
+        pdf.ln(2.5)
+        pdf.set_draw_color(*LINE); pdf.set_line_width(0.2)
+        pdf.line(18, pdf.get_y(), 192, pdf.get_y())
+        pdf.ln(3)
+
+    # DISCLAIMER
+    if pdf.get_y() > 205:
+        pdf.add_page()
+    pdf.ln(4)
+    y = pdf.get_y()
+    disc_h = measure(disclaimer, w=160, h=4.3, size=7.3) + 18
+    pdf.set_fill_color(*PALE); pdf.set_draw_color(*LINE)
+    pdf.rect(18, y, 174, disc_h, style="DF")
+    pdf.set_xy(24, y + 5)
+    set_font("sans", "B", 7.4); color(GOLD_DARK)
+    pdf.cell(0, 4, "DISCLAIMER", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(24); set_font("sans", "", 7.3); color(MUTED)
+    pdf.multi_cell(160, 4.3, clean(disclaimer))
+    pdf.set_y(y + disc_h + 5)
 
     return bytes(pdf.output())
 
@@ -10714,52 +10816,16 @@ def _pc_report_pdf_minimal(report_title, report_type, report_date, subtitle, com
 
 
 def _pc_report_pdf(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows=None, disclaimer=None, include_logo=True):
-    horizon_rows=horizon_rows or []
-    disclaimer=_pc_report_clean(disclaimer,_PC_REPORT_DEFAULT_DISCLAIMER)
+    horizon_rows = horizon_rows or []
+    disclaimer = _pc_report_clean(disclaimer, _PC_REPORT_DEFAULT_DISCLAIMER)
+    # The editorial fpdf2 renderer is now primary because it matches the approved
+    # HTML structure much more closely and behaves consistently on Streamlit Cloud.
     try:
-        from reportlab.lib import colors
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import mm
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Image, KeepTogether
-        import io
-        bio=io.BytesIO(); navy=colors.HexColor("#071B2E"); blue=colors.HexColor("#078DB8"); gold=colors.HexColor("#B38B32"); muted=colors.HexColor("#5F6F7C"); linec=colors.HexColor("#D7E0E7")
-        doc=SimpleDocTemplate(bio,pagesize=A4,rightMargin=18*mm,leftMargin=18*mm,topMargin=18*mm,bottomMargin=18*mm,title=report_title,author="Power & Corridors Intelligence")
-        styles=getSampleStyleSheet(); kicker=ParagraphStyle("pck",parent=styles["Normal"],fontName="Helvetica-Bold",fontSize=8,textColor=gold,leading=11,spaceAfter=4); h1=ParagraphStyle("pch1",parent=styles["Heading1"],fontName="Helvetica-Bold",fontSize=24,textColor=navy,leading=28,spaceAfter=8); h2=ParagraphStyle("pch2",parent=styles["Heading2"],fontName="Helvetica-Bold",fontSize=16,textColor=navy,leading=20,spaceAfter=10); meta=ParagraphStyle("pcm",parent=styles["Normal"],fontSize=7.5,textColor=muted,leading=10,spaceAfter=3); title_style=ParagraphStyle("pct",parent=styles["Normal"],fontName="Helvetica-Bold",fontSize=11.5,textColor=navy,leading=14,spaceAfter=6); body=ParagraphStyle("pcb",parent=styles["Normal"],fontSize=9,textColor=navy,leading=13,spaceAfter=5); small=ParagraphStyle("pcs",parent=styles["Normal"],fontSize=7.2,textColor=muted,leading=9.5,spaceAfter=3)
-        story=[]
-        if include_logo and _PC_REPORT_LOGO_B64:
-            try: story += [Image(io.BytesIO(base64.b64decode(_PC_REPORT_LOGO_B64)),width=61*mm,height=13*mm),Spacer(1,6*mm)]
-            except Exception: pass
-        story += [Paragraph("P&amp;C TRADE INTELLIGENCE · "+html_lib.escape(report_type.upper()),kicker),Paragraph(html_lib.escape(report_title),h1),Paragraph(html_lib.escape(subtitle),body),Paragraph(pd.Timestamp(report_date).strftime("%d %B %Y"),meta),Spacer(1,24*mm),Paragraph("5 COMMERCIAL DEVELOPMENTS · 3 SECURITY / OPERATIONAL RISKS · 5 HORIZON ITEMS",kicker),PageBreak()]
-        def add_section(label,heading,rows,accent,kind,start_no):
-            story.extend([Paragraph(label.upper(),kicker),Paragraph(heading,h2)])
-            for i,r in enumerate(rows,start_no):
-                dt=_pc_report_date_value(r.get("Start Date")); ds=dt.strftime("%d %b %Y") if dt else ""; m=" · ".join(x for x in [ds,_pc_report_clean(r.get("Severity")).upper(),_pc_report_clean(r.get("Location") or r.get("Country / Countries"))] if x); ttl=_pc_report_clean(r.get("_report_title") or r.get("Title") or r.get("Card Title"),"Untitled development"); txt=_pc_report_clean(r.get("_report_text"),_pc_report_horizon_default_text(r) if kind=="horizon" else _pc_report_default_summary(r,kind=="security")); parts=[Paragraph(html_lib.escape(m),meta),Paragraph(f"{i:02d} · "+html_lib.escape(ttl),title_style),Paragraph(html_lib.escape(txt),body)]
-                watch=_pc_report_clean(r.get("_report_watch"));
-                if watch: parts.append(Paragraph("<b>Watch:</b> "+html_lib.escape(watch),small))
-                urls=r.get("_report_sources") or _pc_report_row_source_urls(r)
-                if urls:
-                    refs=[f"{i:02d}" + (chr(97+j) if len(urls)>1 else "") for j,_ in enumerate(urls[:6])]
-                    parts.append(Paragraph("<b>Sources:</b> "+", ".join(refs),small))
-                inner=Table([[p] for p in parts],colWidths=[158*mm]); card=Table([[inner]],colWidths=[166*mm]); card.setStyle(TableStyle([("LINEBEFORE",(0,0),(0,-1),3,accent),("BOX",(0,0),(-1,-1),0.5,linec),("BACKGROUND",(0,0),(-1,-1),colors.white),("LEFTPADDING",(0,0),(-1,-1),7),("RIGHTPADDING",(0,0),(-1,-1),7),("TOPPADDING",(0,0),(-1,-1),7),("BOTTOMPADDING",(0,0),(-1,-1),7)])); story.append(KeepTogether([card,Spacer(1,5*mm)]))
-        add_section("Commercial developments","Five developments shaping trade",commercial_rows,blue,"commercial",1); story.append(PageBreak()); add_section("Security & operational risk","Three developments to monitor",security_rows,gold,"security",6); story.append(PageBreak()); add_section("Horizon outlook","Five dates and milestones ahead",horizon_rows,navy,"horizon",9); story.append(PageBreak()); story.extend([Paragraph("SOURCES & REFERENCES",kicker),Paragraph("Source list by article number",h2)])
-        for item in _pc_report_sources_catalog(commercial_rows,security_rows,horizon_rows):
-            n=item["article_no"]; story.append(Paragraph(f"<b>{n:02d} · {html_lib.escape(item['title'])}</b>",body)); urls=item["urls"] or []
-            if urls:
-                for j,u in enumerate(urls[:6]):
-                    ref=f"{n:02d}" + (chr(97+j) if len(urls)>1 else "")
-                    story.append(Paragraph(f'<b>{ref}</b> · <link href="{html_lib.escape(u,quote=True)}">{html_lib.escape(u)}</link>',small))
-            else:
-                story.append(Paragraph("No source URL currently attached to the canonical event.",small))
-            story.append(Spacer(1,2*mm))
-        story += [Spacer(1,5*mm),Paragraph("DISCLAIMER",kicker),Paragraph(html_lib.escape(disclaimer),small)]
-        def footer(c,d): c.saveState(); c.setStrokeColor(linec); c.line(18*mm,12*mm,192*mm,12*mm); c.setFillColor(muted); c.setFont("Helvetica",7.5); c.drawString(18*mm,7.7*mm,"POWER & CORRIDORS INTELLIGENCE"); c.drawRightString(192*mm,7.7*mm,str(d.page)); c.restoreState()
-        doc.build(story,onFirstPage=footer,onLaterPages=footer); bio.seek(0); return bio.getvalue()
+        return _pc_report_pdf_fpdf(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows, disclaimer, include_logo)
     except Exception:
-        try:
-            return _pc_report_pdf_fpdf(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows, disclaimer, include_logo)
-        except Exception:
-            return _pc_report_pdf_minimal(report_title,report_type,report_date,subtitle,commercial_rows,security_rows,horizon_rows,disclaimer)
+        # Retain the dependency-free emergency fallback so PDF export never blocks
+        # the report workflow if a deployment has an unusual Python environment.
+        return _pc_report_pdf_minimal(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows, disclaimer)
 
 
 
