@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "535-chatgpt-research-load-event-links-2026-09-21"
+LOADER_BUILD = "536-chatgpt-research-load-routes-2026-09-21"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -6509,6 +6509,14 @@ def _generic_schema_driven_workbook_records(sections):
             return "terminal"
         if "berth_id" in c and c.intersection({"berth_name","name"}):
             return "berth"
+        # Canonical transport routes/corridors belong in pc_transport_routes.
+        # A Routes/Corridors research sheet should not be downgraded to the
+        # transport-service layer merely because it also carries route_id/name.
+        if "route_id" in c and "route_name" in c and (
+            "route" in str(sn).casefold() or "corridor" in str(sn).casefold()
+            or c.intersection({"origin_type","origin_id","destination_type","destination_id","countries","current_status","known_bottlenecks","freight_types"})
+        ):
+            return "route"
         if c.intersection({"transport_service_id","service_id","route_id"}) and c.intersection({"service_name","route_name"}):
             return "service"
 
@@ -6686,7 +6694,40 @@ def _generic_schema_driven_workbook_records(sections):
                 },1.0))
 
     # ------------------------------------------------------------------
-    # Pass 3: transport services/routes.
+    # Pass 3a: canonical transport routes/corridors.
+    # ------------------------------------------------------------------
+    for sn,(sheet,rows) in sheet_rows.items():
+        if structural.get(sn)!="route":
+            continue
+        for i,row in enumerate(rows,1):
+            name=_generic_first(row,"route_name","name")
+            if not name: continue
+            url=_rw_url(row)
+            operator=_generic_first(row,"operator_entity_name","operator_name","operator","company","carrier")
+            countries=_generic_first(row,"countries","country")
+            if isinstance(countries,str):
+                countries=[x.strip() for x in countries.replace(";",",").split(",") if x.strip()]
+            meta=_rw_metadata(kind,sheet,row,{
+                "workbook_local_id":row.get("route_id"),
+                "origin_name":_generic_first(row,"origin_name","origin"),
+                "destination_name":_generic_first(row,"destination_name","destination"),
+                "distance_km":_rw_number(row.get("distance_km")),
+                "frequency":_generic_first(row,"frequency","service_frequency"),
+                "un_locode":_generic_first(row,"un_locode","destination_un_locode"),
+                "sheet_archetype":"transport_route",
+            })
+            records.append(_rw_record("pc_transport_routes",f"route:{name}:{_generic_first(row,'mode','transport_mode') or ''}",{
+                "route_name":name,
+                "mode":_generic_first(row,"mode","transport_mode") or "multimodal",
+                "operator_entity_name":operator,
+                "countries":countries,
+                "current_status":_generic_first(row,"current_status","status"),
+                "source_url":url,
+                "metadata":meta,
+            },1.0))
+
+    # ------------------------------------------------------------------
+    # Pass 3b: transport services.
     # ------------------------------------------------------------------
     for sn,(sheet,rows) in sheet_rows.items():
         if structural.get(sn)!="service":
@@ -7587,6 +7628,39 @@ def _simple_ensure_asset(sb, name, country=None, asset_type="asset", subtype=Non
     return aid
 
 
+def _simple_ensure_route(sb, name, mode=None, countries=None, source_id=None, operator_entity_id=None, metadata=None):
+    """Exact canonical route lookup; create a provisional route when genuinely new."""
+    name=_simple_clean_name(name)
+    if not name:
+        return None
+    try:
+        hits=(sb.table("pc_transport_routes").select("route_id,route_name,mode")
+              .ilike("route_name",name).limit(10).execute().data or [])
+        if mode:
+            mk=str(mode).strip().casefold()
+            same=[x for x in hits if not x.get("mode") or str(x.get("mode")).strip().casefold()==mk]
+            if same: hits=same
+        if hits:
+            return hits[0]["route_id"]
+    except Exception:
+        pass
+    rid=_simple_hash_id("ROUTE_AI",name,mode or "")
+    row={
+        "route_id":rid,
+        "route_name":name,
+        "mode":mode or "multimodal",
+        "operator_entity_id":operator_entity_id,
+        "countries":countries if isinstance(countries,list) else None,
+        "current_status":"active",
+        "source_id":source_id,
+        "metadata":dict(metadata or {}, created_by="simple_key_first_loader"),
+    }
+    writable=set(_table_write_columns_live(sb,"pc_transport_routes"))
+    row={k:v for k,v in row.items() if k in writable and v not in (None,"")}
+    sb.table("pc_transport_routes").upsert(row,on_conflict="route_id").execute()
+    return rid
+
+
 def _simple_ensure_mobile_asset(sb, name=None, imo=None, mmsi=None, flag=None, subtype=None, source_id=None):
     """IMO -> MMSI -> exact name/flag lookup; otherwise create canonical mobile asset."""
     name=_simple_clean_name(name)
@@ -7914,6 +7988,11 @@ def _simple_prepare_payload(sb, table, payload, natural_key):
     if table=="pc_mobile_assets" and not p.get("mobile_asset_id"):
         p["mobile_asset_id"]=_simple_ensure_mobile_asset(sb,p.get("name"),p.get("imo"),p.get("mmsi"),p.get("flag"),p.get("subtype"),sid)
 
+    if table=="pc_transport_routes" and not p.get("route_id"):
+        p["route_id"]=_simple_ensure_route(
+            sb,p.get("route_name") or p.get("name"),p.get("mode"),p.get("countries"),sid,p.get("operator_entity_id"),p.get("metadata")
+        )
+
     # Generic graph relationships: research workbooks often carry endpoint names
     # rather than canonical IDs. Resolve/create those endpoints before the write.
     if table=="pc_relationships":
@@ -7949,6 +8028,9 @@ def _simple_prepare_payload(sb, table, payload, natural_key):
         elif lt in {"mobile_asset","vessel","ship","aircraft"}:
             p["linked_type"]="mobile_asset"
             p["linked_id"]=_simple_ensure_mobile_asset(sb,p.get("linked_name"),p.get("imo"),p.get("mmsi"),p.get("flag"),p.get("subtype"),sid)
+        elif lt in {"route","transport_route","corridor","network"}:
+            p["linked_type"]="route"
+            p["linked_id"]=_simple_ensure_route(sb,p.get("linked_name"),p.get("mode"),p.get("countries"),sid,None,p.get("metadata"))
         else:
             p["linked_type"]="asset"
             p["linked_id"]=_simple_ensure_asset(sb,p.get("linked_name"),country,p.get("asset_type") or "asset",p.get("subtype"),sid)
