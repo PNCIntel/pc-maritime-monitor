@@ -10211,10 +10211,17 @@ def _pc_report_security_mask(df):
         strong_security = pd.Series(False, index=df.index)
         strong_operational = pd.Series(False, index=df.index)
 
-    # Strong security terms are admitted even before disruption metadata catches up.
-    # Operational-risk events qualify when either the event type is clearly disruptive
-    # or canonical disruption metadata is present.
-    return security_kw | strong_security | ((explicit | primary | strong_operational) & operational_kw)
+    # Exclude routine commercial/corporate developments from the security pool even if
+    # loose metadata or wording contains generic operational terms.
+    routine_commercial = blob.str.contains(
+        r"newbuild|newbuilding|fleet order|vessel order|shipbuilding|tender|contract award|"
+        r"acquisition|sale and purchase|secondhand|ipo|listing|private placement|financing|"
+        r"partnership|collaboration|investment|expansion|throughput record|facility opening|"
+        r"capacity expansion|commissioning|delivery programme|charter award",
+        regex=True, na=False
+    )
+    strong = security_kw | strong_security | ((explicit | primary | strong_operational) & operational_kw)
+    return strong & ~routine_commercial
 
 
 def _pc_report_window(df, report_date, report_type):
@@ -10306,7 +10313,19 @@ def _pc_report_candidates(report_date, report_type):
     story_flag = window.get("Is Story", pd.Series(True, index=window.index)).fillna(False).astype(bool)
     sec_mask = _pc_report_security_mask(window)
     security = window[sec_mask].copy()
-    commercial = window[(~sec_mask) & story_flag].copy()
+    blob = _pc_report_event_blob(window)
+    ceremonial = blob.str.contains(
+        r"independence day|national day|founder.?s day|respect for the aged|day of atonement|"
+        r"anniversary|commemoration|public holiday|national holiday|religious holiday|festival",
+        regex=True, na=False
+    )
+    substantive_trade = blob.str.contains(
+        r"port|terminal|rail|freight|cargo|shipping|vessel|tanker|container|logistics|customs|"
+        r"tariff|trade agreement|fta|pipeline|refinery|airport|air cargo|supply chain|shipyard|"
+        r"concession|warehouse|manufactur|commodity|energy|export|import|transport",
+        regex=True, na=False
+    )
+    commercial = window[(~sec_mask) & story_flag & (~ceremonial | substantive_trade)].copy()
     sev = {"critical": 6, "severe": 5, "high": 4, "elevated": 3, "medium": 3, "moderate": 2, "low": 1}
     for frame in (commercial, security):
         frame["_sev_rank"] = frame.get("Severity", pd.Series(index=frame.index, dtype=str)).fillna("").astype(str).str.casefold().map(sev).fillna(0)
@@ -10664,9 +10683,9 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
     def _inline_sources(r, article_no):
         refs=_source_refs(r,article_no)
         if not refs:
-            return f'<div style="margin-top:12px;font-size:11px;line-height:1.5;color:{MUTED};overflow-wrap:anywhere;"><strong>Sources:</strong> source record not yet resolved in the canonical event graph.</div>'
+            return f'<div style="margin-top:12px;font-size:11px;line-height:1.5;color:{MUTED};overflow-wrap:anywhere;text-align:left;"><strong>Sources:</strong> source record not yet resolved in the canonical event graph.</div>'
         bits=[f'<a href="{esc(u, quote=True)}" target="_blank" style="color:#9b642e;text-decoration:underline;font-weight:700;">{esc(label)}</a>' for label,u in refs]
-        return f'<div style="margin-top:12px;font-size:11px;line-height:1.5;color:{MUTED};overflow-wrap:anywhere;"><strong>Sources:</strong> {", ".join(bits)}</div>'
+        return f'<div style="margin-top:12px;font-size:11px;line-height:1.5;color:{MUTED};overflow-wrap:anywhere;text-align:left;"><strong>Sources:</strong> {", ".join(bits)}</div>'
 
     def _story(r, article_no, kind):
         title=esc(_pc_report_clean(r.get("_report_title") or r.get("Card Title") or r.get("Title"),"Untitled development"))
@@ -10678,10 +10697,10 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
         accent=GOLD if kind=="security" else BLUE
         watch_block=''
         if watch:
-            watch_block=f'''<div style="background:{PALE};border-left:4px solid {GOLD};padding:13px 15px;margin:16px 0 0 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;">
+            watch_block=f'''<div style="background:{PALE};border-left:4px solid {GOLD};padding:13px 15px;margin:16px 0 0 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-size:10px;font-weight:700;letter-spacing:1.35px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 5px 0;">What to watch</div>
 <div style="font-size:13px;line-height:1.62;color:#4d5a63;margin:0;">{watch}</div></div>'''
-        return f'''<div style="border-left:4px solid {accent};padding:0 0 0 17px;margin:0 0 30px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;">
+        return f'''<div style="border-left:4px solid {accent};padding:0 0 0 17px;margin:0 0 30px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-size:10px;font-weight:700;letter-spacing:1.15px;text-transform:uppercase;color:{MUTED};margin:0 0 8px 0;line-height:1.45;">{meta}</div>
 <div style="font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:1.28;font-weight:700;color:{NAVY};margin:0 0 12px 0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{article_no:02d} &middot; {title}</div>
 <div style="font-size:15px;line-height:1.68;color:{TEXT};margin:0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{body}</div>
@@ -10693,7 +10712,7 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
         date_s=esc(_safe_date(r.get("Start Date")) or _pc_report_clean(r.get("Date Precision"),"Date TBC"))
         loc=esc(_pc_report_clean(r.get("Location") or r.get("Country / Countries") or r.get("Horizon Type")))
         meta=" &nbsp;&bull;&nbsp; ".join(x for x in [date_s.upper(),loc.upper()] if x)
-        return f'''<div style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:15px 17px;margin:0 0 18px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;">
+        return f'''<div style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:15px 17px;margin:0 0 18px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-size:10px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:{MUTED};margin:0 0 6px 0;line-height:1.45;">{meta}</div>
 <div style="font-family:Georgia,'Times New Roman',serif;font-size:19px;line-height:1.35;font-weight:700;color:{NAVY_2};margin:0 0 8px 0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{article_no:02d} &middot; {title}</div>
 <div style="font-size:13.5px;line-height:1.66;color:#4d5a63;margin:0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{body}</div>{_inline_sources(r,article_no)}</div>'''
@@ -10708,10 +10727,10 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
         entries=[]
         for j,url in enumerate(urls[:6]):
             ref=f"{n:02d}" + (chr(97+j) if len(urls)>1 else "")
-            entries.append(f'<div style="font-size:11px;line-height:1.55;margin:3px 0;color:{MUTED};overflow-wrap:anywhere;"><strong style="color:{NAVY};">{ref}</strong> &nbsp;<a href="{esc(url,quote=True)}" target="_blank" style="color:#9b642e;text-decoration:underline;">{esc(_domain(url))}</a></div>')
+            entries.append(f'<div style="font-size:11px;line-height:1.55;margin:3px 0;color:{MUTED};overflow-wrap:anywhere;word-break:break-word;text-align:left;"><strong style="color:{NAVY};">{ref}</strong> &nbsp;<a href="{esc(url,quote=True)}" target="_blank" style="color:#9b642e;text-decoration:underline;">{esc(url)}</a></div>')
         if not entries:
             entries.append(f'<div style="font-size:11px;line-height:1.55;color:{MUTED};">Source URL not yet resolved in the canonical event graph.</div>')
-        source_blocks.append(f'''<div style="padding:11px 0;border-bottom:1px solid {LINE};max-width:100%;overflow-wrap:anywhere;word-break:normal;">
+        source_blocks.append(f'''<div style="padding:11px 0;border-bottom:1px solid {LINE};max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-family:Georgia,'Times New Roman',serif;font-size:15px;line-height:1.4;font-weight:700;color:{NAVY};margin:0 0 4px 0;">{n:02d} &middot; {title}</div>{''.join(entries)}</div>''')
     sources_html=''.join(source_blocks)
 
@@ -10721,20 +10740,21 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
 
     return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:{TEXT};">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#ffffff;table-layout:fixed;"><tr><td align="center" style="padding:0 12px;">
-<div style="width:100%;max-width:680px;margin:0 auto;box-sizing:border-box;overflow-wrap:anywhere;word-break:normal;">
-<div style="border-top:4px solid {GOLD};padding:22px 0 18px 0;margin:0;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#9a7638;margin:0 0 8px 0;">P&amp;C Trade Intelligence</div><div style="font-size:12px;font-weight:700;letter-spacing:1.25px;text-transform:uppercase;color:{MUTED};margin:0 0 12px 0;">{pubdate} &nbsp;&bull;&nbsp; {report_type_text}</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:1.1;font-weight:700;color:{NAVY};margin:0 0 12px 0;overflow-wrap:anywhere;word-break:normal;">{esc(report_title)}</div><div style="font-size:16px;line-height:1.58;color:#56636c;margin:0;">{subtitle_text}</div></div>
-<div style="background:{PALE_2};border-top:3px solid {GOLD};padding:12px 14px;margin:2px 0 28px 0;font-size:12px;line-height:1.55;color:{NAVY};box-sizing:border-box;overflow-wrap:anywhere;"><strong>5 Commercial Developments</strong> &nbsp;&bull;&nbsp; <strong>3 Security / Operational Risks</strong> &nbsp;&bull;&nbsp; <strong>5 Horizon Milestones</strong></div>
-<div style="margin:0 0 22px 0;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Commercial developments</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 20px 0;">Five developments shaping trade</div></div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;background:#ffffff;"><tr><td align="center" style="padding:0 12px;">
+<table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" align="center" style="width:100%;max-width:680px;border-collapse:collapse;background:#ffffff;"><tr><td align="left" style="text-align:left;padding:0;margin:0;">
+<div style="border-top:4px solid {GOLD};padding:22px 0 18px 0;margin:0;text-align:left;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#9a7638;margin:0 0 8px 0;">P&amp;C Trade Intelligence</div><div style="font-size:12px;font-weight:700;letter-spacing:1.25px;text-transform:uppercase;color:{MUTED};margin:0 0 12px 0;">{pubdate} &nbsp;&bull;&nbsp; {report_type_text}</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:1.1;font-weight:700;color:{NAVY};margin:0 0 12px 0;overflow-wrap:anywhere;word-break:normal;">{esc(report_title)}</div><div style="font-size:16px;line-height:1.58;color:#56636c;margin:0;">{subtitle_text}</div></div>
+<div style="background:{PALE_2};border-top:3px solid {GOLD};padding:12px 14px;margin:2px 0 28px 0;font-size:12px;line-height:1.55;color:{NAVY};box-sizing:border-box;overflow-wrap:anywhere;text-align:left;"><strong>5 Commercial Developments</strong> &nbsp;&bull;&nbsp; <strong>3 Security / Operational Risks</strong> &nbsp;&bull;&nbsp; <strong>5 Horizon Milestones</strong></div>
+<div style="margin:0 0 22px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Commercial developments</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 20px 0;">Five developments shaping trade</div></div>
 {commercial_html}
-<div style="background:{NAVY};border-top:4px solid {GOLD};padding:20px 22px;margin:8px 0 26px 0;box-sizing:border-box;"><div style="font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#d6b46f;margin:0 0 8px 0;">Security &amp; operational risk</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.3;font-weight:700;color:#ffffff;margin:0;">Three developments to monitor</div></div>
+<div style="background:{NAVY};border-top:4px solid {GOLD};padding:20px 22px;margin:8px 0 26px 0;box-sizing:border-box;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#d6b46f;margin:0 0 8px 0;">Security &amp; operational risk</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.3;font-weight:700;color:#ffffff;margin:0;">Three developments to monitor</div></div>
 {security_html}
-<div style="margin:10px 0 20px 0;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Horizon outlook</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 6px 0;">Five dates and milestones ahead</div><div style="font-size:14px;line-height:1.6;color:{MUTED};margin:0 0 18px 0;">Forward events that may alter cargo movement, operating conditions, policy or commercial planning.</div></div>
+<div style="margin:10px 0 20px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Horizon outlook</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 6px 0;">Five dates and milestones ahead</div><div style="font-size:14px;line-height:1.6;color:{MUTED};margin:0 0 18px 0;">Forward events that may alter cargo movement, operating conditions, policy or commercial planning.</div></div>
 {horizon_html}
-<div style="border-top:4px solid {GOLD};padding:18px 0 0 0;margin:28px 0 26px 0;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Sources &amp; references</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:26px;line-height:1.25;font-weight:700;color:{NAVY};margin:0 0 8px 0;">Reference list by article number</div>{sources_html}</div>
-<div style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:18px 20px;margin:0 0 28px 0;box-sizing:border-box;overflow-wrap:anywhere;"><div style="font-size:11px;font-weight:700;letter-spacing:1.45px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 8px 0;">Disclaimer</div><div style="font-size:11px;line-height:1.62;color:#5b666e;margin:0;">{esc(disclaimer)}</div></div>
-<div style="padding:16px 0 26px 0;border-top:1px solid {LINE};font-size:10px;line-height:1.55;color:{MUTED};overflow-wrap:anywhere;">Power &amp; Corridors Intelligence &nbsp;&bull;&nbsp; powerncorridors.com &nbsp;&bull;&nbsp; Generated from the canonical P&amp;C event layer. Analyst edits are preserved in the exported publication.</div>
-</div></td></tr></table></body></html>'''
+<div style="border-top:4px solid {GOLD};padding:18px 0 0 0;margin:28px 0 26px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Sources &amp; references</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:26px;line-height:1.25;font-weight:700;color:{NAVY};margin:0 0 8px 0;">Reference list by article number</div>{sources_html}</div>
+<div style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:18px 20px;margin:0 0 28px 0;box-sizing:border-box;overflow-wrap:anywhere;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.45px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 8px 0;">Disclaimer</div><div style="font-size:11px;line-height:1.62;color:#5b666e;margin:0;">{esc(disclaimer)}</div></div>
+<div style="padding:16px 0 26px 0;border-top:1px solid {LINE};font-size:10px;line-height:1.55;color:{MUTED};overflow-wrap:anywhere;text-align:left;">Power &amp; Corridors Intelligence &nbsp;&bull;&nbsp; powerncorridors.com &nbsp;&bull;&nbsp; Generated from the canonical P&amp;C event layer. Analyst edits are preserved in the exported publication.</div>
+</td></tr></table>
+</td></tr></table></body></html>'''
 
 def _pc_report_pdf_fpdf(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows, disclaimer, include_logo=True):
     """Branded A4 PDF renderer using fpdf2.
@@ -15451,3 +15471,5 @@ elif page=="Data":
 
 st.sidebar.markdown("---")
 st.sidebar.caption(f"{len(TABLES):,} tables loaded · {RELEASE_NAME}")
+
+# v6.2: left-aligned Ghost/Gmail-safe HTML; full source URLs restored; report candidate hygiene tightened.
