@@ -42,7 +42,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v3.8.0-latest-reporting-inline-context"
+APP_VERSION = "v4.1.0-latest-reporting-nameerror-fix"
 RELEASE_NAME = "End-to-End Logistics Operating Picture · Companies, Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -4867,7 +4867,7 @@ def render_latest_reporting_trade(limit=4):
 
     for _,row in events.iterrows():
         title=str(row.get("Title","Event") or "Event").strip()
-        date=pretty_date(row.get("Start Date",""))
+        date=pc_pretty_date(row.get("Start Date",""))
         etype=pretty_enum(str(row.get("Event Type","") or "Event"))
         location=str(row.get("Location","") or row.get("Country / Countries","") or "").strip()
         ext=_event_extended_context(row)
@@ -4901,7 +4901,7 @@ def render_trade_horizon_sidebar_compact(limit=4):
         horizon["_hdt"]=pd.to_datetime(horizon["Start Date"],errors="coerce")
         horizon=horizon.sort_values("_hdt",ascending=True,na_position="last")
     for _,r in horizon.head(limit).iterrows():
-        date=pretty_date(r.get("Start Date",""))
+        date=pc_pretty_date(r.get("Start Date",""))
         title=str(r.get("Title","") or "Upcoming event").strip()
         country=str(r.get("Country / Countries","") or "").strip()
         st.markdown(

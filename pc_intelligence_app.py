@@ -631,7 +631,7 @@ def humanize_relationship(v):
         return ""
     if s in RELATIONSHIP_LABELS:
         return RELATIONSHIP_LABELS[s]
-    return pc_pc_pretty_enum(s)
+    return pc_pretty_enum(s)
 
 
 def show_df(df, cols=None, height=420):
