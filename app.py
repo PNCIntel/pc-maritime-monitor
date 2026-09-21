@@ -10621,6 +10621,17 @@ def _pc_report_horizon_default_text(row):
     return txt or "Forward milestone requiring monitoring."
 
 
+def _pc_report_sources_catalog(commercial_rows, security_rows, horizon_rows):
+    out=[]
+    n=1
+    for kind, rows in (("commercial",commercial_rows),("security",security_rows),("horizon",horizon_rows or [])):
+        for r in rows:
+            title=_pc_report_clean(r.get("_report_title") or r.get("Card Title") or r.get("Title") or r.get("Next Milestone"),"Untitled development")
+            urls=r.get("_report_sources") or _pc_report_row_source_urls(r)
+            out.append({"article_no":n,"kind":kind,"title":title,"urls":urls})
+            n+=1
+    return out
+
 def _pc_report_html(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows=None, disclaimer=None, include_logo=True):
     esc=html_lib.escape
     horizon_rows=horizon_rows or []
@@ -10631,13 +10642,11 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
     else:
         logo_html='<div style="font-weight:800;letter-spacing:1.2px;color:#071B2E;font-size:19px;">POWER &amp; CORRIDORS</div>'
 
-    def source_html(r):
+    def source_html(r,n):
         urls=r.get("_report_sources") or _pc_report_row_source_urls(r)
         if not urls: return ""
-        bits=[]
-        for i,u in enumerate(urls[:4],1):
-            bits.append('<a href="%s" style="color:%s;text-decoration:underline;word-break:break-all;">Source %d</a>'%(esc(u,quote=True),blue,i))
-        return '<div style="margin-top:9px;font-size:11px;line-height:1.5;color:%s;"><b>Sources:</b> %s</div>'%(muted," &nbsp;·&nbsp; ".join(bits))
+        refs=[f"{n:02d}" + (chr(97+j) if len(urls)>1 else "") for j,_ in enumerate(urls[:6])]
+        return '<div style="margin-top:9px;font-size:11px;line-height:1.5;color:%s;"><b>Sources:</b> <a href="#sources" style="color:%s;text-decoration:underline;">%s</a></div>'%(muted,blue,", ".join(refs))
 
     def story_block(r,n,kind):
         title=esc(_pc_report_clean(r.get("_report_title") or r.get("Card Title") or r.get("Title"),"Untitled development"))
@@ -10654,7 +10663,7 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
                 '<div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:%s;">%s</div>'
                 '<div style="font-size:18px;line-height:1.25;font-weight:700;color:%s;margin:5px 0 8px;">%02d · %s</div>'
                 '<div style="font-size:13px;line-height:1.65;color:#263746;">%s</div>%s%s'
-                '</td></tr></table></td></tr>')%(line,accent,muted,esc(meta),navy,n,title,body,watch_html,source_html(r))
+                '</td></tr></table></td></tr>')%(line,accent,muted,esc(meta),navy,n,title,body,watch_html,source_html(r,n))
 
     def horizon_block(r,n):
         title=esc(_pc_report_clean(r.get("_report_title") or r.get("Title") or r.get("Next Milestone"),"Forward milestone"))
@@ -10667,11 +10676,22 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
                 '<div style="font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:%s;">%s</div>'
                 '<div style="font-size:17px;line-height:1.25;font-weight:700;color:%s;margin:5px 0 7px;">%02d · %s</div>'
                 '<div style="font-size:13px;line-height:1.6;color:#263746;">%s</div>%s'
-                '</td></tr></table></td></tr>')%(line,navy,muted,esc(meta),navy,n,title,body,source_html(r))
+                '</td></tr></table></td></tr>')%(line,navy,muted,esc(meta),navy,n,title,body,source_html(r,n))
 
     commercial_html="".join(story_block(r,i,"commercial") for i,r in enumerate(commercial_rows,1))
-    security_html="".join(story_block(r,i,"security") for i,r in enumerate(security_rows,1))
-    horizon_html="".join(horizon_block(r,i) for i,r in enumerate(horizon_rows,1))
+    security_html="".join(story_block(r,i,"security") for i,r in enumerate(security_rows,6))
+    horizon_html="".join(horizon_block(r,i) for i,r in enumerate(horizon_rows,9))
+    refs=[]
+    for item in _pc_report_sources_catalog(commercial_rows,security_rows,horizon_rows):
+        n=item["article_no"]; title=esc(item["title"]); urls=item["urls"] or []
+        link_bits=[]
+        for j,u in enumerate(urls[:6]):
+            ref=f"{n:02d}" + (chr(97+j) if len(urls)>1 else "")
+            link_bits.append('<div style="font-size:10.5px;line-height:1.55;margin-top:3px;"><b>%s</b> · <a href="%s" style="color:%s;text-decoration:underline;word-break:break-all;">%s</a></div>'%(ref,esc(u,quote=True),blue,esc(u)))
+        if not link_bits:
+            link_bits=['<div style="font-size:10.5px;color:%s;margin-top:3px;">No source URL currently attached to the canonical event.</div>'%muted]
+        refs.append('<tr><td style="padding:8px 0;border-bottom:1px solid %s;"><div style="font-size:12px;font-weight:700;color:%s;">%02d · %s</div>%s</td></tr>'%(line,navy,n,title,"".join(link_bits)))
+    sources_html="".join(refs)
     pubdate=pd.Timestamp(report_date).strftime("%d %B %Y")
     sub=esc(subtitle or "Trade, logistics, infrastructure, markets and operational risk")
     return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -10687,9 +10707,238 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
 <tr><td style="padding:10px 34px 24px;"><div style="font-size:11px;color:{gold};letter-spacing:1.2px;font-weight:700;text-transform:uppercase;">Security &amp; operational risk</div><div style="font-size:23px;font-weight:800;margin:4px 0 14px;color:{navy};">Three developments to monitor</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{security_html}</table></td></tr>
 <tr><td style="padding:14px 34px 10px;"><div style="height:2px;background:{blue}"></div></td></tr>
 <tr><td style="padding:10px 34px 24px;"><div style="font-size:11px;color:{gold};letter-spacing:1.2px;font-weight:700;text-transform:uppercase;">Horizon outlook</div><div style="font-size:23px;font-weight:800;margin:4px 0 14px;color:{navy};">Five dates and milestones ahead</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{horizon_html}</table></td></tr>
+<tr><td id="sources" style="padding:18px 34px 24px;background:#ffffff;"><div style="height:2px;background:{gold};margin-bottom:14px;"></div><div style="font-size:11px;color:{gold};letter-spacing:1.2px;font-weight:700;text-transform:uppercase;">Sources &amp; references</div><div style="font-size:23px;font-weight:800;margin:4px 0 10px;color:{navy};">Source list by article number</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{sources_html}</table></td></tr>
 <tr><td style="padding:24px 34px;background:{pale};"><div style="font-size:11px;color:{gold};letter-spacing:1.1px;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Disclaimer</div><div style="font-size:10.5px;line-height:1.55;color:{muted};">{esc(disclaimer)}</div></td></tr>
 <tr><td style="padding:14px 34px;background:{navy};font-size:10px;line-height:1.5;color:#ffffff;">Power &amp; Corridors Intelligence · powerncorridors.com · Generated from the canonical P&amp;C event layer. Analyst edits are preserved in the exported publication.</td></tr>
 </table></td></tr></table></body></html>'''
+
+
+
+def _pc_report_pdf_fpdf(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows, disclaimer, include_logo=True):
+    """Branded A4 PDF renderer using fpdf2.
+
+    This is the preferred lightweight renderer for Streamlit deployments where
+    ReportLab is not installed. It supports Unicode fonts, live hyperlinks and
+    predictable page-breaking while preserving the visual hierarchy of the
+    HTML report.
+    """
+    import io, os, base64, html as _html
+    from fpdf import FPDF
+
+    NAVY = (7, 27, 46)
+    BLUE = (7, 141, 184)
+    GOLD = (179, 139, 50)
+    MUTED = (95, 111, 124)
+    LINE = (215, 224, 231)
+    PALE = (246, 248, 250)
+    WHITE = (255, 255, 255)
+
+    class PCPDF(FPDF):
+        def header(self):
+            if self.page_no() == 1:
+                return
+            self.set_draw_color(*BLUE)
+            self.set_line_width(0.45)
+            self.line(18, 16, 192, 16)
+            self.set_text_color(*NAVY)
+            self.set_font("PC", "B", 8.4)
+            self.set_xy(18, 8.7)
+            self.cell(0, 5, "POWER & CORRIDORS INTELLIGENCE", new_x="LMARGIN", new_y="NEXT")
+            self.ln(5)
+
+        def footer(self):
+            self.set_y(-14)
+            self.set_draw_color(*LINE)
+            self.set_line_width(0.25)
+            self.line(18, self.get_y(), 192, self.get_y())
+            self.set_y(-10.5)
+            self.set_font("PC", "", 7.2)
+            self.set_text_color(*MUTED)
+            self.cell(90, 4, "Power & Corridors Intelligence  |  powerncorridors.com")
+            self.cell(0, 4, str(self.page_no()), align="R")
+
+    pdf = PCPDF("P", "mm", "A4")
+    pdf.set_margins(18, 18, 18)
+    pdf.set_auto_page_break(True, 18)
+    pdf.set_title(str(report_title or "Power & Corridors Intelligence"))
+    pdf.set_author("Power & Corridors Intelligence")
+
+    # Prefer embedded Unicode system fonts; use core Helvetica only as a last resort.
+    regular_candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    ]
+    bold_candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    ]
+    reg = next((x for x in regular_candidates if os.path.exists(x)), None)
+    bld = next((x for x in bold_candidates if os.path.exists(x)), None)
+    unicode_font = bool(reg and bld)
+    if unicode_font:
+        pdf.add_font("PC", "", reg)
+        pdf.add_font("PC", "B", bld)
+    else:
+        pdf.add_font("PC", "", fname="") if False else None
+        # Aliases through the core font. Text is normalised below when necessary.
+        pdf.set_font("Helvetica", "", 10)
+
+    def clean(v, fallback=""):
+        t = _pc_report_clean(v, fallback)
+        if unicode_font:
+            return t
+        return (t.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+                 .replace("–", "-").replace("—", "-").replace("•", "-").replace("…", "...")
+                 .replace("→", "->").replace("·", "|").encode("latin-1", "replace").decode("latin-1"))
+
+    def font(style="", size=10):
+        pdf.set_font("PC" if unicode_font else "Helvetica", style, size)
+
+    def rgb(c): pdf.set_text_color(*c)
+
+    def add_logo(max_w=56):
+        if not include_logo or not _PC_REPORT_LOGO_B64:
+            return False
+        try:
+            raw = base64.b64decode(_PC_REPORT_LOGO_B64)
+            bio = io.BytesIO(raw)
+            pdf.image(bio, x=18, y=20, w=max_w)
+            return True
+        except Exception:
+            return False
+
+    def paragraph(text, size=9.6, leading=4.8, color=NAVY, style="", x=None, w=None, align="L"):
+        if x is not None: pdf.set_x(x)
+        font(style, size); rgb(color)
+        if w is None: w = 174
+        pdf.multi_cell(w, leading, clean(text), align=align)
+
+    def kicker(text):
+        font("B", 8.4); rgb(GOLD)
+        pdf.cell(0, 4.5, clean(text).upper(), new_x="LMARGIN", new_y="NEXT")
+
+    def section_heading(k, h):
+        pdf.add_page()
+        kicker(k)
+        font("B", 19); rgb(NAVY)
+        pdf.multi_cell(174, 8.2, clean(h))
+        pdf.ln(2)
+
+    def story_height(r, kind):
+        # Conservative estimate for page-break decisions.
+        title = clean(r.get("_report_title") or r.get("Title") or r.get("Card Title") or r.get("Next Milestone"), "Untitled development")
+        body = clean(r.get("_report_text"), _pc_report_horizon_default_text(r) if kind == "horizon" else _pc_report_default_summary(r, kind == "security"))
+        watch = clean(r.get("_report_watch"))
+        n = len(title)/65 + len(body)/105 + len(watch)/115
+        return max(45, min(95, 29 + n*5.0))
+
+    def source_links(r, article_no):
+        urls = r.get("_report_sources") or _pc_report_row_source_urls(r)
+        if not urls:
+            return
+        refs=[f"{article_no:02d}" + (chr(97+j) if len(urls)>1 else "") for j,_ in enumerate(urls[:6])]
+        pdf.set_x(24); font("B",7.4); rgb(MUTED); pdf.cell(15,4,"Sources:")
+        font("",7.4); rgb(BLUE); pdf.cell(0,4,", ".join(refs)); pdf.ln(5.2)
+
+    def story_card(r, i, kind, accent):
+        est = story_height(r, kind)
+        if pdf.will_page_break(est):
+            pdf.add_page()
+        x0 = 18; y0 = pdf.get_y()
+        # Left visual accent and top rule. Box is drawn after text once final height is known.
+        pdf.set_x(24)
+        dt = _pc_report_date_value(r.get("Start Date"))
+        ds = dt.strftime("%d %b %Y") if dt else ""
+        meta = "  |  ".join(x for x in [ds, clean(r.get("Severity")).upper(), clean(r.get("Location") or r.get("Country / Countries"))] if x)
+        font("", 7.7); rgb(MUTED)
+        pdf.multi_cell(162, 4.2, clean(meta))
+        title = clean(r.get("_report_title") or r.get("Title") or r.get("Card Title") or r.get("Next Milestone"), "Untitled development")
+        font("B", 12.8); rgb(NAVY)
+        pdf.set_x(24); pdf.multi_cell(162, 6.1, f"{i:02d}  |  {title}")
+        pdf.ln(1)
+        body = clean(r.get("_report_text"), _pc_report_horizon_default_text(r) if kind == "horizon" else _pc_report_default_summary(r, kind == "security"))
+        font("", 9.1); rgb(NAVY)
+        pdf.set_x(24); pdf.multi_cell(162, 4.8, body)
+        watch = clean(r.get("_report_watch"))
+        if watch:
+            pdf.ln(0.8); pdf.set_x(24)
+            font("B", 8.1); rgb(NAVY); pdf.write(4.3, "Watch: ")
+            font("", 8.1); pdf.write(4.3, watch); pdf.ln(5)
+        source_links(r, i)
+        y1 = pdf.get_y() + 2
+        pdf.set_draw_color(*LINE); pdf.set_line_width(0.25)
+        pdf.rect(x0, y0, 174, y1-y0)
+        pdf.set_fill_color(*accent)
+        pdf.rect(x0, y0, 2.2, y1-y0, style="F")
+        pdf.set_y(y1 + 4)
+
+    # Cover
+    pdf.add_page()
+    add_logo(62)
+    pdf.set_y(46)
+    pdf.set_draw_color(*BLUE); pdf.set_line_width(0.65); pdf.line(18, 44, 192, 44)
+    kicker(f"P&C TRADE INTELLIGENCE  |  {report_type}")
+    font("B", 25); rgb(NAVY)
+    pdf.multi_cell(174, 10.5, clean(report_title))
+    pdf.ln(2)
+    font("", 11); rgb(MUTED)
+    pdf.multi_cell(156, 6, clean(subtitle or "Trade, logistics, infrastructure, markets and operational risk"))
+    pdf.ln(5)
+    font("B", 10); rgb(NAVY)
+    pdf.cell(0, 6, pd.Timestamp(report_date).strftime("%d %B %Y"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(9)
+    # Summary bar gives the cover useful visual weight without filling it with copy.
+    pdf.set_fill_color(*PALE); pdf.set_draw_color(*LINE)
+    yb = pdf.get_y(); pdf.rect(18, yb, 174, 24, style="DF")
+    pdf.set_xy(24, yb+5)
+    font("B", 8.8); rgb(NAVY)
+    pdf.multi_cell(162, 5.2, "5 COMMERCIAL   |   3 SECURITY / OPERATIONAL RISK   |   5 HORIZON")
+    pdf.set_y(248)
+    pdf.set_fill_color(*GOLD); pdf.rect(18, 248, 2.4, 18, style="F")
+    pdf.set_xy(24, 248)
+    font("B", 8); rgb(GOLD); pdf.cell(0, 4.5, "POWER & CORRIDORS INTELLIGENCE", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(24); font("", 8); rgb(MUTED)
+    pdf.multi_cell(150, 4.5, "Independent monitoring of trade, logistics, infrastructure, markets and operational risk.")
+
+    # Sections
+    section_heading("Commercial developments", "Five developments shaping trade")
+    for i, r in enumerate(commercial_rows, 1): story_card(r, i, "commercial", BLUE)
+
+    section_heading("Security & operational risk", "Three developments to monitor")
+    for i, r in enumerate(security_rows, 6): story_card(r, i, "security", GOLD)
+
+    section_heading("Horizon outlook", "Five dates and milestones ahead")
+    for i, r in enumerate(horizon_rows, 9): story_card(r, i, "horizon", NAVY)
+
+    section_heading("Sources & references", "Source list by article number")
+    for item in _pc_report_sources_catalog(commercial_rows,security_rows,horizon_rows):
+        n=item["article_no"]; title=clean(item["title"]); urls=item["urls"] or []
+        font("B",8.5); rgb(NAVY); pdf.multi_cell(174,4.7,f"{n:02d}  |  {title}")
+        if urls:
+            for j,u in enumerate(urls[:6]):
+                ref=f"{n:02d}" + (chr(97+j) if len(urls)>1 else "")
+                pdf.set_x(24); font("B",7.1); rgb(GOLD); pdf.cell(11,4,ref)
+                font("",7.1); rgb(BLUE); pdf.multi_cell(151,4,clean(u),link=str(u))
+        else:
+            pdf.set_x(24); font("",7.1); rgb(MUTED); pdf.multi_cell(162,4,"No source URL currently attached to the canonical event.")
+        pdf.ln(1.5)
+
+    # Disclaimer gets its own restrained closing page if it will not fit comfortably.
+    if pdf.get_y() > 185:
+        pdf.add_page()
+    pdf.ln(3)
+    kicker("Disclaimer")
+    pdf.set_fill_color(*PALE); pdf.set_draw_color(*LINE)
+    x, y = 18, pdf.get_y()+1
+    # Let the text flow first; draw background based on final height.
+    pdf.set_xy(24, y+5)
+    font("", 7.9); rgb(MUTED)
+    pdf.multi_cell(162, 4.5, clean(disclaimer))
+    end_y = pdf.get_y()+5
+    # draw behind by restoring order is not possible; use border only to avoid covering text
+    pdf.set_draw_color(*LINE); pdf.rect(x, y, 174, max(32, end_y-y))
+
+    return bytes(pdf.output())
 
 
 def _pc_report_pdf_minimal(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows, disclaimer):
@@ -10782,20 +11031,35 @@ def _pc_report_pdf(report_title, report_type, report_date, subtitle, commercial_
             try: story += [Image(io.BytesIO(base64.b64decode(_PC_REPORT_LOGO_B64)),width=61*mm,height=13*mm),Spacer(1,6*mm)]
             except Exception: pass
         story += [Paragraph("P&amp;C TRADE INTELLIGENCE · "+html_lib.escape(report_type.upper()),kicker),Paragraph(html_lib.escape(report_title),h1),Paragraph(html_lib.escape(subtitle),body),Paragraph(pd.Timestamp(report_date).strftime("%d %B %Y"),meta),Spacer(1,24*mm),Paragraph("5 COMMERCIAL DEVELOPMENTS · 3 SECURITY / OPERATIONAL RISKS · 5 HORIZON ITEMS",kicker),PageBreak()]
-        def add_section(label,heading,rows,accent,kind):
+        def add_section(label,heading,rows,accent,kind,start_no):
             story.extend([Paragraph(label.upper(),kicker),Paragraph(heading,h2)])
-            for i,r in enumerate(rows,1):
+            for i,r in enumerate(rows,start_no):
                 dt=_pc_report_date_value(r.get("Start Date")); ds=dt.strftime("%d %b %Y") if dt else ""; m=" · ".join(x for x in [ds,_pc_report_clean(r.get("Severity")).upper(),_pc_report_clean(r.get("Location") or r.get("Country / Countries"))] if x); ttl=_pc_report_clean(r.get("_report_title") or r.get("Title") or r.get("Card Title"),"Untitled development"); txt=_pc_report_clean(r.get("_report_text"),_pc_report_horizon_default_text(r) if kind=="horizon" else _pc_report_default_summary(r,kind=="security")); parts=[Paragraph(html_lib.escape(m),meta),Paragraph(f"{i:02d} · "+html_lib.escape(ttl),title_style),Paragraph(html_lib.escape(txt),body)]
                 watch=_pc_report_clean(r.get("_report_watch"));
                 if watch: parts.append(Paragraph("<b>Watch:</b> "+html_lib.escape(watch),small))
                 urls=r.get("_report_sources") or _pc_report_row_source_urls(r)
-                if urls: parts.append(Paragraph("<b>Sources:</b> "+" · ".join(f'<link href="{html_lib.escape(u,quote=True)}">Source {j}</link>' for j,u in enumerate(urls[:4],1)),small))
+                if urls:
+                    refs=[f"{i:02d}" + (chr(97+j) if len(urls)>1 else "") for j,_ in enumerate(urls[:6])]
+                    parts.append(Paragraph("<b>Sources:</b> "+", ".join(refs),small))
                 inner=Table([[p] for p in parts],colWidths=[158*mm]); card=Table([[inner]],colWidths=[166*mm]); card.setStyle(TableStyle([("LINEBEFORE",(0,0),(0,-1),3,accent),("BOX",(0,0),(-1,-1),0.5,linec),("BACKGROUND",(0,0),(-1,-1),colors.white),("LEFTPADDING",(0,0),(-1,-1),7),("RIGHTPADDING",(0,0),(-1,-1),7),("TOPPADDING",(0,0),(-1,-1),7),("BOTTOMPADDING",(0,0),(-1,-1),7)])); story.append(KeepTogether([card,Spacer(1,5*mm)]))
-        add_section("Commercial developments","Five developments shaping trade",commercial_rows,blue,"commercial"); story.append(PageBreak()); add_section("Security & operational risk","Three developments to monitor",security_rows,gold,"security"); story.append(PageBreak()); add_section("Horizon outlook","Five dates and milestones ahead",horizon_rows,navy,"horizon"); story += [Spacer(1,5*mm),Paragraph("DISCLAIMER",kicker),Paragraph(html_lib.escape(disclaimer),small)]
+        add_section("Commercial developments","Five developments shaping trade",commercial_rows,blue,"commercial",1); story.append(PageBreak()); add_section("Security & operational risk","Three developments to monitor",security_rows,gold,"security",6); story.append(PageBreak()); add_section("Horizon outlook","Five dates and milestones ahead",horizon_rows,navy,"horizon",9); story.append(PageBreak()); story.extend([Paragraph("SOURCES & REFERENCES",kicker),Paragraph("Source list by article number",h2)])
+        for item in _pc_report_sources_catalog(commercial_rows,security_rows,horizon_rows):
+            n=item["article_no"]; story.append(Paragraph(f"<b>{n:02d} · {html_lib.escape(item['title'])}</b>",body)); urls=item["urls"] or []
+            if urls:
+                for j,u in enumerate(urls[:6]):
+                    ref=f"{n:02d}" + (chr(97+j) if len(urls)>1 else "")
+                    story.append(Paragraph(f'<b>{ref}</b> · <link href="{html_lib.escape(u,quote=True)}">{html_lib.escape(u)}</link>',small))
+            else:
+                story.append(Paragraph("No source URL currently attached to the canonical event.",small))
+            story.append(Spacer(1,2*mm))
+        story += [Spacer(1,5*mm),Paragraph("DISCLAIMER",kicker),Paragraph(html_lib.escape(disclaimer),small)]
         def footer(c,d): c.saveState(); c.setStrokeColor(linec); c.line(18*mm,12*mm,192*mm,12*mm); c.setFillColor(muted); c.setFont("Helvetica",7.5); c.drawString(18*mm,7.7*mm,"POWER & CORRIDORS INTELLIGENCE"); c.drawRightString(192*mm,7.7*mm,str(d.page)); c.restoreState()
         doc.build(story,onFirstPage=footer,onLaterPages=footer); bio.seek(0); return bio.getvalue()
     except Exception:
-        return _pc_report_pdf_minimal(report_title,report_type,report_date,subtitle,commercial_rows,security_rows,horizon_rows,disclaimer)
+        try:
+            return _pc_report_pdf_fpdf(report_title, report_type, report_date, subtitle, commercial_rows, security_rows, horizon_rows, disclaimer, include_logo)
+        except Exception:
+            return _pc_report_pdf_minimal(report_title,report_type,report_date,subtitle,commercial_rows,security_rows,horizon_rows,disclaimer)
 
 
 def _render_trade_report_studio():
@@ -12444,14 +12708,55 @@ def _load_trade_event_database_context(event_id):
                 except Exception:
                     sanctions=[]
 
-        # Resolve the event source row as well as URL-bearing metadata.
+        # Resolve the full event evidence trail, not just pc_events.source_id.
+        # Loader packages frequently place the supporting source on pc_event_links,
+        # while pc_sources contains the canonical URL/title record.
         source_rows=[]
-        source_id=str(event.get("source_id") or "").strip()
-        if source_id:
+        source_ids=[]
+
+        def _add_source_id(v):
+            sid=str(v or "").strip()
+            if sid and sid not in source_ids:
+                source_ids.append(sid)
+
+        _add_source_id(event.get("source_id"))
+
+        event_meta=_pc_meta_dict(event.get("metadata"))
+        for _k in ("source_id","primary_source_id"):
+            _add_source_id(event_meta.get(_k))
+        for _k in ("source_ids","research_source_ids","evidence_source_ids"):
+            _vals=event_meta.get(_k) or []
+            if isinstance(_vals,str):
+                _vals=[_vals]
+            if isinstance(_vals,(list,tuple,set)):
+                for _v in _vals:
+                    _add_source_id(_v)
+
+        for _link in links or []:
+            _add_source_id(_link.get("source_id"))
+            _lmeta=_pc_meta_dict(_link.get("metadata"))
+            for _k in ("source_id","evidence_source_id","primary_source_id"):
+                _add_source_id(_lmeta.get(_k))
+            for _k in ("source_ids","research_source_ids","evidence_source_ids"):
+                _vals=_lmeta.get(_k) or []
+                if isinstance(_vals,str):
+                    _vals=[_vals]
+                if isinstance(_vals,(list,tuple,set)):
+                    for _v in _vals:
+                        _add_source_id(_v)
+
+        if source_ids:
             try:
-                source_rows=(sb.table("pc_sources").select("*").eq("source_id",source_id).limit(3).execute().data or [])
+                source_rows=(sb.table("pc_sources").select("*").in_("source_id",source_ids).limit(50).execute().data or [])
             except Exception:
+                # Keep a single-ID fallback for older Supabase clients / schemas.
                 source_rows=[]
+                for _sid in source_ids:
+                    try:
+                        _rows=(sb.table("pc_sources").select("*").eq("source_id",_sid).limit(5).execute().data or [])
+                    except Exception:
+                        _rows=[]
+                    source_rows.extend(_rows)
 
         return {
             "event":event,
@@ -12491,26 +12796,45 @@ def _human_record_table(rows, preferred=None):
 
 
 def _event_source_urls(ctx):
+    """Return every URL attached to the canonical event evidence graph.
+
+    Evidence can live on pc_events metadata, pc_event_links metadata, or the
+    pc_sources rows referenced by either object. Keep the first-seen ordering
+    and deduplicate URLs for clean report output.
+    """
     urls=[]
+
+    def add(v):
+        if isinstance(v,(list,tuple,set)):
+            for x in v:
+                add(x)
+            return
+        if isinstance(v,dict):
+            for k in ("url","source_url","link","article_url","evidence_url"):
+                add(v.get(k))
+            for k in ("research_sources","sources","source_urls","evidence_urls"):
+                add(v.get(k))
+            return
+        u=str(v or "").strip()
+        if u.startswith(("http://","https://")) and u not in urls:
+            urls.append(u)
+
     ev=(ctx or {}).get("event") or {}
+    for k in ("source_url","url","article_url"):
+        add(ev.get(k))
     meta=_pc_meta_dict(ev.get("metadata"))
-    for key in ["research_sources","sources"]:
-        vals=meta.get(key) or []
-        if isinstance(vals,str): vals=[vals]
-        if isinstance(vals,list):
-            for x in vals:
-                if isinstance(x,str) and x.startswith(("http://","https://")):
-                    urls.append(x)
-                elif isinstance(x,dict):
-                    u=str(x.get("url") or x.get("source_url") or "")
-                    if u.startswith(("http://","https://")):
-                        urls.append(u)
-    for s in (ctx or {}).get("sources") or []:
-        for k in ["url","source_url"]:
-            u=str(s.get(k) or "")
-            if u.startswith(("http://","https://")):
-                urls.append(u)
-    return list(dict.fromkeys(urls))
+    add(meta)
+
+    for link in (ctx or {}).get("links") or []:
+        for k in ("source_url","url","article_url","evidence_url"):
+            add(link.get(k))
+        add(_pc_meta_dict(link.get("metadata")))
+
+    for src in (ctx or {}).get("sources") or []:
+        add(src)
+        add(_pc_meta_dict(src.get("metadata")))
+
+    return urls
 
 
 def render_selected_trade_story_context():
