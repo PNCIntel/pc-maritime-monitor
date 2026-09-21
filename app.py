@@ -4849,31 +4849,102 @@ def _live_trade_event_rows(limit=100):
     except Exception:
         return pd.DataFrame()
 
+def _trade_priority_score(row, today=None):
+    """Rank current Trade developments by operational/commercial significance, not timestamp alone."""
+    today=today or pd.Timestamp.utcnow().tz_localize(None).normalize()
+    score=0.0
+
+    # Recency matters, but it should not overpower trade consequence.
+    d=pd.to_datetime(row.get("Start Date"),errors="coerce",utc=True)
+    if pd.notna(d):
+        d=d.tz_convert(None).normalize()
+        age=max(0,(today-d).days)
+        if age <= 1: score += 24
+        elif age <= 3: score += 18
+        elif age <= 7: score += 12
+        elif age <= 30: score += 5
+
+    commercial=str(row.get("Trade / Commercial Impact") or "").strip()
+    operational=str(row.get("Operational Impact") or "").strip()
+    if commercial: score += 24
+    if operational: score += 18
+
+    severity=str(row.get("Severity") or "").casefold()
+    score += {"critical":18,"severe":15,"high":12,"medium":6,"moderate":6,"low":2}.get(severity,0)
+
+    blob=" ".join(str(row.get(c) or "") for c in [
+        "Title","Description","Event Nature","Event Domain","Event Family","Event Type",
+        "Mode","Status","Location","Country / Countries","Operational Impact","Trade / Commercial Impact"
+    ]).casefold()
+
+    # High-value P&C trade signals: movement, capacity, routing, cost and infrastructure.
+    strong_terms=[
+        "congestion","capacity","terminal","port","rail","corridor","route","rerout",
+        "warehouse","storage","truck","trucking","border","customs","canal","chokepoint",
+        "freight","rate","tariff","sanction","strike","closure","closed","disruption",
+        "delay","throughput","supply chain","logistics","cargo","commodity","oil","gas","lng",
+        "refinery","pipeline","airport","air cargo","dredging","berth","intermodal"
+    ]
+    hits=sum(1 for t in strong_terms if t in blob)
+    score += min(hits*3,30)
+
+    # Explicit disruption/current operating states deserve prominence.
+    if any(t in blob for t in ["disruption","congestion","strike","closure","attack","fire","collision","grounding"]):
+        score += 10
+
+    # Strategic business moves remain important, but should not automatically outrank live trade effects.
+    if any(t in blob for t in ["acquisition","newbuild","order","alliance","joint venture","ipo","appointment"]):
+        score += 4
+    if any(t in blob for t in ["opinion","commentary","interview"]):
+        score -= 8
+
+    # Respect explicit story metadata when present.
+    meta=_pc_meta_dict(row.get("Metadata"))
+    story=meta.get("story") if isinstance(meta.get("story"),dict) else {}
+    disruption=meta.get("disruption") if isinstance(meta.get("disruption"),dict) else {}
+    if story.get("lead_story"): score += 20
+    elif story.get("is_story"): score += 6
+    if disruption.get("primary_disruption"): score += 18
+    elif disruption.get("is_disruption"): score += 10
+
+    return float(score)
+
+
 def render_latest_reporting_trade(limit=4):
-    """Newest observed canonical reporting; fresh DB first, horizon rows excluded."""
-    events=_live_trade_event_rows(max(50,limit*8))
+    """Priority current Trade intelligence; fresh DB first, Horizon rows excluded."""
+    events=_live_trade_event_rows(max(100,limit*20))
     if events.empty:
         events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     if events.empty:
         st.caption("No recent canonical reporting available.")
         return
+
     events=exclude_horizon_calendar_events(events)
+    today=pd.Timestamp.utcnow().tz_localize(None).normalize()
     if "Start Date" in events.columns:
         events["_latest_dt"]=pd.to_datetime(events["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
-        today=pd.Timestamp.utcnow().tz_localize(None).normalize()
-        events=events[events["_latest_dt"].isna() | (events["_latest_dt"]<=today)]
-        events=events.sort_values("_latest_dt",ascending=False,na_position="last")
-    events=events.head(limit)
+        events=events[events["_latest_dt"].isna() | (events["_latest_dt"] < today + pd.Timedelta(days=1))].copy()
+
+    # Rank by trade consequence first, then by recency. This prevents a fresh but low-impact
+    # corporate item from displacing a materially important congestion/capacity/corridor story.
+    events["_trade_priority"]=events.apply(lambda r:_trade_priority_score(r,today=today),axis=1)
+    sort_cols=["_trade_priority"] + (["_latest_dt"] if "_latest_dt" in events.columns else [])
+    events=events.sort_values(sort_cols,ascending=[False]*len(sort_cols),na_position="last").head(limit)
 
     for _,row in events.iterrows():
         title=str(row.get("Title","Event") or "Event").strip()
         date=pc_pretty_date(row.get("Start Date",""))
         etype=pretty_enum(str(row.get("Event Type","") or "Event"))
         location=str(row.get("Location","") or row.get("Country / Countries","") or "").strip()
-        ext=_event_extended_context(row)
-        summary=ext["analysis"] or str(row.get("Description","") or "").strip()
+
+        # Lead with what changed and why it matters commercially, not monitoring indicators.
+        description=str(row.get("Description","") or "").strip()
+        commercial=str(row.get("Trade / Commercial Impact","") or "").strip()
+        operational=str(row.get("Operational Impact","") or "").strip()
+        summary=commercial or operational or description
         if len(summary)>360:
             summary=summary[:357].rstrip()+"…"
+
         st.markdown(
             "<div class='pc-card'>"
             f"<div class='pc-label'>{html_lib.escape(date)} · {html_lib.escape(etype)}</div>"
@@ -4898,8 +4969,15 @@ def render_trade_horizon_sidebar_compact(limit=4):
         st.caption("No important dates currently classified.")
         return
     if "Start Date" in horizon.columns:
-        horizon["_hdt"]=pd.to_datetime(horizon["Start Date"],errors="coerce")
+        horizon["_hdt"]=pd.to_datetime(horizon["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+        today=pd.Timestamp.utcnow().tz_localize(None).normalize()
+        # Homepage Important Dates is strictly forward-looking. Historical Horizon rows remain
+        # available in the full Trade Horizon workspace but must never appear as upcoming dates.
+        horizon=horizon[horizon["_hdt"].notna() & (horizon["_hdt"] >= today)].copy()
         horizon=horizon.sort_values("_hdt",ascending=True,na_position="last")
+    if horizon.empty:
+        st.caption("No upcoming important dates currently classified.")
+        return
     for _,r in horizon.head(limit).iterrows():
         date=pc_pretty_date(r.get("Start Date",""))
         title=str(r.get("Title","") or "Upcoming event").strip()
@@ -11584,9 +11662,9 @@ if page=="Overview":
 
     latest_col, dates_col = st.columns([2.7,1.0], gap="large")
     with latest_col:
-        st.markdown("### Latest reporting")
-        st.caption("Newest observed canonical reporting across trade, infrastructure, logistics and disruption. Future scheduled dates are excluded.")
-        render_latest_reporting_trade(4)
+        st.markdown("### Priority developments")
+        st.caption("Current trade intelligence ranked by operational and commercial consequence, then recency.")
+        render_latest_reporting_trade(5)
     with dates_col:
         st.markdown("### Important dates")
         st.caption("Upcoming Trade Horizon dates are kept separate from live reporting.")

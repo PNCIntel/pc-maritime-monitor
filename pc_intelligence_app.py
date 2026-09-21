@@ -653,78 +653,7 @@ def section(kicker, title, copy=None):
         st.markdown(f'<div class="pc-section-copy">{copy}</div>', unsafe_allow_html=True)
 
 
-def _event_analysis_payload(row):
-    """Return the expanded P&C event narrative carried in canonical metadata."""
-    analysis = _meta_value(row, [
-        "analysis_60_90", "analysis_60-90", "summary_60_90", "summary_60-90",
-        "brief_75", "publication_summary", "intelligence_summary"
-    ])
-    why = _meta_value(row, [
-        "why_it_matters", "why_it_matters_60_90", "commercial_significance",
-        "strategic_significance"
-    ])
-    means = _meta_value(row, [
-        "what_it_means", "implications", "assessment", "assessment_impact"
-    ])
-    monitoring = _meta_value(row, [
-        "monitoring_indicators", "monitoring", "indicators", "watch_items"
-    ])
-    return analysis, why, means, monitoring
-
-
-def _render_inline_event_context(row, key_prefix="event"):
-    """Readable event detail directly beneath the card; no jump-to-top rerun."""
-    eid = str(row.get("Event ID", row.get("event_id", "")) or "").strip()
-    analysis, why, means, monitoring = _event_analysis_payload(row)
-    description = clean_display_text(row.get("Description", ""))
-    operational = clean_display_text(row.get("Operational Impact", ""))
-    commercial = clean_display_text(row.get("Trade / Commercial Impact", ""))
-    verification = clean_display_text(row.get("Verification Status", ""))
-    confidence = clean_display_text(row.get("Confidence", ""))
-    status = clean_display_text(row.get("Status", ""))
-
-    with st.expander("Full event context", expanded=False):
-        if analysis:
-            st.markdown("**Assessment · 60–90 words**")
-            st.write(analysis)
-        if description:
-            st.markdown("**What happened**")
-            st.write(description)
-        if why:
-            st.markdown("**Why it matters**")
-            st.write(why)
-        if means:
-            st.markdown("**What it means**")
-            st.write(means)
-
-        c1, c2 = st.columns(2)
-        with c1:
-            if operational:
-                st.markdown("**Operational impact**")
-                st.write(operational)
-        with c2:
-            if commercial:
-                st.markdown("**Trade / commercial impact**")
-                st.write(commercial)
-
-        if monitoring:
-            st.markdown("**Monitoring & indicators**")
-            st.write(monitoring)
-
-        meta_bits = [x for x in [
-            f"Status: {status}" if status else "",
-            f"Verification: {verification}" if verification else "",
-            f"Confidence: {confidence}" if confidence else "",
-        ] if x]
-        if meta_bits:
-            st.caption(" · ".join(meta_bits))
-
-        if eid:
-            st.markdown("#### Connected canonical context")
-            render_connected_context(eid)
-
-
-def event_card(row,key_prefix="event",compact=False):
+def event_card(row,key_prefix="event"):
     title = clean_display_text(row.get("Title", "Untitled event"))
     date = pc_pretty_date(row.get("Start Date", row.get("Date", "")))
     etype = pc_display_value(row.get("Event Type", row.get("Event Family", "Event")),"Event Type")
@@ -733,30 +662,27 @@ def event_card(row,key_prefix="event",compact=False):
         pc_display_value(row.get("Location", ""),"Location")
         or pc_pretty_countries(row.get("Country / Countries", ""))
     )
-    description = clean_display_text(row.get("Description", ""))
-    analysis, _, _, _ = _event_analysis_payload(row)
-    body = analysis or description
+    body = clean_display_text(row.get("Description", ""))
     impact = clean_display_text(row.get("Operational Impact", ""))
-    commercial = clean_display_text(row.get("Trade / Commercial Impact", ""))
+    st.markdown(
+        f'''<div class="pc-card pc-card-priority">
+        <div class="pc-card-meta">{date} · {etype} · {sev} · {loc}</div>
+        <div class="pc-card-title">{title}</div>
+        <div class="pc-card-body">{body}</div>
+        <div class="pc-card-impact"><b>Operational impact:</b> {impact}</div>
+        </div>''',
+        unsafe_allow_html=True,
+    )
 
-    if compact and len(body) > 420:
-        body = body[:417].rstrip() + "…"
-
-    parts = [
-        '<div class="pc-card pc-card-priority">',
-        f'<div class="pc-card-meta">{html_lib.escape(date)} · {html_lib.escape(etype)} · {html_lib.escape(sev)} · {html_lib.escape(loc)}</div>',
-        f'<div class="pc-card-title">{html_lib.escape(title)}</div>',
-    ]
-    if body:
-        parts.append(f'<div class="pc-card-body">{html_lib.escape(body)}</div>')
-    if impact and not compact:
-        parts.append(f'<div class="pc-card-impact"><b>Operational impact:</b> {html_lib.escape(impact)}</div>')
-    if commercial and not compact:
-        parts.append(f'<div class="pc-card-impact"><b>Trade / commercial impact:</b> {html_lib.escape(commercial)}</div>')
-    parts.append("</div>")
-    st.markdown("".join(parts), unsafe_allow_html=True)
-
-    _render_inline_event_context(row, key_prefix=key_prefix)
+    eid = str(row.get("Event ID", row.get("event_id", "")) or "").strip()
+    if eid:
+        pc_drilldown_button(
+            "event",
+            eid,
+            "Open full event context",
+            key=f"{key_prefix}_event_card_dd_{eid}",
+            use_container_width=True,
+        )
 
 
 def canonical_port_id(link_id, link_name):
@@ -770,135 +696,110 @@ def canonical_port_id(link_id, link_name):
         if not hit.empty: return str(hit.iloc[0].get("Port ID",""))
     return ""
 
-def _live_event_connected_context(event_id):
-    """Fetch canonical event links on demand so newly loaded edges surface immediately."""
-    eid=str(event_id or "").strip()
-    result={"assets":[],"companies":[],"mobile":[],"routes":[]}
-    if not eid:
-        return result
-    try:
-        sb=pc_db_client(service=True)
-        if sb is None:
-            return result
-        rows=(sb.table("pc_event_links")
-              .select("event_id,linked_type,linked_id,linked_name,relationship,confidence,source_id,metadata")
-              .eq("event_id",eid).limit(100).execute().data or [])
-        for r in rows:
-            lt=str(r.get("linked_type") or "").casefold()
-            lid=str(r.get("linked_id") or "")
-            lname=clean_display_text(r.get("linked_name",""))
-            base={"id":lid,"name":lname,"relationship":r.get("relationship"),"confidence":r.get("confidence")}
-            if lt=="asset":
-                obj={}
-                try:
-                    hit=(sb.table("pc_assets").select("asset_id,name,asset_type,subtype,country,region_city").eq("asset_id",lid).limit(1).execute().data or [])
-                    obj=hit[0] if hit else {}
-                except Exception: pass
-                result["assets"].append({**base,"name":clean_display_text(obj.get("name") or lname),"asset_type":clean_display_text(obj.get("asset_type")),"subtype":clean_display_text(obj.get("subtype")),"country":clean_display_text(obj.get("country")),"region_city":clean_display_text(obj.get("region_city"))})
-            elif lt=="entity":
-                obj={}
-                try:
-                    hit=(sb.table("pc_entities").select("entity_id,name,entity_type,hq_country").eq("entity_id",lid).limit(1).execute().data or [])
-                    obj=hit[0] if hit else {}
-                except Exception: pass
-                result["companies"].append({**base,"name":clean_display_text(obj.get("name") or lname),"entity_type":clean_display_text(obj.get("entity_type")),"hq_country":clean_display_text(obj.get("hq_country"))})
-            elif lt=="mobile_asset":
-                obj={}
-                try:
-                    hit=(sb.table("pc_mobile_assets").select("mobile_asset_id,name,asset_type,subtype,imo,mmsi,flag").eq("mobile_asset_id",lid).limit(1).execute().data or [])
-                    obj=hit[0] if hit else {}
-                except Exception: pass
-                result["mobile"].append({**base,"name":clean_display_text(obj.get("name") or lname),"asset_type":clean_display_text(obj.get("asset_type")),"subtype":clean_display_text(obj.get("subtype")),"imo":clean_display_text(obj.get("imo")),"flag":clean_display_text(obj.get("flag"))})
-            elif lt=="route":
-                obj={}
-                try:
-                    hit=(sb.table("pc_transport_routes").select("route_id,route_name,mode,countries,current_status").eq("route_id",lid).limit(1).execute().data or [])
-                    obj=hit[0] if hit else {}
-                except Exception: pass
-                result["routes"].append({**base,"name":clean_display_text(obj.get("route_name") or lname),"mode":clean_display_text(obj.get("mode")),"countries":obj.get("countries"),"status":clean_display_text(obj.get("current_status"))})
-    except Exception:
-        pass
-    return result
-
-
 def render_connected_context(event_id):
-    eid = str(event_id or "").strip()
-
-    live=_live_event_connected_context(eid)
-    if any(live.values()):
-        if live["assets"]:
-            st.markdown("**Associated assets / ports**")
-            for r in live["assets"]:
-                st.markdown(f"**{r.get('name') or r.get('id')}** · {pc_pretty_enum(r.get('asset_type') or 'Asset')}")
-                if r.get("relationship"): st.caption(humanize_relationship(r.get("relationship")))
-                if r.get("id"):
-                    pc_drilldown_button("asset",r.get("id"),"Open asset",key=f"intel_live_asset_{eid}_{r.get('id')}",use_container_width=True)
-                bits=[x for x in [r.get("country"),r.get("region_city"),pc_pretty_enum(r.get("subtype"))] if x]
-                if bits: st.caption(" · ".join(bits))
-
-        if live["companies"]:
-            st.markdown("**Associated companies**")
-            for r in live["companies"]:
-                st.markdown(f"**{r.get('name') or r.get('id')}**")
-                bits=[humanize_relationship(r.get("relationship")),pc_pretty_enum(r.get("entity_type")),r.get("hq_country")]
-                bits=[x for x in bits if x]
-                if bits: st.caption(" · ".join(bits))
-                if r.get("id"):
-                    pc_drilldown_button("entity",r.get("id"),"Open company",key=f"intel_live_entity_{eid}_{r.get('id')}",use_container_width=True)
-
-        if live["mobile"]:
-            st.markdown("**Associated vessels / mobile assets**")
-            for r in live["mobile"]:
-                st.markdown(f"**{r.get('name') or r.get('id')}**")
-                bits=[humanize_relationship(r.get("relationship")),pc_pretty_enum(r.get("subtype") or r.get("asset_type")),f"IMO {r.get('imo')}" if r.get('imo') else "",r.get("flag")]
-                bits=[x for x in bits if x]
-                if bits: st.caption(" · ".join(bits))
-                if r.get("id"):
-                    pc_drilldown_button("mobile_asset",r.get("id"),"Open mobile asset",key=f"intel_live_mobile_{eid}_{r.get('id')}",use_container_width=True)
-
-        if live["routes"]:
-            st.markdown("**Associated routes / corridors**")
-            for r in live["routes"]:
-                st.markdown(f"**{r.get('name') or r.get('id')}**")
-                bits=[humanize_relationship(r.get("relationship")),pc_pretty_enum(r.get("mode")),r.get("status")]
-                bits=[x for x in bits if x]
-                if bits: st.caption(" · ".join(bits))
-        return
-
-    # Fallback to preloaded canonical/workbook frames when the direct read is unavailable.
+    eid = str(event_id or "")
     links = event_asset_links[text_col(event_asset_links, "Event ID").eq(eid)] if not event_asset_links.empty else pd.DataFrame()
     clinks = event_company_links[text_col(event_company_links, "Event ID").eq(eid)] if not event_company_links.empty else pd.DataFrame()
     slinks = event_system_links[text_col(event_system_links, "Event ID").eq(eid)] if not event_system_links.empty else pd.DataFrame()
-    try:
-        mlinks = event_mobile_asset_links[text_col(event_mobile_asset_links,"Event ID").eq(eid)] if not event_mobile_asset_links.empty else pd.DataFrame()
-    except Exception:
-        mlinks = pd.DataFrame()
 
-    if links.empty and clinks.empty and slinks.empty and mlinks.empty:
+    if links.empty and clinks.empty and slinks.empty:
         st.markdown('<div class="pc-empty">No connected canonical coverage has been mapped yet.</div>', unsafe_allow_html=True)
         return
 
     if not links.empty:
         st.markdown("**Associated assets / ports**")
-        for _, r in links.iterrows():
-            name = clean_display_text(r.get("Asset", "")); typ = clean_display_text(r.get("Asset Type", "Asset")) or "Asset"
+        dedupe=[c for c in ["Asset ID","Relationship"] if c in links.columns]
+        if dedupe:
+            links=links.drop_duplicates(subset=dedupe).copy()
+        for link_i, (_, r) in enumerate(links.iterrows()):
+            name = clean_display_text(r.get("Asset", ""))
+            typ = clean_display_text(r.get("Asset Type", "Asset")) or "Asset"
+            rel = humanize_relationship(r.get("Relationship", ""))
+
             st.markdown(f"**{name}** · {typ}")
-            rel=humanize_relationship(r.get("Relationship", ""))
-            if rel: st.caption(rel)
+            if rel:
+                st.caption(rel)
+
+            aid = clean_display_text(r.get("Asset ID", ""))
+            if aid:
+                pc_drilldown_button("asset", aid, "Open asset", key=f"intel_asset_dd_{eid}_{aid}_{link_i}", use_container_width=True)
+
+            pid = canonical_port_id(r.get("Asset ID", ""), name)
+            if pid:
+                pr = ports[text_col(ports, "Port ID").eq(pid)]
+                if not pr.empty:
+                    rr = pr.iloc[0]
+                    bits = []
+                    for c in ["Country", "Operator", "Facility Type", "Key Role"]:
+                        v = clean_display_text(rr.get(c, ""))
+                        if v:
+                            bits.append(f"{c}: {v}")
+                    if bits:
+                        st.caption(" · ".join(bits[:4]))
+
     if not clinks.empty:
         st.markdown("**Associated companies**")
-        for _, r in clinks.iterrows():
-            name=clean_display_text(r.get("Company", "")); st.markdown(f"**{name}**")
-            rel=humanize_relationship(r.get("Relationship", ""))
-            if rel: st.caption(rel)
-    if not mlinks.empty:
-        st.markdown("**Associated vessels / mobile assets**")
-        show_df(mlinks,["Mobile Asset","Asset Type","Subtype","IMO","Flag","Relationship","Confidence"],220)
+        dedupe=[c for c in ["Company ID","Relationship"] if c in clinks.columns]
+        if dedupe:
+            clinks=clinks.drop_duplicates(subset=dedupe).copy()
+        for company_i, (_, r) in enumerate(clinks.iterrows()):
+            cid = clean_display_text(r.get("Company ID", ""))
+            name = clean_display_text(r.get("Company", ""))
+            rel = humanize_relationship(r.get("Relationship", ""))
+
+            st.markdown(f"**{name}**")
+            if rel:
+                st.caption(rel)
+
+            if cid:
+                pc_drilldown_button("entity", cid, "Open company", key=f"intel_company_dd_{eid}_{cid}_{company_i}", use_container_width=True)
+
+            if cid and not companies.empty and "Company ID" in companies.columns:
+                cr = companies[text_col(companies, "Company ID").eq(cid)]
+                if not cr.empty:
+                    rr = cr.iloc[0]
+                    bits = []
+                    for c in ["HQ Country", "Ownership", "Business Segments", "Status"]:
+                        v = clean_display_text(rr.get(c, ""))
+                        if v:
+                            bits.append(f"{c}: {v}")
+                    if bits:
+                        st.caption(" · ".join(bits[:4]))
+
     if not slinks.empty:
         st.markdown("**Related systems / corridors**")
-        view=slinks.copy()
-        if "Relationship" in view.columns: view["Relationship"]=view["Relationship"].map(humanize_relationship)
-        show_df(view,["System","Relationship","Confidence"],180)
+        view = slinks.copy()
+        if "Relationship" in view.columns:
+            view["Relationship"] = view["Relationship"].map(humanize_relationship)
+        show_df(view, ["System", "Relationship", "Confidence"], 180)
+
+    # Canonical vessel/mobile-asset relationships loaded from pc_event_links.
+    try:
+        mlinks = event_mobile_asset_links[text_col(event_mobile_asset_links,"Event ID").eq(eid)] if not event_mobile_asset_links.empty else pd.DataFrame()
+    except Exception:
+        mlinks = pd.DataFrame()
+    if not mlinks.empty:
+        st.markdown("**Associated vessels / mobile assets**")
+        dedupe=[c for c in ["Mobile Asset ID","Relationship"] if c in mlinks.columns]
+        if dedupe:
+            mlinks=mlinks.drop_duplicates(subset=dedupe).copy()
+        show_df(mlinks,["Mobile Asset","Asset Type","Subtype","IMO","Flag","Relationship","Confidence"],220)
+        for mobile_i,(_,mr) in enumerate(mlinks.iterrows()):
+            mid=clean_display_text(mr.get("Mobile Asset ID",""))
+            mname=clean_display_text(mr.get("Mobile Asset",""))
+            if mid:
+                pc_drilldown_button("mobile_asset",mid,f"Open {mname or 'mobile asset'}",key=f"intel_mobile_dd_{eid}_{mid}_{mobile_i}",use_container_width=True)
+
+    # Actor relationships are a separate canonical edge model.
+    try:
+        al = event_actor_links[text_col(event_actor_links,"event_id").eq(eid)] if not event_actor_links.empty else pd.DataFrame()
+        if not al.empty and not actor_directory.empty:
+            names=actor_directory[["actor_id","canonical_name","actor_class","actor_subtype"]].copy()
+            al=al.merge(names,on="actor_id",how="left")
+            st.markdown("**Associated actors / groups**")
+            show_df(al.rename(columns={"canonical_name":"Actor","actor_role":"Role","actor_class":"Class","actor_subtype":"Subtype","attribution_status":"Attribution"}),["Actor","Class","Subtype","Role","Attribution","confidence"],230)
+    except Exception:
+        pass
 
 
 
@@ -1439,7 +1340,7 @@ for group, items in NAV.items():
 page = st.session_state.get("pcintel_page", "Operating Picture")
 st.sidebar.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
 _bst=backend_status()
-st.sidebar.caption(f"v4.6 live-canonical-context · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
+st.sidebar.caption(f"v4.4 model coverage · {_bst.get('mode','excel').title()} backend · canonical events + relationships")
 
 with st.sidebar.expander("Data status", expanded=False):
     _hazard_status = data_file_status("13_events_hazards.xlsx")
@@ -2772,7 +2673,7 @@ def publication_summary(row):
             if v:
                 return v
     v = _meta_value(row, [
-        "analysis_60_90", "analysis_60-90", "brief_75", "brief75", "summary_60_90", "summary_60-90", "ai_summary_60_90",
+        "brief_75", "brief75", "summary_60_90", "summary_60-90", "ai_summary_60_90",
         "publication_summary", "intelligence_summary"
     ])
     if v:
@@ -3392,36 +3293,6 @@ def _build_report_markdown(name,as_of,sections,edits,horizon_rows):
     return "\n".join(lines)
 
 if page == "Operating Picture":
-    # Broad canonical intake: surface the newest loaded reporting before applying
-    # the stricter Intelligence routing gate. This keeps fresh trade/logistics
-    # developments visible without weakening the assessed intelligence filter.
-    latest_reporting = exclude_horizon_calendar_events(hazard_events_raw.copy()) if isinstance(hazard_events_raw, pd.DataFrame) else pd.DataFrame()
-    if not latest_reporting.empty:
-        if "Start Date" in latest_reporting.columns:
-            latest_reporting["_latest_reporting_dt"] = pd.to_datetime(latest_reporting["Start Date"], errors="coerce")
-            latest_reporting = latest_reporting.sort_values("_latest_reporting_dt", ascending=False, na_position="last")
-        try:
-            latest_reporting = latest_reporting[~_is_compliance_watchlist_event(latest_reporting)].copy()
-        except Exception:
-            pass
-        section("Latest reporting", "Latest reporting", "Newest canonical records across security, maritime, trade, infrastructure and logistics. These are surfaced before the stricter intelligence-routing filter.")
-        latest_reporting_primary = latest_reporting.head(4)
-        lr_cols = st.columns(2)
-        for lr_i, (_, lr_row) in enumerate(latest_reporting_primary.iterrows()):
-            with lr_cols[lr_i % 2]:
-                event_card(lr_row, key_prefix=f"latest_reporting_{lr_i}", compact=True)
-        # Keep the landing page concise, but do not make slightly older current
-        # incidents disappear simply because four newer records were loaded.
-        # The next eight remain one click away in date order.
-        latest_reporting_more = latest_reporting.iloc[4:12]
-        if not latest_reporting_more.empty:
-            with st.expander(f"More recent reporting ({len(latest_reporting_more)})", expanded=False):
-                more_cols = st.columns(2)
-                for lr_j, (_, lr_row) in enumerate(latest_reporting_more.iterrows(), start=4):
-                    with more_cols[(lr_j-4) % 2]:
-                        event_card(lr_row, key_prefix=f"latest_reporting_more_{lr_j}", compact=True)
-        st.markdown("<div class='pc-rule'></div>", unsafe_allow_html=True)
-
     active_mon = monitoring[text_col(monitoring, "Status").str.contains("Active", case=False, na=False)] if not monitoring.empty else monitoring
     security_terms = ["Security", "Conflict", "Maritime", "Piracy", "Attack", "Ground", "Explosion", "SAR", "Pollution", "Drone", "Missile", "Seizure", "Boarding"]
     sec_events = hazard_events[contains_any(hazard_events, ["Event Family", "Event Type", "Mode", "Title"], security_terms)] if not hazard_events.empty else hazard_events
