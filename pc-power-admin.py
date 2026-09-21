@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "536-chatgpt-research-load-routes-2026-09-21"
+LOADER_BUILD = "537-expanded-event-analysis-2026-09-21"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -4688,9 +4688,9 @@ def _rw_event_records(kind,sheet,rows,default_entity=None):
             "countries":countries,
             "location":location,
             "title":title,
-            "description":row.get("summary") or row.get("description"),
-            "operational_impact":row.get("operational_relevance"),
-            "commercial_impact":row.get("commercial_significance"),
+            "description":row.get("factual_description") or row.get("description") or row.get("summary"),
+            "operational_impact":row.get("operational_impact") or row.get("operational_relevance") or row.get("what_it_means"),
+            "commercial_impact":row.get("commercial_impact") or row.get("commercial_significance") or row.get("why_it_matters"),
             "confidence":row.get("confidence"),
             "verification_status":row.get("verification_status"),
             "trade_relevance":8 if kind in {"trade_articles","girteka","etihad_rail"} else 5,
@@ -4698,7 +4698,13 @@ def _rw_event_records(kind,sheet,rows,default_entity=None):
             "trade_visible":True,
             "intelligence_visible":True,
             "source_url":url,
-            "metadata":_rw_metadata(kind,sheet,row),
+            "metadata":_rw_metadata(kind,sheet,row,{
+                "analysis_60_90":row.get("analysis_60_90") or row.get("summary_60_90") or row.get("analytical_summary"),
+                "why_it_matters":row.get("why_it_matters"),
+                "what_it_means":row.get("what_it_means"),
+                "monitoring_indicators":row.get("monitoring_indicators"),
+                "business_relevance":row.get("business_relevance"),
+            }),
         }))
         linked=[]
         if default_entity:
@@ -6957,7 +6963,9 @@ def _generic_schema_driven_workbook_records(sections):
                         "event_domain":_generic_first(row,"event_domain","domain"),
                         "event_family":_generic_first(row,"event_family","category"),
                         "title":title,
-                        "description":_generic_first(row,"summary","description","details"),
+                        "description":_generic_first(row,"factual_description","description","summary","details"),
+                        "operational_impact":_generic_first(row,"operational_impact","operational_relevance","what_it_means"),
+                        "commercial_impact":_generic_first(row,"commercial_impact","commercial_significance","why_it_matters"),
                         "severity":row.get("severity"),
                         "status":row.get("status") or "reported",
                         "countries":_generic_first(row,"country","countries"),
@@ -6965,7 +6973,15 @@ def _generic_schema_driven_workbook_records(sections):
                         "source_url":url,
                         "trade_relevance":_generic_first(row,"trade_relevance","trade_score"),
                         "intelligence_relevance":_generic_first(row,"intelligence_relevance","intel_score"),
-                        "trade_visible":True,"intelligence_visible":True,"metadata":md,
+                        "trade_visible":True,"intelligence_visible":True,
+                        "metadata":_rw_metadata(kind,sheet,row,{
+                            "generic_classifier":True,
+                            "analysis_60_90":_generic_first(row,"analysis_60_90","summary_60_90","analytical_summary"),
+                            "why_it_matters":row.get("why_it_matters"),
+                            "what_it_means":row.get("what_it_means"),
+                            "monitoring_indicators":row.get("monitoring_indicators"),
+                            "business_relevance":row.get("business_relevance"),
+                        }),
                     },1.0))
                     continue
 
