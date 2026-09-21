@@ -11085,8 +11085,6 @@ def render_trade_horizon_workspace():
         "Upcoming milestones, developing risks, project openings, regulatory deadlines and seasonal trade events. Explicit canonical horizon metadata is authoritative."
     )
 
-    render_selected_trade_story_context()
-
     # Always use the canonical event table that was loaded from Supabase into TABLES.
     canonical_events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     fdf=trade_horizon_events(canonical_events)
@@ -11659,6 +11657,151 @@ def render_selected_trade_story_context():
     st.markdown("---")
 
 
+
+def _render_inline_trade_story_context(event_id, key_prefix="storyctx"):
+    """Render connected canonical context inline beneath a Trade story.
+
+    The Trade home should not force the analyst to jump to a page-level context block.
+    Linked canonical objects remain actionable through the shared drill-down panel.
+    """
+    eid=str(event_id or "").strip()
+    if not eid:
+        st.caption("No canonical event ID is attached to this story.")
+        return
+
+    ctx=_load_trade_event_database_context(eid)
+    ev=ctx.get("event") or {}
+    if not ev:
+        st.caption("No connected canonical context was returned for this event.")
+        return
+
+    meta=_pc_meta_dict(ev.get("metadata"))
+    story=meta.get("story") if isinstance(meta.get("story"),dict) else {}
+    disruption=meta.get("disruption") if isinstance(meta.get("disruption"),dict) else {}
+    horizon=meta.get("horizon") if isinstance(meta.get("horizon"),dict) else {}
+
+    def _clean_ctx(v):
+        try:
+            if pd.isna(v):
+                return ""
+        except Exception:
+            pass
+        txt=str(v or "").strip()
+        return "" if txt.casefold() in {"nan","none","null","nat"} else txt
+
+    title=_clean_ctx(story.get("card_title") or ev.get("title")) or "Selected trade development"
+    deck=_clean_ctx(story.get("card_deck") or ev.get("description"))
+    operational=_clean_ctx(ev.get("operational_impact") or disruption.get("operational_effect"))
+    commercial=_clean_ctx(ev.get("commercial_impact") or disruption.get("commercial_effect") or story.get("why_it_matters"))
+
+    st.markdown(f"**{html_lib.escape(title)}**")
+    if deck:
+        st.caption(deck)
+
+    c1,c2=st.columns(2,gap="large")
+    with c1:
+        if operational:
+            st.markdown("**Operational effect**")
+            st.write(operational)
+    with c2:
+        if commercial:
+            st.markdown("**Trade / commercial effect**")
+            st.write(commercial)
+
+    linked_tabs=st.tabs(["Connected network","Event details","Evidence"])
+
+    with linked_tabs[0]:
+        groups=[
+            ("Companies / entities","entity",ctx.get("entities") or [],"entity_id","name"),
+            ("Infrastructure / assets","asset",ctx.get("assets") or [],"asset_id","name"),
+            ("Vessels / mobile assets","mobile_asset",ctx.get("mobile_assets") or [],"mobile_asset_id","name"),
+            ("Routes / corridors","route",ctx.get("routes") or [],"route_id","route_name"),
+        ]
+        any_rows=False
+        for group_label,obj_type,rows,id_key,name_key in groups:
+            if not rows:
+                continue
+            any_rows=True
+            st.markdown(f"**{group_label}**")
+            for i,rec in enumerate(rows):
+                oid=_clean_ctx(rec.get(id_key))
+                name=_clean_ctx(rec.get(name_key)) or oid
+                # Short human-readable object summary before the action.
+                bits=[]
+                for field in ["entity_type","subtype","hq_country","country","region_city","mode","origin_name","destination_name","imo","flag","status"]:
+                    val=_clean_ctx(rec.get(field))
+                    if val and val not in bits:
+                        bits.append(val)
+                st.markdown(f"**{html_lib.escape(name)}**" + (f" · {html_lib.escape(' · '.join(bits[:4]))}" if bits else ""))
+                if oid:
+                    pc_drilldown_button(
+                        obj_type,
+                        oid,
+                        f"Open { {'entity':'company','asset':'asset','mobile_asset':'vessel / mobile asset','route':'route'}[obj_type] }",
+                        key=f"{key_prefix}_{eid}_{obj_type}_{oid}_{i}",
+                        use_container_width=True,
+                    )
+
+        if not any_rows:
+            st.caption("No linked canonical objects were returned for this event.")
+
+        links=ctx.get("links") or []
+        if links:
+            with st.expander("Relationship detail",expanded=False):
+                ldf=_human_record_table(
+                    links,
+                    ["linked_type","linked_name","relationship","confidence","linked_id"]
+                )
+                display_df(ldf,240)
+
+        rels=ctx.get("relationships") or []
+        if rels:
+            with st.expander("Ownership & operating relationships",expanded=False):
+                display_df(
+                    _human_record_table(
+                        rels,
+                        ["source_name","source_type","relationship_type","target_name","target_type","confidence"]
+                    ),
+                    260,
+                )
+
+    with linked_tabs[1]:
+        fields=[
+            ("Start", "start_date"),("End", "end_date"),("Nature", "event_nature"),
+            ("Domain", "event_domain"),("Family", "event_family"),("Type", "event_type"),
+            ("Status", "status"),("Mode", "mode"),("Countries", "countries"),
+            ("Location", "location"),("Confidence", "confidence"),
+        ]
+        rows=[]
+        for label_txt,key in fields:
+            val=_clean_ctx(ev.get(key))
+            if val:
+                rows.append({"Field":label_txt,"Value":val})
+        if rows:
+            display_df(pd.DataFrame(rows),260)
+        locs=ctx.get("locations") or []
+        if locs:
+            st.markdown("**Affected locations**")
+            display_df(_human_record_table(locs,["location_name","country","accuracy","notes"]),220)
+        if horizon:
+            hm=[]
+            for label_txt,key in [("Horizon type","horizon_type"),("Next milestone","next_milestone")]:
+                val=_clean_ctx(horizon.get(key))
+                if val:
+                    hm.append({"Field":label_txt,"Value":val})
+            if hm:
+                st.markdown("**Forward context**")
+                display_df(pd.DataFrame(hm),160)
+
+    with linked_tabs[2]:
+        urls=_event_source_urls(ctx)
+        if urls:
+            for i,u in enumerate(urls,1):
+                st.markdown(f"**Source {i}:** [{u}]({u})")
+        else:
+            st.caption("No source URL was found in the event/source metadata.")
+
+
 def _render_trade_story_cards(df,max_items=8,show_why=True,key_prefix="story"):
     if df is None or df.empty:
         st.caption("No canonical developments in this view.")
@@ -11695,18 +11838,16 @@ def _render_trade_story_cards(df,max_items=8,show_why=True,key_prefix="story"):
         body += "</div>"
         st.markdown(body,unsafe_allow_html=True)
 
-        b1,b2=st.columns([0.55,0.45])
         if eid:
-            if b1.button("Open connected intelligence",key=f"{key_prefix}_db_{eid}_{card_i}",use_container_width=True):
-                st.session_state["trade_story_event_id"]=eid
-                st.rerun()
+            with st.expander("Connected context",expanded=False):
+                _render_inline_trade_story_context(eid,key_prefix=f"{key_prefix}_ctx_{card_i}")
         sources=r.get("Research Sources") or []
         if isinstance(sources,list) and sources:
             good=[str(x) for x in sources if str(x).startswith(("http://","https://"))]
             if good:
-                b2.link_button("Primary source ↗",good[0],use_container_width=True)
+                st.link_button("Primary source ↗",good[0],use_container_width=True)
                 if len(good)>1:
-                    st.caption("Additional sources available inside connected intelligence.")
+                    st.caption("Additional sources are available inside Connected context.")
 
 
 def _canonical_trade_disruptions():
@@ -11782,8 +11923,6 @@ def render_trade_developments_home():
 
 if page=="Overview":
     header("Trade System","End-to-end logistics intelligence across companies, road, rail, maritime, aviation, facilities, corridors, markets, infrastructure and disruption.")
-
-    render_selected_trade_story_context()
 
     latest_col, dates_col = st.columns([2.7,1.0], gap="large")
     with latest_col:
@@ -13670,8 +13809,6 @@ elif page in {"News & Signals","News & Developments"}:
         "News & Developments",
         "Canonical company, network, disruption and sanctions developments lead this workspace. Open-source feeds remain a discovery layer for promotion into the canonical model."
     )
-
-    render_selected_trade_story_context()
 
     stories=_canonical_trade_story_frame()
     tabs=st.tabs(["Lead Developments","Company & Network","Disruptions","Sanctions & Compliance","Open-source Discovery"])
