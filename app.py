@@ -44,7 +44,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v6.9-trade-home-curation"
+APP_VERSION = "v7.0-trade-home-curation"
 RELEASE_NAME = "End-to-End Logistics Operating Picture · Companies, Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -13218,6 +13218,66 @@ def _canonical_trade_active_monitoring():
     return out
 
 
+
+def _pc_home_one_line(value, limit=190):
+    """Compact reader-facing consequence line for the Trade Overview."""
+    txt=_clean_trade_text(value)
+    if not txt:
+        return ""
+    txt=" ".join(str(txt).split())
+    if len(txt) <= limit:
+        return txt
+    cut=txt[:limit].rsplit(" ",1)[0].rstrip(" ,;:-")
+    return cut + "…"
+
+
+def _render_trade_home_compact_cards(rows, limit=5, key_prefix="home_compact", accent="#3f8db5"):
+    """Executive-home cards: headline + one consequence line + collapsed context only."""
+    if rows is None or getattr(rows,"empty",True):
+        st.caption("No current developments available.")
+        return
+    frame=rows.head(limit).copy()
+    for i,(_,row) in enumerate(frame.iterrows()):
+        title=_clean_trade_text(row.get("Title")) or "Trade development"
+        date=pc_pretty_date(row.get("Start Date",""))
+        location=_clean_trade_text(row.get("Location")) or _clean_trade_text(row.get("Country / Countries"))
+        consequence=_pc_home_one_line(_trade_consequence_text(row),190)
+        label=" · ".join([x for x in [date, location] if x])
+        st.markdown(
+            f"<div style='border-left:4px solid {accent};padding:10px 14px 11px 15px;margin:0 0 8px 0;background:#fff;border-radius:0 8px 8px 0;'>"
+            + (f"<div class='pc-label'>{html_lib.escape(label)}</div>" if label else "")
+            + f"<div class='pc-big' style='margin-top:3px;font-size:1.02rem'>{html_lib.escape(title)}</div>"
+            + (f"<div class='pc-small' style='margin-top:5px;color:#596774'>{html_lib.escape(consequence)}</div>" if consequence else "")
+            + "</div>", unsafe_allow_html=True
+        )
+        eid=_clean_trade_text(row.get("Event ID"))
+        with st.expander("Full context", expanded=False):
+            _render_trade_event_inline_context(row,eid=eid,include_links=True)
+
+
+def render_trade_home_operational_compact(limit=4):
+    """Only material current disruptions for the executive Overview."""
+    disruptions=_canonical_trade_disruptions()
+    if disruptions is None or disruptions.empty:
+        st.caption("No material operational disruptions currently classified.")
+        return
+    disruptions=exclude_horizon_calendar_events(disruptions)
+    if "Horizon" in disruptions.columns:
+        disruptions=disruptions[~disruptions["Horizon"].fillna(False)].copy()
+    today=pd.Timestamp.utcnow().tz_localize(None).normalize()
+    if "Start Date" in disruptions.columns:
+        disruptions["_home_dt"]=pd.to_datetime(disruptions["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+        disruptions=disruptions[disruptions["_home_dt"].isna() | (disruptions["_home_dt"] >= today-pd.Timedelta(days=5))].copy()
+    # Require a demonstrated trade/operational consequence; discard generic security noise.
+    disruptions=disruptions[disruptions.apply(_trade_home_eligible,axis=1)].copy()
+    if disruptions.empty:
+        st.caption("No material operational disruptions currently classified.")
+        return
+    disruptions["_home_score"]=disruptions.apply(lambda r:_trade_priority_score(r,today=today),axis=1)
+    sort_cols=["_home_score"] + (["_home_dt"] if "_home_dt" in disruptions.columns else [])
+    disruptions=disruptions.sort_values(sort_cols,ascending=[False]*len(sort_cols),na_position="last")
+    _render_trade_home_compact_cards(disruptions,limit=limit,key_prefix="overview_disruption_compact",accent="#b18a45")
+
 def render_trade_developments_home():
     """Curated Trade home: current commercial moves, business/network moves and disruptions.
 
@@ -13317,82 +13377,41 @@ if page=="Report Studio":
     _render_trade_report_studio()
 
 elif page=="Overview":
-    header("Trade System","End-to-end logistics intelligence across companies, road, rail, maritime, aviation, facilities, corridors, markets, infrastructure and disruption.")
+    header("Trade System","Executive operating picture across trade, logistics, infrastructure and disruption.")
 
-    latest_col, dates_col = st.columns([2.7,1.0], gap="large")
+    latest_col, dates_col = st.columns([2.75,1.0], gap="large")
     with latest_col:
         st.markdown("### Priority developments")
-        st.caption("Developments with a demonstrated effect on movement, capacity, cost, infrastructure or commercial exposure — ranked by consequence, then recency.")
-        render_latest_reporting_trade(5)
+        st.caption("The few developments most likely to change movement, capacity, cost, infrastructure or commercial exposure.")
+        events=_live_trade_event_rows(180)
+        if events.empty:
+            events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+        events=exclude_horizon_calendar_events(events) if events is not None and not events.empty else events
+        if events is not None and not events.empty:
+            today=pd.Timestamp.utcnow().tz_localize(None).normalize()
+            if "Start Date" in events.columns:
+                events["_home_dt"]=pd.to_datetime(events["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+                events=events[events["_home_dt"].isna() | (events["_home_dt"] < today+pd.Timedelta(days=1))].copy()
+            events=events[events.apply(_trade_home_eligible,axis=1)].copy()
+            if not events.empty:
+                events["_home_score"]=events.apply(lambda r:_trade_priority_score(r,today=today),axis=1)
+                sort_cols=["_home_score"] + (["_home_dt"] if "_home_dt" in events.columns else [])
+                events=events.sort_values(sort_cols,ascending=[False]*len(sort_cols),na_position="last")
+                _render_trade_home_compact_cards(events,limit=5,key_prefix="overview_priority",accent="#3f8db5")
+            else:
+                st.caption("No current developments yet meet the homepage materiality threshold.")
+        else:
+            st.caption("No current developments available.")
+
     with dates_col:
         st.markdown("### Important dates")
-        st.caption("Upcoming Trade Horizon dates are kept separate from live reporting.")
-        render_trade_horizon_sidebar_compact(4)
+        st.caption("Only near-term dates with a plausible trade or operating consequence.")
+        render_trade_horizon_sidebar_compact(3)
 
     st.markdown("---")
-
-    # Canonical developments lead the Trade app. Open-source discovery is supporting evidence,
-    # not the primary operating picture.
-    render_trade_developments_home()
-
-    st.markdown("---")
-    op_left,op_right=st.columns([1.2,1.0],gap="large")
-    with op_left:
-        _render_operational_brief()
-    with op_right:
-        st.markdown("### Markets now")
-        render_live_market_dashboard(compact=True)
-
-    st.markdown("---")
-    q=st.text_input("Search the trade system",placeholder="Company, trucking fleet, rail network, warehouse, port, vessel, air cargo, corridor, contract, project...",key="trade_home_search_top")
-    if q.strip():
-        hits=ranked_search(q.strip(),limit=25)
-        if not hits.empty:
-            for _,h in hits.head(10).iterrows(): readable_search_card(h)
-        # Always search the live canonical database as well. This is what makes
-        # newly loaded incidents such as the Singapore collision discoverable
-        # immediately by title, vessel name, IMO, location or linked object.
-        live_hits=_render_connected_model_search(q.strip())
-        if hits.empty and live_hits==0:
-            st.info("No matching records.")
-
-    st.markdown("---")
-    left,right=st.columns([1.55,1.0],gap="large")
-    with left:
-        _render_trade_pulse()
-    with right:
-        _trade_exposure_snapshot()
-
-    st.markdown("---")
-    left,right=st.columns([1.45,1.0],gap="large")
-    with left:
-        _render_recent_additions()
-    with right:
-        _render_quick_access()
-        st.markdown("---")
-        render_security_business_rail(4)
-
-    st.markdown("---")
-    _render_business_infrastructure()
-
-    with st.expander("Open-source discovery feed",expanded=False):
-        render_overview_news()
-
-    with st.expander("Recent events — full context",expanded=False):
-        events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
-        if not events.empty:
-            dc=_first_existing_col(events,["Date","Start Date","Event Date"])
-            if dc:
-                events['_dt']=pd.to_datetime(events[dc],errors='coerce')
-                events=events.sort_values('_dt',ascending=False,na_position='last')
-            render_event_cards(events,10)
-        else:
-            st.info("No recent operational events.")
-
-
-elif page in {"Forward Calendar","Trade Horizon"}:
-    render_trade_horizon_workspace()
-
+    st.markdown("### Operational disruptions")
+    st.caption("Only current shocks with a direct effect on movement, capacity, infrastructure, access or continuity.")
+    render_trade_home_operational_compact(4)
 
 elif page=="Search":
     header("Search P&C","One query across companies, trucking, rail, aviation, maritime, facilities, corridors, contracts, transactions, news, events and systems.")
