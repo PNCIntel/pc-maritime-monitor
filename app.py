@@ -44,7 +44,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v6.6-weasyprint-pdf"
+APP_VERSION = "v6.7-live-events-weasyprint"
 RELEASE_NAME = "End-to-End Logistics Operating Picture · Companies, Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -12609,8 +12609,16 @@ def _canonical_trade_link_labels():
 
 
 def _canonical_trade_story_frame():
-    """Presentation view over canonical pc_events; no duplicate news universe."""
-    ev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+    """Presentation view over canonical pc_events; live DB first.
+
+    Newly loaded events land in Supabase before the legacy workbook-shaped TABLES
+    projection refreshes. Read pc_events live first so Trade Home, company/network
+    stories, disruptions, monitoring and other canonical story views all see new
+    loads immediately. Fall back to TABLES only when the live database is unavailable.
+    """
+    ev=_live_trade_event_rows(5000).copy()
+    if ev.empty:
+        ev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     if ev.empty:
         return ev
 
@@ -12633,8 +12641,14 @@ def _canonical_trade_story_frame():
             sources=[sources]
 
         item=dict(r)
+        # Fresh loader rows often arrive before optional story presentation metadata.
+        # A dated/titled canonical event is a valid Trade story unless metadata
+        # explicitly disables it. This prevents newly loaded events from disappearing
+        # simply because story.is_story was never set.
+        explicit_is_story=story.get("is_story")
+        is_story=(bool(_clean_trade_text(r.get("Title"))) if explicit_is_story is None else bool(explicit_is_story))
         item.update({
-            "Is Story":bool(story.get("is_story")),
+            "Is Story":is_story,
             "Lead Story":bool(story.get("lead_story")),
             "Story Category":str(story.get("story_category") or r.get("Event Family") or ""),
             "Card Title":str(story.get("card_title") or r.get("Title") or ""),
