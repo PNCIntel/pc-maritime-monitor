@@ -44,7 +44,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v6.7-live-events-weasyprint"
+APP_VERSION = "v6.9-trade-home-curation"
 RELEASE_NAME = "End-to-End Logistics Operating Picture · Companies, Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -10842,6 +10842,24 @@ _PC_REPORT_DEFAULT_DISCLAIMER = (
 )
 
 
+def _pc_is_suppressed_public_source_url(url):
+    """Sources retained for internal provenance but never shown in public P&C output."""
+    u=str(url or "").strip().casefold()
+    return any(host in u for host in ("globalsitu.com", "www.globalsitu.com"))
+
+
+def _pc_public_source_fallback_label(row):
+    """Readable source label when a scheduled/calendar event has no public URL."""
+    horizon=_pc_report_clean(row.get("Horizon Type") or row.get("horizon_type"))
+    title=_pc_report_clean(row.get("Title") or row.get("Card Title") or row.get("Next Milestone"))
+    text=f"{horizon} {title}".casefold()
+    if any(x in text for x in ("holiday","independence day","national day","public holiday")):
+        return "Public holiday / official calendar event"
+    if any(x in text for x in ("summit","conference","meeting","general debate","session","forum")):
+        return "Scheduled event / official calendar"
+    return "Scheduled event / calendar record"
+
+
 def _pc_report_row_source_urls(row):
     urls=[]
     def add(v):
@@ -10853,6 +10871,8 @@ def _pc_report_row_source_urls(row):
                 add(v.get(k))
             return
         s=str(v or "").strip()
+        if _pc_is_suppressed_public_source_url(s):
+            return
         if s.startswith(("http://","https://")) and s not in urls:
             urls.append(s)
     for k in ("Source URL","source_url","URL","url","Research Sources","research_sources"):
@@ -10952,7 +10972,8 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
     def _inline_sources(r, article_no):
         refs=_source_refs(r,article_no)
         if not refs:
-            return f'<div style="margin-top:12px;font-size:11px;line-height:1.5;color:{MUTED};overflow-wrap:anywhere;text-align:left;"><strong>Sources:</strong> source record not yet resolved in the canonical event graph.</div>'
+            fallback=esc(_pc_public_source_fallback_label(r))
+            return f'<div style="margin-top:12px;font-size:11px;line-height:1.5;color:{MUTED};overflow-wrap:anywhere;text-align:left;"><strong>Source:</strong> {fallback}</div>'
         bits=[f'<a href="{esc(u, quote=True)}" target="_blank" style="color:#9b642e;text-decoration:underline;font-weight:700;">{esc(label)}</a>' for label,u in refs]
         return f'<div style="margin-top:12px;font-size:11px;line-height:1.5;color:{MUTED};overflow-wrap:anywhere;text-align:left;"><strong>Sources:</strong> {", ".join(bits)}</div>'
 
@@ -10969,7 +10990,7 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
             watch_block=f'''<div style="background:{PALE};border-left:4px solid {GOLD};padding:13px 15px;margin:16px 0 0 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-size:10px;font-weight:700;letter-spacing:1.35px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 5px 0;">What to watch</div>
 <div style="font-size:13px;line-height:1.62;color:#4d5a63;margin:0;">{watch}</div></div>'''
-        return f'''<div class="pc-report-story pc-report-story-{kind}" style="border-left:4px solid {accent};padding:0 0 0 17px;margin:0 0 30px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
+        return f'''<div style="border-left:4px solid {accent};padding:0 0 0 17px;margin:0 0 30px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-size:10px;font-weight:700;letter-spacing:1.15px;text-transform:uppercase;color:{MUTED};margin:0 0 8px 0;line-height:1.45;">{meta}</div>
 <div style="font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:1.28;font-weight:700;color:{NAVY};margin:0 0 12px 0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{article_no:02d} &middot; {title}</div>
 <div style="font-size:15px;line-height:1.68;color:{TEXT};margin:0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{body}</div>
@@ -10981,7 +11002,7 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
         date_s=esc(_safe_date(r.get("Start Date")) or _pc_report_clean(r.get("Date Precision"),"Date TBC"))
         loc=esc(_pc_report_clean(r.get("Location") or r.get("Country / Countries") or r.get("Horizon Type")))
         meta=" &nbsp;&bull;&nbsp; ".join(x for x in [date_s.upper(),loc.upper()] if x)
-        return f'''<div class="pc-report-horizon" style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:15px 17px;margin:0 0 18px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
+        return f'''<div style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:15px 17px;margin:0 0 18px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-size:10px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:{MUTED};margin:0 0 6px 0;line-height:1.45;">{meta}</div>
 <div style="font-family:Georgia,'Times New Roman',serif;font-size:19px;line-height:1.35;font-weight:700;color:{NAVY_2};margin:0 0 8px 0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{article_no:02d} &middot; {title}</div>
 <div style="font-size:13.5px;line-height:1.66;color:#4d5a63;margin:0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{body}</div>{_inline_sources(r,article_no)}</div>'''
@@ -10999,7 +11020,7 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
             entries.append(f'<div style="font-size:11px;line-height:1.55;margin:3px 0;color:{MUTED};overflow-wrap:anywhere;word-break:break-word;text-align:left;"><strong style="color:{NAVY};">{ref}</strong> &nbsp;<a href="{esc(url,quote=True)}" target="_blank" style="color:#9b642e;text-decoration:underline;">{esc(url)}</a></div>')
         if not entries:
             entries.append(f'<div style="font-size:11px;line-height:1.55;color:{MUTED};">Source URL not yet resolved in the canonical event graph.</div>')
-        source_blocks.append(f'''<div class="pc-report-source-block" style="padding:11px 0;border-bottom:1px solid {LINE};max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
+        source_blocks.append(f'''<div style="padding:11px 0;border-bottom:1px solid {LINE};max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-family:Georgia,'Times New Roman',serif;font-size:15px;line-height:1.4;font-weight:700;color:{NAVY};margin:0 0 4px 0;">{n:02d} &middot; {title}</div>{''.join(entries)}</div>''')
     sources_html=''.join(source_blocks)
 
@@ -11009,98 +11030,19 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
 
     return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:{TEXT};">
-<div class="pc-report-shell" style="max-width:720px;margin:0 auto;padding:0 8px;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;color:{TEXT};line-height:1.7;overflow-wrap:anywhere;word-break:normal;white-space:normal;text-align:left;">
-<div class="pc-report-cover-page"><div class="pc-report-cover" style="border-top:4px solid {GOLD};padding:22px 0 18px 0;margin:0;text-align:left;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#9a7638;margin:0 0 8px 0;">P&amp;C Trade Intelligence</div><div style="font-size:12px;font-weight:700;letter-spacing:1.25px;text-transform:uppercase;color:{MUTED};margin:0 0 12px 0;">{pubdate} &nbsp;&bull;&nbsp; {report_type_text}</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:1.1;font-weight:700;color:{NAVY};margin:0 0 12px 0;overflow-wrap:anywhere;word-break:normal;">{esc(report_title)}</div><div style="font-size:16px;line-height:1.58;color:#56636c;margin:0;">{subtitle_text}</div></div>
-<div class="pc-report-summary" style="background:{PALE_2};border-top:3px solid {GOLD};padding:12px 14px;margin:2px 0 28px 0;font-size:12px;line-height:1.55;color:{NAVY};box-sizing:border-box;overflow-wrap:anywhere;text-align:left;"><strong>5 Commercial Developments</strong> &nbsp;&bull;&nbsp; <strong>3 Security / Operational Risks</strong> &nbsp;&bull;&nbsp; <strong>5 Horizon Milestones</strong></div></div>
-<div class="pc-report-section-heading" style="margin:0 0 22px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Commercial developments</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 20px 0;">Five developments shaping trade</div></div>
+<div style="max-width:720px;margin:0 auto;padding:0 8px;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;color:{TEXT};line-height:1.7;overflow-wrap:anywhere;word-break:normal;white-space:normal;text-align:left;">
+<div style="border-top:4px solid {GOLD};padding:22px 0 18px 0;margin:0;text-align:left;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#9a7638;margin:0 0 8px 0;">P&amp;C Trade Intelligence</div><div style="font-size:12px;font-weight:700;letter-spacing:1.25px;text-transform:uppercase;color:{MUTED};margin:0 0 12px 0;">{pubdate} &nbsp;&bull;&nbsp; {report_type_text}</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:1.1;font-weight:700;color:{NAVY};margin:0 0 12px 0;overflow-wrap:anywhere;word-break:normal;">{esc(report_title)}</div><div style="font-size:16px;line-height:1.58;color:#56636c;margin:0;">{subtitle_text}</div></div>
+<div style="background:{PALE_2};border-top:3px solid {GOLD};padding:12px 14px;margin:2px 0 28px 0;font-size:12px;line-height:1.55;color:{NAVY};box-sizing:border-box;overflow-wrap:anywhere;text-align:left;"><strong>5 Commercial Developments</strong> &nbsp;&bull;&nbsp; <strong>3 Security / Operational Risks</strong> &nbsp;&bull;&nbsp; <strong>5 Horizon Milestones</strong></div>
+<div style="margin:0 0 22px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Commercial developments</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 20px 0;">Five developments shaping trade</div></div>
 {commercial_html}
-<div class="pc-report-section-heading pc-report-security-heading" style="background:{NAVY};border-top:4px solid {GOLD};padding:20px 22px;margin:8px 0 26px 0;box-sizing:border-box;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#d6b46f;margin:0 0 8px 0;">Security &amp; operational risk</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.3;font-weight:700;color:#ffffff;margin:0;">Three developments to monitor</div></div>
+<div style="background:{NAVY};border-top:4px solid {GOLD};padding:20px 22px;margin:8px 0 26px 0;box-sizing:border-box;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#d6b46f;margin:0 0 8px 0;">Security &amp; operational risk</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.3;font-weight:700;color:#ffffff;margin:0;">Three developments to monitor</div></div>
 {security_html}
-<div class="pc-report-section-heading" style="margin:10px 0 20px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Horizon outlook</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 6px 0;">Five dates and milestones ahead</div><div style="font-size:14px;line-height:1.6;color:{MUTED};margin:0 0 18px 0;">Forward events that may alter cargo movement, operating conditions, policy or commercial planning.</div></div>
+<div style="margin:10px 0 20px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Horizon outlook</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 6px 0;">Five dates and milestones ahead</div><div style="font-size:14px;line-height:1.6;color:{MUTED};margin:0 0 18px 0;">Forward events that may alter cargo movement, operating conditions, policy or commercial planning.</div></div>
 {horizon_html}
-<div class="pc-report-references" style="border-top:4px solid {GOLD};padding:18px 0 0 0;margin:28px 0 26px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Sources &amp; references</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:26px;line-height:1.25;font-weight:700;color:{NAVY};margin:0 0 8px 0;">Reference list by article number</div>{sources_html}</div>
-<div class="pc-report-disclaimer" style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:18px 20px;margin:0 0 28px 0;box-sizing:border-box;overflow-wrap:anywhere;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.45px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 8px 0;">Disclaimer</div><div style="font-size:11px;line-height:1.62;color:#5b666e;margin:0;">{esc(disclaimer)}</div></div>
+<div style="border-top:4px solid {GOLD};padding:18px 0 0 0;margin:28px 0 26px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Sources &amp; references</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:26px;line-height:1.25;font-weight:700;color:{NAVY};margin:0 0 8px 0;">Reference list by article number</div>{sources_html}</div>
+<div style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:18px 20px;margin:0 0 28px 0;box-sizing:border-box;overflow-wrap:anywhere;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.45px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 8px 0;">Disclaimer</div><div style="font-size:11px;line-height:1.62;color:#5b666e;margin:0;">{esc(disclaimer)}</div></div>
 <div style="padding:16px 0 26px 0;border-top:1px solid {LINE};font-size:10px;line-height:1.55;color:{MUTED};overflow-wrap:anywhere;text-align:left;">Power &amp; Corridors Intelligence &nbsp;&bull;&nbsp; powerncorridors.com &nbsp;&bull;&nbsp; Generated from the canonical P&amp;C event layer. Analyst edits are preserved in the exported publication.</div>
 </div></body></html>'''
-
-
-
-def _pc_report_pdf_from_html(html_doc, report_title="Power & Corridors Intelligence", include_logo=True):
-    """Render the approved report HTML directly to A4 PDF using WeasyPrint."""
-    try:
-        from weasyprint import HTML, CSS
-    except Exception as exc:
-        raise RuntimeError(
-            "WeasyPrint is not installed. Add 'weasyprint>=68,<69' to requirements.txt "
-            "and the packages listed in packages.txt, then redeploy."
-        ) from exc
-
-    doc = str(html_doc or "")
-    if not doc.strip():
-        raise ValueError("The report HTML is empty.")
-
-    if include_logo and _PC_REPORT_LOGO_B64:
-        logo = (
-            '<div class="pc-pdf-logo" style="margin:0 0 16px 0;">'
-            f'<img src="data:image/png;base64,{_PC_REPORT_LOGO_B64}" '
-            'style="display:block;width:220px;max-width:62%;height:auto;" alt="Power & Corridors">'
-            '</div>'
-        )
-        doc = doc.replace('<div class="pc-report-cover"', logo + '<div class="pc-report-cover"', 1)
-
-    print_css = r'''
-    @page {
-      size: A4;
-      margin: 17mm 17mm 18mm 17mm;
-      @bottom-left {
-        content: "POWER & CORRIDORS INTELLIGENCE";
-        color: #7b858d;
-        font-family: Arial, "Liberation Sans", sans-serif;
-        font-size: 7.5pt;
-        letter-spacing: .08em;
-      }
-      @bottom-right {
-        content: "Page " counter(page) " / " counter(pages);
-        color: #7b858d;
-        font-family: Arial, "Liberation Sans", sans-serif;
-        font-size: 7.5pt;
-      }
-    }
-    html, body { background: #fff !important; }
-    body { margin: 0 !important; padding: 0 !important; }
-    .pc-report-shell {
-      max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important;
-      overflow: visible !important;
-      font-family: "Liberation Sans", "DejaVu Sans", Arial, sans-serif !important;
-    }
-    .pc-report-cover-page {
-      min-height: 245mm; box-sizing: border-box; break-after: page; page-break-after: always; padding-top: 7mm;
-    }
-    .pc-report-cover { padding-top: 18px !important; }
-    .pc-report-cover div[style*="font-family:Georgia"],
-    .pc-report-section-heading div[style*="font-family:Georgia"],
-    .pc-report-story div[style*="font-family:Georgia"],
-    .pc-report-horizon div[style*="font-family:Georgia"],
-    .pc-report-references div[style*="font-family:Georgia"] {
-      font-family: "Liberation Serif", "DejaVu Serif", Georgia, serif !important;
-    }
-    .pc-report-section-heading { break-after: avoid; page-break-after: avoid; }
-    .pc-report-story, .pc-report-horizon, .pc-report-source-block, .pc-report-disclaimer {
-      break-inside: avoid; page-break-inside: avoid;
-    }
-    .pc-report-story { margin-bottom: 8mm !important; }
-    .pc-report-security-heading { margin-top: 5mm !important; }
-    .pc-report-references { break-before: page; page-break-before: always; }
-    .pc-report-source-block a { color: #8b6a35 !important; text-decoration: underline !important; }
-    a { color: inherit; }
-    p, div { orphans: 3; widows: 3; }
-    '''
-
-    return HTML(string=doc, base_url=str(Path(__file__).resolve().parent)).write_pdf(
-        stylesheets=[CSS(string=print_css)],
-        presentational_hints=True,
-        pdf_identifier=True,
-    )
 
 
 
@@ -11140,13 +11082,7 @@ def _render_trade_report_studio():
     try:
         import streamlit.components.v1 as components; components.html(html_doc,height=820,scrolling=True)
     except Exception: st.markdown(html_doc,unsafe_allow_html=True)
-    slug=re.sub(r"[^a-z0-9]+","-",report_title.lower()).strip("-") or "pc-report"; date_slug=pd.Timestamp(report_date).strftime("%Y-%m-%d"); d1,d2=st.columns(2)
-    try:
-        pdf_bytes=_pc_report_pdf_from_html(html_doc,report_title,include_logo)
-        d1.download_button("Download A4 PDF",data=pdf_bytes,file_name=f"{slug}-{date_slug}.pdf",mime="application/pdf",use_container_width=True,type="primary",key="trade_report_pdf_download")
-    except Exception as exc:
-        d1.error(f"PDF renderer unavailable: {exc}")
-    d2.download_button("Download email-safe HTML",data=html_doc.encode("utf-8"),file_name=f"{slug}-{date_slug}.html",mime="text/html",use_container_width=True,key="trade_report_html_download")
+    pdf_bytes=_pc_report_pdf(report_title,report_type,report_date,subtitle,edited_com,edited_sec,edited_hor,disclaimer,include_logo); slug=re.sub(r"[^a-z0-9]+","-",report_title.lower()).strip("-") or "pc-report"; date_slug=pd.Timestamp(report_date).strftime("%Y-%m-%d"); d1,d2=st.columns(2); d1.download_button("Download A4 PDF",data=pdf_bytes,file_name=f"{slug}-{date_slug}.pdf",mime="application/pdf",use_container_width=True,type="primary",key="trade_report_pdf_download"); d2.download_button("Download email-safe HTML",data=html_doc.encode("utf-8"),file_name=f"{slug}-{date_slug}.html",mime="text/html",use_container_width=True,key="trade_report_html_download")
 
 
 # ---------- workspace navigation ----------
@@ -12609,27 +12545,41 @@ def _canonical_trade_link_labels():
 
 
 def _canonical_trade_story_frame():
-    """Presentation view over canonical pc_events; live DB first.
+    """Live presentation view over canonical pc_events.
 
-    Newly loaded events land in Supabase before the legacy workbook-shaped TABLES
-    projection refreshes. Read pc_events live first so Trade Home, company/network
-    stories, disruptions, monitoring and other canonical story views all see new
-    loads immediately. Fall back to TABLES only when the live database is unavailable.
+    The Trade app must not depend on a stale workbook projection immediately after a load.
+    Read live canonical events first, then enrich them with live event-link labels.  Metadata can
+    improve presentation, but a missing ``story.is_story`` flag must not make a valid event vanish.
     """
-    ev=_live_trade_event_rows(5000).copy()
-    if ev.empty:
+    ev=_live_trade_event_rows(500)
+    if ev is None or ev.empty:
         ev=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
-    if ev.empty:
-        return ev
+    if ev is None or ev.empty:
+        return pd.DataFrame()
 
     links=_canonical_trade_link_labels()
     rows=[]
+
+    def _bool_meta(d,key,default=False):
+        if not isinstance(d,dict) or key not in d:
+            return default
+        v=d.get(key)
+        if isinstance(v,bool): return v
+        if isinstance(v,(int,float)): return bool(v)
+        return str(v).strip().casefold() in {"1","true","yes","y","on"}
+
+    def _text_blob(r):
+        return " ".join(_clean_trade_text(r.get(c)) for c in [
+            "Title","Description","Event Nature","Event Domain","Event Family","Event Type",
+            "Mode","Country / Countries","Location","Operational Impact","Trade / Commercial Impact"
+        ]).casefold()
+
     for _,r in ev.iterrows():
         m=_pc_meta_dict(r.get("Metadata"))
         story=m.get("story") if isinstance(m.get("story"),dict) else {}
         disruption=m.get("disruption") if isinstance(m.get("disruption"),dict) else {}
         horizon=m.get("horizon") if isinstance(m.get("horizon"),dict) else {}
-        eid=str(r.get("Event ID") or "")
+        eid=str(r.get("Event ID") or "").strip()
         linkrows=links.get(eid,[])
         labels=[x.get("label") for x in linkrows if x.get("label")]
         entity_labels=[x.get("label") for x in linkrows if x.get("type")=="entity" and x.get("label")]
@@ -12637,45 +12587,80 @@ def _canonical_trade_story_frame():
         route_labels=[x.get("label") for x in linkrows if x.get("type")=="route" and x.get("label")]
 
         sources=m.get("research_sources") or []
-        if isinstance(sources,str):
-            sources=[sources]
+        if isinstance(sources,str): sources=[sources]
+
+        blob=_text_blob(r)
+        impact_blob=" ".join([
+            _clean_trade_text(r.get("Operational Impact")),
+            _clean_trade_text(r.get("Trade / Commercial Impact"))
+        ]).casefold()
+
+        # Horizon/calendar classification: explicit metadata wins; otherwise only genuinely
+        # scheduled/civic items are inferred.  Current commercial announcements are not Horizon.
+        horizon_pat=(
+            r"holiday|independence day|national day|anniversary|"
+            r"election|referendum|summit|conference|calendar event|"
+            r"public holiday|sporting event"
+        )
+        inferred_horizon=bool(re.search(horizon_pat,blob,flags=re.I))
+        is_horizon=_bool_meta(horizon,"show_in_trade_horizon",False) or inferred_horizon
+
+        # Operational-disruption classification.  This deliberately excludes ordinary deals,
+        # orders and projects even when their prose mentions risk/disruption elsewhere.
+        disrupt_terms=[
+            "attack","strike","collision","grounding","fire","explosion","shutdown","closure",
+            "closed","sabotage","cyber","piracy","seizure","boarding","accident","crash",
+            "congestion","outage","interception","smuggling","spill","casualty","suspended"
+        ]
+        business_terms=[
+            "order","newbuild","acquisition","sale","contract","investment","financing","ipo",
+            "listing","partnership","service launch","route launch","fleet expansion","terminal expansion",
+            "redevelopment","concession","budget","throughput record","free-trade","fta"
+        ]
+        inferred_disruption=(any(t in blob for t in disrupt_terms) and not any(t in blob for t in business_terms))
+        is_disruption=_bool_meta(disruption,"is_disruption",inferred_disruption)
+
+        # Missing story metadata must not hide newly loaded canonical events.  Explicit false still wins.
+        if isinstance(story,dict) and "is_story" in story:
+            is_story=_bool_meta(story,"is_story",False)
+        else:
+            is_story=bool(_clean_trade_text(r.get("Title")))
+
+        category=_clean_trade_text(story.get("story_category")) or _clean_trade_text(r.get("Event Family")) or _clean_trade_text(r.get("Event Type")) or "Development"
+        title=_clean_trade_text(story.get("card_title")) or _clean_trade_text(r.get("Title"))
+        deck=_clean_trade_text(story.get("card_deck")) or _clean_trade_text(r.get("Description"))
+        why=_clean_trade_text(story.get("why_it_matters")) or _clean_trade_text(r.get("Trade / Commercial Impact")) or _clean_trade_text(r.get("Operational Impact"))
 
         item=dict(r)
-        # Fresh loader rows often arrive before optional story presentation metadata.
-        # A dated/titled canonical event is a valid Trade story unless metadata
-        # explicitly disables it. This prevents newly loaded events from disappearing
-        # simply because story.is_story was never set.
-        explicit_is_story=story.get("is_story")
-        is_story=(bool(_clean_trade_text(r.get("Title"))) if explicit_is_story is None else bool(explicit_is_story))
         item.update({
             "Is Story":is_story,
-            "Lead Story":bool(story.get("lead_story")),
-            "Story Category":str(story.get("story_category") or r.get("Event Family") or ""),
-            "Card Title":str(story.get("card_title") or r.get("Title") or ""),
-            "Card Deck":str(story.get("card_deck") or r.get("Description") or ""),
-            "Why It Matters":str(story.get("why_it_matters") or r.get("Trade / Commercial Impact") or r.get("Operational Impact") or ""),
+            "Lead Story":_bool_meta(story,"lead_story",False),
+            "Story Category":category,
+            "Card Title":title,
+            "Card Deck":deck,
+            "Why It Matters":why,
             "Linked Objects":" · ".join(dict.fromkeys(labels)),
             "Linked Companies":" · ".join(dict.fromkeys(entity_labels)),
             "Linked Assets":" · ".join(dict.fromkeys(asset_labels)),
             "Linked Routes":" · ".join(dict.fromkeys(route_labels)),
-            "Is Disruption":bool(disruption.get("is_disruption")),
-            "Primary Disruption":bool(disruption.get("primary_disruption")),
-            "Disruption Domains":", ".join(str(x) for x in (disruption.get("disruption_domains") or [])),
-            "Disruption Type":str(disruption.get("disruption_type") or ""),
-            "Disruption Status":str(disruption.get("status") or ""),
-            "Horizon":bool(horizon.get("show_in_trade_horizon")),
-            "Horizon Type":str(horizon.get("horizon_type") or ""),
-            "Next Milestone":str(horizon.get("next_milestone") or ""),
+            "Is Disruption":is_disruption,
+            "Primary Disruption":_bool_meta(disruption,"primary_disruption",False),
+            "Disruption Domains":", ".join(str(x) for x in (disruption.get("disruption_domains") or [])) if isinstance(disruption,dict) else "",
+            "Disruption Type":_clean_trade_text(disruption.get("disruption_type")) if isinstance(disruption,dict) else "",
+            "Disruption Status":_clean_trade_text(disruption.get("status")) if isinstance(disruption,dict) else "",
+            "Horizon":is_horizon,
+            "Horizon Type":_clean_trade_text(horizon.get("horizon_type")) if isinstance(horizon,dict) else "",
+            "Next Milestone":_clean_trade_text(horizon.get("next_milestone")) if isinstance(horizon,dict) else "",
             "Research Sources":sources,
         })
         rows.append(item)
 
     out=pd.DataFrame(rows)
+    if out.empty: return out
     if "Start Date" in out.columns:
         out["_dt"]=pd.to_datetime(out["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
         out=out.sort_values("_dt",ascending=False,na_position="last")
     return out
-
 
 
 @st.cache_data(show_spinner=False, ttl=60)
@@ -12878,6 +12863,8 @@ def _event_source_urls(ctx):
                 add(v.get(k))
             return
         u=str(v or "").strip()
+        if _pc_is_suppressed_public_source_url(u):
+            return
         if u.startswith(("http://","https://")) and u not in urls:
             urls.append(u)
 
@@ -13232,52 +13219,97 @@ def _canonical_trade_active_monitoring():
 
 
 def render_trade_developments_home():
-    """Editorial hierarchy for Trade Home, driven by canonical data."""
+    """Curated Trade home: current commercial moves, business/network moves and disruptions.
+
+    Avoids mixing security incidents, calendar items and ordinary corporate developments in the
+    same stream, and avoids repeating the same event across multiple homepage sections.
+    """
     stories=_canonical_trade_story_frame()
-    if stories.empty:
+    if stories is None or stories.empty:
         st.info("No canonical trade developments are currently available.")
         return
 
     story_rows=stories[stories.get("Is Story",False).fillna(False)].copy() if "Is Story" in stories.columns else stories.copy()
-    # A home-page lead should be current. Keep future/horizon records in the
-    # Important dates rail and sort observed developments newest-first.
+    if story_rows.empty:
+        st.info("No current trade stories are classified.")
+        return
+
+    # Calendar/Horizon never belongs in the live story stream.
     if "Horizon" in story_rows.columns:
         story_rows=story_rows[~story_rows["Horizon"].fillna(False)].copy()
+    story_rows=exclude_horizon_calendar_events(story_rows)
+
+    today=pd.Timestamp.utcnow().tz_localize(None).normalize()
     if "Start Date" in story_rows.columns:
         story_rows["_lead_dt"]=pd.to_datetime(story_rows["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
-        today=pd.Timestamp.utcnow().tz_localize(None).normalize()
-        story_rows=story_rows[story_rows["_lead_dt"].isna() | (story_rows["_lead_dt"]<=today)]
-        story_rows=story_rows.sort_values("_lead_dt",ascending=False,na_position="last")
-    leads=story_rows.head(5)
+        story_rows=story_rows[story_rows["_lead_dt"].isna() | (story_rows["_lead_dt"] < today + pd.Timedelta(days=1))].copy()
+    else:
+        story_rows["_lead_dt"]=pd.NaT
 
-    st.markdown("### Current trade developments")
-    _render_trade_story_cards(leads,5,key_prefix='overview_lead')
+    # Trade-facing relevance filter.  Sparse or purely security records stay out until they
+    # contain a concrete commercial/operational consequence.
+    eligible=story_rows.apply(_trade_home_eligible,axis=1)
+    story_rows=story_rows[eligible].copy()
+    if story_rows.empty:
+        st.caption("No current developments yet contain enough trade-impact context for the Trade home.")
+        return
 
-    companies=story_rows[
-        story_rows.get("Linked Companies",pd.Series(index=story_rows.index,dtype=str)).fillna("").astype(str).str.len().gt(0)
-    ].copy()
-    if not companies.empty:
-        st.markdown("### Company & network stories")
-        _render_trade_story_cards(companies[~companies["Event ID"].isin(set(leads.get("Event ID",[])))],6,show_why=False,key_prefix='overview_company')
+    story_rows["_priority"]=story_rows.apply(lambda r:_trade_priority_score(r,today=today),axis=1)
+    story_rows=story_rows.sort_values(["_lead_dt","_priority"],ascending=[False,False],na_position="last")
 
-    c1,c2=st.columns(2,gap="large")
-    with c1:
-        st.markdown("### Disruptions")
-        disruptions=_canonical_trade_disruptions()
-        _render_trade_story_cards(disruptions,4,key_prefix='overview_disruption')
-    with c2:
-        st.markdown("### Trade Horizon")
-        horizon=trade_horizon_events(stories)
-        _render_trade_story_cards(horizon,4,show_why=False,key_prefix='overview_horizon')
+    # Section 1: today's / latest material trade developments. Prefer today's records, then fill
+    # from the previous 48 hours so the home never looks empty early in the day.
+    today_rows=story_rows[story_rows["_lead_dt"].notna() & (story_rows["_lead_dt"].dt.normalize()==today)].copy()
+    if len(today_rows)<6:
+        recent=story_rows[~story_rows.index.isin(today_rows.index)].copy()
+        recent=recent[recent["_lead_dt"].isna() | (recent["_lead_dt"] >= today-pd.Timedelta(days=2))]
+        lead_pool=pd.concat([today_rows,recent],ignore_index=False).drop_duplicates(subset=["Event ID"],keep="first")
+    else:
+        lead_pool=today_rows
+    leads=lead_pool.sort_values(["_lead_dt","_priority"],ascending=[False,False],na_position="last").head(8)
 
-    market_pat=r"performance|throughput|market|volume|capacity|reliability|forecast|fleet"
-    mask=story_rows.get("Story Category",pd.Series(index=story_rows.index,dtype=str)).fillna("").astype(str).str.contains(
-        market_pat,case=False,regex=True,na=False
+    st.markdown("### Latest trade developments")
+    st.caption("Current commercial, corridor and infrastructure developments with a direct effect on movement, capacity, cost or market access.")
+    _render_trade_story_cards(leads,8,key_prefix='overview_lead')
+    shown=set(leads.get("Event ID",pd.Series(dtype=str)).dropna().astype(str).tolist())
+
+    # Section 2: business/network moves only. No attacks, crashes, strikes or Horizon records.
+    business_pat=(
+        r"order|newbuild|acquisition|sale|contract|investment|financing|ipo|listing|partnership|"
+        r"service launch|route launch|terminal|port|rail|warehouse|corridor|capacity|redevelopment|"
+        r"concession|fleet|trade agreement|free-trade|fta|throughput|logistics"
     )
-    observations=story_rows[mask].copy()
-    if not observations.empty:
-        st.markdown("### Market & throughput observations")
-        _render_trade_story_cards(observations,5,show_why=False,key_prefix='overview_market')
+    business=story_rows[~story_rows.get("Is Disruption",pd.Series(False,index=story_rows.index)).fillna(False)].copy()
+    business=business[~business["Event ID"].astype(str).isin(shown)] if "Event ID" in business.columns else business
+    blob=pd.Series("",index=business.index,dtype="string")
+    for c in ["Story Category","Event Family","Event Type","Title","Description","Trade / Commercial Impact"]:
+        if c in business.columns:
+            blob=blob.str.cat(business[c].fillna("").astype(str),sep=" ")
+    business=business[blob.str.contains(business_pat,case=False,regex=True,na=False)].copy()
+    if not business.empty:
+        st.markdown("### Business, investment & network moves")
+        st.caption("Orders, contracts, acquisitions, infrastructure, service launches and corridor changes — kept separate from operational incidents.")
+        _render_trade_story_cards(business.head(8),8,show_why=True,key_prefix='overview_company')
+        shown.update(business.head(8).get("Event ID",pd.Series(dtype=str)).dropna().astype(str).tolist())
+
+    # Section 3: genuine operational disruptions only.
+    disruptions=_canonical_trade_disruptions()
+    if disruptions is not None and not disruptions.empty:
+        if "Horizon" in disruptions.columns:
+            disruptions=disruptions[~disruptions["Horizon"].fillna(False)].copy()
+        if "Event ID" in disruptions.columns:
+            disruptions=disruptions[~disruptions["Event ID"].astype(str).isin(shown)].copy()
+        if "Start Date" in disruptions.columns:
+            disruptions["_d"]=pd.to_datetime(disruptions["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+            disruptions=disruptions[disruptions["_d"].isna() | (disruptions["_d"] >= today-pd.Timedelta(days=7))]
+            disruptions=disruptions.sort_values("_d",ascending=False,na_position="last")
+        if not disruptions.empty:
+            st.markdown("### Operational disruptions")
+            st.caption("Strikes, attacks, accidents, closures, cyber incidents, congestion and other shocks with a demonstrated trade effect.")
+            _render_trade_story_cards(disruptions,6,key_prefix='overview_disruption')
+
+    # Horizon stays in its dedicated rail/page rather than being repeated again in the live body.
+    st.caption("Forward calendar items remain in Important dates / Trade Horizon and are not repeated in the live development stream.")
 
 
 
