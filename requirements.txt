@@ -1,5 +1,4 @@
 streamlit>=1.35
-pandas>=2.0
 openpyxl>=3.1
 pydeck>=0.9
 supabase>=2.6
@@ -9,3 +8,6 @@ beautifulsoup4>=4.12
 pypdf>=5.0
 matplotlib>=3.10
 weasyprint>=68,<69
+pandas>=2.2
+openpyxl>=3.1
+psycopg[binary]>=3.2
