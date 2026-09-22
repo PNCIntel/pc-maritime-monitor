@@ -1,0 +1,9 @@
+# Add these packages to the repository root packages.txt on Streamlit Community Cloud.
+libpango-1.0-0
+libpangoft2-1.0-0
+libharfbuzz0b
+libcairo2
+libgdk-pixbuf-2.0-0
+shared-mime-info
+fonts-dejavu-core
+fonts-liberation

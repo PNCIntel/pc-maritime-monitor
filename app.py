@@ -44,7 +44,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v5.3-report-studio"
+APP_VERSION = "v6.6-weasyprint-pdf"
 RELEASE_NAME = "End-to-End Logistics Operating Picture · Companies, Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -10969,7 +10969,7 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
             watch_block=f'''<div style="background:{PALE};border-left:4px solid {GOLD};padding:13px 15px;margin:16px 0 0 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-size:10px;font-weight:700;letter-spacing:1.35px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 5px 0;">What to watch</div>
 <div style="font-size:13px;line-height:1.62;color:#4d5a63;margin:0;">{watch}</div></div>'''
-        return f'''<div style="border-left:4px solid {accent};padding:0 0 0 17px;margin:0 0 30px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
+        return f'''<div class="pc-report-story pc-report-story-{kind}" style="border-left:4px solid {accent};padding:0 0 0 17px;margin:0 0 30px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-size:10px;font-weight:700;letter-spacing:1.15px;text-transform:uppercase;color:{MUTED};margin:0 0 8px 0;line-height:1.45;">{meta}</div>
 <div style="font-family:Georgia,'Times New Roman',serif;font-size:22px;line-height:1.28;font-weight:700;color:{NAVY};margin:0 0 12px 0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{article_no:02d} &middot; {title}</div>
 <div style="font-size:15px;line-height:1.68;color:{TEXT};margin:0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{body}</div>
@@ -10981,7 +10981,7 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
         date_s=esc(_safe_date(r.get("Start Date")) or _pc_report_clean(r.get("Date Precision"),"Date TBC"))
         loc=esc(_pc_report_clean(r.get("Location") or r.get("Country / Countries") or r.get("Horizon Type")))
         meta=" &nbsp;&bull;&nbsp; ".join(x for x in [date_s.upper(),loc.upper()] if x)
-        return f'''<div style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:15px 17px;margin:0 0 18px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
+        return f'''<div class="pc-report-horizon" style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:15px 17px;margin:0 0 18px 0;box-sizing:border-box;max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-size:10px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:{MUTED};margin:0 0 6px 0;line-height:1.45;">{meta}</div>
 <div style="font-family:Georgia,'Times New Roman',serif;font-size:19px;line-height:1.35;font-weight:700;color:{NAVY_2};margin:0 0 8px 0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{article_no:02d} &middot; {title}</div>
 <div style="font-size:13.5px;line-height:1.66;color:#4d5a63;margin:0;max-width:100%;overflow-wrap:anywhere;word-break:normal;">{body}</div>{_inline_sources(r,article_no)}</div>'''
@@ -10999,7 +10999,7 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
             entries.append(f'<div style="font-size:11px;line-height:1.55;margin:3px 0;color:{MUTED};overflow-wrap:anywhere;word-break:break-word;text-align:left;"><strong style="color:{NAVY};">{ref}</strong> &nbsp;<a href="{esc(url,quote=True)}" target="_blank" style="color:#9b642e;text-decoration:underline;">{esc(url)}</a></div>')
         if not entries:
             entries.append(f'<div style="font-size:11px;line-height:1.55;color:{MUTED};">Source URL not yet resolved in the canonical event graph.</div>')
-        source_blocks.append(f'''<div style="padding:11px 0;border-bottom:1px solid {LINE};max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
+        source_blocks.append(f'''<div class="pc-report-source-block" style="padding:11px 0;border-bottom:1px solid {LINE};max-width:100%;overflow-wrap:anywhere;word-break:normal;text-align:left;">
 <div style="font-family:Georgia,'Times New Roman',serif;font-size:15px;line-height:1.4;font-weight:700;color:{NAVY};margin:0 0 4px 0;">{n:02d} &middot; {title}</div>{''.join(entries)}</div>''')
     sources_html=''.join(source_blocks)
 
@@ -11009,19 +11009,98 @@ def _pc_report_html(report_title, report_type, report_date, subtitle, commercial
 
     return f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:{TEXT};">
-<div style="max-width:720px;margin:0 auto;padding:0 8px;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;color:{TEXT};line-height:1.7;overflow-wrap:anywhere;word-break:normal;white-space:normal;text-align:left;">
-<div style="border-top:4px solid {GOLD};padding:22px 0 18px 0;margin:0;text-align:left;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#9a7638;margin:0 0 8px 0;">P&amp;C Trade Intelligence</div><div style="font-size:12px;font-weight:700;letter-spacing:1.25px;text-transform:uppercase;color:{MUTED};margin:0 0 12px 0;">{pubdate} &nbsp;&bull;&nbsp; {report_type_text}</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:1.1;font-weight:700;color:{NAVY};margin:0 0 12px 0;overflow-wrap:anywhere;word-break:normal;">{esc(report_title)}</div><div style="font-size:16px;line-height:1.58;color:#56636c;margin:0;">{subtitle_text}</div></div>
-<div style="background:{PALE_2};border-top:3px solid {GOLD};padding:12px 14px;margin:2px 0 28px 0;font-size:12px;line-height:1.55;color:{NAVY};box-sizing:border-box;overflow-wrap:anywhere;text-align:left;"><strong>5 Commercial Developments</strong> &nbsp;&bull;&nbsp; <strong>3 Security / Operational Risks</strong> &nbsp;&bull;&nbsp; <strong>5 Horizon Milestones</strong></div>
-<div style="margin:0 0 22px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Commercial developments</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 20px 0;">Five developments shaping trade</div></div>
+<div class="pc-report-shell" style="max-width:720px;margin:0 auto;padding:0 8px;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;color:{TEXT};line-height:1.7;overflow-wrap:anywhere;word-break:normal;white-space:normal;text-align:left;">
+<div class="pc-report-cover-page"><div class="pc-report-cover" style="border-top:4px solid {GOLD};padding:22px 0 18px 0;margin:0;text-align:left;"><div style="font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#9a7638;margin:0 0 8px 0;">P&amp;C Trade Intelligence</div><div style="font-size:12px;font-weight:700;letter-spacing:1.25px;text-transform:uppercase;color:{MUTED};margin:0 0 12px 0;">{pubdate} &nbsp;&bull;&nbsp; {report_type_text}</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:1.1;font-weight:700;color:{NAVY};margin:0 0 12px 0;overflow-wrap:anywhere;word-break:normal;">{esc(report_title)}</div><div style="font-size:16px;line-height:1.58;color:#56636c;margin:0;">{subtitle_text}</div></div>
+<div class="pc-report-summary" style="background:{PALE_2};border-top:3px solid {GOLD};padding:12px 14px;margin:2px 0 28px 0;font-size:12px;line-height:1.55;color:{NAVY};box-sizing:border-box;overflow-wrap:anywhere;text-align:left;"><strong>5 Commercial Developments</strong> &nbsp;&bull;&nbsp; <strong>3 Security / Operational Risks</strong> &nbsp;&bull;&nbsp; <strong>5 Horizon Milestones</strong></div></div>
+<div class="pc-report-section-heading" style="margin:0 0 22px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Commercial developments</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 20px 0;">Five developments shaping trade</div></div>
 {commercial_html}
-<div style="background:{NAVY};border-top:4px solid {GOLD};padding:20px 22px;margin:8px 0 26px 0;box-sizing:border-box;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#d6b46f;margin:0 0 8px 0;">Security &amp; operational risk</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.3;font-weight:700;color:#ffffff;margin:0;">Three developments to monitor</div></div>
+<div class="pc-report-section-heading pc-report-security-heading" style="background:{NAVY};border-top:4px solid {GOLD};padding:20px 22px;margin:8px 0 26px 0;box-sizing:border-box;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#d6b46f;margin:0 0 8px 0;">Security &amp; operational risk</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:24px;line-height:1.3;font-weight:700;color:#ffffff;margin:0;">Three developments to monitor</div></div>
 {security_html}
-<div style="margin:10px 0 20px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Horizon outlook</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 6px 0;">Five dates and milestones ahead</div><div style="font-size:14px;line-height:1.6;color:{MUTED};margin:0 0 18px 0;">Forward events that may alter cargo movement, operating conditions, policy or commercial planning.</div></div>
+<div class="pc-report-section-heading" style="margin:10px 0 20px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Horizon outlook</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.22;font-weight:700;color:{NAVY};margin:0 0 6px 0;">Five dates and milestones ahead</div><div style="font-size:14px;line-height:1.6;color:{MUTED};margin:0 0 18px 0;">Forward events that may alter cargo movement, operating conditions, policy or commercial planning.</div></div>
 {horizon_html}
-<div style="border-top:4px solid {GOLD};padding:18px 0 0 0;margin:28px 0 26px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Sources &amp; references</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:26px;line-height:1.25;font-weight:700;color:{NAVY};margin:0 0 8px 0;">Reference list by article number</div>{sources_html}</div>
-<div style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:18px 20px;margin:0 0 28px 0;box-sizing:border-box;overflow-wrap:anywhere;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.45px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 8px 0;">Disclaimer</div><div style="font-size:11px;line-height:1.62;color:#5b666e;margin:0;">{esc(disclaimer)}</div></div>
+<div class="pc-report-references" style="border-top:4px solid {GOLD};padding:18px 0 0 0;margin:28px 0 26px 0;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.55px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 7px 0;">Sources &amp; references</div><div style="font-family:Georgia,'Times New Roman',serif;font-size:26px;line-height:1.25;font-weight:700;color:{NAVY};margin:0 0 8px 0;">Reference list by article number</div>{sources_html}</div>
+<div class="pc-report-disclaimer" style="background:{PALE};border-top:1px solid {LINE};border-bottom:1px solid {LINE};padding:18px 20px;margin:0 0 28px 0;box-sizing:border-box;overflow-wrap:anywhere;text-align:left;"><div style="font-size:11px;font-weight:700;letter-spacing:1.45px;text-transform:uppercase;color:{GOLD_DARK};margin:0 0 8px 0;">Disclaimer</div><div style="font-size:11px;line-height:1.62;color:#5b666e;margin:0;">{esc(disclaimer)}</div></div>
 <div style="padding:16px 0 26px 0;border-top:1px solid {LINE};font-size:10px;line-height:1.55;color:{MUTED};overflow-wrap:anywhere;text-align:left;">Power &amp; Corridors Intelligence &nbsp;&bull;&nbsp; powerncorridors.com &nbsp;&bull;&nbsp; Generated from the canonical P&amp;C event layer. Analyst edits are preserved in the exported publication.</div>
 </div></body></html>'''
+
+
+
+def _pc_report_pdf_from_html(html_doc, report_title="Power & Corridors Intelligence", include_logo=True):
+    """Render the approved report HTML directly to A4 PDF using WeasyPrint."""
+    try:
+        from weasyprint import HTML, CSS
+    except Exception as exc:
+        raise RuntimeError(
+            "WeasyPrint is not installed. Add 'weasyprint>=68,<69' to requirements.txt "
+            "and the packages listed in packages.txt, then redeploy."
+        ) from exc
+
+    doc = str(html_doc or "")
+    if not doc.strip():
+        raise ValueError("The report HTML is empty.")
+
+    if include_logo and _PC_REPORT_LOGO_B64:
+        logo = (
+            '<div class="pc-pdf-logo" style="margin:0 0 16px 0;">'
+            f'<img src="data:image/png;base64,{_PC_REPORT_LOGO_B64}" '
+            'style="display:block;width:220px;max-width:62%;height:auto;" alt="Power & Corridors">'
+            '</div>'
+        )
+        doc = doc.replace('<div class="pc-report-cover"', logo + '<div class="pc-report-cover"', 1)
+
+    print_css = r'''
+    @page {
+      size: A4;
+      margin: 17mm 17mm 18mm 17mm;
+      @bottom-left {
+        content: "POWER & CORRIDORS INTELLIGENCE";
+        color: #7b858d;
+        font-family: Arial, "Liberation Sans", sans-serif;
+        font-size: 7.5pt;
+        letter-spacing: .08em;
+      }
+      @bottom-right {
+        content: "Page " counter(page) " / " counter(pages);
+        color: #7b858d;
+        font-family: Arial, "Liberation Sans", sans-serif;
+        font-size: 7.5pt;
+      }
+    }
+    html, body { background: #fff !important; }
+    body { margin: 0 !important; padding: 0 !important; }
+    .pc-report-shell {
+      max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important;
+      overflow: visible !important;
+      font-family: "Liberation Sans", "DejaVu Sans", Arial, sans-serif !important;
+    }
+    .pc-report-cover-page {
+      min-height: 245mm; box-sizing: border-box; break-after: page; page-break-after: always; padding-top: 7mm;
+    }
+    .pc-report-cover { padding-top: 18px !important; }
+    .pc-report-cover div[style*="font-family:Georgia"],
+    .pc-report-section-heading div[style*="font-family:Georgia"],
+    .pc-report-story div[style*="font-family:Georgia"],
+    .pc-report-horizon div[style*="font-family:Georgia"],
+    .pc-report-references div[style*="font-family:Georgia"] {
+      font-family: "Liberation Serif", "DejaVu Serif", Georgia, serif !important;
+    }
+    .pc-report-section-heading { break-after: avoid; page-break-after: avoid; }
+    .pc-report-story, .pc-report-horizon, .pc-report-source-block, .pc-report-disclaimer {
+      break-inside: avoid; page-break-inside: avoid;
+    }
+    .pc-report-story { margin-bottom: 8mm !important; }
+    .pc-report-security-heading { margin-top: 5mm !important; }
+    .pc-report-references { break-before: page; page-break-before: always; }
+    .pc-report-source-block a { color: #8b6a35 !important; text-decoration: underline !important; }
+    a { color: inherit; }
+    p, div { orphans: 3; widows: 3; }
+    '''
+
+    return HTML(string=doc, base_url=str(Path(__file__).resolve().parent)).write_pdf(
+        stylesheets=[CSS(string=print_css)],
+        presentational_hints=True,
+        pdf_identifier=True,
+    )
 
 
 
@@ -11061,7 +11140,13 @@ def _render_trade_report_studio():
     try:
         import streamlit.components.v1 as components; components.html(html_doc,height=820,scrolling=True)
     except Exception: st.markdown(html_doc,unsafe_allow_html=True)
-    pdf_bytes=_pc_report_pdf(report_title,report_type,report_date,subtitle,edited_com,edited_sec,edited_hor,disclaimer,include_logo); slug=re.sub(r"[^a-z0-9]+","-",report_title.lower()).strip("-") or "pc-report"; date_slug=pd.Timestamp(report_date).strftime("%Y-%m-%d"); d1,d2=st.columns(2); d1.download_button("Download A4 PDF",data=pdf_bytes,file_name=f"{slug}-{date_slug}.pdf",mime="application/pdf",use_container_width=True,type="primary",key="trade_report_pdf_download"); d2.download_button("Download email-safe HTML",data=html_doc.encode("utf-8"),file_name=f"{slug}-{date_slug}.html",mime="text/html",use_container_width=True,key="trade_report_html_download")
+    slug=re.sub(r"[^a-z0-9]+","-",report_title.lower()).strip("-") or "pc-report"; date_slug=pd.Timestamp(report_date).strftime("%Y-%m-%d"); d1,d2=st.columns(2)
+    try:
+        pdf_bytes=_pc_report_pdf_from_html(html_doc,report_title,include_logo)
+        d1.download_button("Download A4 PDF",data=pdf_bytes,file_name=f"{slug}-{date_slug}.pdf",mime="application/pdf",use_container_width=True,type="primary",key="trade_report_pdf_download")
+    except Exception as exc:
+        d1.error(f"PDF renderer unavailable: {exc}")
+    d2.download_button("Download email-safe HTML",data=html_doc.encode("utf-8"),file_name=f"{slug}-{date_slug}.html",mime="text/html",use_container_width=True,key="trade_report_html_download")
 
 
 # ---------- workspace navigation ----------
