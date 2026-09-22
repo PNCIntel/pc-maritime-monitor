@@ -4975,7 +4975,8 @@ def _render_connected_network_inline(ctx, eid, key_prefix="eventctx"):
             display_df(_human_record_table(rels,["source_name","source_type","relationship_type","target_name","target_type","confidence"]),260)
 
 
-def _render_trade_event_inline_context(row, eid="", include_links=False):
+def _render_trade_event_inline_context(row, eid="", include_links=False, key_prefix="eventctx"):
+
     """Readable nested context that stays exactly where the event was opened."""
     ctx = _event_extended_context(row)
     description = _clean_trade_text(row.get("Description", ""))
@@ -5003,7 +5004,7 @@ def _render_trade_event_inline_context(row, eid="", include_links=False):
     if include_links and eid:
         event_ctx=_load_trade_event_database_context(eid)
         with st.expander("Connected network",expanded=True):
-            _render_connected_network_inline(event_ctx,eid,key_prefix=f"{eid}_event_network")
+            _render_connected_network_inline(event_ctx,eid,key_prefix=f"{key_prefix}_{eid}_event_network")
 
     if ctx["monitoring"]:
         with st.expander("Monitoring & indicators",expanded=False):
@@ -13251,8 +13252,9 @@ def _render_trade_home_compact_cards(rows, limit=5, key_prefix="home_compact", a
             + "</div>", unsafe_allow_html=True
         )
         eid=_clean_trade_text(row.get("Event ID"))
+        scoped_key=f"{key_prefix}_{i}_{eid or 'noid'}"
         with st.expander("Full context", expanded=False):
-            _render_trade_event_inline_context(row,eid=eid,include_links=True)
+            _render_trade_event_inline_context(row,eid=eid,include_links=True,key_prefix=scoped_key)
 
 
 def render_trade_home_operational_compact(limit=4):
@@ -13273,9 +13275,17 @@ def render_trade_home_operational_compact(limit=4):
     if disruptions.empty:
         st.caption("No material operational disruptions currently classified.")
         return
+    if "Event ID" in disruptions.columns:
+        disruptions=disruptions.drop_duplicates(subset=["Event ID"],keep="first")
     disruptions["_home_score"]=disruptions.apply(lambda r:_trade_priority_score(r,today=today),axis=1)
-    sort_cols=["_home_score"] + (["_home_dt"] if "_home_dt" in disruptions.columns else [])
-    disruptions=disruptions.sort_values(sort_cols,ascending=[False]*len(sort_cols),na_position="last")
+    if "_home_dt" in disruptions.columns:
+        today_mask=disruptions["_home_dt"].notna() & (disruptions["_home_dt"].dt.normalize()==today)
+        today_dis=disruptions[today_mask].sort_values(["_home_score","_home_dt"],ascending=[False,False],na_position="last")
+        older_dis=disruptions[~today_mask].sort_values(["_home_score","_home_dt"],ascending=[False,False],na_position="last")
+        slots=max(0,limit-len(today_dis.head(limit)))
+        disruptions=pd.concat([today_dis.head(limit),older_dis.head(slots)],ignore_index=False)
+    else:
+        disruptions=disruptions.sort_values("_home_score",ascending=False,na_position="last").head(limit)
     _render_trade_home_compact_cards(disruptions,limit=limit,key_prefix="overview_disruption_compact",accent="#b18a45")
 
 def render_trade_developments_home():
@@ -13392,11 +13402,35 @@ elif page=="Overview":
             if "Start Date" in events.columns:
                 events["_home_dt"]=pd.to_datetime(events["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
                 events=events[events["_home_dt"].isna() | (events["_home_dt"] < today+pd.Timedelta(days=1))].copy()
+
+            # Use the canonical story projection to identify disruption-tagged events, then
+            # keep Priority developments commercially focused. Operational shocks have their
+            # own section below and should not consume the five scarce lead slots.
+            story_flags=_canonical_trade_story_frame()
+            disruption_ids=set()
+            if story_flags is not None and not story_flags.empty and "Event ID" in story_flags.columns and "Is Disruption" in story_flags.columns:
+                disruption_ids=set(story_flags.loc[story_flags["Is Disruption"].fillna(False),"Event ID"].astype(str))
+            if "Event ID" in events.columns and disruption_ids:
+                events=events[~events["Event ID"].astype(str).isin(disruption_ids)].copy()
+
             events=events[events.apply(_trade_home_eligible,axis=1)].copy()
+            if "Event ID" in events.columns:
+                events=events.drop_duplicates(subset=["Event ID"],keep="first")
+
             if not events.empty:
                 events["_home_score"]=events.apply(lambda r:_trade_priority_score(r,today=today),axis=1)
-                sort_cols=["_home_score"] + (["_home_dt"] if "_home_dt" in events.columns else [])
-                events=events.sort_values(sort_cols,ascending=[False]*len(sort_cols),na_position="last")
+
+                # Today's material records must be visible before older high-scoring records.
+                # Rank within today by consequence, then fill any remaining slots from recent history.
+                if "_home_dt" in events.columns:
+                    today_mask=events["_home_dt"].notna() & (events["_home_dt"].dt.normalize()==today)
+                    today_events=events[today_mask].sort_values(["_home_score","_home_dt"],ascending=[False,False],na_position="last")
+                    older_events=events[~today_mask].sort_values(["_home_score","_home_dt"],ascending=[False,False],na_position="last")
+                    slots=max(0,5-len(today_events.head(5)))
+                    events=pd.concat([today_events.head(5),older_events.head(slots)],ignore_index=False)
+                else:
+                    events=events.sort_values("_home_score",ascending=False,na_position="last").head(5)
+
                 _render_trade_home_compact_cards(events,limit=5,key_prefix="overview_priority",accent="#3f8db5")
             else:
                 st.caption("No current developments yet meet the homepage materiality threshold.")
