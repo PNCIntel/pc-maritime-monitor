@@ -44,7 +44,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v7.2-corridor-network-explorer"
+APP_VERSION = "v7.2-corridor-linked-locations"
 RELEASE_NAME = "Corridor-Centric Trade & Logistics Operating Picture · Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -5081,7 +5081,12 @@ def render_event_cards(events,max_items=40):
         card_prefix = f"eventblock_{render_scope}_card_{idx}"
 
         with st.expander("Full event context", expanded=False):
-            _render_trade_event_inline_context(row, eid=eid, include_links=True)
+            # Each tab renders all of its cards, including hidden tabs. A shared
+            # default eventctx key therefore collides on repeated event IDs.
+            _render_trade_event_inline_context(
+                row, eid=eid, include_links=True,
+                key_prefix=f"{card_prefix}_{eid or 'noid'}"
+            )
 
         url = str(row.get("Primary Source URL", "")).strip()
         if url.startswith("http"):
@@ -5348,7 +5353,8 @@ def render_latest_reporting_trade(limit=4):
     sort_cols=["_trade_priority"] + (["_latest_dt"] if "_latest_dt" in events.columns else [])
     events=events.sort_values(sort_cols,ascending=[False]*len(sort_cols),na_position="last").head(limit)
 
-    for _,row in events.iterrows():
+    priority_scope = _next_event_render_scope()
+    for priority_idx, (_,row) in enumerate(events.iterrows()):
         title=_clean_trade_text(row.get("Title")) or "Trade development"
         date=pc_pretty_date(row.get("Start Date",""))
         etype=pretty_enum(_clean_trade_text(row.get("Event Type")) or "Development")
@@ -5365,7 +5371,10 @@ def render_latest_reporting_trade(limit=4):
         )
         eid=_clean_trade_text(row.get("Event ID"))
         with st.expander("Full event context",expanded=False):
-            _render_trade_event_inline_context(row,eid=eid,include_links=True)
+            _render_trade_event_inline_context(
+                row,eid=eid,include_links=True,
+                key_prefix=f"priority_{priority_scope}_{priority_idx}_{eid or 'noid'}"
+            )
 
 
 def render_trade_horizon_sidebar_compact(limit=4):
@@ -8673,6 +8682,297 @@ def _mobile_name_map():
     df=_live_frame("pc_mobile_assets","mobile_asset_id,name,asset_type,subtype,imo,flag",30000)
     return dict(zip(df.get("mobile_asset_id",pd.Series(dtype=str)).astype(str),
                     df.get("name",pd.Series(dtype=str)).astype(str))) if not df.empty else {}
+
+
+# ---------- corridor-linked operating picture ----------
+def _pc_first_col(df, candidates):
+    if df is None or df.empty:
+        return None
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+
+def _pc_text(v):
+    return "" if v is None or (isinstance(v,float) and pd.isna(v)) else str(v).strip()
+
+
+def _pc_corridor_label(row):
+    for c in ["corridor_name","name","title","corridor","display_name","Corridor"]:
+        if c in row.index and _pc_text(row.get(c)):
+            return _pc_text(row.get(c))
+    for c in ["corridor_key","Corridor ID","id"]:
+        if c in row.index and _pc_text(row.get(c)):
+            return _pc_text(row.get(c))
+    return "Unnamed corridor"
+
+
+def _pc_haversine_km(lat1, lon1, lat2, lon2):
+    """Great-circle distance. Returns None for incomplete coordinates."""
+    import math
+    try:
+        a1,a2,o1,o2=map(float,[lat1,lat2,lon1,lon2])
+    except Exception:
+        return None
+    r=6371.0088
+    p1,p2=math.radians(a1),math.radians(a2)
+    dp=math.radians(a2-a1); dl=math.radians(o2-o1)
+    h=math.sin(dp/2)**2+math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
+    return 2*r*math.asin(min(1.0,math.sqrt(h)))
+
+
+def _pc_point_segment_distance_km(lat, lon, lat1, lon1, lat2, lon2):
+    """Approximate point-to-segment distance in km using a local equirectangular projection."""
+    import math
+    try:
+        lat,lon,lat1,lon1,lat2,lon2=map(float,[lat,lon,lat1,lon1,lat2,lon2])
+    except Exception:
+        return None
+    mean=math.radians((lat+lat1+lat2)/3.0)
+    kx=111.320*max(0.05,math.cos(mean)); ky=110.574
+    px,py=lon*kx,lat*ky; ax,ay=lon1*kx,lat1*ky; bx,by=lon2*kx,lat2*ky
+    vx,vy=bx-ax,by-ay; wx,wy=px-ax,py-ay
+    den=vx*vx+vy*vy
+    if den<=1e-12:
+        return ((px-ax)**2+(py-ay)**2)**0.5
+    t=max(0.0,min(1.0,(wx*vx+wy*vy)/den))
+    qx,qy=ax+t*vx,ay+t*vy
+    return ((px-qx)**2+(py-qy)**2)**0.5
+
+
+@st.cache_data(show_spinner=False, ttl=90)
+def _pc_corridor_live_frames():
+    """Load the shared Supabase corridor graph and the location layers needed to traverse it."""
+    names=[
+        "pc_trade_corridors","pc_corridor_mode_connections","pc_assets","pc_entities",
+        "pc_relationships","pc_events","pc_event_locations","pc_logistics_event_impacts",
+        "pc_transport_services","pc_supply_chain_dependencies","pc_logistics_service_agreements",
+        "pc_freight_rate_assessments"
+    ]
+    limits={
+        "pc_trade_corridors":5000,"pc_corridor_mode_connections":30000,"pc_assets":40000,
+        "pc_entities":30000,"pc_relationships":50000,"pc_events":30000,"pc_event_locations":50000,
+        "pc_logistics_event_impacts":30000,"pc_transport_services":30000,
+        "pc_supply_chain_dependencies":30000,"pc_logistics_service_agreements":20000,
+        "pc_freight_rate_assessments":20000,
+    }
+    return {n:_live_frame(n,"*",limits[n]) for n in names}
+
+
+def _pc_corridor_key_column(corridors):
+    return _pc_first_col(corridors,["corridor_key","corridor_id","Corridor ID","id"])
+
+
+def _pc_corridor_operating_bundle(corridor_key, proximity_km=100.0):
+    """Resolve one corridor into endpoints, companies, services and events.
+
+    Evidence classes are intentionally separate:
+    - Explicit: a canonical corridor relationship / impact already exists.
+    - Operational: company/service relationship reaches a corridor endpoint.
+    - Geographic candidate: event point is close to an endpoint/segment and needs analyst review.
+    """
+    f=_pc_corridor_live_frames()
+    key=str(corridor_key or "").strip()
+    con=f["pc_corridor_mode_connections"].copy()
+    if not con.empty and "corridor_key" in con.columns:
+        con=con[con["corridor_key"].astype(str).eq(key)].copy()
+    else:
+        con=pd.DataFrame()
+
+    assets=f["pc_assets"].copy()
+    aid_col=_pc_first_col(assets,["asset_id","Asset ID"])
+    endpoint_ids=set()
+    if not con.empty:
+        for c in ["from_asset_id","to_asset_id"]:
+            if c in con.columns:
+                endpoint_ids.update(x for x in con[c].dropna().astype(str) if x)
+    endpoints=assets[assets[aid_col].astype(str).isin(endpoint_ids)].copy() if aid_col and endpoint_ids else pd.DataFrame()
+
+    # annotate explicit connection names for readability
+    amap={}
+    if aid_col and not assets.empty:
+        ncol=_pc_first_col(assets,["name","asset_name","Name"])
+        if ncol:
+            amap=dict(zip(assets[aid_col].astype(str),assets[ncol].astype(str)))
+    if not con.empty:
+        con["From"] = con.get("from_asset_id",pd.Series(index=con.index,dtype=str)).astype(str).map(amap).fillna(con.get("from_asset_id",""))
+        con["To"] = con.get("to_asset_id",pd.Series(index=con.index,dtype=str)).astype(str).map(amap).fillna(con.get("to_asset_id",""))
+
+    # Company operational presence: explicit entity<->asset relationships to corridor endpoints.
+    rel=f["pc_relationships"].copy(); ents=f["pc_entities"].copy()
+    company_rows=[]
+    if endpoint_ids and not rel.empty:
+        ename={}
+        if not ents.empty and "entity_id" in ents.columns:
+            ename=dict(zip(ents["entity_id"].astype(str),ents.get("name",ents["entity_id"]).astype(str)))
+        for _,r in rel.iterrows():
+            stype=_pc_text(r.get("source_type")).casefold(); ttype=_pc_text(r.get("target_type")).casefold()
+            src=_pc_text(r.get("source_id")); tgt=_pc_text(r.get("target_id")); role=_pc_text(r.get("relationship_type"))
+            eid=aid=""
+            if stype=="entity" and ttype=="asset" and tgt in endpoint_ids: eid,aid=src,tgt
+            elif stype=="asset" and ttype=="entity" and src in endpoint_ids: eid,aid=tgt,src
+            if eid and aid:
+                company_rows.append({
+                    "Entity ID":eid,"Company":ename.get(eid,eid),"Role":role,
+                    "Corridor Asset":amap.get(aid,aid),"Asset ID":aid,
+                    "Evidence":"Operational relationship"
+                })
+    companies=pd.DataFrame(company_rows).drop_duplicates() if company_rows else pd.DataFrame()
+
+    # Services explicitly attached to a corridor connection.
+    services=f["pc_transport_services"].copy(); service_ids=set()
+    if not con.empty and "transport_service_id" in con.columns:
+        service_ids.update(x for x in con["transport_service_id"].dropna().astype(str) if x)
+    sidcol=_pc_first_col(services,["transport_service_id","service_id"])
+    linked_services=services[services[sidcol].astype(str).isin(service_ids)].copy() if sidcol and service_ids else pd.DataFrame()
+
+    # Explicit event impacts are authoritative corridor-event links.
+    impacts=f["pc_logistics_event_impacts"].copy()
+    if not impacts.empty and "corridor_key" in impacts.columns:
+        impacts=impacts[impacts["corridor_key"].astype(str).eq(key)].copy()
+    else:
+        impacts=pd.DataFrame()
+    explicit_event_ids=set(impacts.get("event_id",pd.Series(dtype=str)).dropna().astype(str)) if not impacts.empty else set()
+
+    events=f["pc_events"].copy(); loc=f["pc_event_locations"].copy()
+    eidcol=_pc_first_col(events,["event_id","Event ID"]); elid=_pc_first_col(loc,["event_id","Event ID"])
+    event_name_col=_pc_first_col(events,["headline","title","event_name","name","summary","Event"])
+    event_map={}
+    if eidcol:
+        for _,r in events.iterrows():
+            event_map[_pc_text(r.get(eidcol))]=_pc_text(r.get(event_name_col)) if event_name_col else _pc_text(r.get(eidcol))
+
+    explicit_events=events[events[eidcol].astype(str).isin(explicit_event_ids)].copy() if eidcol and explicit_event_ids else pd.DataFrame()
+
+    # Geographic event candidates: near an explicit corridor node or connection segment.
+    candidates=[]
+    latc=_pc_first_col(loc,["latitude","Latitude","lat"]); lonc=_pc_first_col(loc,["longitude","Longitude","lon"])
+    alat=_pc_first_col(assets,["latitude","Latitude","lat"]); alon=_pc_first_col(assets,["longitude","Longitude","lon"])
+    coords={}
+    if aid_col and alat and alon:
+        for _,a in endpoints.iterrows():
+            try:
+                la=float(a.get(alat)); lo=float(a.get(alon))
+                if pd.notna(la) and pd.notna(lo): coords[_pc_text(a.get(aid_col))]=(la,lo)
+            except Exception: pass
+    segments=[]
+    if not con.empty:
+        for _,r in con.iterrows():
+            a=_pc_text(r.get("from_asset_id")); b=_pc_text(r.get("to_asset_id"))
+            if a in coords and b in coords: segments.append((a,b,coords[a],coords[b]))
+    if elid and latc and lonc and not loc.empty and coords:
+        for _,r in loc.iterrows():
+            eid=_pc_text(r.get(elid))
+            if not eid or eid in explicit_event_ids: continue
+            try:
+                la=float(r.get(latc)); lo=float(r.get(lonc))
+            except Exception: continue
+            if pd.isna(la) or pd.isna(lo): continue
+            best=None; nearest=""
+            for aid,(ala,alo) in coords.items():
+                d=_pc_haversine_km(la,lo,ala,alo)
+                if d is not None and (best is None or d<best): best=d; nearest=amap.get(aid,aid)
+            for a,b,(la1,lo1),(la2,lo2) in segments:
+                d=_pc_point_segment_distance_km(la,lo,la1,lo1,la2,lo2)
+                if d is not None and (best is None or d<best): best=d; nearest=f"{amap.get(a,a)} → {amap.get(b,b)}"
+            if best is not None and best<=float(proximity_km):
+                candidates.append({
+                    "Event ID":eid,"Event":event_map.get(eid,eid),
+                    "Location":_pc_text(r.get("location_name")) or _pc_text(r.get("country")),
+                    "Distance km":round(best,1),"Nearest corridor element":nearest,
+                    "Evidence":"Geographic candidate — analyst review"
+                })
+    geo_events=pd.DataFrame(candidates).sort_values("Distance km") if candidates else pd.DataFrame()
+
+    # Dependencies / agreements / rate observations explicitly keyed to the corridor.
+    deps=f["pc_supply_chain_dependencies"].copy()
+    if not deps.empty:
+        mask=pd.Series(False,index=deps.index)
+        for c in ["dependent_corridor_key","provider_corridor_key"]:
+            if c in deps.columns: mask |= deps[c].astype(str).eq(key)
+        deps=deps[mask].copy()
+    agreements=f["pc_logistics_service_agreements"].copy()
+    if not agreements.empty and "corridor_key" in agreements.columns:
+        agreements=agreements[agreements["corridor_key"].astype(str).eq(key)].copy()
+    rates=f["pc_freight_rate_assessments"].copy()
+    if not rates.empty and "corridor_key" in rates.columns:
+        rates=rates[rates["corridor_key"].astype(str).eq(key)].copy()
+
+    return {
+        "connections":con,"endpoints":endpoints,"companies":companies,"services":linked_services,
+        "explicit_events":explicit_events,"impacts":impacts,"geo_events":geo_events,
+        "dependencies":deps,"agreements":agreements,"rates":rates,"locations":loc,
+    }
+
+
+def render_corridor_operating_picture():
+    """Interactive corridor → locations → companies → events traversal for the main Trade app."""
+    live=_pc_corridor_live_frames(); corridors=live["pc_trade_corridors"].copy()
+    if corridors.empty:
+        st.info("No live pc_trade_corridors rows are exposed yet. The existing corridor register remains available below.")
+        return
+    kcol=_pc_corridor_key_column(corridors)
+    if not kcol:
+        st.warning("pc_trade_corridors is reachable but its corridor key column could not be identified.")
+        return
+    corridors=corridors[corridors[kcol].notna()].copy().reset_index(drop=True)
+    if corridors.empty: return
+    labels=[_pc_corridor_label(r) for _,r in corridors.iterrows()]
+    q=st.text_input("Find operational corridor",placeholder="Hormuz, Red Sea, Middle Corridor, Panama...",key="live_corridor_find")
+    indexes=list(range(len(corridors)))
+    if q.strip(): indexes=[i for i in indexes if q.casefold() in labels[i].casefold() or q.casefold() in _pc_text(corridors.iloc[i].get(kcol)).casefold()]
+    if not indexes:
+        st.warning("No matching live corridor."); return
+    pick=st.selectbox("Operational corridor",indexes,format_func=lambda i:labels[i],key="live_corridor_pick")
+    crow=corridors.iloc[pick]; ckey=_pc_text(crow.get(kcol)); cname=labels[pick]
+    st.markdown(f"## {cname}")
+    meta=[]
+    for c in ["status","corridor_type","mode","geography","region","description"]:
+        if c in corridors.columns and _pc_text(crow.get(c)): meta.append(_pc_text(crow.get(c)))
+    if meta: st.caption(" · ".join(meta[:4]))
+    radius=st.slider("Geographic event review radius (km)",25,300,100,25,key=f"corridor_radius_{ckey}",help="This only generates review candidates. It does not assert that the event disrupted the corridor.")
+    b=_pc_corridor_operating_bundle(ckey,radius)
+    a,bm,c,d,e=st.columns(5)
+    a.metric("Connected nodes",len(b["endpoints"]))
+    bm.metric("Mode links",len(b["connections"]))
+    c.metric("Companies",b["companies"]["Entity ID"].nunique() if not b["companies"].empty else 0)
+    d.metric("Explicit events",len(b["explicit_events"]))
+    e.metric("Geo candidates",len(b["geo_events"]))
+    if b["connections"].empty:
+        st.warning("This corridor has no pc_corridor_mode_connections yet. Add verified endpoint links in Power Admin to unlock full network traversal.")
+    tabs=st.tabs(["Network","Companies","Events","Services","Dependencies & markets","Evidence"])
+    with tabs[0]:
+        if not b["endpoints"].empty:
+            lat=_pc_first_col(b["endpoints"],["latitude","Latitude","lat"]); lon=_pc_first_col(b["endpoints"],["longitude","Longitude","lon"])
+            if lat and lon:
+                mp=b["endpoints"].copy(); mp["lat"]=pd.to_numeric(mp[lat],errors="coerce"); mp["lon"]=pd.to_numeric(mp[lon],errors="coerce"); mp=mp.dropna(subset=["lat","lon"])
+                if not mp.empty: st.map(mp,latitude="lat",longitude="lon",size=80,use_container_width=True)
+        st.markdown("#### Mode connections")
+        display_df(b["connections"],300)
+        st.markdown("#### Corridor nodes")
+        display_df(b["endpoints"],300)
+    with tabs[1]:
+        st.caption("Companies appear here because a canonical ownership, operating, management or other entity↔asset relationship reaches a corridor node. Headquarters proximity alone is not treated as corridor exposure.")
+        display_df(b["companies"],350)
+    with tabs[2]:
+        st.markdown("#### Explicit corridor impacts")
+        st.caption("These are existing canonical pc_logistics_event_impacts links and are treated separately from proximity matches.")
+        display_df(b["impacts"],260)
+        if not b["explicit_events"].empty: display_df(b["explicit_events"],320)
+        st.markdown("#### Geographic candidates")
+        st.caption("Events whose mapped location falls near a connected corridor node or segment. These are candidates for analyst review, not confirmed corridor impacts.")
+        display_df(b["geo_events"],320)
+    with tabs[3]:
+        display_df(b["services"],350)
+    with tabs[4]:
+        d1,d2,d3=st.tabs(["Dependencies","Agreements","Freight rates"])
+        with d1: display_df(b["dependencies"],320)
+        with d2: display_df(b["agreements"],320)
+        with d3: display_df(b["rates"],320)
+    with tabs[5]:
+        st.caption("Evidence hierarchy: explicit corridor relationships and event-impact records first; company operational relationships second; geographic proximity only as a review queue. This prevents a nearby HQ or incident from being presented as confirmed operational exposure.")
+        display_df(crow.to_frame("Value").reset_index().rename(columns={"index":"Field"}),300,show_ids=True)
 
 
 def _render_connected_model_search(query):
@@ -13311,70 +13611,6 @@ def _render_trade_home_compact_cards(rows, limit=5, key_prefix="home_compact", a
             _render_trade_event_inline_context(row,eid=eid,include_links=True,key_prefix=scoped_key)
 
 
-def render_corridor_network_workspace(corridors):
-    """Inspect one canonical corridor without inventing graph edges.
-
-    Exact corridor-ID / corridor-name matches are displayed separately from
-    keyword discoveries, which MUST NOT be treated as proven dependencies.
-    """
-    st.markdown("### Corridor network explorer")
-    st.caption("Select a corridor to inspect its known connections across modes. Exact references are separated from unverified name matches.")
-    if corridors is None or corridors.empty:
-        st.info("No canonical corridor layer loaded. Check the shared Supabase/loader connection; no demonstration records are inserted.")
-        return
-    name_col=next((c for c in ("Corridor","Name","Corridor Name","System") if c in corridors.columns),None)
-    if not name_col:
-        st.warning("The corridor source has no display-name column. Inspect loader column mappings before showing relationships.")
-        return
-    available=corridors[corridors[name_col].notna()].copy().reset_index(drop=True)
-    if available.empty:
-        st.info("No named corridors in the current dataset."); return
-    ix=st.selectbox("Explore corridor",range(len(available)),format_func=lambda i:str(available.iloc[i][name_col]),key="pc_corridor_network_selector")
-    item=available.iloc[ix]
-    name=str(item[name_col]).strip()
-    id_col=next((c for c in ("Corridor ID","corridor_id","System ID") if c in item.index),None)
-    cid=str(item[id_col]).strip() if id_col and pd.notna(item[id_col]) else ""
-    st.markdown("**"+html_lib.escape(name)+"**")
-    summary=[f"{c}: {item[c]}" for c in ("Connects","Country / Region","Primary Traffic","Strategic Note") if c in item.index and pd.notna(item[c]) and str(item[c]).strip()]
-    if summary: st.caption(" · ".join(summary))
-    datasets=[
-        ("Ports and terminals",("Infrastructure","Ports")),
-        ("Transport routes",("Infrastructure","Transport Routes")),
-        ("Rail networks",("Rail","Rail Networks")),
-        ("Waterways",("Systems & Waterways","Waterway Systems")),
-        ("Companies",("Corporate","Companies")),
-        ("Tanker exposure",("Maritime","Tanker Corridor Exposure")),
-        ("Great Lakes cargo",("Maritime","Great Lakes Cargo Corridors")),
-        ("Defence delivery",("Defence & Shipbuilding","Sales & Delivery Routes")),
-    ]
-    exact=[]; candidates=[]
-    for label_txt,key in datasets:
-        df=TABLES.get(key,pd.DataFrame())
-        if df is None or df.empty: continue
-        # A named relationship field is evidence of a canonical linkage; free-text
-        # search is only a lead for an analyst, never a fabricated graph edge.
-        ref_cols=[c for c in df.columns if str(c).lower().replace("_"," ").strip() in
-                  ("corridor id","system id","trade corridor id","corridor","trade corridor")]
-        linked=pd.Series(False,index=df.index)
-        for col in ref_cols:
-            vals=df[col].fillna("").astype(str).str.strip().str.casefold()
-            if cid and col.lower().replace("_"," ").endswith("id"):
-                linked=linked | vals.eq(cid.casefold())
-            elif not col.lower().replace("_"," ").endswith("id") and name:
-                linked=linked | vals.eq(name.casefold())
-        if linked.any(): exact.append((label_txt,df[linked].copy()))
-        # Non-keyword matching deliberately disabled here: naming similarity
-        # alone does not establish a corridor-to-asset dependency.
-    if exact:
-        st.success(f"{len(exact)} domain layer(s) contain explicit corridor references.")
-        for label_txt,rows in exact:
-            with st.expander(f"{label_txt} · {len(rows)} linked",expanded=True):
-                display_df(rows, min(250,len(rows)))
-    else:
-        st.info("No explicit cross-domain references were found in the currently loaded tables. This is a data-linkage gap, not evidence that the corridor has no assets.")
-    st.caption("Operational alerts are shown only on Alerts & Disruptions. Future monitoring and planned events remain in Trade Horizon.")
-
-
 def render_corridor_home_focus():
     """Compact corridor-first entry point for the Trade System home page."""
     corridors=TABLES.get(("Infrastructure","Corridors"),pd.DataFrame()).copy()
@@ -15626,9 +15862,12 @@ elif page=="Corridors & Systems":
     systems=TABLES.get(("Systems & Waterways","Systems"),pd.DataFrame()).copy()
     ct1,ct2,ct3,ct4=st.tabs(["Corridors","Connected systems","Waterways","Exposure & routes"])
     with ct1:
-        cq=st.text_input("Find corridor",placeholder="Middle Corridor, Great Lakes, Hormuz, Arctic...",key="corridor_search")
-        display_df(_contains_any(corridors,[cq]) if cq.strip() and not corridors.empty else corridors,250)
-        render_corridor_network_workspace(corridors)
+        st.markdown("### Corridor operating picture")
+        st.caption("Traverse the shared Supabase graph from a corridor to its connected locations, operators, services and events. Geographic matches are kept separate from confirmed operational links.")
+        render_corridor_operating_picture()
+        with st.expander("Legacy / workbook corridor register",expanded=False):
+            cq=st.text_input("Find corridor",placeholder="Middle Corridor, Great Lakes, Hormuz, Arctic...",key="corridor_search")
+            display_df(_contains_any(corridors,[cq]) if cq.strip() and not corridors.empty else corridors,250)
     with ct3:
         wq=st.text_input("Find waterway",placeholder="Suez, Panama, Bosporus, St Lawrence...",key="waterway_search")
         display_df(_contains_any(waterways,[wq]) if wq.strip() and not waterways.empty else waterways,250)
