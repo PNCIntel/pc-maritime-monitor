@@ -1,8 +1,7 @@
 """P&C Streamlit Database Diagnostics — READ ONLY.
 
 Place alongside pc-power-admin.py, or in pages/90_Database_Diagnostics.py.
-Requires the repository's shared/pc_auth.py and existing Supabase service secrets.
-Passwordless mode requires an explicit development flag and a restricted deployment.
+Requires the repository's shared/pc_auth.py and the existing Supabase secrets.
 All database operations are PostgREST SELECT only; no SQL/RPC, DDL or writes.
 """
 from __future__ import annotations
@@ -25,9 +24,9 @@ if ROOT.name.lower() == "pages":
 SHARED = ROOT / "shared"
 if str(SHARED) not in sys.path:
     sys.path.insert(0, str(SHARED))
-from pc_auth import service_client
+from pc_auth import require_super_admin, service_client
 
-APP_VERSION = "phase13g-diagnostics-1.1-dev-no-login"
+APP_VERSION = "phase13g-diagnostics-1.2"
 
 PHASE13_TABLES_BY_PHASE = {'A': ['pc_research_projects',
        'pc_research_questions',
@@ -1247,26 +1246,29 @@ def run_audit(sb, check_physical=False):
     return result
 
 
+def audit_action_matrix(registry, connectivity):
+    """Read-only triage. Never equate metadata absence with physical absence."""
+    phases=[]
+    for phase, tables in PHASE13_TABLES_BY_PHASE.items():
+        rows=[r for r in registry if r.get("Phase")=="13"+phase]
+        ready=sum(r.get("Registration")=="REGISTERED" for r in rows)
+        unregistered=sum(r.get("Registration")=="UNREGISTERED" for r in rows)
+        incomplete=sum(r.get("Registration") in ("REGISTRY_CONFLICT","MISSING_COLUMNS") for r in rows)
+        probes=[r for r in connectivity if r.get("Group")=="13"+phase]
+        failures=sum(r.get("Read status")!="READABLE" for r in probes)
+        phases.append({"Phase":"13"+phase,"Expected":len(tables),"Registered":ready,
+                       "Unregistered":unregistered,"Incomplete metadata":incomplete,
+                       "REST probe failures":failures if probes else None,
+                       "Probed":bool(probes)})
+    return phases
+
+
 def show_app():
     st.set_page_config(page_title="P&C · Database Diagnostics",page_icon="◈",layout="wide")
-    # DEVELOPMENT ONLY: opt-in passwordless diagnostics. The app uses a
-    # server-side Supabase service client, so never allow this on a public app.
-    # Set PC_DIAGNOSTICS_DEV_NO_LOGIN=true in the diagnostic Streamlit app's
-    # own secrets ONLY after restricting access to the Streamlit deployment.
-    def _setting(name, default=False):
-        try:
-            value=st.secrets.get(name, os.getenv(name, default))
-        except Exception:
-            value=os.getenv(name, default)
-        return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-    if not _setting("PC_DIAGNOSTICS_DEV_NO_LOGIN"):
-        st.error("Development diagnostics are disabled. Set PC_DIAGNOSTICS_DEV_NO_LOGIN=true "
-                 "in Streamlit secrets only for a restricted development deployment.")
-        st.stop()
-    st.warning("DEVELOPMENT MODE — no login. This deployment MUST be access-restricted "
-               "or run locally. Anyone with access to this app can inspect its diagnostic "
-               "results. Disable PC_DIAGNOSTICS_DEV_NO_LOGIN before publishing.")
+    # No local bypass: diagnostic access uses existing authorized Power Admin login.
+    # If auth is not configured yet, this diagnostic fails closed rather than
+    # exposing infrastructure/status details via the public Streamlit app.
+    require_super_admin()
     st.title("Database Diagnostics")
     st.caption("Power & Corridors · read-only Streamlit diagnostics · "+APP_VERSION)
     st.info("This page uses your existing Supabase project connection, not the Supabase dashboard. "
@@ -1304,6 +1306,17 @@ def show_app():
         a.metric("Registered / expected",f"{ready} / {total}")
         b.metric("13A–13B registered",f"{reg[(reg['Phase'].isin(['13A','13B'])) & reg['Registration'].eq('REGISTERED')].shape[0]} / 26")
         c.metric("13C–13F registered",f"{reg[(reg['Phase'].isin(['13C','13D','13E','13F'])) & reg['Registration'].eq('REGISTERED')].shape[0]} / 32")
+        st.markdown("#### Registration by phase")
+        phase_matrix=pd.DataFrame(audit_action_matrix(result["registration"],result["connectivity"]))
+        st.dataframe(phase_matrix,use_container_width=True,hide_index=True)
+        st.caption("Metadata registration, REST exposure and physical installation are separate checks. A missing registration or REST failure alone does not establish physical-table absence.")
+        ab=phase_matrix[phase_matrix["Phase"].isin(["13A","13B"])]
+        if not ab.empty and int(ab["Registered"].sum()) < 26:
+            st.warning("13A–13B are not fully registered. Audit their migrations and existing physical objects in the Supabase SQL editor before applying guarded migrations. Do not infer absence from these registry counts.")
+        if (phase_matrix["Incomplete metadata"]>0).any():
+            st.error("Registry conflicts or missing column metadata detected. Review individual differences before enabling the Phase 13 canonical apply path.")
+        if any(result["errors"]):
+            st.error("Registry data could not be fully read; reported totals may be incomplete.")
         st.subheader("Phase 13 model registry")
         phase=st.selectbox("Show phase",["All","13A","13B","13C","13D","13E","13F"])
         visible=reg if phase=="All" else reg[reg["Phase"]==phase]
@@ -1319,6 +1332,8 @@ def show_app():
         failed=connection[connection["Read status"]!="READABLE"]
         if not failed.empty:
             st.warning("A REST read failed. Review connectivity, API exposure and permissions before concluding a physical table is absent.")
+    st.download_button("Export phase triage CSV",data=pd.DataFrame(audit_action_matrix(result["registration"],result["connectivity"])).to_csv(index=False),
+                       file_name="pc_phase13_triage.csv",mime="text/csv")
     st.download_button("Export diagnostic JSON",data=json.dumps(result,indent=2,default=str),
                        file_name="pc_database_diagnostics.json",mime="application/json")
     if not reg.empty:

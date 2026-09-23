@@ -44,7 +44,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v7.1-corridor-operating-picture"
+APP_VERSION = "v7.2-corridor-network-explorer"
 RELEASE_NAME = "Corridor-Centric Trade & Logistics Operating Picture · Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -7689,22 +7689,35 @@ def render_compliance_exposure_workspace():
 
 
 def _trade_alert_candidates():
-    """Canonical disruption records first; legacy keyword inference only as fallback."""
+    """Only current operational disruptions; never promote Horizon/calendar records to alerts.
+
+    The old fallback searched full holiday descriptions for 'closed', 'security',
+    'strike', etc.  Public-holiday office closures are calendar information, not
+    trade-system disruption alerts.  Keep the filter on *both* canonical and
+    workbook fallback paths so stale workbook projections cannot leak them back.
+    """
     explicit=_canonical_trade_disruptions()
     if explicit is not None and not explicit.empty:
-        return explicit.copy()
+        return exclude_horizon_calendar_events(explicit)
 
     events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
     if events.empty:
         return events
-    cols=[c for c in ["Event Family","Event Type","Title","Description","Operational Impact","Trade / Commercial Impact"] if c in events.columns]
+    events=exclude_horizon_calendar_events(events)
+    if events.empty:
+        return events
+    cols=[c for c in ["Event Family","Event Type","Title","Operational Impact","Trade / Commercial Impact"] if c in events.columns]
     blob=pd.Series("",index=events.index,dtype="string")
     for c in cols:
         blob=blob.str.cat(events[c].fillna("").astype(str),sep=" ")
-    include=r"strike|labour|weather|typhoon|cyclone|hurricane|flood|earthquake|wildfire|storm|closure|outage|disruption|grounding|collision|allision|capsize|sinking|fire|explosion|attack|missile|drone|piracy|seizure|interdiction|sanction|customs|tariff|border|canal|channel|low water|cyber|fraud|smuggl|crime"
+    include=(r"\b(?:strike|labour|weather|typhoon|cyclone|hurricane|flood|earthquake|"
+             r"wildfire|storm|closure|outage|disruption|grounding|collision|allision|"
+             r"capsize|sinking|fire|explosion|attack|missile|drone|piracy|seizure|"
+             r"interdiction|sanction|customs|tariff|border|canal|low water|cyber|"
+             r"smuggling)\b")
     view=events[blob.str.contains(include,case=False,regex=True,na=False)].copy()
     if "Start Date" in view.columns:
-        view["_dt"]=pd.to_datetime(view["Start Date"],errors="coerce")
+        view["_dt"]=pd.to_datetime(view["Start Date"],errors="coerce",utc=True)
         view=view.sort_values("_dt",ascending=False)
     return view
 
@@ -12650,8 +12663,17 @@ def _canonical_trade_story_frame():
             "listing","partnership","service launch","route launch","fleet expansion","terminal expansion",
             "redevelopment","concession","budget","throughput record","free-trade","fta"
         ]
-        inferred_disruption=(any(t in blob for t in disrupt_terms) and not any(t in blob for t in business_terms))
-        is_disruption=_bool_meta(disruption,"is_disruption",inferred_disruption)
+        # Calendar records often describe routine office closures or ceremonial
+        # security deployments.  They are never operational disruption alerts.
+        inferred_disruption=(
+            not is_horizon
+            and any(t in blob for t in disrupt_terms)
+            and not any(t in blob for t in business_terms)
+        )
+        is_disruption=(
+            not is_horizon
+            and _bool_meta(disruption,"is_disruption",inferred_disruption)
+        )
 
         # Missing story metadata must not hide newly loaded canonical events.  Explicit false still wins.
         if isinstance(story,dict) and "is_story" in story:
@@ -13287,6 +13309,70 @@ def _render_trade_home_compact_cards(rows, limit=5, key_prefix="home_compact", a
         scoped_key=f"{key_prefix}_{i}_{eid or 'noid'}"
         with st.expander("Full context", expanded=False):
             _render_trade_event_inline_context(row,eid=eid,include_links=True,key_prefix=scoped_key)
+
+
+def render_corridor_network_workspace(corridors):
+    """Inspect one canonical corridor without inventing graph edges.
+
+    Exact corridor-ID / corridor-name matches are displayed separately from
+    keyword discoveries, which MUST NOT be treated as proven dependencies.
+    """
+    st.markdown("### Corridor network explorer")
+    st.caption("Select a corridor to inspect its known connections across modes. Exact references are separated from unverified name matches.")
+    if corridors is None or corridors.empty:
+        st.info("No canonical corridor layer loaded. Check the shared Supabase/loader connection; no demonstration records are inserted.")
+        return
+    name_col=next((c for c in ("Corridor","Name","Corridor Name","System") if c in corridors.columns),None)
+    if not name_col:
+        st.warning("The corridor source has no display-name column. Inspect loader column mappings before showing relationships.")
+        return
+    available=corridors[corridors[name_col].notna()].copy().reset_index(drop=True)
+    if available.empty:
+        st.info("No named corridors in the current dataset."); return
+    ix=st.selectbox("Explore corridor",range(len(available)),format_func=lambda i:str(available.iloc[i][name_col]),key="pc_corridor_network_selector")
+    item=available.iloc[ix]
+    name=str(item[name_col]).strip()
+    id_col=next((c for c in ("Corridor ID","corridor_id","System ID") if c in item.index),None)
+    cid=str(item[id_col]).strip() if id_col and pd.notna(item[id_col]) else ""
+    st.markdown("**"+html_lib.escape(name)+"**")
+    summary=[f"{c}: {item[c]}" for c in ("Connects","Country / Region","Primary Traffic","Strategic Note") if c in item.index and pd.notna(item[c]) and str(item[c]).strip()]
+    if summary: st.caption(" · ".join(summary))
+    datasets=[
+        ("Ports and terminals",("Infrastructure","Ports")),
+        ("Transport routes",("Infrastructure","Transport Routes")),
+        ("Rail networks",("Rail","Rail Networks")),
+        ("Waterways",("Systems & Waterways","Waterway Systems")),
+        ("Companies",("Corporate","Companies")),
+        ("Tanker exposure",("Maritime","Tanker Corridor Exposure")),
+        ("Great Lakes cargo",("Maritime","Great Lakes Cargo Corridors")),
+        ("Defence delivery",("Defence & Shipbuilding","Sales & Delivery Routes")),
+    ]
+    exact=[]; candidates=[]
+    for label_txt,key in datasets:
+        df=TABLES.get(key,pd.DataFrame())
+        if df is None or df.empty: continue
+        # A named relationship field is evidence of a canonical linkage; free-text
+        # search is only a lead for an analyst, never a fabricated graph edge.
+        ref_cols=[c for c in df.columns if str(c).lower().replace("_"," ").strip() in
+                  ("corridor id","system id","trade corridor id","corridor","trade corridor")]
+        linked=pd.Series(False,index=df.index)
+        for col in ref_cols:
+            vals=df[col].fillna("").astype(str).str.strip().str.casefold()
+            if cid and col.lower().replace("_"," ").endswith("id"):
+                linked=linked | vals.eq(cid.casefold())
+            elif not col.lower().replace("_"," ").endswith("id") and name:
+                linked=linked | vals.eq(name.casefold())
+        if linked.any(): exact.append((label_txt,df[linked].copy()))
+        # Non-keyword matching deliberately disabled here: naming similarity
+        # alone does not establish a corridor-to-asset dependency.
+    if exact:
+        st.success(f"{len(exact)} domain layer(s) contain explicit corridor references.")
+        for label_txt,rows in exact:
+            with st.expander(f"{label_txt} · {len(rows)} linked",expanded=True):
+                display_df(rows, min(250,len(rows)))
+    else:
+        st.info("No explicit cross-domain references were found in the currently loaded tables. This is a data-linkage gap, not evidence that the corridor has no assets.")
+    st.caption("Operational alerts are shown only on Alerts & Disruptions. Future monitoring and planned events remain in Trade Horizon.")
 
 
 def render_corridor_home_focus():
@@ -15542,6 +15628,7 @@ elif page=="Corridors & Systems":
     with ct1:
         cq=st.text_input("Find corridor",placeholder="Middle Corridor, Great Lakes, Hormuz, Arctic...",key="corridor_search")
         display_df(_contains_any(corridors,[cq]) if cq.strip() and not corridors.empty else corridors,250)
+        render_corridor_network_workspace(corridors)
     with ct3:
         wq=st.text_input("Find waterway",placeholder="Suez, Panama, Bosporus, St Lawrence...",key="waterway_search")
         display_df(_contains_any(waterways,[wq]) if wq.strip() and not waterways.empty else waterways,250)
