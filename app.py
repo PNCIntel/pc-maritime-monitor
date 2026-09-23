@@ -7731,34 +7731,108 @@ def _trade_alert_candidates():
     return view
 
 
+def _pc_alert_categories(row):
+    """Assign operational alerts to tabs using typed fields and conservative title fallback.
+
+    'Operational disruption', 'maritime' or 'other' are too generic to suppress
+    a specific weather/strike/security headline. A current event can occupy more
+    than one tab; Trade Horizon is filtered in _trade_alert_candidates upstream.
+    """
+    def clean(v):
+        if v is None: return ""
+        if isinstance(v,(list,tuple,set)): return " ".join(str(x) for x in v).casefold()
+        if isinstance(v,dict): return " ".join(str(x) for x in v.values()).casefold()
+        try:
+            if pd.isna(v): return ""
+        except (ValueError,TypeError): pass
+        return str(v).casefold().strip() if str(v).casefold().strip() not in ("nan","none") else ""
+    structured=" ".join(clean(row.get(k)) for k in (
+        "Disruption Domains","Disruption Type","Event Domain","Event Nature",
+        "Event Family","Event Type","Story Category"))
+    title=clean(row.get("Title"))
+    # The current-disruption selection was already made upstream. Do not inspect
+    # free-form descriptive text: it can mention unrelated weather or politics.
+    patterns={
+        "Weather & Natural Hazards":r"\b(?:weather|natural.hazard|storm|cyclon\w*|typhoon\w*|hurrican\w*|flood\w*|rainfall|snow|wildfire\w*|earthquake\w*|drought|low.water|tsunami\w*|landslide\w*)\b",
+        "Labour & Logistics":r"\b(?:labou?r|industrial.action|strike\w*|walkout|protest\w*|civil.unrest|congestion|port.closure|terminal.closure|rail.disruption|road.closure|truck\w*.strike|logistic\w*.disruption|border.queue|handling.disruption)\b",
+        "Trade / Policy":r"\b(?:trade.policy|customs|tariff\w*|sanction\w*|regulat\w*|export.control|embargo\w*|border.restriction|quota\w*)\b",
+        "Security Spillover":r"\b(?:security|conflict|attack\w*|piracy|pirate\w*|drone\w*|missile\w*|sabotage|seizure|interdiction|armed|war|explosion\w*)\b"
+    }
+    groups=[]
+    for name,pat in patterns.items():
+        if re.search(pat,structured,re.I) or re.search(pat,title,re.I):
+            groups.append(name)
+    # Non-event mode (rail/maritime/aviation) is deliberately excluded from
+    # categories; it is a transport layer, not an alert cause.
+    return groups or ["Other / Review"]
+
+
+def _pc_alert_category_views(events):
+    """Deterministic disjoint-by-row views, allowing multi-domain events in 2 tabs."""
+    labels=["Weather & Natural Hazards","Labour & Logistics","Trade / Policy",
+            "Security Spillover","Other / Review"]
+    buckets={label:[] for label in labels}
+    if events is None or events.empty:
+        return {label:pd.DataFrame() for label in labels}
+    for pos,(_,row) in enumerate(events.iterrows()):
+        for label in _pc_alert_categories(row): buckets[label].append(pos)
+    return {label:events.iloc[indexes].copy() if indexes else events.iloc[0:0].copy()
+            for label,indexes in buckets.items()}
+
+
 def render_trade_alerts_workspace():
-    header("Alerts & Disruptions","Commercially relevant disruption across ports, rail, trucking, aviation, weather, labour, policy and security spillover. Routine corporate development is excluded.")
+    header("Alerts & Disruptions","Current operational disruption across ports, rail, trucking, aviation, weather, labour, trade policy and security. Trade Horizon and routine corporate development remain separate.")
     ev=_trade_alert_candidates()
     if ev.empty:
-        st.info("No trade-disruption alerts are currently classified.")
+        st.info("No current trade-disruption alerts are classified. This does not imply there are no weather or security hazards.")
         return
+    views=_pc_alert_category_views(ev)
+    with st.expander("Classification audit · all current records",expanded=False):
+        st.caption("Tabs classify existing operational events only. Source metadata and headlines are evidence; calendar/Horizon records are excluded. Other / Review identifies missing taxonomy.")
+        audit=ev[[c for c in ("Event ID","Title","Event Family","Event Type","Event Domain","Disruption Type","Story Category") if c in ev.columns]].copy()
+        audit["Categories"]=ev.apply(lambda r:", ".join(_pc_alert_categories(r)),axis=1).values
+        display_df(audit,200)
+    weather=views["Weather & Natural Hazards"]
+    labour=views["Labour & Logistics"]
+    security=views["Security Spillover"]
     a,b,c,d=st.columns(4)
-    a.metric("Active alerts",len(ev))
-    fam=ev.get("Disruption Domains",ev.get("Event Family",pd.Series(dtype=str))).fillna("").astype(str)
-    b.metric("Weather / natural",int(fam.str.contains("Weather|Natural",case=False,regex=True).sum()))
-    c.metric("Labour / civil",int(fam.str.contains("Labour|Industrial|Civil",case=False,regex=True).sum()))
-    d.metric("Security spillover",int(fam.str.contains("Security|Conflict|Maritime",case=False,regex=True).sum()))
-    tabs=st.tabs(["All alerts","Weather & Natural Hazards","Labour & Logistics","Trade / Policy","Security Spillover"])
-    filters=[None,"Weather|Natural|Storm|Flood|Typhoon|Cyclone|Earthquake|Wildfire","Labour|Industrial|Strike|Port|Rail|Road|Truck|Logistics","Trade|Policy|Customs|Tariff|Sanction|Border","Security|Conflict|Maritime|Attack|Piracy|Drone|Missile"]
-    for tab,pat in zip(tabs,filters):
+    a.metric("Current disruption records",len(ev))
+    b.metric("Weather / natural",len(weather))
+    c.metric("Labour / logistics",len(labour))
+    d.metric("Security spillover",len(security))
+    tabs=st.tabs(["All alerts","Weather & Natural Hazards","Labour & Logistics",
+                  "Trade / Policy","Security Spillover","Other / Review"])
+    labels=[None,"Weather & Natural Hazards","Labour & Logistics","Trade / Policy",
+            "Security Spillover","Other / Review"]
+    for tab,label in zip(tabs,labels):
         with tab:
-            if pat is None:
-                view=ev
+            view=ev if label is None else views[label]
+            if label is not None:
+                st.caption(f"{len(view)} current disruption record(s) in this category. An event can appear in multiple categories if its structured event taxonomy supports them.")
+            if view.empty:
+                st.info("No currently classified alerts in this category. Check event type and disruption-domain metadata before assuming no incidents occurred.")
+                if label=="Weather & Natural Hazards":
+                    try:
+                        wx=_live_frame("pc_weather_observations","*",1000)
+                        st.caption(f"Supabase weather observations readable: {len(wx)} row(s). Observations do not automatically become operational alerts.")
+                    except Exception:
+                        st.caption("Weather observations could not be checked from this view; check Database Diagnostics.")
+                    with st.expander("Check weather classification candidates (review only)"):
+                        all_events=_canonical_trade_story_frame()
+                        if not all_events.empty:
+                            weather_pat=r"\b(weather|natural|storm|typhoon|cyclone|hurricane|flood|wildfire|earthquake|landslide|drought|low.water|tsunami)\b"
+                            relevant=[]
+                            existing=set(ev.get("Event ID",pd.Series(dtype=str)).dropna().astype(str))
+                            for _,r in all_events.iterrows():
+                                eid=str(r.get("Event ID") or "")
+                                if eid in existing or bool(r.get("Horizon",False)): continue
+                                field_text=" ".join(str(r.get(k) or "") for k in ["Title","Event Family","Event Type","Event Nature","Event Domain"])
+                                if re.search(weather_pat,field_text,re.I):
+                                    relevant.append({"Event ID":eid,"Title":r.get("Title"),"Event Type":r.get("Event Type"),"Review":"Verify operational impact, event timing and disruption metadata"})
+                            if relevant: display_df(pd.DataFrame(relevant),100)
+                            else: st.caption("No unclassified weather candidates in the currently loaded event sample.")
             else:
-                blob=pd.Series("",index=ev.index,dtype="string")
-                for col in ["Disruption Domains","Disruption Type","Event Family","Event Type","Title","Description","Operational Impact","Trade / Commercial Impact"]:
-                    if col in ev.columns:
-                        blob=blob.str.cat(ev[col].fillna("").astype(str),sep=" ")
-                view=ev[blob.str.contains(pat,case=False,regex=True,na=False)]
-            if view.empty: st.caption("No alerts in this category.")
-            else: render_event_cards(view,60)
-
-
+                render_event_cards(view,60)
 
 def _security_text(v):
     return str(v or "").strip()
@@ -8748,14 +8822,14 @@ def _pc_corridor_live_frames():
         "pc_trade_corridors","pc_corridor_mode_connections","pc_assets","pc_entities",
         "pc_relationships","pc_events","pc_event_locations","pc_logistics_event_impacts",
         "pc_transport_services","pc_supply_chain_dependencies","pc_logistics_service_agreements",
-        "pc_freight_rate_assessments"
+        "pc_freight_rate_assessments","pc_company_corridor_roles","pc_company_asset_roles"
     ]
     limits={
         "pc_trade_corridors":5000,"pc_corridor_mode_connections":30000,"pc_assets":40000,
         "pc_entities":30000,"pc_relationships":50000,"pc_events":30000,"pc_event_locations":50000,
         "pc_logistics_event_impacts":30000,"pc_transport_services":30000,
         "pc_supply_chain_dependencies":30000,"pc_logistics_service_agreements":20000,
-        "pc_freight_rate_assessments":20000,
+        "pc_freight_rate_assessments":20000, "pc_company_corridor_roles":20000, "pc_company_asset_roles":20000,
     }
     return {n:_live_frame(n,"*",limits[n]) for n in names}
 
@@ -8798,6 +8872,14 @@ def _pc_corridor_operating_bundle(corridor_key, proximity_km=100.0):
     if not con.empty:
         con["From"] = con.get("from_asset_id",pd.Series(index=con.index,dtype=str)).astype(str).map(amap).fillna(con.get("from_asset_id",""))
         con["To"] = con.get("to_asset_id",pd.Series(index=con.index,dtype=str)).astype(str).map(amap).fillna(con.get("to_asset_id",""))
+
+    # Phase 13B roles are explicit evidence and must remain visible even when
+    # the Phase 13E node/edge loader has not run yet.
+    explicit_roles=f.get("pc_company_corridor_roles",pd.DataFrame()).copy()
+    if not explicit_roles.empty and "corridor_key" in explicit_roles.columns:
+        explicit_roles=explicit_roles[explicit_roles["corridor_key"].astype(str).eq(key)].copy()
+    else:
+        explicit_roles=pd.DataFrame()
 
     # Company operational presence: explicit entity<->asset relationships to corridor endpoints.
     rel=f["pc_relationships"].copy(); ents=f["pc_entities"].copy()
@@ -8900,7 +8982,7 @@ def _pc_corridor_operating_bundle(corridor_key, proximity_km=100.0):
         rates=rates[rates["corridor_key"].astype(str).eq(key)].copy()
 
     return {
-        "connections":con,"endpoints":endpoints,"companies":companies,"services":linked_services,
+        "connections":con,"endpoints":endpoints,"companies":companies,"explicit_roles":explicit_roles,"services":linked_services,
         "explicit_events":explicit_events,"impacts":impacts,"geo_events":geo_events,
         "dependencies":deps,"agreements":agreements,"rates":rates,"locations":loc,
     }
@@ -8955,6 +9037,9 @@ def render_corridor_operating_picture():
     with tabs[1]:
         st.caption("Companies appear here because a canonical ownership, operating, management or other entity↔asset relationship reaches a corridor node. Headquarters proximity alone is not treated as corridor exposure.")
         display_df(b["companies"],350)
+        st.markdown("#### Explicit Phase 13B corridor roles")
+        st.caption("Direct, documented company–corridor roles. These remain visible before node links are populated.")
+        display_df(b.get("explicit_roles",pd.DataFrame()),350)
     with tabs[2]:
         st.markdown("#### Explicit corridor impacts")
         st.caption("These are existing canonical pc_logistics_event_impacts links and are treated separately from proximity matches.")
