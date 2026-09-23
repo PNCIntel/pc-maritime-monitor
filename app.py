@@ -44,8 +44,8 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v7.0-trade-home-curation"
-RELEASE_NAME = "End-to-End Logistics Operating Picture · Companies, Networks, Modes, Markets & Risk"
+APP_VERSION = "v7.1-corridor-operating-picture"
+RELEASE_NAME = "Corridor-Centric Trade & Logistics Operating Picture · Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
 st.set_page_config(page_title=f"{APP_TITLE} {APP_VERSION}", page_icon="◈", layout="wide", initial_sidebar_state="expanded")
@@ -5090,20 +5090,49 @@ def render_event_cards(events,max_items=40):
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 
 
-def exclude_horizon_calendar_events(df: pd.DataFrame) -> pd.DataFrame:
-    """Exclude scheduled/calendar records from live/latest reporting.
+def exclude_horizon_calendar_events(df: pd.DataFrame, exclude_future: bool = True) -> pd.DataFrame:
+    """Keep forward/calendar items out of live/current event streams.
 
-    This is intentionally conservative: election/holiday/anniversary/summit/calendar
-    rows belong in Important dates / Trade Horizon, not in the current-reporting feed.
+    Trade Horizon is a separate analytical lane.  A record is excluded from current
+    reporting when it is explicitly classified for the horizon, carries horizon
+    scheduling metadata, is clearly a calendar/scheduled event, or (for current-feed
+    use) has a start date after today.  The Horizon workspace reads canonical events
+    directly and is therefore unaffected by this filter.
     """
     if df is None or df.empty:
         return pd.DataFrame() if df is None else df.copy()
+
     x=df.copy()
+    is_horizon=pd.Series(False,index=x.index,dtype=bool)
+
+    # Presentation/story projections may already contain the canonical Horizon flag.
+    if "Horizon" in x.columns:
+        is_horizon |= x["Horizon"].fillna(False).astype(bool)
+    if "Explicit Horizon" in x.columns:
+        is_horizon |= x["Explicit Horizon"].fillna(False).astype(bool)
+
+    # Canonical metadata is authoritative.  Treat an explicitly horizon-classified
+    # record, or one carrying a genuine future milestone/date payload, as Horizon.
+    if "Metadata" in x.columns:
+        def _mh(v):
+            m=_pc_meta_dict(v)
+            h=m.get("horizon") if isinstance(m,dict) else {}
+            if not isinstance(h,dict):
+                return False
+            if bool(h.get("show_in_trade_horizon")):
+                return True
+            return any(str(h.get(k) or "").strip() for k in (
+                "target_date","next_milestone","window","target_year","date_precision"
+            )) and bool(str(h.get("horizon_type") or "").strip())
+        is_horizon |= x["Metadata"].map(_mh).fillna(False)
+
+    # Conservative lexical catch for scheduled/civic/calendar records where legacy
+    # records do not yet carry full horizon metadata.
     blob=pd.Series("",index=x.index,dtype="string")
     for c in [
         "Event Nature","Event Domain","Event Family","Event Type",
         "Event Temporality","Event Phase","Event Category","Event Subcategory",
-        "Mode","Title"
+        "Mode","Title","Horizon Type"
     ]:
         if c in x.columns:
             blob=blob.str.cat(x[c].fillna("").astype(str),sep=" ")
@@ -5111,15 +5140,17 @@ def exclude_horizon_calendar_events(df: pd.DataFrame) -> pd.DataFrame:
         r"\banniversar(?:y|ies)?\b|\bholiday\b|\bcommemorat(?:ion|ive)\b|"
         r"\belection\b|\breferendum\b|\bsummit\b|\bconference\b|"
         r"\bfestival\b|\bsporting event\b|\bhorizon calendar\b|"
-        r"\bforward calendar\b|\bcalendar event\b"
+        r"\bforward calendar\b|\bcalendar event\b|\bimportant date\b"
     )
-    is_horizon=blob.str.contains(pat,case=False,regex=True,na=False)
-    if "Metadata" in x.columns:
-        def _mh(v):
-            m=_pc_meta_dict(v)
-            h=m.get("horizon") if isinstance(m,dict) else {}
-            return bool(h.get("show_in_trade_horizon")) if isinstance(h,dict) else False
-        is_horizon |= x["Metadata"].map(_mh)
+    is_horizon |= blob.str.contains(pat,case=False,regex=True,na=False)
+
+    # A future start date belongs in Horizon, not in 'current/latest'.  Same-day
+    # events can remain current unless they are explicitly classified above.
+    if exclude_future and "Start Date" in x.columns:
+        today=pd.Timestamp.utcnow().tz_localize(None).normalize()
+        dt=pd.to_datetime(x["Start Date"],errors="coerce",utc=True).dt.tz_convert(None)
+        is_horizon |= dt.notna() & (dt.dt.normalize() > today)
+
     return x[~is_horizon].copy()
 
 
@@ -11109,12 +11140,13 @@ _bst=backend_status()
 st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend")
 
 NAV_SECTIONS={
-    "OPERATING PICTURE":["Overview","Trade Horizon","Regional Maps","Alerts & Disruptions","Watch Areas"],
-    "LOGISTICS NETWORK":["Companies","Services & Routes","Corridors & Systems","Trucking","Rail","Aviation","Maritime","Ports & Terminals","Vessels"],
-    "BUSINESS & INFRASTRUCTURE":["Investments","Deals, Projects & Contracts","Energy & Industry","Defence & Shipbuilding"],
-    "PUBLICATIONS":["Report Studio"],
-    "MARKETS & POLICY":["Freight & Commodity Markets","Market Instruments","Trade Flows & Supply","Country & Macro","Sanctions & Compliance","Trade Policy"],
-    "MONITORING & TOOLS":["Government & Security","Port Activity","Hormuz Monitor","Live Feeds","News & Developments","Search","Reference & Benchmarks","Data"],
+    # Corridor-first workflow: begin with the operating picture, then move into the
+    # network/mode, organisation and risk layers that explain the corridor exposure.
+    "OPERATING PICTURE":["Overview","Corridors & Systems","Alerts & Disruptions","Trade Horizon","Regional Maps"],
+    "NETWORK & MODES":["Services & Routes","Ports & Terminals","Rail","Trucking","Aviation","Maritime","Vessels"],
+    "ORGANISATIONS & INFRASTRUCTURE":["Companies","Investments","Deals, Projects & Contracts","Energy & Industry","Defence & Shipbuilding"],
+    "RISK, MARKETS & POLICY":["Sanctions & Compliance","Freight & Commodity Markets","Trade Flows & Supply","Market Instruments","Trade Policy","Country & Macro"],
+    "OUTPUTS & TOOLS":["Report Studio","Watch Areas","Government & Security","Port Activity","Hormuz Monitor","Live Feeds","News & Developments","Search","Reference & Benchmarks","Data"],
 }
 VISIBLE_PAGES=[p for items in NAV_SECTIONS.values() for p in items]
 HIDDEN_ROUTES={"Ports","Shipyards","Network Map","News & Events","Reference Library","Ferries","Cruise","Maritime Security","Maritime Disruptions","Security & Business Risk","Contracts"}
@@ -11151,15 +11183,15 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("<div class='pc-small'>QUICK ACCESS</div>",unsafe_allow_html=True)
 qa1,qa2=st.sidebar.columns(2)
 with qa1:
-    if st.button("Companies",use_container_width=True,key="qa_companies"):
-        request_nav("Companies"); st.rerun()
+    if st.button("Corridors",use_container_width=True,key="qa_corridors"):
+        request_nav("Corridors & Systems"); st.rerun()
     if st.button("Alerts",use_container_width=True,key="qa_alerts"):
         request_nav("Alerts & Disruptions"); st.rerun()
 with qa2:
     if st.button("Services",use_container_width=True,key="qa_services"):
         request_nav("Services & Routes"); st.rerun()
-    if st.button("Corridors",use_container_width=True,key="qa_corridors"):
-        request_nav("Corridors & Systems"); st.rerun()
+    if st.button("Companies",use_container_width=True,key="qa_companies"):
+        request_nav("Companies"); st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("<div class='pc-small'>ACTIVE DATA LAYERS</div>",unsafe_allow_html=True)
@@ -12599,9 +12631,9 @@ def _canonical_trade_story_frame():
         # Horizon/calendar classification: explicit metadata wins; otherwise only genuinely
         # scheduled/civic items are inferred.  Current commercial announcements are not Horizon.
         horizon_pat=(
-            r"holiday|independence day|national day|anniversary|"
-            r"election|referendum|summit|conference|calendar event|"
-            r"public holiday|sporting event"
+            r"\bholiday\b|\bindependence day\b|\bnational day\b|\banniversary\b|"
+            r"\belection\b|\breferendum\b|\bsummit\b|\bconference\b|\bcalendar event\b|"
+            r"\bpublic holiday\b|\bsporting event\b"
         )
         inferred_horizon=bool(re.search(horizon_pat,blob,flags=re.I))
         is_horizon=_bool_meta(horizon,"show_in_trade_horizon",False) or inferred_horizon
@@ -13257,6 +13289,69 @@ def _render_trade_home_compact_cards(rows, limit=5, key_prefix="home_compact", a
             _render_trade_event_inline_context(row,eid=eid,include_links=True,key_prefix=scoped_key)
 
 
+def render_corridor_home_focus():
+    """Compact corridor-first entry point for the Trade System home page."""
+    corridors=TABLES.get(("Infrastructure","Corridors"),pd.DataFrame()).copy()
+    routes=TABLES.get(("Infrastructure","Transport Routes"),pd.DataFrame()).copy()
+    rail=TABLES.get(("Rail","Rail Networks"),pd.DataFrame()).copy()
+    waterways=TABLES.get(("Systems & Waterways","Waterway Systems"),pd.DataFrame()).copy()
+
+    st.markdown("### Corridor operating picture")
+    st.caption("Start with the movement system: corridor → gateways → services → operators → disruptions → alternatives.")
+
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric("Trade corridors",len(corridors))
+    m2.metric("Routes / services",len(routes))
+    m3.metric("Rail networks",len(rail))
+    m4.metric("Waterways",len(waterways))
+
+    # One fast search across the principal corridor/network layers keeps the first
+    # interaction simple; detailed analysis remains in Corridors & Systems.
+    q=st.text_input(
+        "Find corridor or gateway",
+        placeholder="Hormuz, Red Sea / Suez, Middle Corridor, Panama, Great Lakes, Churchill...",
+        key="overview_corridor_search"
+    )
+    if q.strip():
+        hits=[]
+        for label_txt,df,cols in [
+            ("Corridor",corridors,["Corridor","Country / Region","Connects","Primary Traffic","Strategic Note"]),
+            ("Route",routes,["Route","Corridor","Name","Mode","Region","Origin","Destination"]),
+            ("Rail",rail,["Network / Corridor","Countries / Jurisdictions","Start Node","End Node","Primary Cargo / Role"]),
+            ("Waterway",waterways,["System","Waterway","Name","Country / Region","Notes"]),
+        ]:
+            if df is None or df.empty:
+                continue
+            use=[c for c in cols if c in df.columns]
+            sub=_contains_any(df,[q],use if use else None)
+            if sub is not None and not sub.empty:
+                for _,r in sub.head(3).iterrows():
+                    name=""
+                    for c in ["Corridor","Route","Name","Network / Corridor","System","Waterway"]:
+                        if c in r and str(r.get(c) or "").strip():
+                            name=str(r.get(c)).strip(); break
+                    hits.append((label_txt,name,r))
+        if hits:
+            cols=st.columns(min(3,len(hits)))
+            for i,(kind,name,row) in enumerate(hits[:6]):
+                with cols[i%len(cols)]:
+                    st.markdown(
+                        f"<div class='pc-card'><div class='pc-label'>{html_lib.escape(kind)}</div>"
+                        f"<div class='pc-big'>{html_lib.escape(name or 'Connected network object')}</div></div>",
+                        unsafe_allow_html=True
+                    )
+            if st.button("Open corridor workspace",use_container_width=True,key="overview_open_corridors"):
+                request_nav("Corridors & Systems"); st.rerun()
+        else:
+            st.caption("No corridor/network match found in the currently loaded canonical layers.")
+    else:
+        c1,c2=st.columns([1,1])
+        if c1.button("Open Corridors & Systems",use_container_width=True,key="overview_corridor_workspace"):
+            request_nav("Corridors & Systems"); st.rerun()
+        if c2.button("Open Alerts & Disruptions",use_container_width=True,key="overview_corridor_alerts"):
+            request_nav("Alerts & Disruptions"); st.rerun()
+
+
 def render_trade_home_operational_compact(limit=4):
     """Only material current disruptions for the executive Overview."""
     disruptions=_canonical_trade_disruptions()
@@ -13387,12 +13482,15 @@ if page=="Report Studio":
     _render_trade_report_studio()
 
 elif page=="Overview":
-    header("Trade System","Executive operating picture across trade, logistics, infrastructure and disruption.")
+    header("Corridor Operating Picture","Trade, logistics, infrastructure and risk organised around how movement actually flows through corridors.")
+
+    render_corridor_home_focus()
+    st.markdown("---")
 
     latest_col, dates_col = st.columns([2.75,1.0], gap="large")
     with latest_col:
-        st.markdown("### Priority developments")
-        st.caption("The few developments most likely to change movement, capacity, cost, infrastructure or commercial exposure.")
+        st.markdown("### Current corridor-impact developments")
+        st.caption("Current developments affecting movement, capacity, gateways, cost, access or the companies operating across them. Forward dates stay in Trade Horizon.")
         events=_live_trade_event_rows(180)
         if events.empty:
             events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
