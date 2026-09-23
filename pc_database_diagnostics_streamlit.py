@@ -1,7 +1,8 @@
 """P&C Streamlit Database Diagnostics — READ ONLY.
 
 Place alongside pc-power-admin.py, or in pages/90_Database_Diagnostics.py.
-Requires the repository's shared/pc_auth.py and the existing Supabase secrets.
+Requires the repository's shared/pc_auth.py and existing Supabase service secrets.
+Passwordless mode requires an explicit development flag and a restricted deployment.
 All database operations are PostgREST SELECT only; no SQL/RPC, DDL or writes.
 """
 from __future__ import annotations
@@ -24,9 +25,9 @@ if ROOT.name.lower() == "pages":
 SHARED = ROOT / "shared"
 if str(SHARED) not in sys.path:
     sys.path.insert(0, str(SHARED))
-from pc_auth import require_super_admin, service_client
+from pc_auth import service_client
 
-APP_VERSION = "phase13g-diagnostics-1.0"
+APP_VERSION = "phase13g-diagnostics-1.1-dev-no-login"
 
 PHASE13_TABLES_BY_PHASE = {'A': ['pc_research_projects',
        'pc_research_questions',
@@ -1248,10 +1249,24 @@ def run_audit(sb, check_physical=False):
 
 def show_app():
     st.set_page_config(page_title="P&C · Database Diagnostics",page_icon="◈",layout="wide")
-    # No local bypass: diagnostic access uses existing authorized Power Admin login.
-    # If auth is not configured yet, this diagnostic fails closed rather than
-    # exposing infrastructure/status details via the public Streamlit app.
-    require_super_admin()
+    # DEVELOPMENT ONLY: opt-in passwordless diagnostics. The app uses a
+    # server-side Supabase service client, so never allow this on a public app.
+    # Set PC_DIAGNOSTICS_DEV_NO_LOGIN=true in the diagnostic Streamlit app's
+    # own secrets ONLY after restricting access to the Streamlit deployment.
+    def _setting(name, default=False):
+        try:
+            value=st.secrets.get(name, os.getenv(name, default))
+        except Exception:
+            value=os.getenv(name, default)
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    if not _setting("PC_DIAGNOSTICS_DEV_NO_LOGIN"):
+        st.error("Development diagnostics are disabled. Set PC_DIAGNOSTICS_DEV_NO_LOGIN=true "
+                 "in Streamlit secrets only for a restricted development deployment.")
+        st.stop()
+    st.warning("DEVELOPMENT MODE — no login. This deployment MUST be access-restricted "
+               "or run locally. Anyone with access to this app can inspect its diagnostic "
+               "results. Disable PC_DIAGNOSTICS_DEV_NO_LOGIN before publishing.")
     st.title("Database Diagnostics")
     st.caption("Power & Corridors · read-only Streamlit diagnostics · "+APP_VERSION)
     st.info("This page uses your existing Supabase project connection, not the Supabase dashboard. "
