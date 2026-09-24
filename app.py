@@ -44,7 +44,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v7.2.4-corridor-nodes-home-relevance"
+APP_VERSION = "v7.2.6-corporate-profile-deployment"
 RELEASE_NAME = "Corridor-Centric Trade & Logistics Operating Picture · Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -5924,6 +5924,111 @@ def _company_terminal_union(bundle, prof):
     return df.drop(columns=["_source_rank","_terminal_key","_country_key"],errors="ignore").reset_index(drop=True)
 
 
+# ---------- Corporate-intelligence presentation (v7.2.5) ----------
+def _pc_corporate_direct_relationships(entity_id, entity_name):
+    """Direct edges of the selected legal company only, not its entire group fleet.
+
+    Resolve an old workbook key to canonical ID only for an exact normalised company
+    name. Do not merge parent/subsidiary identity or infer an operating mandate.
+    """
+    entities=_live_frame("pc_entities","entity_id,name,entity_type,hq_city,hq_country,status,record_status,metadata",30000)
+    ids={str(entity_id)}
+    if not entities.empty and {"entity_id","name"}.issubset(entities.columns):
+        normalized=_company_name_key(entity_name)
+        exact=entities[entities["name"].fillna("").astype(str).map(_company_name_key).eq(normalized)]
+        ids.update(exact["entity_id"].dropna().astype(str))
+    relationships=_live_frame("pc_relationships","*",50000)
+    if relationships.empty or not {"source_id","target_id","source_type","target_type"}.issubset(relationships.columns):
+        return pd.DataFrame(),entities,ids
+    kind=lambda c: relationships[c].fillna("").astype(str).str.casefold().isin(["entity","company","organisation","organization"])
+    direct=(kind("source_type") & kind("target_type") & (
+        relationships["source_id"].fillna("").astype(str).isin(ids) |
+        relationships["target_id"].fillna("").astype(str).isin(ids)))
+    corporate=relationships[direct].copy()
+    if not corporate.empty:
+        names=dict(zip(entities.get("entity_id",pd.Series(dtype=str)).astype(str),entities.get("name",pd.Series(dtype=str)).astype(str))) if not entities.empty else {}
+        corporate["Related company"]=corporate.apply(lambda r: names.get(str(r["target_id"] if str(r["source_id"]) in ids else r["source_id"]),str(r["target_id"] if str(r["source_id"]) in ids else r["source_id"])),axis=1)
+        corporate["Direction"]=corporate["source_id"].fillna("").astype(str).isin(ids).map({True:"Outgoing",False:"Incoming"})
+        corporate["Relationship"]=corporate.get("relationship_type",pd.Series(index=corporate.index,dtype=str)).fillna("").map(pretty_relationship)
+        corporate["Ownership %"]=corporate.get("ownership_percent",pd.Series(index=corporate.index,dtype=object))
+        corporate["Evidence"]=corporate.get("evidence_source_id",pd.Series(index=corporate.index,dtype=str))
+        corporate["Status"]=corporate.get("record_status",pd.Series(index=corporate.index,dtype=str))
+        corporate=corporate.drop_duplicates(subset=["source_id","target_id","relationship_type"],keep="first")
+    return corporate,entities,ids
+
+
+def _pc_render_company_corporate(entity_id, entity_name, bundle):
+    """Company-first corporate network. Fleets and officers are specialist views."""
+    corporate,entities,ids=_pc_corporate_direct_relationships(entity_id,entity_name)
+    st.markdown("### Corporate ownership & investments")
+    st.caption("Only direct relationships of this legal entity. Subsidiaries have independent leadership, offices and fleets. Ownership is not operational control.")
+    if corporate.empty:
+        st.info("No direct corporate relationships were returned. This does not establish that the company has no subsidiaries or investors.")
+    else:
+        def _bucket(r):
+            t=str(r.get("relationship_type") or "").casefold()
+            if any(x in t for x in ("joint_venture","jv_partner","joint venture")): return "Joint ventures & partnerships"
+            if any(x in t for x in ("owns","owned_by","subsidiary","parent","shareholder","hold","equity","controls")):
+                return "Ownership & subsidiaries"
+            if any(x in t for x in ("invest","acquir","stake","portfolio","concession")):
+                return "Investments & transactions"
+            return "Other corporate relationships"
+        corporate["Category"]=corporate.apply(_bucket,axis=1)
+        st.metric("Direct company relationships",len(corporate))
+        show=[c for c in ["Related company","Relationship","Direction","Ownership %","Status","Evidence"] if c in corporate.columns]
+        for group in ["Ownership & subsidiaries","Joint ventures & partnerships","Investments & transactions","Other corporate relationships"]:
+            sub=corporate[corporate["Category"].eq(group)]
+            if sub.empty: continue
+            st.markdown("#### "+group)
+            st.dataframe(sub[show].reset_index(drop=True),use_container_width=True,hide_index=True)
+        st.caption("Percentages reflect recorded direct edges. Proposed project interests and indirect holdings must be distinguished from settled legal ownership.")
+    st.markdown("### Strategic corridor participation")
+    roles=_live_frame("pc_company_corridor_roles","*",20000)
+    if not roles.empty and "entity_id" in roles.columns:
+        roles=roles[roles["entity_id"].fillna("").astype(str).isin(ids)].copy()
+    else: roles=pd.DataFrame()
+    if not roles.empty:
+        cols=[c for c in ["corridor_key","corridor_role","role_status","source_id","notes","metadata"] if c in roles]
+        display_df(roles[cols],380,show_ids=True)
+    else: st.caption("No explicit corridor roles registered for this exact company. Asset proximity is not proof of corridor membership.")
+    st.markdown("### Corporate investments and deals")
+    for title,key in [("Transactions","transactions"),("Projects","projects"),("Financing","financing")]:
+        frame=bundle.get(key,pd.DataFrame())
+        if isinstance(frame,pd.DataFrame) and not frame.empty:
+            with st.expander(f"{title} · {len(frame)} records",expanded=False): display_df(frame,450)
+
+
+def _pc_render_company_locations(entity_id,entity_name,bundle):
+    st.markdown("### Headquarters & offices")
+    entities=_live_frame("pc_entities","entity_id,name,hq_city,hq_country,metadata",30000)
+    row=pd.DataFrame()
+    if not entities.empty and "entity_id" in entities:
+        row=entities[entities["entity_id"].fillna("").astype(str).eq(str(entity_id))]
+        if row.empty and "name" in entities:
+            row=entities[entities["name"].fillna("").astype(str).map(_company_name_key).eq(_company_name_key(entity_name))]
+    if not row.empty:
+        r=row.iloc[0]
+        st.markdown(f"**Registered headquarters (entity record):** {pc_display_value(r.get('hq_city')) or 'Not recorded'}, {pc_display_value(r.get('hq_country')) or 'not recorded'}")
+    else: st.caption("Headquarters has not been resolved to a canonical entity record.")
+    footprint=bundle.get("footprint",pd.DataFrame())
+    if isinstance(footprint,pd.DataFrame) and not footprint.empty:
+        office_cols=[c for c in footprint.columns if any(x in c.casefold() for x in ("type","role","function","name"))]
+        if office_cols:
+            office_mask=pd.Series(False,index=footprint.index)
+            for c in office_cols:
+                office_mask |= footprint[c].fillna("").astype(str).str.contains(r"headquarter|\bhq\b|regional office|representative office|branch office|registered office|corporate office",case=False,regex=True)
+            offices=footprint[office_mask]
+        else: offices=pd.DataFrame()
+        if not offices.empty:
+            st.markdown("#### Office register")
+            display_df(offices,450)
+        else: st.caption("No offices separately classified in the operating-footprint register. Facility locations are not automatically corporate offices.")
+        with st.expander("All operating locations and facilities",expanded=False): display_df(footprint,500)
+    else: st.caption("No structured office or operating-footprint records are linked yet.")
+    reg=bundle.get("registrations",pd.DataFrame())
+    if isinstance(reg,pd.DataFrame) and not reg.empty:
+        with st.expander("Legal registrations",expanded=False): display_df(reg,400)
+
 def render_company_profile(entity_id, entity_name):
     prof=build_company_profile(entity_id,entity_name)
     rec=company_record(entity_id)
@@ -5932,8 +6037,17 @@ def render_company_profile(entity_id, entity_name):
     modes=_company_mode_summary(bundle,prof)
 
     st.markdown(f"## {entity_name}")
+    st.caption(f"Corporate intelligence profile · {APP_VERSION}")
     if modes:
         st.markdown(" ".join(f"<span class='pc-chip'>{html_lib.escape(m)}</span>" for m in modes),unsafe_allow_html=True)
+
+    # Put corporate relationships first; retain operational statistics in their own view.
+    # Version the widget key so older 'Connected Network' selections cannot persist.
+    company_view=st.selectbox(
+        "Company section",
+        ["Corporate Network","Headquarters & Offices","Operations & Fleet","Leadership & Governance","Investments","Financials","Share Price","Security & Risk","Legacy Connected Network"],
+        key=f"company_section_v726_{entity_id}"
+    )
 
     # Prefer the new canonical company profile over older workbook summary fields.
     live_profile=bundle.get("profile",pd.DataFrame())
@@ -5955,8 +6069,8 @@ def render_company_profile(entity_id, entity_name):
             if c in rec.index and str(rec.get(c,"")).strip(): summary.append(f"**{c}:** {rec.get(c)}")
         if summary: st.markdown("  \n".join(summary[:6]))
 
-    # Group scope remains visible, but not as a substitute for operational content.
-    if len(prof.get("scope_ids",[]))>1:
+    # Group rollups are operational context, not the selected legal entity's identity.
+    if company_view=="Operations & Fleet" and len(prof.get("scope_ids",[]))>1:
         group_names=[x for x in prof.get("scope_names",[]) if x != entity_name]
         if group_names: st.caption("Included group / controlled entities: " + " · ".join(group_names[:20]))
 
@@ -5979,17 +6093,26 @@ def render_company_profile(entity_id, entity_name):
     if not bundle.get("events",pd.DataFrame()).empty or profile_count(prof,"events"):
         metrics.append(("Events",max(len(bundle.get("events",pd.DataFrame())),profile_count(prof,"events"))))
     metrics=metrics[:7]
-    if metrics:
+    if metrics and company_view=="Operations & Fleet":
         cols=st.columns(len(metrics))
         for c,(lab,val) in zip(cols,metrics): c.metric(lab,val)
 
-    company_view=st.selectbox(
-        "Company section",
-        ["Logistics Profile","Connected Network","Investments","Financials","Share Price","Security & Risk"],
-        key=f"company_section_{entity_id}"
-    )
-    if company_view=="Connected Network":
-        st.markdown("### Connected logistics network")
+    if company_view=="Corporate Network":
+        _pc_render_company_corporate(entity_id,entity_name,bundle)
+        return
+    if company_view=="Headquarters & Offices":
+        _pc_render_company_locations(entity_id,entity_name,bundle)
+        return
+    if company_view=="Leadership & Governance":
+        st.markdown("### Leadership & governance")
+        st.caption("Leadership belongs to this legal entity. Parent-company directors are not automatically directors of subsidiaries.")
+        leadership=prof.get("leadership",pd.DataFrame())
+        if isinstance(leadership,pd.DataFrame) and not leadership.empty: display_df(leadership,500)
+        else: st.info("No separately verified leadership register in this company profile yet.")
+        return
+    if company_view=="Legacy Connected Network":
+        st.markdown("### Full operational graph (legacy)")
+        st.caption("For detailed technical investigation only; includes operational and group-scope relationships, not the corporate ownership summary.")
         render_company_connected_model(entity_id,entity_name)
         return
     if company_view=="Investments":
@@ -6014,6 +6137,7 @@ def render_company_profile(entity_id, entity_name):
         render_company_security_risk(entity_id,entity_name)
         return
 
+    st.caption("Specialist operating view. Corporate ownership, offices and leadership are in their dedicated company sections.")
     tabs=st.tabs([
         "Overview","Operations & Footprint","Services & Routes","Assets & Fleet",
         "Projects / Contracts","Events & News","Corporate & Financial","Risk & Compliance",
@@ -11600,6 +11724,7 @@ NAV_SECTIONS={
     "NETWORK & MODES":["Services & Routes","Ports & Terminals","Rail","Trucking","Aviation","Maritime","Vessels"],
     "ORGANISATIONS & INFRASTRUCTURE":["Companies","Investments","Deals, Projects & Contracts","Energy & Industry","Defence & Shipbuilding"],
     "RISK, MARKETS & POLICY":["Sanctions & Compliance","Freight & Commodity Markets","Trade Flows & Supply","Market Instruments","Trade Policy","Country & Macro"],
+    "RESEARCH & EVIDENCE":["Research","Documents"],
     "OUTPUTS & TOOLS":["Report Studio","Watch Areas","Government & Security","Port Activity","Hormuz Monitor","Live Feeds","News & Developments","Search","Reference & Benchmarks","Data"],
 }
 VISIBLE_PAGES=[p for items in NAV_SECTIONS.values() for p in items]
@@ -14008,6 +14133,42 @@ elif page=="Overview":
     st.caption("Only current shocks with a direct effect on movement, capacity, infrastructure, access or continuity.")
     render_trade_home_operational_compact(4)
 
+elif page=="Research":
+    header("Research Workbench","Investigate open questions, review staged findings and develop evidence-backed company, asset and corridor relationships.")
+    st.caption("Read-only research workspace in this release. Production promotion remains controlled by the Power Admin review workflow.")
+    research_tabs=st.tabs(["Staged findings","Research sources","Research questions"])
+    with research_tabs[0]:
+        staged=_live_frame("pc_staged_records","*",5000)
+        if not staged.empty:
+            st.metric("Staged records (retrieved)",len(staged))
+            display_df(staged,500,show_ids=True)
+        else: st.info("No staged records returned or the staging table is not accessible to this app.")
+    with research_tabs[1]:
+        sources=_live_frame("pc_sources","*",15000)
+        if not sources.empty:
+            st.metric("Registered sources (retrieved)",len(sources))
+            q=st.text_input("Search research sources",key="pc_research_source_search")
+            if q: sources=_filter_frame_any(sources,q)
+            display_df(sources,500,show_ids=True)
+        else: st.info("No source registry records returned.")
+    with research_tabs[2]:
+        st.markdown("### Active investigation areas")
+        st.info("Research-project and question registers are the next schema/application phase. Do not treat unreviewed source matches as verified entities or links.")
+        st.markdown("**Initial queues:** Middle Corridor Caspian services; corporate ownership and offices; IMEC infrastructure membership; asset duplicate resolution.")
+
+elif page=="Documents":
+    header("Documents & Evidence","Source catalogue, regulatory material and finished analytical publications, each linked to canonical objects when evidence permits.")
+    st.caption("Registered source metadata is live; file storage, full-text extraction and many-to-many document/entity linking require a dedicated document layer.")
+    docs=_live_frame("pc_sources","*",20000)
+    if docs.empty: st.info("No documents or source registry rows returned.")
+    else:
+        term=st.text_input("Find source or publication",key="pc_document_search")
+        if term: docs=_filter_frame_any(docs,term)
+        cols=[c for c in ["source_id","publisher","source_name","source_type","published_at","url","license_name","redistribution_status","attribution_required","notes"] if c in docs]
+        st.metric("Matching source records",len(docs))
+        display_df(docs[cols] if cols else docs,600,show_ids=True)
+        st.caption("Source URL is provenance, not proof that its document bytes are stored in the platform.")
+
 elif page=="Search":
     header("Search P&C","One query across companies, trucking, rail, aviation, maritime, facilities, corridors, contracts, transactions, news, events and systems.")
     q=st.text_input("Query",placeholder="Try: Girteka Poland, Etihad Rail freight, CMA CGM service, AD Ports Black Sea, Rotterdam strike")
@@ -14662,7 +14823,7 @@ elif page=="Investments":
     render_investment_dashboard()
 
 elif page=="Companies":
-    header("Companies","Company-first view across assets, ports, shipyards, vessels, commercial relationships, programmes and events.")
+    header("Companies","Corporate intelligence: ownership, subsidiaries, investments and strategic corridor participation. Fleet and leadership have separate views.")
     # honor direct navigation from Search
     companies=TABLES.get(("Core Entities","Companies"),pd.DataFrame())
     opts=companies[["Company ID","Company"]].drop_duplicates().sort_values("Company").to_dict("records") if not companies.empty else []
