@@ -44,7 +44,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v7.2-corridor-linked-locations"
+APP_VERSION = "v7.2.4-corridor-nodes-home-relevance"
 RELEASE_NAME = "Corridor-Centric Trade & Logistics Operating Picture · Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -5216,6 +5216,32 @@ def _trade_consequence_text(row):
     return text
 
 
+# Executive homepage exclusions are based on the EVENT HEADLINE, not the joined
+# description/impact blob.  Generic source/calendar enrichment must not promote
+# a sports event simply because its location is a port city or its metadata
+# contains generic trade keywords.
+_PC_HOME_EVENT_EXCLUSIONS = re.compile(
+    r"\b(?:presidents? cup|grand prix|formula\s*(?:one|1|e)|f1|motogp|"
+    r"golf|golfing|tournament|championship|olympic|world cup|"
+    r"football|soccer|tennis|basketball|baseball|cricket|"
+    r"rugby|race weekend|concert|film festival)\b", re.I
+)
+_PC_HOME_CIVIC_EXCLUSIONS = re.compile(
+    r"\b(?:national assembly|national day|independence day|public holiday|"
+    r"election|referendum|parliamentary vote|parliament)\b", re.I
+)
+
+def _pc_home_direct_trade_evidence(row):
+    """Require an explicit, substantive impact for otherwise generic calendar events."""
+    impact=" ".join(_clean_trade_text(row.get(k)) for k in
+        ("Trade / Commercial Impact", "Operational Impact")).casefold()
+    return len(impact) >= 55 and bool(re.search(
+        r"\b(?:port closure|airport closure|border closure|shipping delay|"
+        r"rail disruption|freight disruption|cargo restrictions?|customs closure|"
+        r"trade restrictions?|logistics disruption|supply.chain disruption|"
+        r"transport suspension|port congestion)\b", impact))
+
+
 def _trade_home_eligible(row):
     """Whether a current event deserves scarce lead space on the Trade homepage.
 
@@ -5233,6 +5259,12 @@ def _trade_home_eligible(row):
     nature=_clean_trade_text(row.get("Event Nature"))
     blob=" ".join([title,family,etype,domain,nature,description,operational,commercial]).casefold()
     impact_blob=" ".join([commercial,operational]).casefold()
+    # Sports/entertainment are never lead corridor stories.  A civic calendar
+    # event requires specific documented operational/trade evidence.
+    if _PC_HOME_EVENT_EXCLUSIONS.search(title):
+        return False
+    if _PC_HOME_CIVIC_EXCLUSIONS.search(title) and not _pc_home_direct_trade_evidence(row):
+        return False
 
     consequence_terms=[
         "congestion","capacity","throughput","delay","closure","closed","disruption",
@@ -5406,6 +5438,10 @@ def render_trade_horizon_sidebar_compact(limit=4):
         operational=_clean_trade_text(r.get("Operational Impact"))
         htype=_clean_trade_text(r.get("Horizon Type"))
         blob=" ".join([title,family,etype,commercial,operational,htype]).casefold()
+        if _PC_HOME_EVENT_EXCLUSIONS.search(title):
+            return False
+        if _PC_HOME_CIVIC_EXCLUSIONS.search(title) and not _pc_home_direct_trade_evidence(r):
+            return False
 
         # Exclude generic civic/holiday dates unless the record itself explains a
         # material trade consequence.
@@ -8822,7 +8858,8 @@ def _pc_corridor_live_frames():
         "pc_trade_corridors","pc_corridor_mode_connections","pc_assets","pc_entities",
         "pc_relationships","pc_events","pc_event_locations","pc_logistics_event_impacts",
         "pc_transport_services","pc_supply_chain_dependencies","pc_logistics_service_agreements",
-        "pc_freight_rate_assessments","pc_company_corridor_roles","pc_company_asset_roles"
+        "pc_freight_rate_assessments","pc_company_corridor_roles","pc_company_asset_roles",
+        "pc_corridor_nodes"
     ]
     limits={
         "pc_trade_corridors":5000,"pc_corridor_mode_connections":30000,"pc_assets":40000,
@@ -8830,6 +8867,7 @@ def _pc_corridor_live_frames():
         "pc_logistics_event_impacts":30000,"pc_transport_services":30000,
         "pc_supply_chain_dependencies":30000,"pc_logistics_service_agreements":20000,
         "pc_freight_rate_assessments":20000, "pc_company_corridor_roles":20000, "pc_company_asset_roles":20000,
+        "pc_corridor_nodes":20000,
     }
     return {n:_live_frame(n,"*",limits[n]) for n in names}
 
@@ -8856,7 +8894,16 @@ def _pc_corridor_operating_bundle(corridor_key, proximity_km=100.0):
 
     assets=f["pc_assets"].copy()
     aid_col=_pc_first_col(assets,["asset_id","Asset ID"])
+    registered_nodes=f.get("pc_corridor_nodes",pd.DataFrame()).copy()
+    if not registered_nodes.empty and "corridor_key" in registered_nodes.columns:
+        registered_nodes=registered_nodes[registered_nodes["corridor_key"].astype(str).eq(key)].copy()
+    else:
+        registered_nodes=pd.DataFrame()
+    # Nodes are independent corridor memberships.  They must be present before
+    # the corridor has its first verified inter-node mode/service connection.
     endpoint_ids=set()
+    if not registered_nodes.empty and "node_key" in registered_nodes.columns:
+        endpoint_ids.update(x for x in registered_nodes["node_key"].dropna().astype(str) if x)
     if not con.empty:
         for c in ["from_asset_id","to_asset_id"]:
             if c in con.columns:
@@ -8982,7 +9029,8 @@ def _pc_corridor_operating_bundle(corridor_key, proximity_km=100.0):
         rates=rates[rates["corridor_key"].astype(str).eq(key)].copy()
 
     return {
-        "connections":con,"endpoints":endpoints,"companies":companies,"explicit_roles":explicit_roles,"services":linked_services,
+        "connections":con,"endpoints":endpoints,"registered_nodes":registered_nodes,
+        "companies":companies,"explicit_roles":explicit_roles,"services":linked_services,
         "explicit_events":explicit_events,"impacts":impacts,"geo_events":geo_events,
         "dependencies":deps,"agreements":agreements,"rates":rates,"locations":loc,
     }
@@ -9016,13 +9064,18 @@ def render_corridor_operating_picture():
     radius=st.slider("Geographic event review radius (km)",25,300,100,25,key=f"corridor_radius_{ckey}",help="This only generates review candidates. It does not assert that the event disrupted the corridor.")
     b=_pc_corridor_operating_bundle(ckey,radius)
     a,bm,c,d,e=st.columns(5)
-    a.metric("Connected nodes",len(b["endpoints"]))
+    # Read registered nodes and explicit roles independently from mode links.
+    registered=b.get("registered_nodes",pd.DataFrame())
+    a.metric("Registered nodes",len(registered))
     bm.metric("Mode links",len(b["connections"]))
-    c.metric("Companies",b["companies"]["Entity ID"].nunique() if not b["companies"].empty else 0)
+    linked_company_ids=set(b["companies"]["Entity ID"].dropna().astype(str)) if not b["companies"].empty else set()
+    if not b["explicit_roles"].empty and "entity_id" in b["explicit_roles"].columns:
+        linked_company_ids.update(b["explicit_roles"]["entity_id"].dropna().astype(str))
+    c.metric("Companies",len(linked_company_ids))
     d.metric("Explicit events",len(b["explicit_events"]))
     e.metric("Geo candidates",len(b["geo_events"]))
     if b["connections"].empty:
-        st.warning("This corridor has no pc_corridor_mode_connections yet. Add verified endpoint links in Power Admin to unlock full network traversal.")
+        st.info("Registered corridor facilities and company roles remain visible. Verified inter-node mode connections and individual services have not yet been recorded.")
     tabs=st.tabs(["Network","Companies","Events","Services","Dependencies & markets","Evidence"])
     with tabs[0]:
         if not b["endpoints"].empty:
@@ -9032,10 +9085,13 @@ def render_corridor_operating_picture():
                 if not mp.empty: st.map(mp,latitude="lat",longitude="lon",size=80,use_container_width=True)
         st.markdown("#### Mode connections")
         display_df(b["connections"],300)
-        st.markdown("#### Corridor nodes")
-        display_df(b["endpoints"],300)
+        st.markdown("#### Registered corridor nodes")
+        display_df(b.get("registered_nodes",pd.DataFrame()),300)
+        if not b["endpoints"].empty:
+            st.markdown("#### Canonical assets at corridor nodes / connection endpoints")
+            display_df(b["endpoints"],300)
     with tabs[1]:
-        st.caption("Companies appear here because a canonical ownership, operating, management or other entity↔asset relationship reaches a corridor node. Headquarters proximity alone is not treated as corridor exposure.")
+        st.caption("Company-to-asset relationships at registered nodes are shown below. Explicit company–corridor roles are displayed separately, regardless of physical connections. Headquarters proximity is not corridor exposure.")
         display_df(b["companies"],350)
         st.markdown("#### Explicit Phase 13B corridor roles")
         st.caption("Direct, documented company–corridor roles. These remain visible before node links are populated.")
