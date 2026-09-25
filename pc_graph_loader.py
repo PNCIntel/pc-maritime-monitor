@@ -136,14 +136,48 @@ def parse_upload(filename, data):
     else: raise ValueError('Use .xlsx, .csv or .json')
     result=[]
     for sheet,frame in book.items():
-        table=SHEET_TABLE.get(str(sheet).upper())
-        if not table: continue
+        sheet_key=str(sheet).strip().lower()
+        # Canonical research exports name tabs pc_events, pc_entities, etc.
+        # Retain support for shorthand EVENTS/ENTITIES from earlier workbooks.
+        table=(sheet_key if sheet_key in SHEET_TABLE.values()
+               else SHEET_TABLE.get(sheet_key.upper()))
+        if not table:
+            continue  # Human-readable research/audit sheets are not canonical writes.
         frame.columns=[norm(x) for x in frame.columns]
         frame=frame.dropna(how='all')
         for idx,row in frame.iterrows():
-            payload={k:clean(v) for k,v in row.to_dict().items()}
-            payload={k:v for k,v in payload.items() if v is not None}
-            result.append({'sheet':sheet,'row':int(idx)+2,'table':table,'payload':payload})
+            raw={k:clean(v) for k,v in row.to_dict().items()}
+            raw={k:v for k,v in raw.items() if v is not None}
+            # P&C analytical workbooks put canonical records in a JSON payload
+            # column; other columns are staging controls and provenance.
+            envelope=raw.get('payload')
+            if envelope is not None:
+                if isinstance(envelope,str):
+                    try: envelope=json.loads(envelope)
+                    except (ValueError,TypeError) as exc:
+                        raise ValueError(f'{sheet} row {int(idx)+2}: malformed payload JSON: {exc}') from exc
+                if not isinstance(envelope,dict):
+                    raise ValueError(f'{sheet} row {int(idx)+2}: payload must be a JSON object')
+                payload={k:clean(v) for k,v in envelope.items()}
+                payload={k:v for k,v in payload.items() if v is not None}
+                # Move source_url into metadata for tables without that field,
+                # while retaining it as a first-class field where supported.
+                source_url=raw.get('source_url') or payload.get('source_url')
+                if table not in {'pc_sources','pc_documents','pc_contracts'}:
+                    payload.pop('source_url',None)
+                if source_url:
+                    metadata=payload.get('metadata') or {}
+                    if not isinstance(metadata,dict): metadata={}
+                    metadata.setdefault('source_url',source_url)
+                    payload['metadata']=metadata
+                natural_key=raw.get('natural_key')
+                if natural_key:
+                    pass  # natural_key remains an envelope control, not a database column
+            else:
+                payload=raw
+            result.append({'sheet':sheet,'row':int(idx)+2,'table':table,'payload':payload,
+                           'action':raw.get('action'),'confidence':raw.get('confidence'),
+                           'natural_key':raw.get('natural_key')})
     return result
 
 def plan(upload_rows, schema, existing=None):
@@ -165,6 +199,7 @@ def plan(upload_rows, schema, existing=None):
         pk=PK.get(table)
         if pk and not payload.get(pk):
             natural=payload.get('imo') if table=='pc_mobile_assets' else None
+            natural=natural or row.get('natural_key')
             natural=natural or payload.get('source_record_key') or payload.get('name') or payload.get('corridor_name') or payload.get('title')
             # Deterministic provisional keys; production matcher still decides whether existing record should be reused.
             if natural:
@@ -308,7 +343,7 @@ def stage(sb, planned, filename, file_bytes):
 
 def render(sb,schema):
     import streamlit as st
-    st.title('Graph Loader v0.2 — Batch preview and stage')
+    st.title('Graph Loader v0.2.1 — Batch preview and stage')
     st.info('Review-only: this cannot publish canonical records. Batched indexed lookups replace N+1 calls.')
     up=st.file_uploader('Research workbook, events CSV, or multi-sheet JSON',type=['xlsx','csv','json'])
     if not up:return
@@ -319,7 +354,8 @@ def render(sb,schema):
     if st.button('Run batched preflight',type='primary'):
         try:
             rows=parse_upload(up.name,data)
-            if not rows:st.error('No recognised sheets');return
+            if not rows:st.error('No recognised canonical sheets. Supported names include pc_events, pc_entities, pc_assets and pc_event_links.');return
+            st.caption(f'Recognised {len(rows)} canonical rows from {len(set(r["sheet"] for r in rows))} sheet(s). Research/audit tabs remain read-only.')
             existing,errors=lookup_existing(sb,rows) if sb else ({},['No database connection'])
             matches,imo_errors=resolve_verified_imos(sb,rows) if sb else ({},[])
             errors+=imo_errors
