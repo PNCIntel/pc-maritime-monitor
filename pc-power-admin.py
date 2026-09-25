@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "544-guided-event-linking-2026-09-25"
+LOADER_BUILD = "545-graph-import-verification-2026-09-25"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -15389,7 +15389,70 @@ elif page=="Link Events":
     if sb is None:
         st.error("Database connection is not configured.")
     else:
-        link_tab, company_tab = st.tabs(["Event → vessel / company / asset","Resolve company identities"])
+        link_tab, company_tab, repair_tab = st.tabs(["Event → vessel / company / asset","Resolve company identities","Import link audit & repair"])
+        with repair_tab:
+            st.markdown("### Check an import and repair unresolved links")
+            st.caption("Choose an import by its workbook name. See its actual production link count—not just the number of events imported. Existing graph rows are retried only when both canonical endpoints can be resolved.")
+            candidate_jobs=[j for j in _canonical_jobs(100) if str(j.get("job_type") or "").upper()=="BATCH_IMPORT"]
+            if not candidate_jobs:
+                st.info("No recent import jobs found.")
+            else:
+                chosen_idx=st.selectbox("Imported workbook", list(range(len(candidate_jobs))),
+                    format_func=lambda i: str(candidate_jobs[i].get("title") or "Untitled")+" · "+str(candidate_jobs[i].get("created_at") or ""),
+                    key="v545_repair_job")
+                current_job=candidate_jobs[chosen_idx]
+                current_id=str(current_job["ingestion_job_id"])
+                try:
+                    staged_graph=(sb.table("pc_staged_records")
+                        .select("staged_record_id,target_table,natural_key,payload,review_status,resolution_status,resolution_details")
+                        .eq("ingestion_job_id",current_id)
+                        .in_("target_table",["pc_event_links","pc_relationships"])
+                        .limit(5000).execute().data or [])
+                    staged_events=(sb.table("pc_staged_records")
+                        .select("staged_record_id,payload,resolved_entity_id,review_status")
+                        .eq("ingestion_job_id",current_id).eq("target_table","pc_events")
+                        .limit(3000).execute().data or [])
+                    verified_events=[]
+                    for er in staged_events:
+                        ep=er.get("payload") or {}
+                        eid=str(er.get("resolved_entity_id") or ep.get("event_id") or "").strip()
+                        if eid: verified_events.append(eid)
+                    # Count actual canonical links for all loaded events; do not equate
+                    # staging approval with a live linked relationship.
+                    confirmed_links=0
+                    for offset in range(0,len(verified_events),100):
+                        ids=verified_events[offset:offset+100]
+                        if ids:
+                            result=(sb.table("pc_event_links").select("event_link_id")
+                                .in_("event_id",ids).limit(10000).execute().data or [])
+                            confirmed_links+=len(result)
+                    pending=[r for r in staged_graph if str(r.get("review_status") or "").lower()!="applied"]
+                    applied=[r for r in staged_graph if str(r.get("review_status") or "").lower()=="applied"]
+                    a,b,c=st.columns(3)
+                    a.metric("Graph rows in workbook",len(staged_graph))
+                    b.metric("Graph rows applied",len(applied))
+                    c.metric("Live links on imported events",confirmed_links)
+                    if not staged_graph:
+                        st.error("No company/asset/event-link records were staged by this job. Its events may exist, but it cannot populate their connected network from this import alone. Use a link-aware workbook or the Event linking tab.")
+                    elif pending:
+                        st.warning(f"{len(pending)} graph rows are still pending. Review their exact reasons below. The repair operation will skip unresolved or ambiguous identities.")
+                    if staged_events and confirmed_links==0:
+                        st.error("The imported events have ZERO live links. Treat this as an incomplete import, even if every event row was applied.")
+                    if pending:
+                        with st.expander("Pending relationships and their reasons",expanded=True):
+                            dataframe([{"Object":(r.get("payload") or {}).get("linked_name") or (r.get("payload") or {}).get("relationship_type") or r.get("natural_key"),
+                                "Table":r.get("target_table"),"Resolution":r.get("resolution_status"),
+                                "Reason":str((r.get("resolution_details") or {}).get("reason") or (r.get("resolution_details") or {}).get("endpoint_resolution") or "Inspect pending identity")}
+                                for r in pending])
+                    confirmed=st.checkbox("Retry only already-staged links for this job; never guess ambiguous identities",key="v545_repair_confirm")
+                    if st.button("Repair this job's links",type="primary",disabled=not pending or not confirmed,key="v545_repair_execute"):
+                        link_result=_v28_apply_event_links_direct(current_id)
+                        company_result=_v29_apply_relationships_direct(current_id)
+                        st.write("Event links:",link_result)
+                        st.write("Company/asset relationships:",company_result)
+                        st.rerun()
+                except Exception as repair_exc:
+                    st.error(f"Unable to audit this job: {repair_exc}")
         with company_tab:
             st.markdown("### Resolve company import exceptions")
             st.caption("Choose an existing canonical company only after comparing names and details. This saves a match to staging; it does not merge or overwrite a company.")
@@ -15655,13 +15718,30 @@ elif page=="Quick Import":
                                 deferred=stages.pop("_deferred_records",[])
                                 if not stages.get("rows"):
                                     raise RuntimeError("No data records staged; stopped before applying")
-                                _canonical_process_job(jid,deferred)
+                                process_details=_canonical_process_job(jid,deferred)
                                 summary,_by=_canonical_job_summary(jid)
+                                # The old UI counted applied events as a success even
+                                # when the entire event-link graph was missing.
+                                graph_snapshot=(sb.table("pc_staged_records")
+                                    .select("target_table,review_status")
+                                    .eq("ingestion_job_id",jid)
+                                    .in_("target_table",["pc_event_links","pc_relationships"])
+                                    .limit(10000).execute().data or [])
+                                graph_expected=len(graph_snapshot)
+                                graph_applied=sum(str(r.get("review_status") or "").lower()=="applied" for r in graph_snapshot)
+                                graph_pending=graph_expected-graph_applied
+                                if graph_pending:
+                                    st.error(f"{graph_pending} of {graph_expected} graph relationships did not apply. Open Link Events → Import link audit & repair. This import is incomplete.")
+                                elif graph_expected==0 and any(c.get("target")=="pc_events" for c in item["configs"].values()):
+                                    st.warning("Events loaded, but this workbook did not stage any company/asset links. Import a link-aware workbook or connect them under Link Events.")
                                 quick_outcomes.append({"File":name,"Job ID":jid,
                                     "Applied":summary.get("applied",0),"Review":summary.get("review",0),
-                                    "Total":summary.get("total",0),"Result":"Processed"})
+                                    "Total":summary.get("total",0),
+                                    "Graph applied":graph_applied,"Graph pending":graph_pending,
+                                    "Result":"Incomplete: graph pending" if graph_pending else "Processed"})
                                 st.write(f"Applied {summary.get('applied',0)} / {summary.get('total',0)}; "
-                                         f"{summary.get('review',0)} need review")
+                                         f"{summary.get('review',0)} need review; "
+                                         f"{graph_applied} / {graph_expected} graph links applied")
                             except Exception as quick_exc:
                                 quick_outcomes.append({"File":name,"Job ID":jid or "—",
                                                        "Applied":"—","Review":"—", "Total":"—",
