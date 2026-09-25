@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "541-phase13g2-multimodal-staging-preview-2026-09-23"
+LOADER_BUILD = "542-corridor-bulk-reconciliation-2026-09-25"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -86,6 +86,7 @@ st.sidebar.radio(
 NAV = {
     "Home": "Canonical Home",
     "Canonical Loader": "Canonical Loader",
+    "Corridor Bulk Loader": "Corridor Bulk Loader",
     "Identity Hygiene": "Identity Hygiene",
     "Review Queue": "Review Queue",
     "Canonical Exceptions": "Canonical Review",
@@ -121,6 +122,9 @@ REQUIRED_BY_TABLE = {
     "pc_supply_series": ["supply_series_id"],
     "pc_transport_routes": ["route_id","route_name","mode"],
     "pc_chokepoints": ["chokepoint_id","name"],
+    "pc_trade_corridors": ["corridor_key","corridor_name"],
+    "pc_corridor_nodes": ["corridor_node_key","corridor_key","node_key","display_name"],
+    "pc_corridor_route_references": ["corridor_key","route_id","association_type"],
 
     # Port / terminal / berth layer
     "pc_port_capabilities": ["port_asset_id"],
@@ -1839,6 +1843,141 @@ def _table_exists(name):
         return False
 
 
+# ---- Corridor-specific, dependency-checked loader (v542) ----
+# Unlike the legacy multi-table page, the following avoids uncertain table
+# inference and does not require an unverified Phase 13 SQL dispatch function.
+_CORRIDOR_SHEETS = {
+    "pc_corridor_nodes": "Nodes",
+    "pc_corridor_route_references": "Route references",
+    "pc_company_corridor_roles": "Company roles",
+    "pc_corridor_mode_connections": "Mode connections",
+}
+_CORRIDOR_KNOWN_COLUMNS = {
+    "pc_corridor_nodes": {"corridor_node_key","corridor_key","sequence_no","node_type","node_key","display_name","country","region","latitude","longitude","role","status","confidence","source_url","notes"},
+    "pc_corridor_route_references": {"corridor_key","route_id","association_type","verification_status","source_id","notes","metadata"},
+    "pc_company_corridor_roles": {"company_corridor_role_id","corridor_key","entity_id","transport_service_id","corridor_role","role_status","valid_from","valid_to","as_of","source_id","research_claim_id","metadata"},
+    "pc_corridor_mode_connections": {"corridor_mode_connection_id","corridor_key","from_asset_id","to_asset_id","mode","rail_link_id","road_corridor_id","transport_service_id","transfer_capacity","transfer_unit","transfer_time_hours","status","valid_from","valid_to","source_id","research_claim_id","verification_status","metadata"},
+}
+_CORRIDOR_FIELDS = {
+    "pc_corridor_nodes": ("corridor_key", "node_key", "display_name", "source_url"),
+    "pc_corridor_route_references": ("corridor_key", "route_id", "association_type"),
+    "pc_company_corridor_roles": ("corridor_key", "entity_id", "corridor_role", "source_id"),
+    "pc_corridor_mode_connections": ("corridor_key", "from_asset_id", "to_asset_id", "mode", "source_id"),
+}
+_CORRIDOR_KEYS = {
+    "pc_corridor_nodes": ("corridor_key", "node_key"),
+    "pc_corridor_route_references": ("corridor_key", "route_id"),
+    "pc_company_corridor_roles": ("company_corridor_role_id",),
+    "pc_corridor_mode_connections": ("corridor_mode_connection_id",),
+}
+
+def _corridor_upload_sections(upload):
+    name=upload.name.lower()
+    raw=upload.getvalue()
+    if name.endswith(".xlsx"):
+        book=pd.ExcelFile(io.BytesIO(raw))
+        return {sheet:pd.read_excel(io.BytesIO(raw),sheet_name=sheet,dtype=object).dropna(how="all")
+                for sheet in book.sheet_names if sheet in _CORRIDOR_SHEETS or sheet.upper() in {"NODES","ROUTES","COMPANIES","CONNECTIONS"}}
+    if name.endswith(".csv"):
+        frame=pd.read_csv(io.BytesIO(raw),dtype=object).dropna(how="all")
+        if "target_table" not in frame.columns:
+            raise ValueError("CSV must include target_table; use one workbook for multi-sheet corridor imports.")
+        return {str(table):df.drop(columns=["target_table"]).copy()
+                for table,df in frame.groupby("target_table")}
+    raise ValueError("Upload XLSX or CSV.")
+
+def _corridor_rows(sb,sections):
+    alias={"NODES":"pc_corridor_nodes","ROUTES":"pc_corridor_route_references",
+           "COMPANIES":"pc_company_corridor_roles","CONNECTIONS":"pc_corridor_mode_connections"}
+    results=[]; cache={}; seen=set()
+    def exists(table,column,value):
+        ck=(table,column,str(value))
+        if ck not in cache:
+            try:
+                cache[ck]=bool(sb.table(table).select(column).eq(column,value).limit(1).execute().data)
+            except Exception as exc:
+                raise RuntimeError(f"Cannot verify {table}.{column}: {type(exc).__name__}: {exc}") from exc
+        return cache[ck]
+    available={}
+    for section,frame in sections.items():
+        target=alias.get(str(section).upper(),str(section))
+        if target not in _CORRIDOR_SHEETS:
+            continue
+        try:
+            # Registered Phase 13 and independently migrated junctions need not
+            # all be present in pc_meta_columns; use their known physical schema.
+            available[target]=_CORRIDOR_KNOWN_COLUMNS[target]
+            sb.table(target).select("*").limit(1).execute()
+        except Exception as exc:
+            results.append({"sheet":section,"table":target,"decision":"BLOCKED","details":f"Table unavailable: {exc}","payload":{}})
+            continue
+        for ix,row in enumerate(frame.to_dict("records"),2):
+            p={str(k).strip():_jsonish(_clean_upload_scalar(v)) for k,v in row.items()
+               if not str(k).startswith("Unnamed") and _clean_upload_scalar(v) is not None}
+            if not p: continue
+            note=[]; status="NEW"
+            if target=="pc_corridor_nodes" and not p.get("corridor_node_key") and p.get("corridor_key") and p.get("node_key"):
+                p["corridor_node_key"]=f"{p['corridor_key']}:asset:{p['node_key']}"
+            if target in {"pc_company_corridor_roles","pc_corridor_mode_connections"}:
+                pk=_CORRIDOR_KEYS[target][0]
+                if not p.get(pk):
+                    parts=[str(p.get(k) or "") for k in (
+                        ("corridor_key","entity_id","corridor_role","source_id") if target=="pc_company_corridor_roles" else
+                        ("corridor_key","from_asset_id","to_asset_id","mode","source_id"))]
+                    p[pk]=str(uuid.uuid5(uuid.NAMESPACE_URL,"pc-corridor-v542|"+"|".join(parts)))
+            if isinstance(p.get("metadata"),str):
+                try: p["metadata"]=json.loads(p["metadata"])
+                except Exception: status="BLOCKED"; note.append("Invalid metadata JSON")
+            missing=[col for col in _CORRIDOR_FIELDS[target] if p.get(col) in (None,"")]
+            if missing: status="BLOCKED"; note.append("Missing: "+", ".join(missing))
+            unknown=set(p)-available[target]
+            if unknown:
+                status="BLOCKED"; note.append("Unknown columns: "+", ".join(sorted(unknown)))
+            key=tuple(str(p.get(k) or "") for k in _CORRIDOR_KEYS[target])
+            batch_key=(target,key)
+            if batch_key in seen: status="DUPLICATE_IN_FILE"; note.append("Repeated within workbook")
+            seen.add(batch_key)
+            if status!="BLOCKED":
+                if not exists("pc_trade_corridors","corridor_key",p.get("corridor_key")):
+                    status="BLOCKED"; note.append("Corridor does not exist; create/review corridor definition first")
+                if target=="pc_corridor_nodes":
+                    if not exists("pc_assets","asset_id",p.get("node_key")):
+                        status="BLOCKED"; note.append("Asset ID not resolved")
+                    if not str(p.get("source_url") or "").startswith("https://"):
+                        status="BLOCKED"; note.append("Official or other research source URL required")
+                    # Natural-key dedupe: never insert the same asset membership twice under a different ID.
+                    existing=(sb.table(target).select("corridor_node_key").eq("corridor_key",p["corridor_key"]).eq("node_key",p["node_key"]).limit(1).execute().data or [])
+                    if existing: status="EXISTS"; note.append("Existing membership: "+str(existing[0]["corridor_node_key"]))
+                elif target=="pc_corridor_route_references":
+                    if not exists("pc_transport_routes","route_id",p.get("route_id")):
+                        status="BLOCKED"; note.append("Route ID not resolved")
+                    if p.get("association_type") not in {"corridor_reference","connecting_feeder","candidate"}:
+                        status="BLOCKED"; note.append("Invalid association_type")
+                elif target=="pc_company_corridor_roles":
+                    if not exists("pc_entities","entity_id",p.get("entity_id")):
+                        status="BLOCKED"; note.append("Company ID not resolved")
+                    if p.get("corridor_role") not in {"operator","infrastructure_owner","concessionaire","investor","carrier","trader","shipper","offtaker","logistics_provider","customer","other"}:
+                        status="BLOCKED"; note.append("Invalid company role")
+                    existing=(sb.table(target).select("company_corridor_role_id").eq("corridor_key",p["corridor_key"]).eq("entity_id",p["entity_id"]).eq("corridor_role",p["corridor_role"]).limit(5).execute().data or [])
+                    # Same company may legitimately have distinct documented roles at different assets.
+                    if existing and (not isinstance(p.get("metadata"),dict) or not p["metadata"].get("evidence_asset_id")):
+                        status="REVIEW"; note.append("Similar role exists; check facility/scope before inserting")
+                elif target=="pc_corridor_mode_connections":
+                    for field in ("from_asset_id","to_asset_id"):
+                        if not exists("pc_assets","asset_id",p.get(field)):
+                            status="BLOCKED"; note.append(field+" unresolved")
+                if p.get("source_id") and not exists("pc_sources","source_id",p["source_id"]):
+                    status="BLOCKED"; note.append("Source ID missing from pc_sources")
+                if not p.get("source_id") and target!="pc_corridor_nodes":
+                    status="BLOCKED"; note.append("Registered source_id required")
+                if status not in {"BLOCKED","DUPLICATE_IN_FILE","EXISTS"} and all(key):
+                    q=sb.table(target).select(_CORRIDOR_KEYS[target][0])
+                    for fld,val in zip(_CORRIDOR_KEYS[target],key): q=q.eq(fld,val)
+                    if q.limit(1).execute().data: status="EXISTS"; note.append("Matching database record")
+            results.append({"sheet":section,"row":ix,"table":target,"name":p.get("display_name") or p.get("route_id") or p.get("entity_id") or p.get("from_asset_id"),
+                            "decision":status,"details":"; ".join(note),"payload":p})
+    return results
+
 selected_page=st.sidebar.radio("",PAGES,label_visibility="collapsed")
 page=NAV[selected_page]
 st.sidebar.caption("Ingest → extract facts → resolve/link → review → apply")
@@ -2456,6 +2595,9 @@ APPLY_CONFLICT_KEYS = {
 # already present in the current P&C schema; the previous loader allow-list simply
 # had not caught up with the data model.
 EXPANDED_RESEARCH_TABLES = {
+    "pc_trade_corridors",
+    "pc_corridor_nodes",
+    "pc_corridor_route_references",
     "pc_sources",
     "pc_source_records",
     "pc_company_profiles",
@@ -2476,6 +2618,9 @@ EXPANDED_RESEARCH_TABLES = {
 AI_ALLOWED_TABLES.update(EXPANDED_RESEARCH_TABLES)
 DIRECT_DOMAIN_TABLES.update(EXPANDED_RESEARCH_TABLES)
 APPLY_CONFLICT_KEYS.update({
+    "pc_trade_corridors":"corridor_key",
+    "pc_corridor_nodes":"corridor_node_key",
+    "pc_corridor_route_references":"corridor_key,route_id",
     "pc_sources":"source_id",
     "pc_company_profiles":"entity_id",
     "pc_company_registrations":"entity_id,jurisdiction,registration_type,registration_number",
@@ -17155,6 +17300,50 @@ elif page=="Bulk Import Workflow":
             st.success("No bulk-load integrity mismatches detected.")
         with st.expander("Show all bulk-load jobs",expanded=False):
             dataframe(bulk_audit_rows)
+
+elif page=="Corridor Bulk Loader":
+    title("Corridor bulk loader", "Reuse existing Supabase companies, ports, railways and routes. Preview duplicate-safe corridor links before controlled staging.")
+    st.info("Staging and QA only in this release. No production corridor writes or automatic Phase 13 apply are triggered here. The existing SQL dispatch does not yet cover all corridor junctions.")
+    if not sb:
+        st.error("Supabase connection required for canonical lookup and duplicate checks.")
+    else:
+        st.caption("Accepted workbook sheets: NODES, ROUTES, COMPANIES and CONNECTIONS (or their canonical pc_ table names). Existing canonical asset, entity, route and source IDs are mandatory.")
+        up=st.file_uploader("Corridor XLSX or CSV",type=["xlsx","csv"],key="corridor_v542_upload")
+        if up:
+            try:
+                import_hash=hashlib.sha256(up.getvalue()).hexdigest()
+                sections=_corridor_upload_sections(up)
+                if not sections: st.error("No recognised corridor sheets. Use NODES, ROUTES, COMPANIES or CONNECTIONS.")
+                else:
+                    check=_corridor_rows(sb,sections)
+                    report=pd.DataFrame([{k:v for k,v in item.items() if k!="payload"} for item in check])
+                    st.caption(f"SHA-256 {import_hash[:16]}... | {len(check)} examined record(s)")
+                    st.dataframe(report,use_container_width=True,hide_index=True)
+                    counts=report["decision"].value_counts().to_dict() if not report.empty else {}
+                    st.json(counts)
+                    st.download_button("Download audit CSV",report.to_csv(index=False).encode("utf-8"),"corridor_preflight.csv","text/csv")
+                    candidates=[x for x in check if x.get("decision")=="NEW"]
+                    review=[x for x in check if x.get("decision")=="REVIEW"]
+                    if review: st.warning(f"{len(review)} similar role(s) require scope/evidence review and are not eligible for the automatic staging batch.")
+                    st.caption("Only NEW rows can be staged. Every staged row stays pending for analyst approval. No canonical records are created by staging.")
+                    confirmed=st.checkbox("I have reviewed the source URLs and canonical IDs for the NEW rows",key="corridor_v542_confirm")
+                    if st.button(f"Stage {len(candidates)} NEW corridor associations",disabled=not confirmed or not candidates,type="primary"):
+                        job=sb.table("pc_ingestion_jobs").insert({"job_type":"BATCH_IMPORT","title":"Corridor QA | "+up.name,
+                          "source_scope":{"corridor_batch":True,"file_sha256":import_hash,"staging_only":True},"status":"running"}).execute().data[0]
+                        jid=job["ingestion_job_id"]
+                        staged=[]
+                        for item in candidates:
+                            tab=item["table"]; payload=item["payload"]
+                            key="|".join(str(payload.get(x) or "") for x in _CORRIDOR_KEYS[tab])
+                            staged.append({"ingestion_job_id":jid,"target_table":tab,"natural_key":key,
+                                "source_record_key":f"corridor:{tab}:{key}","action":"REVIEW",
+                                "payload":_jsonable(payload),"confidence":0.95,"validation_status":"pending",
+                                "review_status":"pending","resolution_status":"UNRESOLVED"})
+                        for offset in range(0,len(staged),100): sb.table("pc_staged_records").insert(staged[offset:offset+100]).execute()
+                        sb.table("pc_ingestion_jobs").update({"status":"completed","stats":{"staged":len(staged),"file_sha256":import_hash,"staging_only":True}}).eq("ingestion_job_id",jid).execute()
+                        st.success(f"Staged {len(staged)} association(s) in job {jid}. No production writes occurred.")
+            except Exception as exc:
+                st.error("Corridor preflight/staging stopped: "+str(exc))
 
 elif page=="Multi-Table Bulk Loader":
     title("Multi-table bulk loader","Load one workbook/file into several canonical tables. Map sections and fields, fill staging keys, then resolve everything as one controlled job.")
