@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "542-corridor-bulk-reconciliation-2026-09-25"
+LOADER_BUILD = "543-guided-multimodal-import-2026-09-25"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -85,6 +85,7 @@ st.sidebar.radio(
 )
 NAV = {
     "Home": "Canonical Home",
+    "Quick Import": "Quick Import",
     "Canonical Loader": "Canonical Loader",
     "Corridor Bulk Loader": "Corridor Bulk Loader",
     "Identity Hygiene": "Identity Hygiene",
@@ -15299,12 +15300,178 @@ if page=="Canonical Home":
             """
         )
 
+elif page=="Quick Import":
+    title(
+        "Import data",
+        "Upload your research files. Power Admin recognises companies, ports, vessels and events, resolves existing identities and sends only exceptions for review. No database IDs or SQL required."
+    )
+    st.caption(f"Guided multimodal importer · {LOADER_BUILD} · Existing canonical engine")
+    st.info(
+        "For this catch-up, select the identity workbook AND the events workbook together. "
+        "They will run in that order so companies, vessels and ports exist before their events. "
+        "Existing records are reconciled; ambiguous records remain in the Review Queue."
+    )
+    if sb is None:
+        st.error("The Supabase connection is not configured. An administrator must configure the app once; you do not need to handle database credentials or SQL for routine imports.")
+    else:
+        quick_files=st.file_uploader(
+            "Choose Excel, CSV or JSON files", type=["xlsx","xls","csv","json","jsonl","ndjson"],
+            accept_multiple_files=True,key="guided_multimodal_files_v543",
+            help="Choose the identity and event workbooks together. Reference/research-only tabs will be excluded."
+        )
+        if quick_files:
+            prepared=[]; issues=[]; table_totals={}
+            def _quick_sort(up):
+                nm=str(up.name).lower()
+                return (0 if "identit" in nm or "compan" in nm else 2 if "event" in nm else 1,nm)
+            for quick_up in sorted(quick_files,key=_quick_sort):
+                try:
+                    quick_sections,quick_hash=_parse_multitable_upload(quick_up)
+                    quick_configs={}; quick_excluded=[]; quick_file_issues=[]
+                    for quick_section,quick_df in quick_sections.items():
+                        if quick_df is None or quick_df.empty:
+                            continue
+                        quick_target,quick_default,quick_reason=_canonical_section_target(quick_section,quick_df)
+                        if not quick_default or not quick_target:
+                            quick_excluded.append(f"{quick_section}: {quick_reason}")
+                            continue
+                        quick_native=_loader_native_section(quick_df)
+                        quick_mapping=(None if quick_native else _auto_column_mapping(
+                            list(quick_df.columns),_table_write_columns_live(sb,quick_target)
+                        ))
+                        # Catch missing mandatory columns *before* creating a job.
+                        quick_req=REQUIRED_BY_TABLE.get(quick_target,[])
+                        if quick_native:
+                            for quick_index,quick_row in enumerate(quick_df.to_dict('records'),start=2):
+                                pp=_jsonish(quick_row.get('payload'))
+                                if not isinstance(pp,dict):
+                                    quick_file_issues.append(f"{quick_section} row {quick_index}: invalid JSON payload")
+                                elif not any(pp.get(k) for k in ("name","title","event_id","relationship_id","linked_id","asset_id","entity_id","mobile_asset_id")):
+                                    quick_file_issues.append(f"{quick_section} row {quick_index}: no identifiable object")
+                        else:
+                            missing=[k for k in quick_req if k not in set(quick_df.columns)
+                                     and k not in {"entity_id","asset_id","mobile_asset_id","event_id","event_link_id","relationship_id"}]
+                            if missing:
+                                quick_file_issues.append(f"{quick_section}: missing fields: {', '.join(missing)}")
+                            if "source_url" not in quick_df.columns and "metadata" not in quick_df.columns and "source_id" not in quick_df.columns:
+                                quick_file_issues.append(f"{quick_section}: source URL or source reference missing")
+                        quick_configs[quick_section]={"include":True,"target":quick_target,
+                            "df":quick_df,"mapping":quick_mapping,"native":quick_native}
+                        table_totals[quick_target]=table_totals.get(quick_target,0)+len(quick_df)
+                    if not quick_configs:
+                        quick_file_issues.append("No supported data sheets were found")
+                    if quick_file_issues:
+                        issues.extend(f"{quick_up.name}: {msg}" for msg in quick_file_issues)
+                    prepared.append({"filename":quick_up.name,"sha256":quick_hash,"configs":quick_configs,
+                                     "excluded":quick_excluded,"issues":quick_file_issues})
+                except Exception as quick_exc:
+                    issues.append(f"{quick_up.name}: {quick_exc}")
+            if prepared:
+                recent_hashes={}
+                try:
+                    for old in _canonical_jobs(100):
+                        old_scope=old.get("source_scope") or {}
+                        if isinstance(old_scope,dict) and old_scope.get("file_sha256"):
+                            recent_hashes[str(old_scope["file_sha256"])]=old
+                except Exception:
+                    pass
+                already=[x for x in prepared if x["sha256"] in recent_hashes]
+                if already:
+                    st.warning("This exact file was previously submitted: "+", ".join(x["filename"] for x in already)+
+                               ". Check previous import results before retrying.")
+                    allow_repeat=st.checkbox("Reprocess already-submitted files",value=False,
+                        key="guided_import_allow_repeat_v543")
+                else:
+                    allow_repeat=True
+                st.markdown("### Import preview")
+                mc1,mc2,mc3=st.columns(3)
+                mc1.metric("Files",len(prepared))
+                mc2.metric("Data records",sum(table_totals.values()))
+                mc3.metric("Problems",len(issues))
+                friendly={"pc_entities":"Companies","pc_assets":"Ports and infrastructure",
+                    "pc_mobile_assets":"Vessels and mobile assets","pc_events":"Events",
+                    "pc_event_links":"Event links","pc_relationships":"Company and asset links"}
+                dataframe([{"Data":friendly.get(k,k),"Records":v} for k,v in table_totals.items()])
+                st.caption("Processing order: "+" → ".join(x["filename"] for x in prepared))
+                excluded=[{"File":x["filename"],"Excluded worksheet":v}
+                          for x in prepared for v in x["excluded"]]
+                if excluded:
+                    with st.expander("Research and other sheets excluded from loading"):
+                        dataframe(excluded)
+                if issues:
+                    st.error("The upload needs attention before importing:")
+                    for quick_error in issues[:30]:
+                        st.write("• "+quick_error)
+                st.warning(
+                    "Importing can add or update live records. Exact matches are reconciled, but "
+                    "weak or conflicting identities need review. No automatic overwriting of "
+                    "unverified ownership claims or unconfirmed event links is intended."
+                )
+                quick_confirm=st.checkbox(
+                    "I have reviewed the file names, data categories and record counts",
+                    key="guided_import_confirm_v543"
+                )
+                quick_button=st.button("Import these files",type="primary",use_container_width=True,
+                    disabled=bool(issues) or not quick_confirm or not allow_repeat,key="guided_import_apply_v543")
+                if quick_button:
+                    quick_outcomes=[]
+                    with st.status("Importing and linking data in dependency order…",expanded=True) as quick_status:
+                        for item in prepared:
+                            name=item["filename"]; jid=None
+                            try:
+                                job=_canonical_create_job(name,{
+                                    "architecture":"guided_multimodal_v543",
+                                    "file_sha256":item["sha256"],
+                                    "sections":{k:{"target_table":c["target"],"rows":len(c["df"])}
+                                        for k,c in item["configs"].items()}
+                                })
+                                jid=str(job["ingestion_job_id"])
+                                st.write(f"Processing **{name}**")
+                                stages=_canonical_stage_records(jid,item["configs"])
+                                deferred=stages.pop("_deferred_records",[])
+                                if not stages.get("rows"):
+                                    raise RuntimeError("No data records staged; stopped before applying")
+                                _canonical_process_job(jid,deferred)
+                                summary,_by=_canonical_job_summary(jid)
+                                quick_outcomes.append({"File":name,"Job ID":jid,
+                                    "Applied":summary.get("applied",0),"Review":summary.get("review",0),
+                                    "Total":summary.get("total",0),"Result":"Processed"})
+                                st.write(f"Applied {summary.get('applied',0)} / {summary.get('total',0)}; "
+                                         f"{summary.get('review',0)} need review")
+                            except Exception as quick_exc:
+                                quick_outcomes.append({"File":name,"Job ID":jid or "—",
+                                                       "Applied":"—","Review":"—", "Total":"—",
+                                                       "Result":str(quick_exc)})
+                                if jid:
+                                    try:
+                                        sb.table("pc_ingestion_jobs").update({"status":"failed",
+                                            "error_text":str(quick_exc)}).eq("ingestion_job_id",jid).execute()
+                                    except Exception:
+                                        pass
+                                st.error(f"Stopped at {name}: {quick_exc}")
+                                break
+                        st.session_state["guided_import_last_result_v543"]=quick_outcomes
+                        quick_status.update(label="Import attempt finished — see results below",state="complete")
+            outcome=st.session_state.get("guided_import_last_result_v543")
+            if outcome:
+                st.markdown("### Import results")
+                dataframe(outcome)
+                st.download_button("Download results CSV",
+                    pd.DataFrame(outcome).to_csv(index=False).encode("utf-8"),
+                    file_name="PC_Quick_Import_Results.csv",mime="text/csv",
+                    key="guided_import_results_download_v543")
+                st.caption("Open Review Queue for genuinely ambiguous records. Technical job IDs are retained only for audit and troubleshooting.")
+        else:
+            st.markdown("**What you can upload:** company and fleet profiles, ports and terminals, security and commercial events, or a mixed workbook.")
+            st.caption("You do not need to create IDs, know database table names or use Supabase SQL. Advanced controls remain available in Canonical Loader.")
+
 elif page=="Canonical Loader":
     title(
         "Canonical loader",
         "Load a package once. Existing vessels resolve by IMO, existing companies by exact name/alias, missing companies are created once, and vessel-company graph links follow automatically."
     )
     st.caption(f"Loader build: `{LOADER_BUILD}`")
+    st.info("For routine company, port, vessel and event workbooks, use **Quick Import** in the sidebar. This advanced page is for custom packages and troubleshooting.")
     st.success("V34: graph-closure repair. Event parents can resolve through package-local canonical mappings, graph endpoints can close through their staged parent payloads, and unresolved graph rows record an exact endpoint reason instead of remaining opaque PENDING rows.")
     if not sb:
         st.error("Supabase service connection required.")
