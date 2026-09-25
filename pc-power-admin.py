@@ -21,10 +21,31 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Secure Dashboard Parameter Controls
-DB_DSN = st.sidebar.text_input("Supabase Database URL (DSN)", value="postgresql://postgres:secret_pass@localhost:5432/supabase_db", type="password")
-OPENAI_KEY = st.sidebar.text_input("OpenAI API Intelligence Key", value="", type="password")
+# ===============================================================
+# SECURE CONFIGURATION: PULL FROM STREAMLIT SECSecrets / SIDEBAR OVERRIDES
+# ===============================================================
+
+# 1. Database Connection Handling
+default_dsn = st.secrets.get("SUPABASE_DSN") or st.secrets.get("DB_DSN") or "postgresql://postgres:secret_pass@localhost:5432/supabase_db"
+DB_DSN = st.sidebar.text_input(
+    "Supabase Database URL (DSN)", 
+    value=default_dsn, 
+    type="password",
+    help="Pulled from secrets. Fill this field out only to override your deployment vault."
+)
+
+# 2. OpenAI API Token Handling
+default_openai_key = st.secrets.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_KEY") or ""
+OPENAI_KEY = st.sidebar.text_input(
+    "OpenAI API Intelligence Key", 
+    value=default_openai_key, 
+    type="password",
+    help="Pulled from secrets. Fill this field out only to override your deployment vault."
+)
+
+# Instantiate engine with current connection parameters
 loader = CanonicalGraphLoader(dsn=DB_DSN)
+
 
 st.markdown("<div class='pc-gold-header'>Power & Corridors Graph Extraction Workspace</div>", unsafe_allow_html=True)
 st.title("◈ Universal AI Ingestion & Deduplication Portal")
