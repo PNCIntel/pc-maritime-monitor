@@ -86,6 +86,7 @@ st.sidebar.radio(
 NAV = {
     "Home": "Canonical Home",
     "Quick Import": "Quick Import",
+    "Graph Loader": "Graph Loader",
     "Link Events": "Link Events",
     "Canonical Loader": "Canonical Loader",
     "Corridor Bulk Loader": "Corridor Bulk Loader",
@@ -15332,7 +15333,12 @@ def _v544_link_event(event,candidate):
 
 
 
-if page=="Canonical Home":
+if page == "Graph Loader":
+    import json as _graph_json
+    from pc_graph_loader import render as _render_graph_loader
+    _graph_schema = _graph_json.loads((ROOT / "pc_schema_columns.json").read_text())
+    _render_graph_loader(sb, {k:set(v) for k,v in _graph_schema.items()})
+elif page == "Canonical Home":
     title(
         "Canonical admin",
         "The normal path is now simple: ingest package → resolve/upsert canonical objects → write relationships/event links → QA."
