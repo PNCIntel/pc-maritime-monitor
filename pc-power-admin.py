@@ -126,7 +126,8 @@ with st.container():
 # COMPONENT 2: FUZZY IDENTITY AUDITOR
 # ===============================================================
 def compute_normalized_token_ratio(str_a: str, str_b: str) -> float:
-    def tokenize(txt: str) -> list: return re.sub(r"[^\w]+", " ", txt.lower()).split()
+    def tokenize(txt: str) -> list: 
+        return re.sub(r"[^\w]+", " ", txt.lower()).split()
     tokens_a, tokens_b = set(tokenize(str_a)), set(tokenize(str_b))
     intersection, union = tokens_a.intersection(tokens_b), tokens_a.union(tokens_b)
     return float(len(intersection)) / len(union) if union else 0.0
@@ -170,9 +171,13 @@ if st.session_state["active_package"]:
 
         if highest_score >= 0.85 and matched_canonical_row:
             c_id, c_name = matched_canonical_row
-            reconciliation_logs.append({"Target Table": table, "Package Name": name_val, "Match Status": "COLLISION / REMAP", "Canonical Match": f"{c_name} ({c_id})", "Confidence Score": f"{highest_score*100:.1f}%", "Operational Action": f"Pruned candidate generation. Bound reference to: {c_id}"})
+            reconciliation_logs.append({
+                "Target Table": table, 
+                "Package Name": name_val, 
+                "Match Status": "COLLISION / REMAP", 
+                "Canonical Match": f"{c_name} ({c_id})", 
+                "Confidence Score": f"{highest_score*100:.1f}%", 
+                "Operational Action": f"Pruned candidate generation. Bound reference to: {c_id}"
+            })
             pk_col = APPLY_CONFLICT_KEYS.get(table, 'id')
             payload[pk_col] = c_id
-            item['payload'] = payload
-            deduped_package.append(item)
-        elif highest_score >= 0.50 and matched_canonical_row:
