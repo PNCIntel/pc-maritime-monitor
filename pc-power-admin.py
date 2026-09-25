@@ -9,7 +9,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 import streamlit as st
 
-LOADER_BUILD = "543-guided-multimodal-import-2026-09-25"
+LOADER_BUILD = "544-guided-event-linking-2026-09-25"
 
 
 ROOT=Path(__file__).resolve().parent
@@ -86,6 +86,7 @@ st.sidebar.radio(
 NAV = {
     "Home": "Canonical Home",
     "Quick Import": "Quick Import",
+    "Link Events": "Link Events",
     "Canonical Loader": "Canonical Loader",
     "Corridor Bulk Loader": "Corridor Bulk Loader",
     "Identity Hygiene": "Identity Hygiene",
@@ -15249,6 +15250,88 @@ def _sx_load_records(source_key, records):
     return stats
 
 
+# ---------------------------------------------------------------------------
+# v544: Editorially guided, source-scoped event linking and identity review.
+# No SQL, fabricated asset identifiers or silent ownership assignments.
+# ---------------------------------------------------------------------------
+def _v544_meta(row):
+    m=(row or {}).get("metadata") or {}
+    if isinstance(m,str):
+        try: m=json.loads(m)
+        except Exception: m={}
+    return m if isinstance(m,dict) else {}
+
+
+def _v544_terms(value):
+    if not value: return []
+    if isinstance(value,list):
+        return [str(x).strip() for x in value if x]
+    return [x.strip() for x in re.split(r"\s*[;|]\s*",str(value)) if x.strip()]
+
+
+def _v544_candidates(event, vessels, entities, assets):
+    m=_v544_meta(event)
+    out=[]; held=[]
+    def add(kind,record,why,relation,method):
+        pk={"mobile_asset":"mobile_asset_id","entity":"entity_id","asset":"asset_id"}[kind]
+        uid=str(record.get(pk) or "")
+        if uid and not any(x["kind"]==kind and x["uid"]==uid for x in out):
+            out.append({"kind":kind,"uid":uid,"name":record.get("name") or uid,
+                        "why":why,"relationship":relation,"method":method})
+    imo=str(m.get("candidate_imo") or "").strip()
+    if imo:
+        found=[v for v in vessels if str(v.get("imo") or "").strip()==imo]
+        if len(found)==1:
+            add("mobile_asset",found[0],"IMO "+imo,"involved vessel","imo_exact")
+        else: held.append(f"Vessel IMO {imo}: {len(found)} canonical candidates")
+    vessel_name=str(m.get("candidate_vessel_name") or "").strip()
+    if vessel_name and not imo:
+        found=[v for v in vessels if _canon_name_key(v.get("name"))==_canon_name_key(vessel_name)]
+        if len(found)==1: add("mobile_asset",found[0],"Exact vessel name; confirm vessel identity","involved vessel","name_exact_review")
+        else: held.append(f"Vessel {vessel_name}: {len(found)} exact candidates; no automatic link")
+    for name in _v544_terms(m.get("candidate_companies")):
+        found=[e for e in entities if _canon_name_key(e.get("name"))==_canon_name_key(name)]
+        if len(found)==1:
+            add("entity",found[0],"Article candidate: "+name,"mentioned in event","company_exact_editor_review")
+        else: held.append(f"Company {name}: {len(found)} exact candidates; resolve company identity first")
+    for name in _v544_terms(m.get("candidate_infrastructure")):
+        # Never turn geography, an entire strait or a generic region into a physical asset.
+        found=[a for a in assets if _canon_name_key(a.get("name"))==_canon_name_key(name)]
+        if len(found)==1:
+            add("asset",found[0],"Article candidate: "+name,"mentioned infrastructure","asset_exact_editor_review")
+        else: held.append(f"Infrastructure {name}: {len(found)} exact candidates; no assumed link")
+    return out,held
+
+
+def _v544_link_event(event,candidate):
+    event_id=str(event["event_id"])
+    kind=candidate["kind"]
+    table,pk={"mobile_asset":("pc_mobile_assets","mobile_asset_id"),
+              "entity":("pc_entities","entity_id"),"asset":("pc_assets","asset_id")}[kind]
+    if not (sb.table("pc_events").select("event_id").eq("event_id",event_id).limit(1).execute().data or []):
+        raise ValueError("Event not found in production")
+    if not (sb.table(table).select(pk).eq(pk,candidate["uid"]).limit(1).execute().data or []):
+        raise ValueError("Linked object is not in production")
+    existing=(sb.table("pc_event_links").select("event_link_id")
+              .eq("event_id",event_id).eq("linked_type",kind)
+              .eq("linked_id",candidate["uid"])
+              .eq("relationship",candidate["relationship"]).limit(1).execute().data or [])
+    if existing: return "already linked"
+    digest=hashlib.sha256((event_id+"|"+kind+"|"+candidate["uid"]+"|"+candidate["relationship"]).encode()).hexdigest()[:24].upper()
+    row={"event_link_id":"EVLINK_"+digest,"event_id":event_id,"linked_type":kind,
+         "linked_id":candidate["uid"],"linked_name":candidate["name"],
+         "relationship":candidate["relationship"],"confidence":"high",
+         "metadata":{"resolution_method":candidate["method"],"linking_workflow":"guided_v544",
+                     "link_evidence":candidate["why"],"event_title":event.get("title")}}
+    if event.get("source_id"):
+        row["source_id"]=event["source_id"]
+    writable=set(_table_write_columns_live(sb,"pc_event_links"))
+    result={k:v for k,v in row.items() if k in writable}
+    sb.table("pc_event_links").insert(_jsonable(result)).execute()
+    return "linked"
+
+
+
 if page=="Canonical Home":
     title(
         "Canonical admin",
@@ -15299,6 +15382,147 @@ if page=="Canonical Home":
             **5. Review is exceptional.** Only real ambiguity, insufficient identity, or an unsupported endpoint should remain for an analyst.
             """
         )
+
+elif page=="Link Events":
+    title("Connect events to your database",
+          "Link your imported stories to actual vessels, companies and infrastructure. Resolve uncertain company identities here without using SQL.")
+    if sb is None:
+        st.error("Database connection is not configured.")
+    else:
+        link_tab, company_tab = st.tabs(["Event → vessel / company / asset","Resolve company identities"])
+        with company_tab:
+            st.markdown("### Resolve company import exceptions")
+            st.caption("Choose an existing canonical company only after comparing names and details. This saves a match to staging; it does not merge or overwrite a company.")
+            try:
+                unresolved=(sb.table("pc_staged_records")
+                            .select("staged_record_id,ingestion_job_id,natural_key,payload,candidate_count")
+                            .eq("target_table","pc_entities").eq("review_status","pending")
+                            .eq("resolution_status","AMBIGUOUS")
+                            .order("created_at",desc=True).limit(100).execute().data or [])
+                companies=(sb.table("pc_entities").select("entity_id,name,entity_type,subtype,hq_country,metadata")
+                           .limit(10000).execute().data or [])
+            except Exception as err:
+                unresolved=[];companies=[];st.error(f"Cannot read pending identities: {err}")
+            if not unresolved:
+                st.success("No ambiguous company rows are currently pending.")
+            else:
+                st.metric("Companies awaiting identity decisions",len(unresolved))
+                if "v544_company_choice" not in st.session_state: st.session_state["v544_company_choice"]=0
+                company_idx=st.selectbox("Company to resolve",list(range(len(unresolved))),
+                    format_func=lambda i:unresolved[i].get("natural_key") or "Unknown",key="v544_company_pick")
+                pending=unresolved[company_idx]
+                nm=str((pending.get("payload") or {}).get("name") or pending.get("natural_key") or "")
+                matches=[r for r in companies if _canon_name_key(r.get("name"))==_canon_name_key(nm)]
+                if not matches:
+                    matches=[r for r in companies if _canon_name_key(nm) in _canon_name_key(r.get("name")) or _canon_name_key(r.get("name")) in _canon_name_key(nm)][:15]
+                st.write("**Submitted company:** "+nm)
+                if matches:
+                    options=list(range(len(matches)))
+                    chosen=st.selectbox("Use existing company",options,format_func=lambda i:
+                        f"{matches[i].get('name')} · {matches[i].get('hq_country') or 'country unknown'} · {matches[i].get('subtype') or matches[i].get('entity_type') or 'company'}",
+                        key="v544_company_match")
+                    with st.expander("Review existing profile"):
+                        st.json(matches[chosen])
+                    confirm=st.checkbox("I confirm this is the same legal company or established alias",key="v544_company_confirm")
+                    if st.button("Save this identity match",type="primary",disabled=not confirm,key="v544_company_save"):
+                        existing=matches[chosen]
+                        p=dict(pending.get("payload") or {})
+                        p["entity_id"]=existing["entity_id"]
+                        meta=_v544_meta(p)
+                        meta["manually_resolved_to_existing_entity"]=existing["entity_id"]
+                        p["metadata"]=meta
+                        sb.table("pc_staged_records").update({
+                            "payload":_jsonable(p),"resolved_entity_id":existing["entity_id"],
+                            "resolution_status":"MATCHED","resolution_method":"manual_editor_confirmed_exact_identity",
+                            "candidate_count":1,"validation_status":"reviewed"
+                        }).eq("staged_record_id",pending["staged_record_id"]).eq("review_status","pending").execute()
+                        st.success("Match saved to staging. The existing company will be reused; no duplicate company was created. Review and apply it in Review Queue.")
+                        st.rerun()
+                else:
+                    st.warning("No matching company is visible. Leave this pending for research; do not create an automatic duplicate.")
+        with link_tab:
+            st.markdown("### Link imported events")
+            st.caption("A reported event is not linked simply because an object is nearby. Exact IMO matches are eligible for bulk linking; other candidate roles require your confirmation.")
+            try:
+                events=(sb.table("pc_events")
+                        .select("event_id,title,start_date,source_id,metadata,event_type")
+                        .order("start_date",desc=True).limit(350).execute().data or [])
+                vessels=(sb.table("pc_mobile_assets").select("mobile_asset_id,name,imo")
+                         .limit(15000).execute().data or [])
+                entities=(sb.table("pc_entities").select("entity_id,name")
+                          .limit(15000).execute().data or [])
+                assets=(sb.table("pc_assets").select("asset_id,name")
+                        .limit(15000).execute().data or [])
+            except Exception as err:
+                events=[];vessels=[];entities=[];assets=[]
+                st.error(f"Could not read the event and asset registers: {err}")
+            if not events:
+                st.info("No events loaded yet, or the event registry could not be read.")
+            else:
+                st.metric("Recent event records available",len(events))
+                q=st.text_input("Filter by title, IMO or company",key="v544_event_search")
+                if q:
+                    filtered=[e for e in events if q.casefold() in (str(e.get("title") or "")+" "+str(_v544_meta(e))).casefold()]
+                else: filtered=events
+                if not filtered:
+                    st.info("No matching events in the recent event list.")
+                else:
+                    ev_idx=st.selectbox("Select an event",list(range(len(filtered))),
+                        format_func=lambda i:f"{filtered[i].get('start_date') or 'No date'} · {filtered[i].get('title') or filtered[i]['event_id']}",
+                        key="v544_event_choice")
+                    event=filtered[ev_idx]
+                    st.write("**"+str(event.get("title") or "Event")+"**")
+                    if event.get("source_id"):st.caption("Recorded source: "+str(event["source_id"]))
+                    candidates,held=_v544_candidates(event,vessels,entities,assets)
+                    prior=(sb.table("pc_event_links").select("linked_type,linked_id,relationship")
+                           .eq("event_id",event["event_id"]).limit(500).execute().data or [])
+                    is_already=lambda x:any(l.get("linked_type")==x["kind"] and str(l.get("linked_id"))==x["uid"] and l.get("relationship")==x["relationship"] for l in prior)
+                    if candidates:
+                        st.markdown("#### Documented candidate identities")
+                        display=[]
+                        for c in candidates:
+                            display.append({"Object":c["name"],"Type":c["kind"],"Evidence":c["why"],
+                                            "Proposed relation":c["relationship"],"Status":"Linked" if is_already(c) else "Choose to link"})
+                        dataframe(display)
+                        selectable=[c for c in candidates if not is_already(c)]
+                        manual=st.multiselect("Choose the candidate objects supported by the story",
+                            list(range(len(selectable))),
+                            format_func=lambda i:f"{selectable[i]['name']} ({selectable[i]['kind']}) — {selectable[i]['relationship']}",
+                            key="v544_selected_links")
+                        agree=st.checkbox("I checked the source and confirm each selected object is linked to this event",
+                            key="v544_links_confirm")
+                        if st.button("Save event links",disabled=not manual or not agree,type="primary",key="v544_links_save"):
+                            outcomes=[]
+                            for i in manual:
+                                try: outcomes.append(f"{selectable[i]['name']}: {_v544_link_event(event,selectable[i])}")
+                                except Exception as exc: outcomes.append(f"{selectable[i]['name']}: ERROR {exc}")
+                            for line in outcomes:st.write(line)
+                            st.rerun()
+                    else:
+                        st.info("No exact object candidates in this event's imported metadata. The story remains in the event registry; its identity links require research.")
+                    if held:
+                        with st.expander(f"Unresolved candidate identities ({len(held)})"):
+                            for item in held:st.write("• "+item)
+                st.divider()
+                st.markdown("### Link uniquely identified vessels in one operation")
+                imo_candidates=[]
+                for e in events:
+                    cand,_held=_v544_candidates(e,vessels,[],[])
+                    imo_candidates.extend((e,c) for c in cand if c["kind"]=="mobile_asset" and c["method"]=="imo_exact")
+                if imo_candidates:
+                    st.caption(f"{len(imo_candidates)} eligible recent event–vessel associations by exact, unique IMO match. Existing links are skipped.")
+                    bulk_confirm=st.checkbox("I confirm these exact IMO associations can be linked",key="v544_imo_confirm")
+                    if st.button("Link all unambiguous IMO vessels",type="primary",disabled=not bulk_confirm,key="v544_imo_link"):
+                        done=0; skipped=0;failed=[]
+                        for e,c in imo_candidates:
+                            try:
+                                status=_v544_link_event(e,c)
+                                done+=status=="linked";skipped+=status=="already linked"
+                            except Exception as err:failed.append(f"{e.get('title')}: {err}")
+                        st.success(f"Created {done} new links; skipped {skipped} already linked.")
+                        for item in failed:st.error(item)
+                else:
+                    st.info("No unique IMO-based links were found in recent events.")
 
 elif page=="Quick Import":
     title(
@@ -15460,7 +15684,7 @@ elif page=="Quick Import":
                     pd.DataFrame(outcome).to_csv(index=False).encode("utf-8"),
                     file_name="PC_Quick_Import_Results.csv",mime="text/csv",
                     key="guided_import_results_download_v543")
-                st.caption("Open Review Queue for genuinely ambiguous records. Technical job IDs are retained only for audit and troubleshooting.")
+                st.caption("Next: open Link Events to attach the imported stories to real vessels, companies and assets and resolve ambiguous company identities. Technical job IDs are retained only for audit.")
         else:
             st.markdown("**What you can upload:** company and fleet profiles, ports and terminals, security and commercial events, or a mixed workbook.")
             st.caption("You do not need to create IDs, know database table names or use Supabase SQL. Advanced controls remain available in Canonical Loader.")
