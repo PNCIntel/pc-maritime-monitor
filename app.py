@@ -14246,7 +14246,13 @@ elif page=="Overview":
 
 elif page=="Connected developments":
     from pc_trade_connected import render_connected_developments
-    render_connected_developments(keyword="Ogun")
+    from pc_trade_live import render_live_trade
+    from pc_trade_connected import _staff_client
+    live_tab, draft_tab = st.tabs(["LIVE · Canonical Trade", "Research · Awaiting approval"])
+    with live_tab:
+        render_live_trade(_staff_client())
+    with draft_tab:
+        render_connected_developments(keyword="Ogun")
 
 elif page=="Imported intelligence":
     # Staff-only access is independently enforced by this read-only module.
@@ -14997,6 +15003,10 @@ elif page=="Companies":
         render_company_profile(ent["Company ID"],ent["Company"])
         from pc_trade_connected import render_company_connections
         render_company_connections(ent["Company ID"],ent["Company"])
+        from pc_trade_live import render_live_company_links
+        from pc_trade_connected import staff_available, _staff_client
+        if staff_available():
+            render_live_company_links(_staff_client(),ent["Company ID"])
 
 elif page=="Network Map":
     header("Trade Network Map","Commercial geography across canonical and reference ports. Intelligence events remain on P&C Intelligence unless they affect a selected trade asset.")
