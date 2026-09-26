@@ -10,7 +10,7 @@ from pc_v09_presentation import (render_sections, readable, entries, sources, qu
 def render_trade_intelligence(sb,admin=False):
  st.header('Trade intelligence')
  st.caption('Canonical records are separate from unpublished research proposals.')
- tab_events,tab_assets,tab_corridors,tab_staged,tab_editorial=st.tabs(['Developments','Assets and companies','Corridors','Review pipeline','Descriptions & news'])
+ tab_events,tab_assets,tab_corridors,tab_staged,tab_editorial,tab_published=st.tabs(['Developments','Assets and companies','Corridors','Review pipeline','Descriptions & news','Published / moved'])
  with tab_events:
   page=st.number_input('Developments page',min_value=1,step=1,value=1)
   q=sb.table('pc_events').select('event_id,title,start_date,event_domain,location,description,operational_impact,commercial_impact,metadata')
@@ -61,9 +61,19 @@ def render_trade_intelligence(sb,admin=False):
  with tab_staged:
   if not admin:
    st.info('Review-stage proposals are restricted to administrators.')
+   with tab_published:
+    from pc_v10_trade_read import render_published_content
+    try:render_published_content(sb,admin=False)
+    except Exception as exc:st.warning('Published Trade page unavailable: '+str(exc))
    return
   jobs=sb.table('pc_ingestion_jobs').select('ingestion_job_id,title,status,stats,created_at').order('created_at',desc=True).limit(50).execute().data or []
-  if not jobs:st.info('No ingestion jobs yet.');return
+  if not jobs:
+   st.info('No ingestion jobs yet.')
+   with tab_published:
+    from pc_v10_trade_read import render_published_content
+    try:render_published_content(sb,admin=admin)
+    except Exception as exc:st.warning('Published Trade page unavailable: '+str(exc))
+   return
   st.dataframe(pd.DataFrame(jobs),hide_index=True,use_container_width=True)
   chosen=st.selectbox('Job to inspect',jobs,format_func=lambda j:f"{j.get('title')} — {j.get('status')}")
   page=st.number_input('Review page',min_value=1,value=1,step=1,key='trade_stage_page')
@@ -118,6 +128,11 @@ def render_trade_intelligence(sb,admin=False):
    try:render_trade_editorial(sb)
    except Exception as exc:st.error('Editorial records unavailable: '+str(exc)+' — apply v0.8 migration first.')
   else:st.info('Unpublished analyses are only available to administrators.')
+
+ with tab_published:
+  from pc_v10_trade_read import render_published_content
+  try:render_published_content(sb,admin=admin)
+  except Exception as exc:st.error('Published Trade page unavailable: '+str(exc)+' — install the v1.0 migration.')
 
 def render_trade_editorial(sb):
  """Admin-only view of the full source-provided analysis and news trail (v0.8)."""
