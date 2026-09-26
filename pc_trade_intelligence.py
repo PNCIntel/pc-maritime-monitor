@@ -4,12 +4,13 @@ Client-facing publication MUST use admin=False and its normal client access cont
 """
 import streamlit as st
 import pandas as pd
+from pc_v09_presentation import (render_sections, readable, entries, sources, quality_flags)
 
 
 def render_trade_intelligence(sb,admin=False):
  st.header('Trade intelligence')
  st.caption('Canonical records are separate from unpublished research proposals.')
- tab_events,tab_assets,tab_corridors,tab_staged=st.tabs(['Developments','Assets and companies','Corridors','Review pipeline'])
+ tab_events,tab_assets,tab_corridors,tab_staged,tab_editorial=st.tabs(['Developments','Assets and companies','Corridors','Review pipeline','Descriptions & news'])
  with tab_events:
   page=st.number_input('Developments page',min_value=1,step=1,value=1)
   q=sb.table('pc_events').select('event_id,title,start_date,event_domain,location,description,operational_impact,commercial_impact,metadata')
@@ -24,17 +25,20 @@ def render_trade_intelligence(sb,admin=False):
    if ids:
     linked=(sb.table('pc_event_links').select('event_id,linked_type,linked_id,linked_name,relationship').in_('event_id',ids).limit(500).execute().data or [])
     selected=st.selectbox('Inspect connected development',rows,format_func=lambda r:r.get('title') or str(r['event_id']))
-    st.subheader(selected.get('title') or 'Development')
-    st.write('**What happened:**',(selected.get('metadata') or {}).get('what_happened') or selected.get('description') or 'Not provided')
-    st.write('**Operational impact:**',selected.get('operational_impact') or 'Not assessed')
-    st.write('**Commercial impact:**',selected.get('commercial_impact') or 'Not assessed')
     m=selected.get('metadata') or {}
-    if isinstance(m,dict):
-     if m.get('why_it_matters'):st.write('**Why it matters:**',m['why_it_matters'])
-     if m.get('commercial_implications'):st.write('**Business implications:**',m['commercial_implications'])
-     if m.get('assessment'):st.write('**Assessment:**',m['assessment'])
-     if m.get('monitoring_indicators'):st.write('**Monitor:**',m['monitoring_indicators'])
-     if m.get('research_sources'):st.write('**Sources:**',m['research_sources'])
+    if not isinstance(m,dict):m={}
+    presentation={
+     'title':selected.get('title'),
+     'description':m.get('what_happened') or selected.get('description'),
+     'what_it_means':m.get('why_it_matters') or m.get('what_it_means'),
+     'operational_impact':selected.get('operational_impact') or m.get('operational_impact'),
+     'commercial_implications':selected.get('commercial_impact') or m.get('commercial_implications') or m.get('business_implications'),
+     'pc_assessment':m.get('assessment') or m.get('pc_assessment'),
+     'monitoring_indicators':m.get('monitoring_indicators'),
+     'research_gaps':m.get('research_gaps'),
+     'source_evidence':m.get('research_sources') or m.get('sources'),
+    }
+    render_sections(st,presentation,heading=True)
     matches=[x for x in linked if x['event_id']==selected['event_id']]
     if matches:st.dataframe(pd.DataFrame(matches),hide_index=True,use_container_width=True)
   else:st.info('No visible canonical developments on this page.')
@@ -84,10 +88,14 @@ def render_trade_intelligence(sb,admin=False):
    with st.expander('Draft business and trade assessments',expanded=True):
     for a in analyses:
      st.subheader(a['event_title'])
-     for field,label in [('what_happened','What happened'),('what_it_means','What it means'),('operational_impact','Operational impact'),('commercial_impact','Commercial impact'),('pc_assessment','P&C assessment')]:
-      if a.get(field):st.write(f"**{label}:** {a[field]}")
-     if a.get('monitoring_indicators'):st.write('**Monitor:**',a['monitoring_indicators'])
-     if a.get('evidence_urls'):st.write('**Sources:**',a['evidence_urls'])
+     render_sections(st,{
+       'title':a.get('event_title'), 'description':a.get('what_happened'),
+       'what_it_means':a.get('what_it_means'),
+       'operational_impact':a.get('operational_impact'),
+       'commercial_implications':a.get('commercial_impact'),
+       'pc_assessment':a.get('pc_assessment'),
+       'monitoring_indicators':a.get('monitoring_indicators'),
+       'source_evidence':a.get('evidence_urls')})
 
   if rows:
    import hashlib
@@ -104,3 +112,47 @@ def render_trade_intelligence(sb,admin=False):
         st.caption('Research lead only; analyst verification required before identity or ownership changes.')
         if rec.get('evidence_urls'):st.write('Source links:',rec['evidence_urls'])
     except Exception as exc:st.warning('Research cache not available: '+str(exc))
+
+ with tab_editorial:
+  if admin:
+   try:render_trade_editorial(sb)
+   except Exception as exc:st.error('Editorial records unavailable: '+str(exc)+' — apply v0.8 migration first.')
+  else:st.info('Unpublished analyses are only available to administrators.')
+
+def render_trade_editorial(sb):
+ """Admin-only view of the full source-provided analysis and news trail (v0.8)."""
+ st.subheader('Descriptions, business implications & news')
+ st.caption('Draft intelligence for analyst review. This is NOT client-visible canonical publication.')
+ jobs=(sb.table('pc_ingestion_jobs').select('ingestion_job_id,title,status,created_at')
+       .order('created_at',desc=True).limit(50).execute().data or [])
+ if not jobs:
+  st.info('Queue an import to populate the editorial review.');return
+ job=st.selectbox('Select research batch',jobs,
+       format_func=lambda j:f"{j.get('title')} — {j.get('status')}",key='pc_v08_editorial_job')
+ page=st.number_input('Editorial page',min_value=1,step=1,value=1,key='pc_v08_editorial_page')
+ kind=st.selectbox('Type',['All','pc_events','pc_entities','pc_assets','pc_mobile_assets',
+                              'pc_trade_corridors','pc_transport_routes','pc_transport_services'],
+                   key='pc_v08_editorial_type')
+ q=sb.table('pc_v08_trade_content').select('content_id,target_table,target_key,canonical_id,title,description,what_it_means,operational_impact,commercial_implications,pc_assessment,monitoring_indicators,research_gaps,source_evidence,text_origin,editorial_status')
+ q=q.eq('ingestion_job_id',job['ingestion_job_id'])
+ if kind!='All':q=q.eq('target_table',kind)
+ rows=q.order('content_id',desc=True).range((page-1)*25,page*25-1).execute().data or []
+ if not rows:st.info('No narrative records for this batch / category yet.');return
+ st.dataframe(pd.DataFrame([{'Type':r['target_table'],'Title':r['title'],
+       'Description':(r.get('description') or '')[:140],
+       'Business':(r.get('commercial_implications') or '')[:100],
+       'Review':r['editorial_status']} for r in rows]),
+       use_container_width=True,hide_index=True)
+ chosen=st.selectbox('Read full intelligence record',rows,
+        format_func=lambda r:r['title'],key='pc_v08_editorial_selection')
+ st.caption('Source-provided material · '+chosen['target_table']+' · '+chosen['editorial_status'])
+ render_sections(st,chosen,heading=True)
+ st.markdown('#### Related source articles')
+ source_rows=(sb.table('pc_v08_news_items').select('source_url,publisher,headline,published_at,source_role')
+     .eq('ingestion_job_id',job['ingestion_job_id'])
+     .eq('source_record_key',next((r['source_record_key'] for r in (sb.table('pc_v08_trade_content')
+           .select('source_record_key').eq('content_id',chosen['content_id']).limit(1).execute().data or [])),''))
+     .limit(50).execute().data or [])
+ for r in source_rows:
+  for source in sources([{'url':r['source_url'],'headline':r.get('headline'),'publisher':r.get('publisher')} ]):
+   st.markdown('- ['+(source['headline'] or source['publisher'])+']('+source['url']+')')
