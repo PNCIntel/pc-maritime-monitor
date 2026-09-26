@@ -134,6 +134,10 @@ def render_finish_load(sb):
     try:rows,published=group_rows(sb,job)
     except Exception as exc:st.error('Cannot read staged records: '+str(exc));return
     by_type={t:[r for r in rows if r['target_table']==t and r['staged_record_id'] not in published] for t in KEYS}
+    with st.expander('ONE-STEP: Publish whole development + missing companies, agencies and assets', expanded=True):
+        from pc_v13_connected_publish import render_connected_publish
+        render_connected_publish(sb,job,rows,published)
+    st.divider()
     x1,x2,x3,x4=st.columns(4)
     x1.metric('Existing staged',len(rows));x2.metric('Already published',len(published))
     x3.metric('Ready to inspect',sum(map(len,by_type.values())))
