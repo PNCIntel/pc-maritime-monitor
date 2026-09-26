@@ -100,7 +100,7 @@ if "deduped_package" not in st.session_state:
 # v0.7 bulk worker and Trade preview are additional pages, not replacements.
 mode = st.sidebar.radio(
     'Workspace',
-    ['Universal intake · URLs + files', 'Bulk queue · thousands of records', 'Trade preview'],
+    ['Universal intake · URLs + files', 'Bulk queue · thousands of records', 'Trade preview', 'Move staged → Trade'],
     index=0,
     key='pc_workspace_v071',
 )
@@ -111,6 +111,10 @@ if mode == 'Bulk queue · thousands of records':
 if mode == 'Trade preview':
     from pc_trade_intelligence import render_trade_intelligence
     render_trade_intelligence(sb, admin=True)
+    st.stop()
+if mode == 'Move staged → Trade':
+    from pc_v10_publish_panel import render_publish_panel
+    render_publish_panel(sb)
     st.stop()
 
 st.info('Multi-source loader: paste up to 20 URLs, upload multiple Excel/CSV/JSON/PDF/DOCX files, '
@@ -345,8 +349,8 @@ def audit_identities(package: list, registry: dict) -> tuple[list, list]:
 # -----------------------------------------------------------------------------
 # 4. VIEW: MAIN WORKSPACE
 # -----------------------------------------------------------------------------
-st.title("Universal Research & Graph Intake v0.6")
-st.caption("Bulk intake → batched matching → research feedback → dependency-aware graph review → resumable staging. Canonical publishing disabled.")
+st.title("P&C Universal Intake & Trade Publishing v1.0")
+st.caption("Bulk intake → batched matching → research feedback → dependency-aware graph review → resumable staging. Publishing is available only through Move staged → Trade, with explicit approval and backup.")
 
 # PHASE 1: UNIVERSAL MULTI-SOURCE INTAKE
 st.markdown("#### Phase 1: Universal intake — URLs, documents and structured files")
