@@ -125,6 +125,27 @@ def render_bulk_intake(sb, active_package=None):
   if jobs:
    st.dataframe(pd.DataFrame(jobs),hide_index=True,use_container_width=True)
    selected=st.selectbox('Inspect queue',jobs,format_func=lambda j:f"{j['title']} ({j['status']})")
+   st.markdown('#### Process queue in Streamlit')
+   st.caption('No GitHub Actions required. Processes one bounded batch on button click, '
+      'then saves staged proposals, descriptions and news. Does not publish to Trade. '
+      'The database claims the oldest queued rows across all jobs.')
+   batch_size=st.select_slider('Records per run',options=[10,25,50],value=50,
+       key='pc_v101_batch_size')
+   if st.button('Process next queued batch now',type='primary',key='pc_v101_process_once'):
+    from pc_bulk_worker import process_queue_once
+    try:
+     with st.spinner('Processing a bounded batch; wait for completion before clicking again…'):
+      outcome=process_queue_once(sb,batch_size=batch_size)
+     if outcome['claimed']:
+      st.success(f"Processed {outcome['claimed']} queued rows. "
+         f"Results: {outcome['counts']}. Refresh the page to see updated totals.")
+      if outcome['counts'].get('queued') or outcome['counts'].get('failed'):
+       st.warning('Some records could not be staged. Inspect error_text in the queue table before retrying.')
+     else:st.info('No queued rows are available to claim. Check whether they are processing or already staged.')
+    except Exception as exc:
+     st.error(f'Batch failed; leases were released for retry where possible: {type(exc).__name__}: {exc}')
+   st.caption('For 252 queued rows, run approximately six 50-row batches. '
+       'Do not reload the original files or click processing twice while a batch is running.')
    statuses={}
    for status in ('queued','processing','staged','needs_review','failed'):
     r=sb.table('pc_v07_queue').select('queue_id',count='exact',head=True).eq('ingestion_job_id',selected['ingestion_job_id']).eq('status',status).execute()

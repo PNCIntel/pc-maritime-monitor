@@ -14,6 +14,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from pc_v07_core import identity_candidates, extract_assessment, source_urls
+from pc_v08_content import extract_content, extract_news
 
 
 def client():
@@ -98,6 +99,20 @@ def process_batch(sb, rows, worker_id):
      hit={c['research_key'] for c in cache}
      for chunk in _chunks([v for k,v in tasks.items() if k not in hit]):
       sb.table('pc_v07_research_tasks').upsert(chunk,on_conflict='research_key',ignore_duplicates=True).execute()
+   # v0.8 descriptive sidecars: all first-class Trade domains, preserving full source texts.
+   # Retry-safe constraints stop repeated worker runs from duplicating descriptions/news.
+   sidecars=[]; news=[]
+   for r in group:
+    match=matches.get((job,r['source_record_key']),{})
+    content=extract_content(r,match)
+    if content:sidecars.append(content)
+    news.extend(extract_news(r))
+   for chunk in _chunks(sidecars):
+    sb.table('pc_v08_trade_content').upsert(chunk,
+      on_conflict='ingestion_job_id,source_record_key,version',ignore_duplicates=True).execute()
+   for chunk in _chunks(news):
+    sb.table('pc_v08_news_items').upsert(chunk,
+      on_conflict='ingestion_job_id,source_record_key,source_hash',ignore_duplicates=True).execute()
    # A missing sidecar must not be treated as successfully staged.
    sb.table('pc_v07_queue').update({'status':'staged','error_text':None,'lease_owner':None,
       'lease_until':None,'updated_at':datetime.now(timezone.utc).isoformat()}) \
@@ -168,6 +183,34 @@ def update_job_summary(sb,job_id):
  sb.table('pc_ingestion_jobs').update(payload).eq('ingestion_job_id',job_id).execute()
  return status_counts
 
+
+
+def process_queue_once(sb, batch_size=50):
+ """Admin-triggered single, bounded Streamlit queue batch; NO external scheduler.
+ Uses the same atomic DB claim/lease as the background CLI worker.
+ Claims oldest queued rows globally (pc_v07_claim_queue has no job filter).
+ Never publishes canonical rows and does not run optional AI research.
+ """
+ size=max(1,min(50,int(batch_size)))
+ worker_id='pc-streamlit-'+uuid.uuid4().hex[:16]
+ rows=sb.rpc('pc_v07_claim_queue',{'p_worker':worker_id,'p_limit':size}).execute().data or []
+ if not rows:return {'claimed':0,'counts':{},'jobs':[]}
+ job_ids={r['ingestion_job_id'] for r in rows}
+ try:
+  counts=process_batch(sb,rows,worker_id)
+ except Exception as exc:
+  # A failure before process_batch's own handling (e.g. registry lookup)
+  # must release the leases so nothing remains stuck in processing.
+  for r in rows:
+   status='failed' if int(r.get('attempts') or 1)>=3 else 'queued'
+   sb.table('pc_v07_queue').update({'status':status,'lease_owner':None,
+      'lease_until':None,'error_text':('Worker failed: '+str(exc))[:350],
+      'updated_at':datetime.now(timezone.utc).isoformat()}) \
+     .eq('queue_id',r['queue_id']).eq('lease_owner',worker_id).execute()
+  for job in job_ids:update_job_summary(sb,job)
+  raise
+ for job in job_ids:update_job_summary(sb,job)
+ return {'claimed':len(rows),'counts':dict(counts),'jobs':list(job_ids)}
 
 def run(max_batches=10, batch_size=100):
  sb=client(); worker_id='pc07-'+uuid.uuid4().hex[:16]
