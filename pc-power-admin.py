@@ -5,7 +5,16 @@ import urllib.request
 import urllib.parse
 import pandas as pd
 import streamlit as st
-import psycopg
+import sys
+from copy import deepcopy
+from urllib.parse import urlparse
+
+# Reuse the existing P&C Supabase client; no PostgreSQL DSN required.
+ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
+SHARED = ROOT / "shared"
+if str(SHARED) not in sys.path:
+    sys.path.insert(0, str(SHARED))
+from pc_auth import service_client, require_super_admin
 
 # -----------------------------------------------------------------------------
 # 1. PAGE SETUP & MODERN COLOR PALETTE
@@ -86,13 +95,19 @@ st.markdown("""
 st.sidebar.markdown("### ◈ P&C Admin Deck")
 st.sidebar.caption("Universal Multi-Domain Extractor & Fuzzy Auditor")
 
-default_dsn = (
-    st.secrets.get("SUPABASE_DSN") 
-    or st.secrets.get("DB_DSN") 
-    or os.getenv("SUPABASE_DSN") 
-    or ""
-)
-DB_DSN = st.sidebar.text_input("Database DSN", value=default_dsn, type="password")
+# A service-role connection must only be exposed to authorized admins.
+if os.getenv("PC_REQUIRE_AUTH", "true").lower() == "true":
+    require_super_admin()
+
+try:
+    sb = service_client()
+except Exception as exc:
+    st.error("Could not initialize the existing P&C Supabase client.")
+    st.stop()
+if sb is None:
+    st.error("P&C Supabase connection is not configured. Check your existing Streamlit secrets.")
+    st.stop()
+st.sidebar.success("Using existing P&C Supabase connection")
 
 default_openai_key = (
     st.secrets.get("OPENAI_API_KEY") 
@@ -106,6 +121,8 @@ if "active_package" not in st.session_state:
     st.session_state["active_package"] = []
 if "audit_logs" not in st.session_state:
     st.session_state["audit_logs"] = []
+if "deduped_package" not in st.session_state:
+    st.session_state["deduped_package"] = []
 
 # -----------------------------------------------------------------------------
 # 3. HELPER FUNCTIONS: LLM EXTRACTION & FUZZY DEDUPE
@@ -193,25 +210,86 @@ def compute_token_ratio(str_a: str, str_b: str) -> float:
     return float(len(tokens_a & tokens_b)) / float(len(tokens_a | tokens_b))
 
 
-from your_auth_module import service_client  # Or your standard sb client initialization
+IDENTITY_COLUMNS = {
+    "pc_entities": ("entity_id", "name"),
+    "pc_assets": ("asset_id", "name"),
+    "pc_mobile_assets": ("mobile_asset_id", "name"),
+}
 
-def fetch_database_identities_via_client(sb, table: str) -> list:
-    """Uses your existing Supabase URL and service_role/anon secret key instead of a DB password."""
-    pk = APPLY_CONFLICT_KEYS.get(table, "id")
-    name_col = "title" if table == "pc_events" else "name"
-    cols = f"{pk},{name_col}" + (",imo" if table == "pc_mobile_assets" else "")
-    
-    try:
-        response = sb.table(table).select(cols).not_.is_(name_col, "null").limit(5000).execute()
+
+def fetch_database_identities_via_client(sb, table: str, page_size: int = 500) -> list:
+    """Read the complete canonical identity registry with stable pagination.
+
+    Any API/database failure raises: a failed lookup is NEVER an empty registry.
+    """
+    if table not in IDENTITY_COLUMNS:
+        raise ValueError(f"Unsupported identity table: {table}")
+    pk, name_col = IDENTITY_COLUMNS[table]
+    projection = f"{pk},{name_col}" + (",imo" if table == "pc_mobile_assets" else "")
+    output = []
+    offset = 0
+    while True:
+        response = (
+            sb.table(table).select(projection)
+            .not_.is_(name_col, "null")
+            .order(pk)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
         rows = response.data or []
-        results = []
-        for r in rows:
-            imo = r.get("imo") if table == "pc_mobile_assets" else None
-            results.append((str(r.get(pk)), str(r.get(name_col)), imo))
-        return results
-    except Exception as e:
-        st.warning(f"Could not pull {table} registry: {e}")
-        return []
+        for row in rows:
+            if not row.get(pk) or not row.get(name_col):
+                continue
+            output.append((str(row[pk]), str(row[name_col]), row.get("imo")))
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return output
+
+
+def audit_identities(package: list, registry: dict) -> tuple[list, list]:
+    """Build a non-mutating match review. Do not overwrite IDs based on fuzzy names."""
+    logs, proposals = [], deepcopy(package)
+    for item in proposals:
+        table = item.get("table")
+        payload = item.get("payload") or {}
+        if table not in IDENTITY_COLUMNS or not payload.get("name"):
+            continue
+        name = str(payload["name"])
+        pk = IDENTITY_COLUMNS[table][0]
+        candidates = registry.get(table, [])
+        exact_imo = []
+        imo = str(payload.get("imo") or "").strip()
+        if table == "pc_mobile_assets" and re.fullmatch(r"\d{7}", imo):
+            exact_imo = [(cid, cname) for cid, cname, cimo in candidates if str(cimo or "").strip() == imo]
+        if len(exact_imo) == 1:
+            status, candidate_id, candidate_name, score = "IMO MATCH", exact_imo[0][0], exact_imo[0][1], 1.0
+        elif len(exact_imo) > 1:
+            status, candidate_id, candidate_name, score = "AMBIGUOUS IMO", None, None, 1.0
+        else:
+            exact_name = [(cid, cname) for cid, cname, _ in candidates if cname.strip().casefold() == name.strip().casefold()]
+            if len(exact_name) == 1:
+                status, candidate_id, candidate_name, score = "EXACT NAME — REVIEW", exact_name[0][0], exact_name[0][1], 1.0
+            elif len(exact_name) > 1:
+                status, candidate_id, candidate_name, score = "AMBIGUOUS NAME", None, None, 1.0
+            else:
+                ranked = sorted(((compute_token_ratio(name, cname), cid, cname) for cid, cname, _ in candidates), reverse=True)
+                score, candidate_id, candidate_name = ranked[0] if ranked else (0.0, None, None)
+                if score >= 0.65:
+                    status = "POSSIBLE MATCH — REVIEW"
+                else:
+                    status = "NEW CANDIDATE"
+                    candidate_id, candidate_name = None, None
+        # Proposed remaps are display-only, never silently applied to the package.
+        logs.append({
+            "Status": status, "Table": table, "Incoming Name": name,
+            "Canonical Match": f"{candidate_name} ({candidate_id})" if candidate_id else "None",
+            "Score": f"{score * 100:.1f}%",
+            "Action": "Review proposed identity; source IDs unchanged" if candidate_id else "Hold for evidence-backed creation or manual review",
+            "Proposed Canonical ID": candidate_id or "",
+            "Source Package ID": payload.get(pk, ""),
+        })
+    return logs, proposals
 
 # -----------------------------------------------------------------------------
 # 4. VIEW: MAIN WORKSPACE
@@ -260,6 +338,7 @@ with st.container():
                         extracted = call_openai_extraction(raw_text, OPENAI_KEY, source_url)
                         st.session_state["active_package"] = extracted
                         st.session_state["audit_logs"] = []
+                        st.session_state["deduped_package"] = []
                         st.success(f"Harvested {len(extracted)} valid domain objects.")
                     except Exception as err:
                         st.error(f"Extraction failed: {err}")
@@ -292,75 +371,25 @@ if st.session_state["active_package"]:
         run_dedupe = st.button("Run Identity Match", use_container_width=True)
     
     if run_dedupe:
-        if not DB_DSN:
-            st.error("A valid Database DSN is required to perform production registry matching.")
-        else:
-            with st.spinner("Comparing against canonical identity registers..."):
-                audit_logs = []
-                deduped_package = []
-                tables_to_check = {"pc_entities", "pc_assets", "pc_mobile_assets"}
-                
-                # Fetch reference indexes
-                indexes = {tbl: fetch_database_identities(DB_DSN, tbl) for tbl in tables_to_check}
-                
-                for item in active_rows:
-                    tbl = item.get("table")
-                    payload = item.get("payload", {})
-                    name_val = payload.get("name") or payload.get("title")
-                    
-                    if tbl not in tables_to_check or not name_val:
-                        deduped_package.append(item)
-                        continue
-                    
-                    candidates = indexes.get(tbl, [])
-                    matched_id = None
-                    matched_name = None
-                    best_score = 0.0
-                    
-                    # 1. Exact IMO match for vessels
-                    if tbl == "pc_mobile_assets" and payload.get("imo"):
-                        target_imo = str(payload["imo"]).strip()
-                        for c_id, c_name, c_imo in candidates:
-                            if c_imo and str(c_imo).strip() == target_imo:
-                                matched_id, matched_name, best_score = c_id, c_name, 1.0
-                                break
-                    
-                    # 2. Token similarity fallback
-                    if not matched_id:
-                        for c_id, c_name, _ in candidates:
-                            score = compute_token_ratio(name_val, c_name)
-                            if score > best_score:
-                                best_score, matched_id, matched_name = score, c_id, c_name
-                    
-                    # 3. Collision Action Threshold
-                    if best_score >= 0.85 and matched_id:
-                        pk_col = APPLY_CONFLICT_KEYS.get(tbl, "id")
-                        payload[pk_col] = matched_id
-                        audit_logs.append({
-                            "Status": "REMAP",
-                            "Table": tbl,
-                            "Incoming Name": name_val,
-                            "Canonical Match": f"{matched_name} ({matched_id})",
-                            "Score": f"{best_score * 100:.1f}%",
-                            "Action": f"Pruned candidate. Bound {pk_col} -> {matched_id}"
-                        })
-                    else:
-                        audit_logs.append({
-                            "Status": "NEW",
-                            "Table": tbl,
-                            "Incoming Name": name_val,
-                            "Canonical Match": "None",
-                            "Score": f"{best_score * 100:.1f}%",
-                            "Action": "Kept as new insertion candidate"
-                        })
-                    
-                    deduped_package.append(item)
-                
-                st.session_state["active_package"] = deduped_package
+        with st.spinner("Comparing against existing canonical identities..."):
+            needed = {r.get("table") for r in active_rows} & set(IDENTITY_COLUMNS)
+            # A failed query aborts the ENTIRE audit; never show false NEW records.
+            try:
+                indexes = {table: fetch_database_identities_via_client(sb, table) for table in sorted(needed)}
+            except Exception as exc:
+                st.session_state["audit_logs"] = []
+                st.session_state["deduped_package"] = []
+                st.error(f"Identity audit stopped. Database lookup failed: {exc}")
+                st.warning("No identity decisions were made. Check the existing Supabase URL/key and retry.")
+            else:
+                audit_logs, candidate_package = audit_identities(active_rows, indexes)
                 st.session_state["audit_logs"] = audit_logs
-    
+                st.session_state["deduped_package"] = candidate_package
+                st.success(f"Lookup completed for {len(needed)} registries; {len(audit_logs)} identities reviewed. No records were written.")
+
     if st.session_state["audit_logs"]:
         st.markdown("##### Preflight Identity Audit Results")
         st.dataframe(pd.DataFrame(st.session_state["audit_logs"]), use_container_width=True, hide_index=True)
     
     st.markdown("</div>", unsafe_allow_html=True)
+# Safety: this version is preflight-only. Publishing remains disabled until transactional ID remapping is implemented.
