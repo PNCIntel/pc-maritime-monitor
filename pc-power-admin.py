@@ -317,8 +317,8 @@ def audit_identities(package: list, registry: dict) -> tuple[list, list]:
 # -----------------------------------------------------------------------------
 # 4. VIEW: MAIN WORKSPACE
 # -----------------------------------------------------------------------------
-st.title("Universal Research & Graph Intake v0.5")
-st.caption("Bulk intake → targeted identity matching → bounded gap research → grouped review → stage. Canonical publishing is disabled.")
+st.title("Universal Research & Graph Intake v0.6")
+st.caption("Bulk intake → batched matching → research feedback → dependency-aware graph review → resumable staging. Canonical publishing disabled.")
 
 # PHASE 1: UNIVERSAL MULTI-SOURCE INTAKE
 st.markdown("#### Phase 1: Universal intake — URLs, documents and structured files")
@@ -528,6 +528,7 @@ with st.container():
                 st.session_state["audit_logs"] = []
                 st.session_state["deduped_package"] = []
                 st.session_state["match_confirmations"] = {}
+                st.session_state["gap_research"] = {}
                 st.success(f"Prepared {len(extracted)} record proposals from {len(inputs)} text sources "
                            f"and {len(structured)} structured records. No canonical records written.")
         except Exception as exc:
@@ -581,6 +582,7 @@ if st.session_state["active_package"]:
                 st.session_state["audit_logs"] = audit_logs
                 st.session_state["deduped_package"] = candidate_package
                 st.session_state["match_confirmations"] = {}
+                st.session_state["gap_research"] = {}
                 st.success(f"Targeted lookup completed for {len(needed)} registries; {len(audit_logs)} identities reviewed. No records were written.")
 
     if st.session_state["audit_logs"]:
@@ -637,6 +639,33 @@ if st.session_state.get("audit_logs"):
         with st.expander("Inspect research findings"):
             st.dataframe(pd.DataFrame(findings[:25]), use_container_width=True, hide_index=True)
 
+# Optional research feedback: import a prior AI gap-research JSON without rerunning requests.
+# Research text is advisory. It must never approve an identity or overwrite DB fields.
+if st.session_state.get("audit_logs"):
+    st.markdown("#### Phase 2C: Research feedback and graph evidence")
+    imported = st.file_uploader("Import gap research JSON (optional)", type=["json"],
+                                key="gap_research_import")
+    if imported and st.button("Attach research findings to this batch"):
+        try:
+            imported_findings = json.loads(imported.getvalue())
+            if not isinstance(imported_findings, list) or not all(isinstance(v, dict) for v in imported_findings):
+                raise ValueError("Expected a JSON array of research findings")
+            previous = st.session_state.setdefault("gap_research", {})
+            for item in imported_findings:
+                if item.get("table") and item.get("name"):
+                    previous[str((item["table"], item["name"]))] = item
+            st.success(f"Attached {len(imported_findings):,} advisory research findings. No identities approved.")
+        except (ValueError, TypeError) as exc:
+            st.error(f"Invalid gap research JSON: {exc}")
+    if st.session_state.get("gap_research"):
+        st.caption(f"{len(st.session_state['gap_research']):,} research entries available for review; no automatic identity binding")
+        with st.expander("Review research gaps and source leads"):
+            st.dataframe(pd.DataFrame([{
+                "Table": f.get("table"), "Name": f.get("name"),
+                "Research excerpt": str(f.get("findings", ""))[:400]
+            } for f in list(st.session_state["gap_research"].values())[:100]]),
+                hide_index=True, use_container_width=True)
+
 # -----------------------------------------------------------------------------
 # PHASE 3: BATCH-SAFE REVIEW STAGING (NEVER WRITES CANONICAL TABLES)
 # -----------------------------------------------------------------------------
@@ -673,118 +702,164 @@ def _source_urls(payload):
 def _audit_key(log):
     return (log.get("Table"), log.get("Incoming Name"), log.get("Source Package ID"))
 
-def _propose_stage(package, audit, confirms):
-    """Pure planning function; returns rows only, does not change original package."""
-    logs = {_audit_key(l): l for l in audit}
-    planned = []
-    # A mapping is valid only after explicit approval or verified exact IMO.
-    confirmed_ids = {}
+def _propose_stage(package, audit, confirms, research_findings=None):
+    """O(N) package dependency analysis. Never equate a package ID with a canonical ID.
+
+    Existing canonical IDs are propagated only for approved matches. A link to a
+    newly proposed parent is retained as PACKAGE_DEPENDENCY, not called a broken
+    relationship or a verified existing link. All output remains review-only.
+    """
+    logs = {_audit_key(log): log for log in audit}
+    findings = {(str(f.get("table")), str(f.get("name", "")).casefold()): f
+                for f in (research_findings or []) if isinstance(f, dict)}
+    package_ids = defaultdict(set)
+    for record in package:
+        table = record.get("table")
+        pk = PKS.get(table)
+        if pk and (record.get("payload") or {}).get(pk):
+            package_ids[table].add(str(record["payload"][pk]))
+
+    approved_id = {}
     for log in audit:
-        key = _audit_key(log)
         status = log.get("Status", "")
-        candidate = log.get("Proposed Canonical ID")
-        approved = status == "IMO MATCH" or confirms.get(key, False)
-        if candidate and approved and status in {"IMO MATCH", "EXACT NAME — REVIEW"}:
-            old = str(log.get("Source Package ID") or "")
-            if old:
-                confirmed_ids[(log["Table"], old)] = str(candidate)
+        key = _audit_key(log)
+        cid = log.get("Proposed Canonical ID")
+        if cid and (status == "IMO MATCH" or
+                    (status == "EXACT NAME — REVIEW" and confirms.get(key, False))):
+            old_id = str(log.get("Source Package ID") or "")
+            if old_id:
+                approved_id[(log["Table"], old_id)] = str(cid)
+
+    linked_types = {"entity": "pc_entities", "company": "pc_entities",
+                    "asset": "pc_assets", "infrastructure": "pc_assets",
+                    "mobile_asset": "pc_mobile_assets", "vessel": "pc_mobile_assets",
+                    "corridor": "pc_trade_corridors"}
+    edges = {"pc_relationships", "pc_event_links", "pc_event_corridor_links",
+             "pc_corridor_route_references", "pc_corridor_nodes",
+             "pc_company_corridor_roles"}
+    planned = []
     for index, original in enumerate(package):
         table = original.get("table")
         payload = deepcopy(original.get("payload") or {})
-        name = payload.get("name") or payload.get("title") or ""
         pk = PKS.get(table)
-        audit_log = logs.get((table, name, str(payload.get(pk, ""))))
-        status = audit_log.get("Status") if audit_log else "NOT_AUDITED"
-        candidate = (audit_log or {}).get("Proposed Canonical ID") or None
-        match_approved = (status == "IMO MATCH" or confirms.get(_audit_key(audit_log), False)) if audit_log else False
-        confirmed = bool(candidate and match_approved and status in {"IMO MATCH", "EXACT NAME — REVIEW"})
-        if confirmed and pk:
-            payload[pk] = candidate
-        # Only propagate IDs where the source package explicitly identified
-        # the endpoint. Never guess relationships from names or proximity.
-        unresolved_refs = []
-        if table in {"pc_event_links", "pc_relationships", "pc_event_corridor_links",
-                     "pc_corridor_route_references"}:
-            for field, ref_table in REF_FIELDS.items():
-                if payload.get(field):
-                    old = str(payload[field])
-                    if (ref_table, old) in confirmed_ids:
-                        payload[field] = confirmed_ids[(ref_table, old)]
-            if table == "pc_event_links":
-                linked_type = str(payload.get("linked_type") or "").lower()
-                linked_to = {"entity":"pc_entities", "company":"pc_entities",
-                             "asset":"pc_assets", "mobile_asset":"pc_mobile_assets",
-                             "vessel":"pc_mobile_assets", "corridor":"pc_trade_corridors"}.get(linked_type)
-                old = str(payload.get("linked_id") or "")
-                if linked_to and (linked_to, old) in confirmed_ids:
-                    payload["linked_id"] = confirmed_ids[(linked_to, old)]
-                elif linked_to and old and any(
-                    r.get("table") == linked_to and str((r.get("payload") or {}).get(PKS.get(linked_to), "")) == old
-                    for r in package
-                ):
-                    unresolved_refs.append(f"linked_id:{old}")
-            # If references still point to unconfirmed package-only IDs,
-            # the relationship must remain unresolved until review.
-            for field, ref_table in REF_FIELDS.items():
-                old = str(payload.get(field) or "")
-                if old and any(r.get("table") == ref_table and
-                               str((r.get("payload") or {}).get(PKS.get(ref_table), "")) == old
-                               for r in package) and (ref_table, old) not in confirmed_ids:
-                    unresolved_refs.append(f"{field}:{old}")
+        name = str(payload.get("name") or payload.get("title") or "")
+        old_id = str(payload.get(pk) or "") if pk else ""
+        log = logs.get((table, name, old_id))
+        status = log.get("Status") if log else "NOT_AUDITED"
+        candidate = log.get("Proposed Canonical ID") if log else None
+        confirmed = bool(candidate and old_id and (table, old_id) in approved_id)
+        if confirmed:
+            payload[pk] = approved_id[(table, old_id)]
+
+        unresolved, package_dependencies, remapped = [], [], []
+        if table in edges:
+            endpoints = [(field, ref_table, str(payload.get(field) or ""))
+                         for field, ref_table in REF_FIELDS.items() if payload.get(field)]
+            if table == "pc_event_links" and payload.get("linked_id"):
+                ref_type = linked_types.get(str(payload.get("linked_type") or "").lower())
+                if ref_type:
+                    endpoints.append(("linked_id", ref_type, str(payload["linked_id"])))
+                else:
+                    unresolved.append("unknown linked_type")
+            if table == "pc_relationships":
+                for field, typ_field in (("source_id", "source_type"), ("target_id", "target_type")):
+                    if payload.get(field):
+                        ref_type = linked_types.get(str(payload.get(typ_field) or "").lower())
+                        if ref_type:
+                            endpoints.append((field, ref_type, str(payload[field])))
+                        else:
+                            unresolved.append(f"unsupported {typ_field}")
+            for field, ref_table, ref in endpoints:
+                if (ref_table, ref) in approved_id:
+                    payload[field] = approved_id[(ref_table, ref)]
+                    remapped.append(field)
+                elif ref in package_ids[ref_table]:
+                    package_dependencies.append({"field": field, "table": ref_table, "package_id": ref})
+                else:
+                    # Only mark an external reference unresolved when it is
+                    # referenced but not established by this package. It may
+                    # exist in the DB; don't claim missing without checking.
+                    unresolved.append(f"external reference not audited: {field}={ref}")
+
         evidence = _source_urls(payload)
         if table not in STAGEABLE:
-            resolution = "UNRESOLVED"
-            reason = "unsupported target table"
+            resolution, reason = "UNRESOLVED", "unsupported target table"
         elif confirmed:
-            resolution = "MATCHED"
-            reason = "verified IMO" if status == "IMO MATCH" else "human-confirmed exact name"
+            resolution, reason = "MATCHED", ("unique IMO match" if status == "IMO MATCH" else "analyst-approved name match")
         elif status in {"AMBIGUOUS NAME", "AMBIGUOUS IMO", "POSSIBLE MATCH — REVIEW", "EXACT NAME — REVIEW"}:
-            resolution = "UNRESOLVED"
-            reason = "identity requires analyst review"
-        elif unresolved_refs:
-            resolution = "UNRESOLVED"
-            reason = "unresolved package references"
-        elif status in {"NEW CANDIDATE", "UNVERIFIED — RESEARCH"}:
-            resolution = "UNRESOLVED"
-            reason = "targeted lookup found no exact candidate; research before creation"
-        elif table in {"pc_relationships", "pc_event_links", "pc_event_corridor_links",
-                       "pc_corridor_route_references"}:
-            resolution = "UNRESOLVED"
-            reason = "relationship endpoints require verification"
+            resolution, reason = "UNRESOLVED", "identity decision pending"
+        elif status == "UNVERIFIED — RESEARCH":
+            resolution, reason = "UNRESOLVED", "no verified identifier; further research required"
+        elif table in edges and unresolved:
+            resolution, reason = "UNRESOLVED", "unverified external relationship endpoints"
+        elif table in edges and package_dependencies:
+            resolution, reason = "PACKAGE_DEPENDENCY", "parent proposed in same package; publish together after approval"
+        elif table in edges:
+            resolution, reason = "RELATIONSHIP_REVIEW", "relationship evidence and endpoints require approval"
         elif table in {"pc_events", "pc_trade_corridors", "pc_transport_routes"} and evidence:
-            resolution = "NEW"
-            reason = "source-backed candidate; requires canonical duplicate and evidence review"
+            resolution, reason = "NEW_CANDIDATE", "source-backed; check for existing event/route/corridor"
         else:
-            resolution = "UNRESOLVED"
-            reason = "not identity-audited"
+            resolution, reason = "UNRESOLVED", "not identity-audited or insufficient evidence"
+
         confidence = original.get("confidence")
-        try: confidence = float(confidence) if confidence is not None else None
-        except (TypeError, ValueError): confidence = None
-        if confidence is not None and not 0 <= confidence <= 1: confidence = None
-        details = {"input_index": index, "resolution_reason": reason,
-                   "audit_status": status, "source_urls": evidence,
-                   "original_payload": original.get("payload") or {},
-                   "unresolved_references": unresolved_refs,
-                   "package_original_id": (original.get("payload") or {}).get(pk) if pk else None}
-        planned.append({"target_table": table, "natural_key": str(original.get("natural_key") or name or index),
+        try:
+            confidence = float(confidence) if confidence is not None else None
+        except (ValueError, TypeError):
+            confidence = None
+        if confidence is not None and not 0 <= confidence <= 1:
+            confidence = None
+        finding = findings.get((str(table), name.casefold()))
+        details = {"input_index": index, "audit_status": status,
+                   "source_urls": evidence, "original_payload": original.get("payload") or {},
+                   "package_original_id": old_id or None, "unresolved_references": unresolved,
+                   "package_dependencies": package_dependencies, "remapped_fields": remapped,
+                   "research_available": bool(finding),
+                   "research_excerpt": str(finding.get("findings", ""))[:600] if finding else None,
+                   "requires_event_duplicate_check": table == "pc_events",
+                   "requires_corridor_review": table in {"pc_trade_corridors", "pc_transport_routes"}}
+        planned.append({"target_table": table,
+                        "natural_key": str(original.get("natural_key") or name or index),
                         "action": "REVIEW", "payload": payload, "confidence": confidence,
                         "validation_status": "pending", "review_status": "pending",
                         "resolution_status": resolution,
                         "resolved_entity_id": candidate if confirmed else None,
                         "resolution_method": reason,
                         "resolution_confidence": 1.0 if confirmed and status == "IMO MATCH" else None,
-                        "resolution_details": details,
-                        "source_record_key": f"input:{index}"})
+                        "resolution_details": details, "source_record_key": f"input:{index}"})
+    # Duplicate source identities inside the same package remain individual
+    # provenance rows, but are flagged for consolidation before publishing.
+    seen = defaultdict(list)
+    for item in planned:
+        orig = item["resolution_details"]["original_payload"]
+        key = (item["target_table"], str(orig.get("imo") or "").strip() if item["target_table"] == "pc_mobile_assets" and orig.get("imo")
+               else str(item["natural_key"]).strip().casefold())
+        seen[key].append(item)
+    for duplicates in seen.values():
+        if len(duplicates) > 1:
+            for item in duplicates:
+                item["resolution_details"]["same_package_count"] = len(duplicates)
+                item["resolution_details"]["same_package_duplicate_review"] = True
     return planned
 
-def stage_review_package(sb, package, audit, confirms, source_ref):
+def stage_review_package(sb, package, audit, confirms, source_ref, research_findings=None):
     """Idempotent per payload fingerprint. Partial errors are retained for retry."""
-    planned = _propose_stage(package, audit, confirms)
+    planned = _propose_stage(package, audit, confirms, research_findings)
     if not planned:
         raise ValueError("No records to stage")
     if any(row["target_table"] not in STAGEABLE for row in planned):
         raise ValueError("Package contains unsupported tables; no records staged")
-    digest = _fingerprint({"package": package, "confirmations": [str(k) for k, v in confirms.items() if v]})
+    # Database status vocabulary is deliberately kept compatible with v0.5.
+    # More detailed planner states remain in resolution_details for analysts.
+    db_status = {"NEW_CANDIDATE": "NEW", "PACKAGE_DEPENDENCY": "UNRESOLVED",
+                 "RELATIONSHIP_REVIEW": "UNRESOLVED"}
+    planned_for_db = []
+    for record in planned:
+        row = deepcopy(record)
+        row["resolution_details"]["graph_resolution_status"] = row["resolution_status"]
+        row["resolution_status"] = db_status.get(row["resolution_status"], row["resolution_status"])
+        planned_for_db.append(row)
+    digest = _fingerprint({"package": package, "confirmations": sorted(str(k) for k, v in confirms.items() if v),
+                          "research": research_findings or [], "planner_version": "0.6"})
     existing = (sb.table("pc_ingestion_jobs").select("ingestion_job_id,status")
                 .contains("source_scope", {"package_sha256": digest}).limit(2).execute().data or [])
     if len(existing) > 1:
@@ -817,7 +892,7 @@ def stage_review_package(sb, package, audit, confirms, source_ref):
             if len(prior) < 500:
                 break
             offset += 500
-        pending = [{"ingestion_job_id": job_id, **row} for row in planned
+        pending = [{"ingestion_job_id": job_id, **row} for row in planned_for_db
                    if row["source_record_key"] not in completed_keys]
         for start in range(0, len(pending), 100):
             sb.table("pc_staged_records").insert(pending[start:start + 100]).execute()
@@ -864,21 +939,37 @@ if st.session_state.get("deduped_package"):
                 confirms[key] = st.checkbox(label, value=confirms.get(key, False), key=widget_key) if not st.session_state.get(f"bulk_{log['Table']}") else True
             if len(exact) > 200:
                 st.info("Only 200 exceptions are shown individually. Use the group controls above or export audit CSV.")
-    preview = _propose_stage(st.session_state["deduped_package"], logs, confirms)
+    preview = _propose_stage(st.session_state["deduped_package"], logs, confirms, list(st.session_state.get("gap_research", {}).values()))
     counts = {k: sum(r["resolution_status"] == k for r in preview)
-              for k in ("MATCHED", "NEW", "UNRESOLVED")}
+              for k in ("MATCHED", "NEW_CANDIDATE", "PACKAGE_DEPENDENCY", "RELATIONSHIP_REVIEW", "UNRESOLVED")}
     st.caption(f"Proposals: {len(preview)} · Matched: {counts['MATCHED']} · "
-               f"New candidates: {counts['NEW']} · Unresolved: {counts['UNRESOLVED']}")
+               f"New candidates: {counts['NEW_CANDIDATE']} · In-package links: {counts['PACKAGE_DEPENDENCY']} · "
+               f"Other links: {counts['RELATIONSHIP_REVIEW']} · Unresolved: {counts['UNRESOLVED']}")
     st.dataframe(pd.DataFrame([{"Table": r["target_table"], "Name": r["natural_key"],
                                 "Resolution": r["resolution_status"],
                                 "Reason": r["resolution_method"]} for r in preview[:200]]),
                  use_container_width=True, hide_index=True)
     st.download_button("Download all staging proposals (JSON)", json.dumps(preview, ensure_ascii=False, default=str), "pc_staging_proposals.json", "application/json")
+    # A reusable corridor research queue. This is NOT automatic corridor creation:
+    # require an evidenced named route/corridor, operator and constituent nodes.
+    corridor_gaps = [{"record": p["natural_key"], "table": p["target_table"],
+                      "source_urls": p["resolution_details"]["source_urls"],
+                      "research_question": "Identify documented transport route, named corridor and constituent infrastructure. Do not infer membership from proximity."}
+                     for p in preview if p["target_table"] in {"pc_events", "pc_assets", "pc_transport_routes"}
+                     and p["resolution_details"]["source_urls"]]
+    with st.expander(f"Corridor research candidates ({len(corridor_gaps):,})"):
+        st.caption("Candidates only; no inferred corridor memberships are staged.")
+        st.dataframe(pd.DataFrame(corridor_gaps[:100]), use_container_width=True, hide_index=True)
+        st.download_button("Download corridor research queue (JSON)",
+                           json.dumps(corridor_gaps, ensure_ascii=False, indent=2),
+                           "pc_corridor_research_queue.json", "application/json")
+
     if st.button("Commit review-stage proposals", type="primary", use_container_width=True):
         try:
             job_id, count, already = stage_review_package(
                 sb, st.session_state["deduped_package"], logs, confirms,
-                st.session_state.get("source_reference", ""))
+                st.session_state.get("source_reference", ""),
+                list(st.session_state.get("gap_research", {}).values()))
             if already:
                 st.info(f"Package already staged under job {job_id}; no duplicate write.")
             else:
