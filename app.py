@@ -11831,7 +11831,7 @@ st.sidebar.caption(f"{APP_VERSION} · {_bst.get('mode','excel').title()} backend
 NAV_SECTIONS={
     # Corridor-first workflow: begin with the operating picture, then move into the
     # network/mode, organisation and risk layers that explain the corridor exposure.
-    "OPERATING PICTURE":["Overview","Corridors & Systems","Alerts & Disruptions","Trade Horizon","Regional Maps"],
+    "OPERATING PICTURE":["Overview","Connected developments","Corridors & Systems","Alerts & Disruptions","Trade Horizon","Regional Maps"],
     "NETWORK & MODES":["Services & Routes","Ports & Terminals","Rail","Trucking","Aviation","Maritime","Vessels"],
     "ORGANISATIONS & INFRASTRUCTURE":["Companies","Investments","Deals, Projects & Contracts","Energy & Industry","Defence & Shipbuilding"],
     "RISK, MARKETS & POLICY":["Sanctions & Compliance","Freight & Commodity Markets","Trade Flows & Supply","Market Instruments","Trade Policy","Country & Macro"],
@@ -14244,6 +14244,10 @@ elif page=="Overview":
     st.caption("Only current shocks with a direct effect on movement, capacity, infrastructure, access or continuity.")
     render_trade_home_operational_compact(4)
 
+elif page=="Connected developments":
+    from pc_trade_connected import render_connected_developments
+    render_connected_developments(keyword="Ogun")
+
 elif page=="Imported intelligence":
     # Staff-only access is independently enforced by this read-only module.
     from pc_trade_imports import render_imported_intelligence
@@ -14991,6 +14995,8 @@ elif page=="Companies":
         ent=opts[pick]
         st.session_state["entity_pick"]=ent["Company ID"]
         render_company_profile(ent["Company ID"],ent["Company"])
+        from pc_trade_connected import render_company_connections
+        render_company_connections(ent["Company ID"],ent["Company"])
 
 elif page=="Network Map":
     header("Trade Network Map","Commercial geography across canonical and reference ports. Intelligence events remain on P&C Intelligence unless they affect a selected trade asset.")
@@ -16095,6 +16101,12 @@ elif page in {"News & Signals","News & Developments"}:
         "News & Developments",
         "Canonical company, network, disruption and sanctions developments lead this workspace. Open-source feeds remain a discovery layer for promotion into the canonical model."
     )
+
+    # Staff can inspect existing extracted event links directly within the main News page.
+    from pc_trade_connected import staff_available as pc_connected_staff, render_connected_developments
+    if pc_connected_staff():
+        with st.expander('P&C connected intelligence — companies, agencies, infrastructure & corridors',expanded=True):
+            render_connected_developments(compact=True,keyword="Ogun")
 
     stories=_canonical_trade_story_frame()
     tabs=st.tabs(["Lead Developments","Company & Network","Disruptions","Sanctions & Compliance","Open-source Discovery"])
