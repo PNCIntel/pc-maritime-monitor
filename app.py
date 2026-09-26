@@ -44,7 +44,7 @@ except Exception:
     require_login = None
 
 APP_TITLE = "P&C Trade System"
-APP_VERSION = "v7.2.7-corridor-route-profiles"
+APP_VERSION = "v7.2.8-imported-intelligence"
 RELEASE_NAME = "Corridor-Centric Trade & Logistics Operating Picture · Networks, Modes, Markets & Risk"
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -11835,7 +11835,7 @@ NAV_SECTIONS={
     "NETWORK & MODES":["Services & Routes","Ports & Terminals","Rail","Trucking","Aviation","Maritime","Vessels"],
     "ORGANISATIONS & INFRASTRUCTURE":["Companies","Investments","Deals, Projects & Contracts","Energy & Industry","Defence & Shipbuilding"],
     "RISK, MARKETS & POLICY":["Sanctions & Compliance","Freight & Commodity Markets","Trade Flows & Supply","Market Instruments","Trade Policy","Country & Macro"],
-    "RESEARCH & EVIDENCE":["Research","Documents"],
+    "RESEARCH & EVIDENCE":["Imported intelligence","Research","Documents"],
     "OUTPUTS & TOOLS":["Report Studio","Watch Areas","Government & Security","Port Activity","Hormuz Monitor","Live Feeds","News & Developments","Search","Reference & Benchmarks","Data"],
 }
 VISIBLE_PAGES=[p for items in NAV_SECTIONS.values() for p in items]
@@ -14243,6 +14243,11 @@ elif page=="Overview":
     st.markdown("### Operational disruptions")
     st.caption("Only current shocks with a direct effect on movement, capacity, infrastructure, access or continuity.")
     render_trade_home_operational_compact(4)
+
+elif page=="Imported intelligence":
+    # Staff-only access is independently enforced by this read-only module.
+    from pc_trade_imports import render_imported_intelligence
+    render_imported_intelligence()
 
 elif page=="Research":
     header("Research Workbench","Investigate open questions, review staged findings and develop evidence-backed company, asset and corridor relationships.")
