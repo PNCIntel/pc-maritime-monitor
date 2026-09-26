@@ -77,15 +77,32 @@ def load_structured_file(file):
 def render_bulk_intake(sb, active_package=None):
  st.title('Universal Loader · Bulk intake')
  st.caption('Queue thousands of proposals quickly. Processing runs outside Streamlit; all changes stay in review staging.')
- st.info('Upload structured data without AI processing for every row. The existing research workspace handles URLs and PDFs; both can feed this queue.')
- source=st.radio('Batch source',['Use current extracted package','Upload structured file'],horizontal=True)
- if source=='Upload structured file':
-  file=st.file_uploader('JSON, CSV or analytical Excel workbook',type=['json','csv','xlsx','xlsm'],key='pc_v07_upload')
-  if file:
-   try:records=load_structured_file(file)
-   except Exception as e:st.error(str(e));records=[]
-  else:records=[]
- else: records=active_package or []
+ st.info('Queue multiple structured workbooks together. For URLs, PDF, Word and mixed-source AI extraction, choose Universal intake · URLs + files in the sidebar; queue the result there directly.')
+ source=st.radio('Batch source',['Upload multiple structured files','Use current extracted package'],horizontal=True)
+ records=[]
+ if source=='Upload multiple structured files':
+  uploads=st.file_uploader('Upload multiple JSON, CSV or analytical Excel workbooks',
+       type=['json','csv','xlsx','xlsm'],accept_multiple_files=True,key='pc_v071_multi_bulk')
+  if uploads:
+   if len(uploads)>30:
+    st.error('Maximum 30 files per queued package. Split larger input into jobs.')
+   else:
+    try:
+     for file in uploads:
+      batch=load_structured_file(file)
+      if not isinstance(batch,list):raise ValueError(f'{file.name}: expected a list')
+      # Preserve provenance without changing source payload or canonical identity.
+      for item in batch:
+       if not isinstance(item,dict):raise ValueError(f'{file.name}: malformed record')
+       prepared=dict(item)
+       prepared['source_record_key']=f'file:{len(records)}'
+       records.append(prepared)
+     st.caption(f'{len(uploads)} files parsed, {len(records):,} total rows.')
+    except Exception as e:
+     records=[]  # Never queue a partially parsed multi-file package.
+     st.error(f'Multi-file intake stopped; nothing queued: {e}')
+ else:
+  records=active_package or []
  title=st.text_input('Job title','P&C batch: Trade, infrastructure and events')
  research=st.checkbox('Queue targeted AI research for unresolved identities',value=False,
    help='Runs only when the scheduled worker has OPENAI_API_KEY and PC_ENABLE_AI_RESEARCH=1.')

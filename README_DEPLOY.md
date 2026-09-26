@@ -52,3 +52,16 @@ The local mock regression processes 229 supplied review proposals, generates 60 
 - `permission denied` in worker: use the server-side **service-role key** in GitHub Actions; never use anon key for this privileged job.
 - All identities appear NEW: match failures must raise rather than returning an empty registry; worker explicitly retries a failed lookup and never treats the failure as proof of novelty.
 - Staged draft assessments missing: worker must process the v0.7 queue; older v0.6 jobs are not retroactively backfilled by this release.
+
+## v0.7.1 usability restoration — multi-source Home page
+
+The v0.7 entrypoint's default tab previously changed to **Bulk queue (fast)**, making the earlier multi-URL/PDF/Word interface appear to have disappeared. v0.7.1 fixes that navigation regression:
+
+- Default sidebar page is now **Universal intake · URLs + files**, retaining the previous multi-URL (up to 20), multi-file (up to 20) and optional AI web research workflow, subject to API availability and user consent.
+- The extracted package can now be sent straight to the persistent v0.7 queue using **Queue all extracted records**, without running hundreds of interactive identity checks. It remains review-only.
+- **Bulk queue · thousands of records** accepts up to 30 structured Excel/CSV/JSON files in one job. If any file fails validation, nothing is queued from that multi-file selection. The same worker and Supabase migration are reused.
+- **Trade preview** and the prior Phase 2/3 interactive review remain available.
+
+To update from deployed v0.7, replace only `pc-power-admin.py` and `pc_v07_admin_panel.py` in your existing GitHub directory. No new migration, credentials or changes to the v0.7 worker are necessary. Keep `pc_v07_core.py`, `pc_bulk_worker.py` and the GitHub Actions workflow unchanged.
+
+Important: source-text extraction is still synchronous in the universal intake page (with a limited number of URLs/files per run). Structured large batches should go through the fast queue, where staging is performed by the background worker. AI web research remains optional, costly and dependent on the configured API; no automatic canonical writes are enabled.

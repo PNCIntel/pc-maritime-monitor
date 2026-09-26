@@ -96,8 +96,15 @@ if "deduped_package" not in st.session_state:
 
 # v0.7 fast pages run before the legacy research UI, preventing expensive
 # dataframe construction and old full-page rerenders for large imports.
-mode = st.sidebar.radio('Workspace', ['Bulk queue (fast)', 'Trade preview', 'Research & review (existing)'], index=0)
-if mode == 'Bulk queue (fast)':
+# Keep the familiar multi-URL and multi-file loader as the HOME page. The
+# v0.7 bulk worker and Trade preview are additional pages, not replacements.
+mode = st.sidebar.radio(
+    'Workspace',
+    ['Universal intake · URLs + files', 'Bulk queue · thousands of records', 'Trade preview'],
+    index=0,
+    key='pc_workspace_v071',
+)
+if mode == 'Bulk queue · thousands of records':
     from pc_v07_admin_panel import render_bulk_intake
     render_bulk_intake(sb, st.session_state.get('active_package') or [])
     st.stop()
@@ -105,6 +112,10 @@ if mode == 'Trade preview':
     from pc_trade_intelligence import render_trade_intelligence
     render_trade_intelligence(sb, admin=True)
     st.stop()
+
+st.info('Multi-source loader: paste up to 20 URLs, upload multiple Excel/CSV/JSON/PDF/DOCX files, '
+        'or add research notes. After extraction, queue the entire package for background processing '
+        'without doing thousands of interactive identity checks.')
 
 # -----------------------------------------------------------------------------
 # 3. HELPER FUNCTIONS: LLM EXTRACTION & FUZZY DEDUPE
@@ -487,12 +498,12 @@ with st.container():
             urls = _parse_urls(raw_urls)
             if urls and not reader_consent:
                 raise ValueError("Please confirm third-party public-URL retrieval consent")
-            if (urls or pasted.strip() or uploads) and not ai_consent:
-                raise ValueError("Confirm API processing consent to run research; structured imports also require consent in this workflow")
+            # Structured imports never need OpenAI consent; only text sent to
+            # extraction/research does. This is checked after parsing below.
             if research_depth.startswith("AI") and not OPENAI_KEY:
                 raise ValueError("OpenAI API key is not configured")
-            if len(uploads or []) > 10:
-                raise ValueError("Limit to 10 documents per run; split large jobs into batches")
+            if len(uploads or []) > 20:
+                raise ValueError("Limit to 20 files per run; use the bulk page for larger structured imports")
             inputs, structured, errors = [], [], []
             progress = st.progress(0, text="Reading input sources")
             for i, url in enumerate(urls):
@@ -518,8 +529,12 @@ with st.container():
                 st.warning(f"{len(errors)} sources could not be read; they were excluded. Inspect errors below.")
             if not inputs and not structured:
                 st.error("No usable input was retrieved; nothing was processed.")
-            elif not OPENAI_KEY and inputs:
-                st.error("An OpenAI API key is required for text extraction. Structured records have been retained.")
+            elif inputs and not ai_consent:
+                st.error("Confirm OpenAI API consent to extract text from URLs, PDFs, Word files or notes. "
+                         "Structured records were parsed but have not been submitted.")
+            elif inputs and not OPENAI_KEY:
+                st.error("An OpenAI API key is required for text extraction. Structured records were parsed "
+                         "but have not been submitted.")
             else:
                 extracted = deepcopy(structured)
                 stats = []
@@ -556,6 +571,30 @@ with st.container():
     if st.session_state.get("source_stats"):
         with st.expander("AI extraction by source"):
             st.dataframe(pd.DataFrame(st.session_state["source_stats"]), use_container_width=True)
+
+# Direct bridge to v0.7's persistent worker. This deliberately does not
+# require per-record checkboxes or a synchronous database-wide identity scan.
+if st.session_state.get("active_package"):
+    st.divider()
+    st.subheader("Queue extracted package for background processing")
+    st.caption("All extracted records, including relationships and analytical metadata, "
+               "go to the v0.7 review queue. No canonical records are changed.")
+    with st.form("pc_v071_direct_queue"):
+        queue_title = st.text_input("Job name", "P&C multi-source intelligence intake")
+        queue_research = st.checkbox("Research unresolved identities in background (optional)", value=False)
+        submit_queue = st.form_submit_button("Queue all extracted records", type="primary")
+    if submit_queue:
+        try:
+            from pc_v07_core import enqueue
+            job_id, count, reused = enqueue(
+                sb, st.session_state["active_package"], title=queue_title,
+                ai_research=queue_research,
+            )
+            st.success(f"{'Previously queued' if reused else 'Queued'} {count:,} records "
+                       f"under job {job_id}. Open 'Bulk queue' to monitor the worker.")
+        except Exception as exc:
+            st.error(f"Background queue could not be created: {exc}. "
+                     "Check the v0.7 migration and your Supabase connection.")
 
 # PHASE 2: PREFLIGHT DEDUPLICATION & RECONCILIATION
 if st.session_state["active_package"]:
