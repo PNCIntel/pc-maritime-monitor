@@ -193,25 +193,25 @@ def compute_token_ratio(str_a: str, str_b: str) -> float:
     return float(len(tokens_a & tokens_b)) / float(len(tokens_a | tokens_b))
 
 
-def fetch_database_identities(dsn: str, table: str) -> list:
-    """Synchronous read of active canonical identifiers from target tables."""
+from your_auth_module import service_client  # Or your standard sb client initialization
+
+def fetch_database_identities_via_client(sb, table: str) -> list:
+    """Uses your existing Supabase URL and service_role/anon secret key instead of a DB password."""
     pk = APPLY_CONFLICT_KEYS.get(table, "id")
     name_col = "title" if table == "pc_events" else "name"
-    imo_query = ", imo" if table == "pc_mobile_assets" else ""
+    cols = f"{pk},{name_col}" + (",imo" if table == "pc_mobile_assets" else "")
     
-    query = f"SELECT {pk}, {name_col}{imo_query} FROM {table} WHERE {name_col} IS NOT NULL LIMIT 5000;"
-    
-    results = []
     try:
-        with psycopg.connect(dsn, connect_timeout=8) as conn:
-            with conn.cursor() as cur:
-                cur.execute(query)
-                for r in cur.fetchall():
-                    imo = r[2] if table == "pc_mobile_assets" else None
-                    results.append((str(r[0]), str(r[1]), imo))
+        response = sb.table(table).select(cols).not_.is_(name_col, "null").limit(5000).execute()
+        rows = response.data or []
+        results = []
+        for r in rows:
+            imo = r.get("imo") if table == "pc_mobile_assets" else None
+            results.append((str(r.get(pk)), str(r.get(name_col)), imo))
+        return results
     except Exception as e:
-        st.warning(f"Could not pull {table} registry for preflight dedupe: {e}")
-    return results
+        st.warning(f"Could not pull {table} registry: {e}")
+        return []
 
 # -----------------------------------------------------------------------------
 # 4. VIEW: MAIN WORKSPACE
