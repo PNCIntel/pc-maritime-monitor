@@ -11,6 +11,7 @@ import streamlit as st
 import sys
 from pathlib import Path
 from copy import deepcopy
+from collections import defaultdict
 from urllib.parse import urlparse
 
 # Reuse the existing P&C Supabase client; no PostgreSQL DSN required.
@@ -211,39 +212,63 @@ IDENTITY_COLUMNS = {
 }
 
 
-def fetch_database_identities_via_client(sb, table: str, page_size: int = 500) -> list:
-    """Read the complete canonical identity registry with stable pagination.
+def _unique_chunks(items, size=80):
+    """Stable deduplicated chunks; small IN lists avoid URL limits."""
+    return [items[i:i + size] for i in range(0, len(items), size)]
 
-    Any API/database failure raises: a failed lookup is NEVER an empty registry.
+
+def fetch_candidate_identities(sb, table: str, incoming: list, chunk_size: int = 80) -> list:
+    """Only fetch IDs relevant to this package; no registry-wide table downloads.
+
+    Exact name matching is deliberately case-sensitive at SQL level; near/case
+    variants without an identifier go to the research queue, not auto-created.
+    Any failed query raises and aborts the whole preflight.
     """
     if table not in IDENTITY_COLUMNS:
         raise ValueError(f"Unsupported identity table: {table}")
     pk, name_col = IDENTITY_COLUMNS[table]
     projection = f"{pk},{name_col}" + (",imo" if table == "pc_mobile_assets" else "")
-    output = []
-    offset = 0
-    while True:
-        response = (
-            sb.table(table).select(projection)
-            .not_.is_(name_col, "null")
-            .order(pk)
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        rows = response.data or []
-        for row in rows:
-            if not row.get(pk) or not row.get(name_col):
-                continue
-            output.append((str(row[pk]), str(row[name_col]), row.get("imo")))
-        if len(rows) < page_size:
-            break
-        offset += page_size
-    return output
+    name_values = sorted({str((r.get("payload") or {}).get("name") or "").strip()
+                          for r in incoming if r.get("table") == table} - {""})
+    imo_values = sorted({str((r.get("payload") or {}).get("imo") or "").strip()
+                         for r in incoming if r.get("table") == "pc_mobile_assets"
+                         and re.fullmatch(r"\d{7}", str((r.get("payload") or {}).get("imo") or "").strip())})
+    by_id = {}
+    for chunk in _unique_chunks(name_values, chunk_size):
+        # Explicit projection and server-side filtering are vital for 1,000+ imports.
+        response = sb.table(table).select(projection).in_(name_col, chunk).execute()
+        for r in (response.data or []):
+            if r.get(pk) and r.get(name_col):
+                by_id[str(r[pk])] = (str(r[pk]), str(r[name_col]), r.get("imo"))
+    if table == "pc_mobile_assets":
+        for chunk in _unique_chunks(imo_values, chunk_size):
+            response = sb.table(table).select(projection).in_("imo", chunk).execute()
+            for r in (response.data or []):
+                if r.get(pk) and r.get(name_col):
+                    by_id[str(r[pk])] = (str(r[pk]), str(r[name_col]), r.get("imo"))
+    return list(by_id.values())
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _identity_guidance():
+    return ("Exact DB matches are candidates, not legal identity proof. "
+            "Unmatched names are UNVERIFIED until case/alias checking or research. "
+            "Verified IMO matches can bind when unique; conflicting identifiers must be reviewed.")
 
 
 def audit_identities(package: list, registry: dict) -> tuple[list, list]:
     """Build a non-mutating match review. Do not overwrite IDs based on fuzzy names."""
     logs, proposals = [], deepcopy(package)
+    # Index the targeted candidate pool once rather than comparing every incoming
+    # record against every DB identity (quadratic on large imports).
+    indexed = {}
+    for t, items in registry.items():
+        names, imos = defaultdict(list), defaultdict(list)
+        for cid, cname, cimo in items:
+            names[str(cname).strip().casefold()].append((cid, cname))
+            if cimo:
+                imos[str(cimo).strip()].append((cid, cname))
+        indexed[t] = (names, imos)
     for item in proposals:
         table = item.get("table")
         payload = item.get("payload") or {}
@@ -252,27 +277,31 @@ def audit_identities(package: list, registry: dict) -> tuple[list, list]:
         name = str(payload["name"])
         pk = IDENTITY_COLUMNS[table][0]
         candidates = registry.get(table, [])
+        names_index, imo_index = indexed.get(table, ({}, {}))
         exact_imo = []
         imo = str(payload.get("imo") or "").strip()
         if table == "pc_mobile_assets" and re.fullmatch(r"\d{7}", imo):
-            exact_imo = [(cid, cname) for cid, cname, cimo in candidates if str(cimo or "").strip() == imo]
+            exact_imo = imo_index.get(imo, [])
         if len(exact_imo) == 1:
             status, candidate_id, candidate_name, score = "IMO MATCH", exact_imo[0][0], exact_imo[0][1], 1.0
         elif len(exact_imo) > 1:
             status, candidate_id, candidate_name, score = "AMBIGUOUS IMO", None, None, 1.0
         else:
-            exact_name = [(cid, cname) for cid, cname, _ in candidates if cname.strip().casefold() == name.strip().casefold()]
+            exact_name = names_index.get(name.strip().casefold(), [])
             if len(exact_name) == 1:
                 status, candidate_id, candidate_name, score = "EXACT NAME — REVIEW", exact_name[0][0], exact_name[0][1], 1.0
             elif len(exact_name) > 1:
                 status, candidate_id, candidate_name, score = "AMBIGUOUS NAME", None, None, 1.0
             else:
-                ranked = sorted(((compute_token_ratio(name, cname), cid, cname) for cid, cname, _ in candidates), reverse=True)
+                # Fuzzy matching is only over the small targeted candidate pool;
+                # larger alias-search cohorts go directly to research review.
+                ranked = sorted(((compute_token_ratio(name, cname), cid, cname)
+                                 for cid, cname, _ in candidates), reverse=True) if len(candidates) <= 250 else []
                 score, candidate_id, candidate_name = ranked[0] if ranked else (0.0, None, None)
                 if score >= 0.65:
                     status = "POSSIBLE MATCH — REVIEW"
                 else:
-                    status = "NEW CANDIDATE"
+                    status = "UNVERIFIED — RESEARCH"
                     candidate_id, candidate_name = None, None
         # Proposed remaps are display-only, never silently applied to the package.
         logs.append({
@@ -288,8 +317,8 @@ def audit_identities(package: list, registry: dict) -> tuple[list, list]:
 # -----------------------------------------------------------------------------
 # 4. VIEW: MAIN WORKSPACE
 # -----------------------------------------------------------------------------
-st.title("Universal Research & Graph Intake")
-st.caption("Extract → reconcile → review → stage. Staging is not canonical publishing.")
+st.title("Universal Research & Graph Intake v0.5")
+st.caption("Bulk intake → targeted identity matching → bounded gap research → grouped review → stage. Canonical publishing is disabled.")
 
 # PHASE 1: UNIVERSAL MULTI-SOURCE INTAKE
 st.markdown("#### Phase 1: Universal intake — URLs, documents and structured files")
@@ -516,7 +545,7 @@ if st.session_state["active_package"]:
     st.markdown("<div class='pc-card'>", unsafe_allow_html=True)
     
     active_rows = st.session_state["active_package"]
-    st.write(f"**Loaded in Memory:** {len(active_rows)} records")
+    st.write(f"**Loaded in Memory:** {len(active_rows):,} records (showing first 150; all records participate in matching)")
     
     st.dataframe(
         pd.DataFrame([
@@ -526,7 +555,7 @@ if st.session_state["active_package"]:
                 "Display Name": r.get("payload", {}).get("name") or r.get("payload", {}).get("title"),
                 "Identifier": r.get("payload", {}).get("imo") or "—"
             }
-            for r in active_rows
+            for r in active_rows[:150]
         ]),
         use_container_width=True,
         hide_index=True
@@ -541,7 +570,7 @@ if st.session_state["active_package"]:
             needed = {r.get("table") for r in active_rows} & set(IDENTITY_COLUMNS)
             # A failed query aborts the ENTIRE audit; never show false NEW records.
             try:
-                indexes = {table: fetch_database_identities_via_client(sb, table) for table in sorted(needed)}
+                indexes = {table: fetch_candidate_identities(sb, table, active_rows) for table in sorted(needed)}
             except Exception as exc:
                 st.session_state["audit_logs"] = []
                 st.session_state["deduped_package"] = []
@@ -552,13 +581,61 @@ if st.session_state["active_package"]:
                 st.session_state["audit_logs"] = audit_logs
                 st.session_state["deduped_package"] = candidate_package
                 st.session_state["match_confirmations"] = {}
-                st.success(f"Lookup completed for {len(needed)} registries; {len(audit_logs)} identities reviewed. No records were written.")
+                st.success(f"Targeted lookup completed for {len(needed)} registries; {len(audit_logs)} identities reviewed. No records were written.")
 
     if st.session_state["audit_logs"]:
         st.markdown("##### Preflight Identity Audit Results")
-        st.dataframe(pd.DataFrame(st.session_state["audit_logs"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(st.session_state["audit_logs"][:200]), use_container_width=True, hide_index=True)
+        st.download_button("Download all identity decisions (CSV)", pd.DataFrame(st.session_state["audit_logs"]).to_csv(index=False).encode("utf-8"), "pc_identity_audit.csv", "text/csv")
     
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+# -----------------------------------------------------------------------------
+# PHASE 2B: TARGETED RESEARCH FOR EXCEPTIONS — BOUNDED API USE
+# -----------------------------------------------------------------------------
+if st.session_state.get("audit_logs"):
+    st.markdown("#### Phase 2B: Targeted AI research for unresolved identities")
+    st.caption("Research the exceptions, not all incoming records. Findings are separate "
+               "from canonical identity decisions and never auto-published.")
+    pending_research = [l for l in st.session_state["audit_logs"]
+                        if l["Status"] in {"UNVERIFIED — RESEARCH", "AMBIGUOUS NAME",
+                                            "AMBIGUOUS IMO", "POSSIBLE MATCH — REVIEW"}]
+    st.write(f"Research queue: {len(pending_research):,} unique incoming identity decisions")
+    st.download_button("Export full research queue (CSV)",
+        pd.DataFrame(pending_research).to_csv(index=False).encode("utf-8"),
+        "pc_research_queue.csv", "text/csv")
+    research_limit = st.number_input("Research up to this many exceptions in this run",
+                                     min_value=1, max_value=25, value=5)
+    st.caption("For thousands of gaps, process this queue using durable background jobs "
+               "in a later release, not one long Streamlit request.")
+    if st.button("Research next exception batch", disabled=not pending_research):
+        if not OPENAI_KEY:
+            st.error("Configure OPENAI_API_KEY in Streamlit secrets to research exceptions.")
+        else:
+            previous = st.session_state.setdefault("gap_research", {})
+            unique = []
+            for log in pending_research:
+                key = (log["Table"], log["Incoming Name"])
+                if str(key) not in previous and key not in unique:
+                    unique.append(key)
+            for table, name in unique[:int(research_limit)]:
+                try:
+                    topic = f"{table} identity for {name}. Candidate matches must be verified by original source documents."
+                    findings = research_with_web(topic, OPENAI_KEY, "Canonical identity / aliases / legal entity / identifiers")
+                    previous[str((table, name))] = {"table":table, "name":name, "findings":findings,
+                                                    "researched_at":datetime.now(timezone.utc).isoformat()}
+                except Exception as exc:
+                    st.error(f"Research failed for {name}: {exc}")
+                    break
+    findings = list(st.session_state.get("gap_research", {}).values())
+    if findings:
+        st.write(f"Research findings available: {len(findings):,}")
+        st.download_button("Download research results (JSON)",
+                           json.dumps(findings, ensure_ascii=False, indent=2),
+                           "pc_gap_research.json", "application/json")
+        with st.expander("Inspect research findings"):
+            st.dataframe(pd.DataFrame(findings[:25]), use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------------
 # PHASE 3: BATCH-SAFE REVIEW STAGING (NEVER WRITES CANONICAL TABLES)
@@ -667,9 +744,9 @@ def _propose_stage(package, audit, confirms):
         elif unresolved_refs:
             resolution = "UNRESOLVED"
             reason = "unresolved package references"
-        elif status == "NEW CANDIDATE":
-            resolution = "NEW"
-            reason = "candidate; external verification still required"
+        elif status in {"NEW CANDIDATE", "UNVERIFIED — RESEARCH"}:
+            resolution = "UNRESOLVED"
+            reason = "targeted lookup found no exact candidate; research before creation"
         elif table in {"pc_relationships", "pc_event_links", "pc_event_corridor_links",
                        "pc_corridor_route_references"}:
             resolution = "UNRESOLVED"
@@ -730,9 +807,16 @@ def stage_review_package(sb, package, audit, confirms, source_ref):
         job_id = response.data[0]["ingestion_job_id"]
     try:
         # No full-table scans: only staged rows belonging to this particular job.
-        prior = (sb.table("pc_staged_records").select("source_record_key")
-                 .eq("ingestion_job_id", job_id).range(0, 9999).execute().data or [])
-        completed_keys = {row["source_record_key"] for row in prior if row.get("source_record_key")}
+        completed_keys = set()
+        offset = 0
+        while True:
+            prior = (sb.table("pc_staged_records").select("source_record_key")
+                     .eq("ingestion_job_id", job_id)
+                     .order("source_record_key").range(offset, offset + 499).execute().data or [])
+            completed_keys.update(row["source_record_key"] for row in prior if row.get("source_record_key"))
+            if len(prior) < 500:
+                break
+            offset += 500
         pending = [{"ingestion_job_id": job_id, **row} for row in planned
                    if row["source_record_key"] not in completed_keys]
         for start in range(0, len(pending), 100):
@@ -763,12 +847,23 @@ if st.session_state.get("deduped_package"):
             "Staging creates review proposals; it cannot publish canonical records.")
     logs = st.session_state["audit_logs"]
     confirms = st.session_state.setdefault("match_confirmations", {})
-    for log in logs:
-        if log.get("Status") == "EXACT NAME — REVIEW" and log.get("Proposed Canonical ID"):
-            label = f"Confirm {log['Incoming Name']} = {log['Canonical Match']}"
-            key = _audit_key(log)
-            confirms[key] = st.checkbox(label, value=confirms.get(key, False),
-                                        key="confirm_" + hashlib.sha256(repr(key).encode()).hexdigest()[:12])
+    exact = [l for l in logs if l.get("Status") == "EXACT NAME — REVIEW" and l.get("Proposed Canonical ID")]
+    if exact:
+        st.caption(f"Exact-name candidates: {len(exact):,}. Bulk confirmation is an explicit analyst decision.")
+        for table in sorted({l["Table"] for l in exact}):
+            group = [l for l in exact if l["Table"] == table]
+            if st.checkbox(f"Confirm all {len(group):,} exact-name candidates in {table}", key=f"bulk_{table}"):
+                for l in group:
+                    confirms[_audit_key(l)] = True
+        with st.expander("Inspect or override individual exact-name candidates"):
+            for log in exact[:200]:
+                label = f"Confirm {log['Incoming Name']} = {log['Canonical Match']}"
+                key = _audit_key(log)
+                # Widget state and bulk approvals must agree across reruns.
+                widget_key = "confirm_" + hashlib.sha256(repr(key).encode()).hexdigest()[:12]
+                confirms[key] = st.checkbox(label, value=confirms.get(key, False), key=widget_key) if not st.session_state.get(f"bulk_{log['Table']}") else True
+            if len(exact) > 200:
+                st.info("Only 200 exceptions are shown individually. Use the group controls above or export audit CSV.")
     preview = _propose_stage(st.session_state["deduped_package"], logs, confirms)
     counts = {k: sum(r["resolution_status"] == k for r in preview)
               for k in ("MATCHED", "NEW", "UNRESOLVED")}
@@ -776,8 +871,9 @@ if st.session_state.get("deduped_package"):
                f"New candidates: {counts['NEW']} · Unresolved: {counts['UNRESOLVED']}")
     st.dataframe(pd.DataFrame([{"Table": r["target_table"], "Name": r["natural_key"],
                                 "Resolution": r["resolution_status"],
-                                "Reason": r["resolution_method"]} for r in preview]),
+                                "Reason": r["resolution_method"]} for r in preview[:200]]),
                  use_container_width=True, hide_index=True)
+    st.download_button("Download all staging proposals (JSON)", json.dumps(preview, ensure_ascii=False, default=str), "pc_staging_proposals.json", "application/json")
     if st.button("Commit review-stage proposals", type="primary", use_container_width=True):
         try:
             job_id, count, already = stage_review_package(
