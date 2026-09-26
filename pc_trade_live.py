@@ -67,6 +67,7 @@ def render_live_trade(sb,compact=False):
     chosen=st.selectbox('Open live development',rows,index=default,format_func=lambda r:r.get('title') or r['event_id'],key='pc_v12_live_pick')
     st.subheader(chosen.get('title') or 'Untitled development')
     st.caption('Canonical event '+str(chosen['event_id'])+' · Published · Source job '+str(chosen['ingestion_job_id'])[:8])
+    render_agreements_for_event(sb,chosen['event_id'])
     for label,key in [('What happened','description'),('Why it matters','what_it_means'),
         ('Operational implications','operational_impact'),('Commercial implications','commercial_implications'),
         ('P&C assessment','pc_assessment')]:_paragraph(label,chosen.get(key))
@@ -114,7 +115,8 @@ def render_live_trade(sb,compact=False):
 
 
 def render_live_company_links(sb, canonical_id):
-    """Published relationships on real canonical company pages, not source mentions."""
+    """Published relationships and first-class agreements on canonical company pages."""
+    render_live_company_agreements(sb,canonical_id)
     try:
         links=(sb.table('pc_v12_published_links').select('event_id,relationship')
             .eq('linked_type','entity').eq('linked_id',canonical_id).limit(100).execute().data or [])
@@ -134,3 +136,93 @@ def render_live_company_links(sb, canonical_id):
                 st.session_state['nav_request']='Connected developments'
                 st.rerun()
     except Exception as exc:st.caption('Published graph unavailable: '+str(exc))
+
+
+def _agreement_name_rows(sb, links, kind):
+    ids=[x['entity_id' if kind=='entity' else 'asset_id'] for x in links]
+    if not ids:return {}
+    table='pc_entities' if kind=='entity' else 'pc_assets'
+    pk='entity_id' if kind=='entity' else 'asset_id'
+    result=[]
+    for n in range(0,len(ids),50):
+        result += (sb.table(table).select(pk+',name').in_(pk,ids[n:n+50]).limit(50).execute().data or [])
+    return {x[pk]:x['name'] for x in result}
+
+
+def _show_agreement(sb, agreement, key_prefix):
+    """Staff-only display; only DB-persisted canonical endpoints are shown."""
+    aid=agreement['agreement_id']
+    st.markdown('**'+str(agreement.get('title') or 'Agreement')+'**')
+    st.caption('Instrument: '+str(agreement.get('instrument_type') or 'Agreement').replace('_',' ') +
+      ' · Status: '+str(agreement.get('agreement_status') or 'Not confirmed')+
+      ' · Announced: '+str(agreement.get('announced_date') or 'date unconfirmed'))
+    if agreement.get('summary'):st.write(agreement['summary'])
+    if not agreement.get('official_document_available'):
+        st.caption('Source is an announcement; signed agreement text has not been provided.')
+    parties=(sb.table('pc_v14_agreement_parties').select('entity_id,role')
+             .eq('agreement_id',aid).limit(100).execute().data or [])
+    projects=(sb.table('pc_v14_agreement_projects').select('asset_id,relationship')
+              .eq('agreement_id',aid).limit(100).execute().data or [])
+    party_names=_agreement_name_rows(sb,parties,'entity')
+    project_names=_agreement_name_rows(sb,projects,'asset')
+    if parties:
+        st.markdown('**Parties and organisations**')
+        for i,p in enumerate(parties):
+            label=party_names.get(p['entity_id'],p['entity_id'])
+            st.write(label+' · '+p.get('role','').replace('_',' '))
+            if st.button('Open '+label, key=key_prefix+'_party_'+aid+'_'+str(i)):
+                st.session_state['company_pick_id']=p['entity_id']
+                st.session_state['nav_request']='Companies';st.rerun()
+    if projects:
+        st.markdown('**Referenced projects and infrastructure**')
+        for i,project in enumerate(projects):
+            label=project_names.get(project['asset_id'],project['asset_id'])
+            st.write(label+' · '+project.get('relationship','').replace('_',' '))
+            if st.button('Open '+label,key=key_prefix+'_asset_'+aid+'_'+str(i)):
+                st.session_state['port_pick_id']=project['asset_id']
+                st.session_state['nav_request']='Ports';st.rerun()
+    evidence=agreement.get('evidence') or []
+    if isinstance(evidence,str):
+        try:evidence=json.loads(evidence)
+        except ValueError:evidence=[]
+    for index,item in enumerate(evidence):
+        url=item.get('url') if isinstance(item,dict) else item
+        safe=_link(url)
+        if safe:st.markdown('- [Original supporting source '+str(index+1)+']('+safe+')')
+
+
+def render_agreements_for_event(sb,event_id):
+    try:
+        rows=(sb.table('pc_v14_agreements').select('*').eq('event_id',event_id).limit(10).execute().data or [])
+        for idx,a in enumerate(rows):
+            with st.expander('Agreement / MoU: '+str(a['title']),expanded=True):
+                _show_agreement(sb,a,'v14_event_'+str(idx))
+    except Exception as exc:st.caption('Agreement registry not available: '+str(exc))
+
+
+def render_live_company_agreements(sb,entity_id):
+    try:
+        assoc=(sb.table('pc_v14_agreement_parties').select('agreement_id,role')
+               .eq('entity_id',entity_id).limit(50).execute().data or [])
+        if not assoc:return
+        ids=[x['agreement_id'] for x in assoc]
+        rows=(sb.table('pc_v14_agreements').select('*').in_('agreement_id',ids)
+              .order('announced_date',desc=True).limit(50).execute().data or [])
+        if not rows:return
+        st.subheader('Agreements & MoUs')
+        for i,r in enumerate(rows):
+            with st.expander(str(r['title']),expanded=i==0):_show_agreement(sb,r,'v14_company_'+entity_id+'_'+str(i))
+    except Exception as exc:st.caption('Agreements unavailable: '+str(exc))
+
+
+def render_live_asset_agreements(sb,asset_id):
+    try:
+        assoc=(sb.table('pc_v14_agreement_projects').select('agreement_id').eq('asset_id',asset_id).limit(50).execute().data or [])
+        if not assoc:return
+        rows=(sb.table('pc_v14_agreements').select('*').in_('agreement_id',[x['agreement_id'] for x in assoc])
+              .order('announced_date',desc=True).limit(50).execute().data or [])
+        if not rows:return
+        st.subheader('Agreements & MoUs')
+        for i,r in enumerate(rows):
+            with st.expander(str(r['title']),expanded=i==0):_show_agreement(sb,r,'v14_asset_'+asset_id+'_'+str(i))
+    except Exception as exc:st.caption('Asset agreements unavailable: '+str(exc))

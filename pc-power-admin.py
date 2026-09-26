@@ -100,10 +100,14 @@ if "deduped_package" not in st.session_state:
 # v0.7 bulk worker and Trade preview are additional pages, not replacements.
 mode = st.sidebar.radio(
     'Workspace',
-    ['Universal intake · URLs + files', 'Bulk queue · thousands of records', 'Trade preview', 'Move staged → Trade', 'Finish Trade load'],
+    ['Universal intake · URLs + files', 'Reload & republish · end-to-end', 'Bulk queue · thousands of records', 'Trade preview', 'Move staged → Trade', 'Finish Trade load'],
     index=0,
     key='pc_workspace_v071',
 )
+if mode == 'Reload & republish · end-to-end':
+    from pc_v15_bulk_replay import render_bulk_replay
+    render_bulk_replay(sb, st.session_state.get('active_package') or [])
+    st.stop()
 if mode == 'Bulk queue · thousands of records':
     from pc_v07_admin_panel import render_bulk_intake
     render_bulk_intake(sb, st.session_state.get('active_package') or [])

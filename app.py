@@ -15120,6 +15120,14 @@ elif page in ["Ports","Ports & Terminals"]:
                     radius=50000
                 )
             render_port_connected_dossier(row,pt)
+            # The same canonical agreement appears reciprocally on its port/SEZ profile.
+            try:
+                from pc_trade_connected import staff_available, _staff_client
+                from pc_trade_live import render_live_asset_agreements
+                if staff_available() and pid and not str(pid).startswith('REF_'):
+                    render_live_asset_agreements(_staff_client(),pid)
+            except Exception as exc:
+                st.caption('Agreement links temporarily unavailable: '+str(exc))
 
 elif page=="Watch Areas":
     header("Watch Areas","Live canonical monitoring, disruption watch, weather/labour observations and strategic events in one operational workspace.")
