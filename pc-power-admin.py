@@ -915,6 +915,33 @@ def stage_review_package(sb, package, audit, confirms, source_ref, research_find
             pass
         raise
 
+def _unique_exact_logs(logs):
+    """Return one checkbox per unique audit identity; exclude conflicting IDs.
+
+    Multiple source mentions with the same identity key and same proposed
+    canonical ID share one widget. Multiple IDs for one key require review.
+    """
+    by_key = {}
+    conflicts = []
+    bad_keys = set()
+    for log in logs:
+        if log.get("Status") != "EXACT NAME — REVIEW" or not log.get("Proposed Canonical ID"):
+            continue
+        key = _audit_key(log)
+        if key in bad_keys:
+            continue
+        existing = by_key.get(key)
+        if existing and str(existing["Proposed Canonical ID"]) != str(log["Proposed Canonical ID"]):
+            conflicts.append({"Table": log.get("Table"), "Incoming Name": log.get("Incoming Name"),
+                              "Source Package ID": log.get("Source Package ID"),
+                              "Candidate IDs": [existing["Proposed Canonical ID"], log["Proposed Canonical ID"]]})
+            by_key.pop(key, None)
+            bad_keys.add(key)
+        elif not existing:
+            by_key[key] = log
+    return list(by_key.values()), conflicts
+
+
 if st.session_state.get("deduped_package"):
     st.divider()
     st.markdown("#### Phase 3: Review and stage (not canonical publish)")
@@ -922,23 +949,49 @@ if st.session_state.get("deduped_package"):
             "Staging creates review proposals; it cannot publish canonical records.")
     logs = st.session_state["audit_logs"]
     confirms = st.session_state.setdefault("match_confirmations", {})
-    exact = [l for l in logs if l.get("Status") == "EXACT NAME — REVIEW" and l.get("Proposed Canonical ID")]
+    # Deduplicate repeated audit entries before creating widgets. The same
+    # company/asset can occur many times in a large multisource import.
+    # Conflicting canonical suggestions are never eligible for bulk approval.
+    exact, conflicts = _unique_exact_logs(logs)
+    for conflict in conflicts:
+        confirms.pop((conflict["Table"], conflict["Incoming Name"], conflict["Source Package ID"]), None)
+    if conflicts:
+        st.warning(f"{len(conflicts):,} repeated identities have conflicting canonical suggestions; "
+                   "they remain unresolved pending analyst review.")
+        with st.expander("Conflicting exact-name proposals"):
+            st.dataframe(pd.DataFrame(conflicts), use_container_width=True, hide_index=True)
     if exact:
-        st.caption(f"Exact-name candidates: {len(exact):,}. Bulk confirmation is an explicit analyst decision.")
-        for table in sorted({l["Table"] for l in exact}):
+        st.caption(f"Unique exact-name candidates: {len(exact):,}. "
+                   "Repeated records share one approval; bulk confirmation is an analyst decision.")
+        groups = sorted({l["Table"] for l in exact})
+        # Each checkbox has a single deterministic key, regardless of repeated
+        # source rows; no dynamic duplicate Streamlit widgets are created.
+        for table in groups:
             group = [l for l in exact if l["Table"] == table]
-            if st.checkbox(f"Confirm all {len(group):,} exact-name candidates in {table}", key=f"bulk_{table}"):
-                for l in group:
-                    confirms[_audit_key(l)] = True
+            bulk_key = f"bulk_{table}"
+            st.checkbox(f"Confirm all {len(group):,} unique exact-name candidates in {table}",
+                        key=bulk_key)
+            if st.session_state[bulk_key]:
+                for log in group:
+                    confirms[_audit_key(log)] = True
         with st.expander("Inspect or override individual exact-name candidates"):
             for log in exact[:200]:
                 label = f"Confirm {log['Incoming Name']} = {log['Canonical Match']}"
                 key = _audit_key(log)
-                # Widget state and bulk approvals must agree across reruns.
-                widget_key = "confirm_" + hashlib.sha256(repr(key).encode()).hexdigest()[:12]
-                confirms[key] = st.checkbox(label, value=confirms.get(key, False), key=widget_key) if not st.session_state.get(f"bulk_{log['Table']}") else True
+                widget_key = "confirm_" + hashlib.sha256(repr(key).encode()).hexdigest()[:20]
+                bulk_selected = bool(st.session_state.get(f"bulk_{log['Table']}"))
+                # Widget keys are unique because 'exact' has been deduplicated.
+                # Once a key exists, Streamlit owns its state; avoid passing an
+                # incompatible 'value' on every rerun.
+                if widget_key not in st.session_state:
+                    st.session_state[widget_key] = bool(confirms.get(key, False))
+                if bulk_selected:
+                    st.session_state[widget_key] = True
+                selected = st.checkbox(label, key=widget_key, disabled=bulk_selected)
+                confirms[key] = bulk_selected or bool(selected)
             if len(exact) > 200:
-                st.info("Only 200 exceptions are shown individually. Use the group controls above or export audit CSV.")
+                st.info("Only 200 unique candidates are shown individually. "
+                        "Use the group controls above or export the audit CSV.")
     preview = _propose_stage(st.session_state["deduped_package"], logs, confirms, list(st.session_state.get("gap_research", {}).values()))
     counts = {k: sum(r["resolution_status"] == k for r in preview)
               for k in ("MATCHED", "NEW_CANDIDATE", "PACKAGE_DEPENDENCY", "RELATIONSHIP_REVIEW", "UNRESOLVED")}
