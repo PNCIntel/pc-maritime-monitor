@@ -10,6 +10,72 @@ ALLOWED = {'pc_entities','pc_assets','pc_mobile_assets','pc_events'}
 PK = {'pc_entities':'entity_id','pc_assets':'asset_id','pc_mobile_assets':'mobile_asset_id','pc_events':'event_id'}
 
 
+CANONICAL_CFG = {
+    'pc_entities': {'pk':'entity_id','name_fields':['name']},
+    'pc_assets': {'pk':'asset_id','name_fields':['name','asset_name','display_name']},
+    'pc_mobile_assets': {'pk':'mobile_asset_id','name_fields':['name','asset_name','display_name']},
+    'pc_events': {'pk':'event_id','name_fields':['title','name','event_name']},
+}
+
+def _candidate_summary(table, row):
+    cfg=CANONICAL_CFG.get(table,{})
+    pk=cfg.get('pk')
+    rid=row.get(pk) or row.get('id') or ''
+    label=(row.get('name') or row.get('title') or row.get('event_name') or row.get('display_name') or rid)
+    extras=[]
+    for k in ('entity_type','asset_type','event_type','hq_country','country','flag','imo','mmsi','record_status'):
+        v=row.get(k)
+        if v not in (None,''):
+            extras.append(f"{k}={v}")
+    return f"{label} — {rid}" + (" — " + ", ".join(extras[:4]) if extras else '')
+
+def _canonical_candidates(sb, staged_row, limit=12):
+    """Best-effort canonical lookup for the review UI. Never auto-approves a match."""
+    table=staged_row.get('target_table')
+    cfg=CANONICAL_CFG.get(table)
+    if not cfg:
+        return []
+    natural=str(staged_row.get('natural_key') or '').strip()
+    if not natural:
+        return []
+    seen={}
+    # Preserve any ID already proposed by the planner, then look up exact-name candidates.
+    proposed=(staged_row.get('resolved_entity_id') or (staged_row.get('resolution_details') or {}).get('proposed_canonical_id'))
+    if proposed:
+        try:
+            found=(sb.table(table).select('*').eq(cfg['pk'],str(proposed)).limit(1).execute().data or [])
+            for item in found:
+                seen[str(item.get(cfg['pk']))]=item
+        except Exception:
+            pass
+    for field in cfg['name_fields']:
+        try:
+            exact=(sb.table(table).select('*').ilike(field,natural).limit(limit).execute().data or [])
+        except Exception:
+            exact=[]
+        for item in exact:
+            key=str(item.get(cfg['pk']) or '')
+            if key:
+                seen[key]=item
+        if exact:
+            break
+    # Only broaden if exact lookup returned nothing.
+    if not seen:
+        token=natural.replace('%','').replace('_',' ').strip()[:80]
+        for field in cfg['name_fields']:
+            try:
+                fuzzy=(sb.table(table).select('*').ilike(field,f'%{token}%').limit(limit).execute().data or [])
+            except Exception:
+                fuzzy=[]
+            for item in fuzzy:
+                key=str(item.get(cfg['pk']) or '')
+                if key:
+                    seen[key]=item
+            if fuzzy:
+                break
+    return list(seen.values())[:limit]
+
+
 def page_rows(sb,job_id,page=1,page_size=50):
     return (sb.table('pc_staged_records')
             .select('staged_record_id,ingestion_job_id,source_record_key,target_table,natural_key,payload,resolution_status,resolved_entity_id,review_status,validation_status,resolution_details')
@@ -105,13 +171,38 @@ def render_publish_panel(sb):
         sid=r['staged_record_id'];previous=approved.get(sid,{})
         with st.expander(f"{r['target_table']} — {r['natural_key']}",expanded=len(choices)<4):
             st.caption('Existing approved identity is separate from unverified AI name matches.')
-            match_id=previous.get('canonical_id') or r.get('resolved_entity_id') or ''
-            default_decision=previous.get('decision') or ('match_existing' if match_id else 'create_new')
+            candidates=_canonical_candidates(sb,r)
+            match_id=previous.get('canonical_id') or r.get('resolved_entity_id') or (r.get('resolution_details') or {}).get('proposed_canonical_id') or ''
+            default_decision=previous.get('decision') or ('match_existing' if (match_id or candidates) else 'create_new')
             decision=st.radio('Identity decision',['match_existing','create_new'],
                 index=0 if default_decision=='match_existing' else 1,horizontal=True,key=f'v10_decision_{sid}')
-            canonical_id=st.text_input('Verified canonical ID',value=match_id,key=f'v10_match_{sid}') if decision=='match_existing' else None
-            if decision=='create_new' and r.get('resolution_status') in ('UNRESOLVED','AMBIGUOUS'):
-                st.warning('Explicit NEW decision on unresolved record: verify authoritative sources and inspect existing names first.')
+            canonical_id=None
+            if decision=='match_existing':
+                if candidates:
+                    exact_name=[c for c in candidates if str(c.get('name') or c.get('title') or c.get('event_name') or '').strip().casefold()==str(r.get('natural_key') or '').strip().casefold()]
+                    if len(exact_name)>1:
+                        st.error(f"{len(exact_name)} exact-name canonical candidates already exist. Choose the correct existing record; do not create another duplicate.")
+                    elif len(exact_name)==1:
+                        st.success('One exact-name canonical candidate found. Verify it before approval.')
+                    else:
+                        st.info('Potential canonical candidates found. Verify the correct record before approval.')
+                    options=['']+[str(c.get(CANONICAL_CFG[r['target_table']]['pk'])) for c in candidates if c.get(CANONICAL_CFG[r['target_table']]['pk'])]
+                    if match_id and str(match_id) not in options:
+                        options.append(str(match_id))
+                    default_idx=options.index(str(match_id)) if str(match_id) in options else (1 if len(options)>1 else 0)
+                    canonical_id=st.selectbox('Verified canonical record',options,index=default_idx,key=f'v10_match_{sid}',
+                        format_func=lambda x:'Select a canonical record…' if not x else next((_candidate_summary(r['target_table'],c) for c in candidates if str(c.get(CANONICAL_CFG[r['target_table']]['pk']))==str(x)),str(x)))
+                    with st.expander('Inspect canonical candidates',expanded=len(exact_name)>1):
+                        st.dataframe(pd.DataFrame(candidates),hide_index=True,use_container_width=True)
+                else:
+                    st.warning('No canonical candidate was found automatically. Verify whether this is genuinely new.')
+                    canonical_id=st.text_input('Canonical ID (manual fallback)',value=match_id,key=f'v10_match_manual_{sid}')
+            if decision=='create_new' and candidates:
+                st.warning('Existing canonical candidates were found. Creating NEW may duplicate an existing record; inspect candidates first.')
+                with st.expander('Inspect existing candidates before creating new'):
+                    st.dataframe(pd.DataFrame(candidates),hide_index=True,use_container_width=True)
+            elif decision=='create_new' and r.get('resolution_status') in ('UNRESOLVED','AMBIGUOUS'):
+                st.warning('Explicit NEW decision on unresolved record: verify authoritative sources first.')
             source_verified=st.checkbox('I verified identity, provenance and sources',value=previous.get('source_verified',False),key=f'v10_source_{sid}')
             event_checked=(st.checkbox('I checked for duplicate events, date and asset identities',
                value=previous.get('event_duplicate_checked',False),key=f'v10_duplicate_{sid}')
