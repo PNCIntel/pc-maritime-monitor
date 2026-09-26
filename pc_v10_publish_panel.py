@@ -2,6 +2,7 @@
 Keep the multi-file/URL intake unchanged; staging is never deleted.
 """
 import json
+import time
 from datetime import datetime, timezone
 import streamlit as st
 import pandas as pd
@@ -9,71 +10,58 @@ import pandas as pd
 ALLOWED = {'pc_entities','pc_assets','pc_mobile_assets','pc_events'}
 PK = {'pc_entities':'entity_id','pc_assets':'asset_id','pc_mobile_assets':'mobile_asset_id','pc_events':'event_id'}
 
+# Canonical identity search is performed inside the admin UI. No SQL or copied IDs
+# are required from an analyst. Results are bounded, scoped to the target table,
+# and cached briefly per Streamlit session to avoid repeat RPCs on every rerun.
+def _candidate_label(row, table):
+    pk=PK[table]
+    name=row.get('title') if table=='pc_events' else row.get('name')
+    country=row.get('hq_country') or row.get('country') or row.get('flag') or ''
+    kind=row.get('entity_type') or row.get('asset_type') or row.get('event_type') or ''
+    extra=' · '.join(str(v) for v in (kind,country) if v)
+    return f"{name or 'Unnamed'} | {extra or 'Details unavailable'} | {row.get(pk)}"
 
-CANONICAL_CFG = {
-    'pc_entities': {'pk':'entity_id','name_fields':['name']},
-    'pc_assets': {'pk':'asset_id','name_fields':['name','asset_name','display_name']},
-    'pc_mobile_assets': {'pk':'mobile_asset_id','name_fields':['name','asset_name','display_name']},
-    'pc_events': {'pk':'event_id','name_fields':['title','name','event_name']},
-}
 
-def _candidate_summary(table, row):
-    cfg=CANONICAL_CFG.get(table,{})
-    pk=cfg.get('pk')
-    rid=row.get(pk) or row.get('id') or ''
-    label=(row.get('name') or row.get('title') or row.get('event_name') or row.get('display_name') or rid)
-    extras=[]
-    for k in ('entity_type','asset_type','event_type','hq_country','country','flag','imo','mmsi','record_status'):
-        v=row.get(k)
-        if v not in (None,''):
-            extras.append(f"{k}={v}")
-    return f"{label} — {rid}" + (" — " + ", ".join(extras[:4]) if extras else '')
-
-def _canonical_candidates(sb, staged_row, limit=12):
-    """Best-effort canonical lookup for the review UI. Never auto-approves a match."""
-    table=staged_row.get('target_table')
-    cfg=CANONICAL_CFG.get(table)
-    if not cfg:
-        return []
-    natural=str(staged_row.get('natural_key') or '').strip()
-    if not natural:
-        return []
-    seen={}
-    # Preserve any ID already proposed by the planner, then look up exact-name candidates.
-    proposed=(staged_row.get('resolved_entity_id') or (staged_row.get('resolution_details') or {}).get('proposed_canonical_id'))
-    if proposed:
-        try:
-            found=(sb.table(table).select('*').eq(cfg['pk'],str(proposed)).limit(1).execute().data or [])
-            for item in found:
-                seen[str(item.get(cfg['pk']))]=item
-        except Exception:
-            pass
-    for field in cfg['name_fields']:
-        try:
-            exact=(sb.table(table).select('*').ilike(field,natural).limit(limit).execute().data or [])
-        except Exception:
-            exact=[]
-        for item in exact:
-            key=str(item.get(cfg['pk']) or '')
-            if key:
-                seen[key]=item
+def _get_candidates(sb, table, name, *, refresh=False):
+    if table not in PK or not str(name or '').strip():
+        return [], None
+    lookup_key=(table,str(name).casefold().strip())
+    cache=st.session_state.setdefault('v102_candidate_cache', {})
+    if not refresh and lookup_key in cache and time.time()-cache[lookup_key][0]<180:
+        _, rows, error=cache[lookup_key]
+        return rows, error
+    col='title' if table=='pc_events' else 'name'
+    try:
+        # Exact (case-insensitive) first: no accidental same-name auto-merge.
+        exact=(sb.table(table).select('*').ilike(col,str(name).strip()).limit(20).execute().data or [])
+        # If no exact match, offer a SMALL set of similar candidates, never auto-confirm.
         if exact:
-            break
-    # Only broaden if exact lookup returned nothing.
-    if not seen:
-        token=natural.replace('%','').replace('_',' ').strip()[:80]
-        for field in cfg['name_fields']:
-            try:
-                fuzzy=(sb.table(table).select('*').ilike(field,f'%{token}%').limit(limit).execute().data or [])
-            except Exception:
-                fuzzy=[]
-            for item in fuzzy:
-                key=str(item.get(cfg['pk']) or '')
-                if key:
-                    seen[key]=item
-            if fuzzy:
-                break
-    return list(seen.values())[:limit]
+            rows=exact
+        else:
+            literal=str(name).strip().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
+            rows=(sb.table(table).select('*').ilike(col,'%'+literal+'%').limit(12).execute().data or [])
+        cache[lookup_key]=(time.time(), rows, None)
+        return rows, None
+    except Exception as exc:
+        message=str(exc)[:220]
+        cache[lookup_key]=(time.time(), [], message)
+        return [], message
+
+
+def _candidate_details(row, table):
+    metadata=row.get('metadata') if isinstance(row.get('metadata'),dict) else {}
+    fields={
+        'Canonical ID':row.get(PK[table]),
+        'Name':row.get('title') if table=='pc_events' else row.get('name'),
+        'Type':row.get('entity_type') or row.get('asset_type') or row.get('event_type'),
+        'Country / flag':row.get('hq_country') or row.get('country') or row.get('flag'),
+        'IMO':row.get('imo') if table=='pc_mobile_assets' else None,
+        'Website':metadata.get('official_website') or metadata.get('website'),
+        'Summary':metadata.get('company_summary') or metadata.get('description') or row.get('description'),
+        'Source':(metadata.get('research_sources') or [None])[0],
+    }
+    return {k:v for k,v in fields.items() if v not in (None,'',[],{})}
+
 
 
 def page_rows(sb,job_id,page=1,page_size=50):
@@ -87,7 +75,7 @@ def make_approval(row,decision,canonical_id,source_verified,event_checked,conten
     if row['target_table'] not in ALLOWED:raise ValueError('Graph links are not in the first publication wave')
     if not source_verified:raise ValueError('Verify sources before approval')
     if row['target_table']=='pc_events' and not event_checked:raise ValueError('Check event duplicates before approval')
-    if decision=='match_existing' and not str(canonical_id or '').strip():raise ValueError('Canonical ID is required for a match')
+    if decision=='match_existing' and not str(canonical_id or '').strip():raise ValueError('Select a verified canonical record from the database')
     if client_visible and not content_reviewed:raise ValueError('Client-visible text requires editorial review')
     if not str(reviewer).strip():raise ValueError('Reviewer name required')
     return {'staged_record_id':row['staged_record_id'],'ingestion_job_id':row['ingestion_job_id'],
@@ -106,6 +94,7 @@ def staged_export(rows):
 
 def render_publish_panel(sb):
     st.header('Move staged → Trade')
+    st.caption('v1.0.2 · In-app canonical record search and duplicate-aware identity selection')
     st.info('Pilot: companies, physical assets, vessels and events only. Backups are immutable; original staging rows remain untouched. '
             'Graph links and corridors stay in review until their endpoints have been verified.')
     jobs=(sb.table('pc_ingestion_jobs').select('ingestion_job_id,title,status,created_at')
@@ -170,39 +159,53 @@ def render_publish_panel(sb):
     for r in choices:
         sid=r['staged_record_id'];previous=approved.get(sid,{})
         with st.expander(f"{r['target_table']} — {r['natural_key']}",expanded=len(choices)<4):
-            st.caption('Existing approved identity is separate from unverified AI name matches.')
-            candidates=_canonical_candidates(sb,r)
-            match_id=previous.get('canonical_id') or r.get('resolved_entity_id') or (r.get('resolution_details') or {}).get('proposed_canonical_id') or ''
-            default_decision=previous.get('decision') or ('match_existing' if (match_id or candidates) else 'create_new')
+            st.caption('Choose from canonical records already in Supabase. No manual SQL lookup or typed IDs.')
+            prior_id=previous.get('canonical_id') or ''
+            incoming=r.get('payload') or {}
+            if r['target_table']=='pc_entities':
+                st.caption(f"Incoming type: {incoming.get('entity_type') or 'unspecified'} · country: {incoming.get('hq_country') or incoming.get('country') or 'unspecified'}")
+            search_name=st.text_input('Search existing canonical records',value=r['natural_key'],key=f'v102_search_{sid}',help='Change the search term for abbreviations or historical names. It never changes the source record.')
+            refresh=st.button('Refresh database matches',key=f'v102_refresh_{sid}')
+            candidates, lookup_error=_get_candidates(sb,r['target_table'],search_name,refresh=refresh)
+            if lookup_error:st.error(f'Could not search existing canonical records: {lookup_error}. Approval is blocked until lookup succeeds.')
+            same_name=[c for c in candidates if str(c.get('title' if r['target_table']=='pc_events' else 'name') or '').casefold().strip()==str(r['natural_key']).casefold().strip()]
+            if len(same_name)>1:
+                st.warning(f'{len(same_name)} existing canonical records have this exact name. Compare them before selecting; do not create another duplicate.')
+            elif not candidates and not lookup_error:
+                st.info('No matching canonical record found in this domain. Review aliases and evidence before creating a new one.')
+            if candidates:
+                st.dataframe(pd.DataFrame([_candidate_details(c,r['target_table']) for c in candidates]),hide_index=True,use_container_width=True)
+            # Never promote old fuzzy/proposed IDs to verified matches automatically.
+            possible_ids={str(c.get(PK[r['target_table']])) for c in candidates}
+            prior_valid=bool(prior_id and str(prior_id) in possible_ids)
+            default_decision=previous.get('decision') if prior_valid else ('match_existing' if candidates else 'create_new')
             decision=st.radio('Identity decision',['match_existing','create_new'],
                 index=0 if default_decision=='match_existing' else 1,horizontal=True,key=f'v10_decision_{sid}')
             canonical_id=None
             if decision=='match_existing':
-                if candidates:
-                    exact_name=[c for c in candidates if str(c.get('name') or c.get('title') or c.get('event_name') or '').strip().casefold()==str(r.get('natural_key') or '').strip().casefold()]
-                    if len(exact_name)>1:
-                        st.error(f"{len(exact_name)} exact-name canonical candidates already exist. Choose the correct existing record; do not create another duplicate.")
-                    elif len(exact_name)==1:
-                        st.success('One exact-name canonical candidate found. Verify it before approval.')
-                    else:
-                        st.info('Potential canonical candidates found. Verify the correct record before approval.')
-                    options=['']+[str(c.get(CANONICAL_CFG[r['target_table']]['pk'])) for c in candidates if c.get(CANONICAL_CFG[r['target_table']]['pk'])]
-                    if match_id and str(match_id) not in options:
-                        options.append(str(match_id))
-                    default_idx=options.index(str(match_id)) if str(match_id) in options else (1 if len(options)>1 else 0)
-                    canonical_id=st.selectbox('Verified canonical record',options,index=default_idx,key=f'v10_match_{sid}',
-                        format_func=lambda x:'Select a canonical record…' if not x else next((_candidate_summary(r['target_table'],c) for c in candidates if str(c.get(CANONICAL_CFG[r['target_table']]['pk']))==str(x)),str(x)))
-                    with st.expander('Inspect canonical candidates',expanded=len(exact_name)>1):
-                        st.dataframe(pd.DataFrame(candidates),hide_index=True,use_container_width=True)
-                else:
-                    st.warning('No canonical candidate was found automatically. Verify whether this is genuinely new.')
-                    canonical_id=st.text_input('Canonical ID (manual fallback)',value=match_id,key=f'v10_match_manual_{sid}')
-            if decision=='create_new' and candidates:
-                st.warning('Existing canonical candidates were found. Creating NEW may duplicate an existing record; inspect candidates first.')
-                with st.expander('Inspect existing candidates before creating new'):
-                    st.dataframe(pd.DataFrame(candidates),hide_index=True,use_container_width=True)
-            elif decision=='create_new' and r.get('resolution_status') in ('UNRESOLVED','AMBIGUOUS'):
-                st.warning('Explicit NEW decision on unresolved record: verify authoritative sources first.')
+                candidate_map={str(c[PK[r['target_table']]]):c for c in candidates if c.get(PK[r['target_table']])}
+                options=['']+list(candidate_map)
+                selected_id=st.selectbox('Select verified canonical record',options,
+                    index=options.index(str(prior_id)) if prior_valid else 0,
+                    format_func=lambda x:_candidate_label(candidate_map[x],r['target_table']) if x else '— Select an existing database record —',
+                    key=f'v102_existing_{sid}')
+                if selected_id:
+                    canonical_id=selected_id
+                    with st.expander('Inspect selected canonical profile',expanded=len(same_name)>1):
+                        st.json(_candidate_details(candidate_map[selected_id],r['target_table']))
+                elif candidates:st.info('Select the precise company or asset. Similar names may be different legal entities.')
+                if lookup_error or not selected_id:
+                    st.warning('This record cannot be approved as an existing identity without a database selection.')
+            if decision=='create_new':
+                if same_name:st.error('An exact-name canonical record exists. Resolve the duplicate instead of creating another record.')
+                elif candidates:st.warning('Similar existing records found. Verify they are not the same identity before creating a new one.')
+                elif lookup_error:st.error('Database lookup failed; creating a new identity is blocked.')
+            duplicate_checked=True
+            if len(same_name)>1 and decision=='match_existing':
+                duplicate_checked=st.checkbox('I compared the duplicate canonical records and verified the selected ID',
+                    key=f'v102_duplicates_{sid}')
+            resolution_ready=not lookup_error and duplicate_checked and (
+                bool(canonical_id) if decision=='match_existing' else not bool(same_name))
             source_verified=st.checkbox('I verified identity, provenance and sources',value=previous.get('source_verified',False),key=f'v10_source_{sid}')
             event_checked=(st.checkbox('I checked for duplicate events, date and asset identities',
                value=previous.get('event_duplicate_checked',False),key=f'v10_duplicate_{sid}')
@@ -211,7 +214,8 @@ def render_publish_panel(sb):
                 value=previous.get('content_reviewed',False),key=f'v10_text_{sid}')
             client_visible=st.checkbox('Make reviewed narrative visible in Trade (subject to app authorization)',
                 value=previous.get('client_visible',False),key=f'v10_visible_{sid}',disabled=not content_reviewed)
-            prepared.append((r,decision,canonical_id,source_verified,event_checked,content_reviewed,client_visible))
+            if not resolution_ready:st.error('Identity decision is incomplete; this selection cannot be approved yet.')
+            prepared.append((r,decision,canonical_id,source_verified and resolution_ready,event_checked,content_reviewed,client_visible))
     col1,col2=st.columns(2)
     with col1:
         if st.button('Save explicit approvals',key='v10_save',type='secondary'):
@@ -255,14 +259,36 @@ def render_publish_panel(sb):
             pick_backup=st.selectbox('Download immutable backup snapshot',backups,
                 format_func=lambda x:f"{x['created_at']} — {x['record_count']} records — {x['backup_id'][:8]}",
                 key='v10_backup_pick')
-            if st.button('Load backup JSON for download',key='v10_backup_load'):
-                backup_detail=(sb.table('pc_v10_stage_backups').select('backup_id,snapshot,snapshot_md5')
-                    .eq('backup_id',pick_backup['backup_id']).limit(1).execute().data or [])
-                if backup_detail:
-                    st.download_button('Download complete immutable backup JSON',
-                        json.dumps(backup_detail[0],ensure_ascii=False,indent=2,default=str),
-                        f"pc_immutable_backup_{pick_backup['backup_id']}.json",'application/json',
-                        key='v10_full_snapshot_download')
+            # Keep downloaded payload outside the load-button branch. Streamlit reruns the
+            # script when a download is clicked; nesting download_button inside an ephemeral
+            # button would otherwise make it disappear during that rerun.
+            selected_id = pick_backup['backup_id']
+            cached = st.session_state.get('v10_loaded_backup')
+            if cached and cached.get('backup_id') != selected_id:
+                st.session_state.pop('v10_loaded_backup', None)
+                cached = None
+            if st.button('Load backup JSON for download', key='v10_backup_load'):
+                try:
+                    result = (sb.table('pc_v10_stage_backups')
+                        .select('backup_id,snapshot,snapshot_md5')
+                        .eq('backup_id', selected_id).limit(1).execute().data or [])
+                    if result:
+                        cached = {'backup_id': selected_id,
+                            'json': json.dumps(result[0], ensure_ascii=False,
+                                               indent=2, default=str)}
+                        st.session_state['v10_loaded_backup'] = cached
+                        st.success('Backup loaded. Use the Download button below.')
+                    else:
+                        st.warning('Backup not found. Refresh the list and try again.')
+                except Exception as exc:
+                    st.error(f'Could not retrieve backup: {exc}')
+            cached = st.session_state.get('v10_loaded_backup')
+            if cached and cached.get('backup_id') == selected_id:
+                st.download_button('Download complete immutable backup JSON',
+                    data=cached['json'],
+                    file_name=f'pc_immutable_backup_{selected_id}.json',
+                    mime='application/json',
+                    key='v10_full_snapshot_download')
         pubs=(sb.table('pc_v10_publications').select('publication_id,backup_id,item_count,published_by,published_at')
           .eq('ingestion_job_id',job).order('published_at',desc=True).limit(20).execute().data or [])
         st.dataframe(pubs,hide_index=True,use_container_width=True)
