@@ -94,6 +94,18 @@ if "audit_logs" not in st.session_state:
 if "deduped_package" not in st.session_state:
     st.session_state["deduped_package"] = []
 
+# v0.7 fast pages run before the legacy research UI, preventing expensive
+# dataframe construction and old full-page rerenders for large imports.
+mode = st.sidebar.radio('Workspace', ['Bulk queue (fast)', 'Trade preview', 'Research & review (existing)'], index=0)
+if mode == 'Bulk queue (fast)':
+    from pc_v07_admin_panel import render_bulk_intake
+    render_bulk_intake(sb, st.session_state.get('active_package') or [])
+    st.stop()
+if mode == 'Trade preview':
+    from pc_trade_intelligence import render_trade_intelligence
+    render_trade_intelligence(sb, admin=True)
+    st.stop()
+
 # -----------------------------------------------------------------------------
 # 3. HELPER FUNCTIONS: LLM EXTRACTION & FUZZY DEDUPE
 # -----------------------------------------------------------------------------
@@ -159,6 +171,11 @@ def call_openai_extraction(text: str, api_key: str, source_url: str,
         "if missing, stage named entity with research gap metadata, not a designation. "
         "Distinguish company from infrastructure with same name. "
         "Do not invent ownership or corridor links based on geographic proximity. "
+        "For pc_events preserve a detailed what-happened narrative and write metadata.event_summary, "
+        "metadata.why_it_matters, metadata.commercial_implications, metadata.assessment and "
+        "metadata.monitoring_indicators when supported by provided sources. Distinguish observed impacts "
+        "from forward-looking business scenarios, and mark analytical inferences as draft. "
+        "Avoid claiming corridor disruption merely because an asset is nearby. "
         "Put source-derived research gaps in metadata.research_gaps and support source URLs in "
         "metadata.research_sources. Keep sources separately attributed. "
         "Do not add unverified factual details; no commentary beyond JSON."
