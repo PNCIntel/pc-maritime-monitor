@@ -15,6 +15,7 @@ import pandas as pd
 
 ID_TABLES={'pc_entities':'entity_id','pc_assets':'asset_id','pc_mobile_assets':'mobile_asset_id','pc_events':'event_id'}
 NAME_COL={'pc_entities':'name','pc_assets':'name','pc_mobile_assets':'name','pc_events':'title'}
+PUBLISHER_VERSION='1.5.4-model-guard'
 
 
 def _norm(x):
@@ -111,6 +112,21 @@ def _identity_candidates(table,name,payload,index,registry):
     # relabel the existing port as a government authority or vice versa.
     other='pc_assets' if table=='pc_entities' else 'pc_entities' if table=='pc_assets' else None
     cross=index.get(other,{}).get('name',{}).get(key,[]) if other else []
+    # A terminal may be registered as an asset under its full name while an
+    # extraction proposes an abbreviated *company*. Do not create that company
+    # before checking the cross-domain candidate. Never auto-merge domains.
+    if other and not cross and len(_tokens(name)) >= 2:
+        other_ix=index.get(other,{})
+        pool={}
+        for token in _tokens(name):
+            for candidate in other_ix.get('token',{}).get(token,[]):
+                pool[str(candidate[ID_TABLES[other]])]=candidate
+        for candidate in pool.values():
+            cname=candidate.get(NAME_COL[other]) or ''
+            common=_tokens(name)&_tokens(cname)
+            if len(common)>=2 and (common==_tokens(name) or
+                                   SequenceMatcher(None,key,_norm(cname)).ratio()>=0.83):
+                cross.append(candidate)
     return [],fuzzy,cross, 'name-search'
 
 
@@ -189,6 +205,10 @@ def _validation_issue(row):
                   'rail freight sector', 'terminal operator 20', 'expansion project',
                   'investment announcement','autonomous centre','robotic autonomous centre')):
             return 'record-type review: development/topic supplied as an entity'
+        if re.search(r'\b(advisory|expansion|redevelopment|groundbreaking|tender|strategy|delivery)\b',low):
+            return 'record-type review: announcement or project supplied as an entity'
+        if re.search(r'\b(centre|center)\b',low) and ('navy' in low or 'robotic' in low):
+            return 'record-type review: organisational unit versus standalone company requires evidence'
     if table == 'pc_assets':
         # Equipment purchases are developments; individual cranes need
         # equipment identities before being registered as standalone assets.
@@ -197,6 +217,14 @@ def _validation_issue(row):
             return 'record-type review: equipment delivery supplied as an asset'
         if any(term in low for term in ('terminal redevelopment','terminal overhaul','container terminal redevelopment')):
             return 'record-type review: existing terminal versus redevelopment project'
+        if re.search(r'\b(expansion|overhaul|delivery|procurement|upgrade)\b',low):
+            return 'record-type review: development/equipment programme supplied as physical asset'
+        if re.search(r'\b(cranes?|rtgs?|rmgs?)\b',low) and not p.get('equipment_serial_number'):
+            return 'record-type review: unnamed equipment fleet is not an identified standalone physical asset'
+        # Vessel identities belong to pc_mobile_assets, including planned hulls;
+        # a vessel name embedded in an asset row must not manufacture a port asset.
+        if ('van oord' in low and ('vindnes' in low or 'vestnes' in low)) or re.search(r'\b(vessel|tanker|ship)\b',low):
+            return 'record-type review: vessel supplied as pc_assets; use pc_mobile_assets with verified identity'
     if table == 'pc_mobile_assets':
         imo = str(p.get('imo') or '').strip()
         if imo and (not re.fullmatch(r'\d{7}', imo)):
@@ -266,6 +294,12 @@ def _plan(sb,job,staged):
             other='pc_assets' if table=='pc_entities' else 'pc_entities'
             exceptions.append({'Table':table,'Name':name,'Reason':'same-name object exists in another canonical domain — classify before creating',
               'Candidates':', '.join(f"{x.get(NAME_COL[other])} [{x[ID_TABLES[other]]}]" for x in cross[:5])})
+            continue
+        if table=='pc_entities' and re.fullmatch(r'[A-Za-z]{2,4}',name.strip()):
+            # Short names/acronyms (QSL, etc.) have too many possible legal
+            # identities for a name-only absence claim to be sufficient.
+            exceptions.append({'Table':table,'Name':name,
+               'Reason':'short-name entity requires authoritative identity / alias verification before creation'})
             continue
         if not _urls(leader):
             exceptions.append({'Table':table,'Name':name,'Reason':'no original source URL'})
@@ -354,6 +388,7 @@ def _process_job_queue(sb,job,batch=50,max_batches=30):
 
 def render_bulk_replay(sb,active_package):
     st.header('Reload & republish — end-to-end')
+    st.caption(f'Publisher build: {PUBLISHER_VERSION} · model-first classification and shared canonical matching')
     st.caption('Existing staged job → paginated shared canonical lookup + fuzzy identity hold → publish validated records → sync verified graph and agreements. No ID lookup or reload.')
     if active_package:
         st.success(f'{len(active_package):,} extracted records are in memory from Universal intake.')

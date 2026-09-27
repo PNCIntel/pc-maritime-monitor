@@ -78,3 +78,34 @@ assert m._plan_digest(ready,followers,errors) != m._plan_digest(ready[:1],follow
 print('PASS: _plan integration prevents LA/Maersk duplicates; holds QSL for identity review; plan digest invalidates stale approvals')
 print('PASS: normalized exact matches (Los Angeles, Maersk), fuzzy candidate holds (Baltic Hub, QSL), cross-category protection, IMO identity, unsafe types and dates, 501-row pagination, exported regressions')
 print('LIMIT: mocked Supabase data; live registry and publishing NOT tested')
+
+# Model-first classifier regression: dates and known 85-record misclassifications.
+wrong_kind=[
+ ('pc_entities','HPC Hamburg Port Consulting advisory 2026'),
+ ('pc_entities','Port of Hastings 2055 Development Strategy'),
+ ('pc_entities','us_navy_robotic_autonomous_centre_2026'),
+ ('pc_assets','Baltic Hub RMG cranes'),
+ ('pc_assets','Contecon Manzanillo hybrid RTGs 2026'),
+ ('pc_assets','Tecon Rio Grande STS and RTG cranes 2026'),
+ ('pc_assets','van_oord_vindnes_2028'),
+ ('pc_assets','van_oord_vestnes_2029'),
+]
+for table,name in wrong_kind:
+    issue=m._validation_issue({'target_table':table,'payload':{'name':name}})
+    assert issue,(table,name)
+# A physical proposed facility is different from an announcement and stays eligible for match/research.
+assert m._validation_issue({'target_table':'pc_assets','payload':{'name':'Deendayal Port e-methanol plant'}}) is None
+assert m.PUBLISHER_VERSION=='1.5.4-model-guard'
+
+# Cross-domain fuzzy warning: existing terminal should block creation of homonymous new company.
+ix=m._identity_indexes({'pc_entities':[],'pc_assets':canon['pc_assets']})
+cross=m._identity_candidates('pc_entities','Baltic Hub',{},ix,{'pc_entities':[],'pc_assets':canon['pc_assets']})[2]
+assert cross and cross[0]['asset_id']=='ASSET_HUB'
+
+# Integration: all incorrectly typed rows held; acronym QSL cannot become a NEW company
+extra=[staging(f'wrong-{i}',table,name) for i,(table,name) in enumerate(wrong_kind)]
+extra.append(staging('short-QSL','pc_entities','QSL'))
+new_ready,_,new_errors,_=m._plan(mock,job,extra)
+assert not new_ready,(new_ready,new_errors)
+assert len(new_errors)==len(extra),(new_errors,len(extra))
+print('PASS: 8 misclassified source records and short-acronym creation blocked; proposed infrastructure retained; cross-domain terminal detected')

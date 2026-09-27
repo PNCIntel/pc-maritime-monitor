@@ -390,6 +390,50 @@ def audit_identities(package: list, registry: dict) -> tuple[list, list]:
         })
     return logs, proposals
 
+
+def audit_identities_shared(sb, package: list) -> tuple[list, list]:
+    """Use the SAME complete shared canonical registry as the bulk publisher.
+
+    Legacy fetch_candidate_identities only asks SQL for identical input names,
+    making the subsequent fuzzy audit blind to all other names/aliases.
+    This is a non-mutating audit; bulk publication recomputes live matches.
+    """
+    from pc_v15_bulk_replay import (_canon_registry, _identity_indexes,
+                                    _identity_candidates, ID_TABLES, NAME_COL)
+    needed={r.get('table') for r in package} & set(IDENTITY_COLUMNS)
+    if not needed: return [], deepcopy(package)
+    registry=_canon_registry(sb, needed)
+    index=_identity_indexes(registry)
+    logs=[]
+    for item in package:
+        table=item.get('table'); p=item.get('payload') or {}
+        name=str(p.get('name') or '').strip()
+        if table not in needed or not name: continue
+        pk=IDENTITY_COLUMNS[table][0]
+        exact,fuzzy,cross,method=_identity_candidates(table,name,p,index,registry)
+        if len(exact)==1 and method=='verified-IMO':
+            status,candidate,score='IMO MATCH',exact[0],1.0
+        elif len(exact)==1:
+            status,candidate,score='EXACT NAME — REVIEW',exact[0],1.0
+        elif len(exact)>1:
+            status,candidate,score='AMBIGUOUS NAME',None,1.0
+        elif fuzzy:
+            ranked=sorted(fuzzy,key=lambda x:compute_token_ratio(name,x.get(NAME_COL[table]) or ''),reverse=True)
+            status,candidate,score='POSSIBLE MATCH — REVIEW',ranked[0],compute_token_ratio(name,ranked[0].get(NAME_COL[table]) or '')
+        elif cross:
+            status,candidate,score='CROSS-TYPE — REVIEW',None,0.0
+        else:
+            status,candidate,score='UNVERIFIED — RESEARCH',None,0.0
+        logs.append({
+            'Status':status,'Table':table,'Incoming Name':name,
+            'Canonical Match':f"{candidate[NAME_COL[table]]} ({candidate[pk]})" if candidate else 'None',
+            'Score':f'{score*100:.1f}%',
+            'Action':'Review proposed identity; source IDs unchanged' if candidate else 'Research missing/ambiguous identity before creation',
+            'Proposed Canonical ID':candidate[pk] if candidate else '',
+            'Source Package ID':p.get(pk,''),
+        })
+    return logs,deepcopy(package)
+
 # -----------------------------------------------------------------------------
 # 4. VIEW: MAIN WORKSPACE
 # -----------------------------------------------------------------------------
@@ -686,21 +730,21 @@ if st.session_state["active_package"]:
     if run_dedupe:
         with st.spinner("Comparing against existing canonical identities..."):
             needed = {r.get("table") for r in active_rows} & set(IDENTITY_COLUMNS)
-            # A failed query aborts the ENTIRE audit; never show false NEW records.
+            # Shared publisher registry covers ALL canonical names, not only
+            # exact input-name SQL IN matches. Fail closed on incomplete reads.
             try:
-                indexes = {table: fetch_candidate_identities(sb, table, active_rows) for table in sorted(needed)}
+                audit_logs, candidate_package = audit_identities_shared(sb, active_rows)
             except Exception as exc:
                 st.session_state["audit_logs"] = []
                 st.session_state["deduped_package"] = []
                 st.error(f"Identity audit stopped. Database lookup failed: {exc}")
                 st.warning("No identity decisions were made. Check the existing Supabase URL/key and retry.")
             else:
-                audit_logs, candidate_package = audit_identities(active_rows, indexes)
                 st.session_state["audit_logs"] = audit_logs
                 st.session_state["deduped_package"] = candidate_package
                 st.session_state["match_confirmations"] = {}
                 st.session_state["gap_research"] = {}
-                st.success(f"Targeted lookup completed for {len(needed)} registries; {len(audit_logs)} identities reviewed. No records were written.")
+                st.success(f"Shared canonical registry audit completed for {len(needed)} registries; {len(audit_logs)} identities reviewed. No records were written.")
 
     if st.session_state["audit_logs"]:
         st.markdown("##### Preflight Identity Audit Results")
@@ -719,7 +763,7 @@ if st.session_state.get("audit_logs"):
                "from canonical identity decisions and never auto-published.")
     pending_research = [l for l in st.session_state["audit_logs"]
                         if l["Status"] in {"UNVERIFIED — RESEARCH", "AMBIGUOUS NAME",
-                                            "AMBIGUOUS IMO", "POSSIBLE MATCH — REVIEW"}]
+                                            "AMBIGUOUS IMO", "POSSIBLE MATCH — REVIEW", "CROSS-TYPE — REVIEW"}]
     st.write(f"Research queue: {len(pending_research):,} unique incoming identity decisions")
     st.download_button("Export full research queue (CSV)",
         pd.DataFrame(pending_research).to_csv(index=False).encode("utf-8"),
