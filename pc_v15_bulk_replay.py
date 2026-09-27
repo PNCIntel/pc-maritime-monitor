@@ -15,7 +15,7 @@ import pandas as pd
 
 ID_TABLES={'pc_entities':'entity_id','pc_assets':'asset_id','pc_mobile_assets':'mobile_asset_id','pc_events':'event_id'}
 NAME_COL={'pc_entities':'name','pc_assets':'name','pc_mobile_assets':'name','pc_events':'title'}
-PUBLISHER_VERSION='1.5.4-model-guard'
+PUBLISHER_VERSION='1.5.5-alias-type-date'
 
 
 def _norm(x):
@@ -66,13 +66,68 @@ def _canon_registry(sb, needed):
     return registry
 
 
+# Alias discovery is confined to unambiguous names actually present in the shared
+# canonical registry. These are match candidates, never evidence of ownership.
+_LEGAL_SUFFIXES = (' sa de cv', ' s a de c v', ' s a', ' sa', ' llc', ' ltd',
+                   ' limited', ' inc', ' plc', ' corporation')
+
+def _identity_aliases(value):
+    raw=str(value or '').strip()
+    names={_norm(raw)}
+    # Official canonical names sometimes carry a second recognized identity
+    # following a slash, e.g. City of LA Harbor Department / Port of Los Angeles.
+    for part in re.split(r'\s+/\s+|\s+\|\s+', raw):
+        if part.strip(): names.add(_norm(part))
+    for name in list(names):
+        # Legal endings can be removed for candidate discovery only. The full
+        # registered name remains intact in the canonical record.
+        for suffix in _LEGAL_SUFFIXES:
+            if name.endswith(suffix) and len(name)>len(suffix)+4:
+                names.add(name[:-len(suffix)].strip())
+    return {v for v in names if v}
+
+
+def _type_family(table,value):
+    val=_norm(value)
+    if not val: return ''
+    words=set(val.split())
+    if table=='pc_entities':
+        if words & {'government','ministry','department','authority','regulator','agency','state'}:
+            return 'public_body'
+        if words & {'company','corporation','operator','business','enterprise','logistics','shipping','group','subsidiary','carrier','consultancy'}:
+            return 'business'
+        if words & {'association','union','organisation','organization','network'}:
+            return 'association'
+        if words & {'person','individual'}: return 'person'
+        if words & {'port','terminal','zone','airport','harbour','harbor'}: return 'physical_not_entity'
+    if table=='pc_assets':
+        if words & {'port','harbour','harbor','seaport'}: return 'port'
+        if words & {'terminal','berth','quay'}: return 'terminal'
+        if words & {'zone','sez','industrial','freezone'}: return 'zone'
+        if words & {'airport','airfield'}: return 'airport'
+        if words & {'rail','railway','station'}: return 'rail'
+        if words & {'plant','factory','refinery'}: return 'plant'
+    return ''  # Unknown subtype is not evidence of a conflict.
+
+
+def _type_conflict(table,source,canonical):
+    a=_type_family(table,source); b=_type_family(table,canonical)
+    if not (a and b): return False
+    if table=='pc_assets' and {a,b}<={'port','terminal'}:
+        # A port and its terminal can have identical names; hold rather than
+        # conflating them, even when they sit inside one port complex.
+        return a != b
+    return a != b
+
 def _identity_indexes(registry):
     ix={}
     for table,records in registry.items():
         by_name=defaultdict(list);by_imo=defaultdict(list);by_token=defaultdict(list)
         for item in records:
             name=_norm(item.get(NAME_COL[table]))
-            if name: by_name[name].append(item)
+            if name:
+                for alias in _identity_aliases(item.get(NAME_COL[table])):
+                    by_name[alias].append(item)
             if table=='pc_mobile_assets' and item.get('imo'):
                 by_imo[str(item['imo']).strip()].append(item)
             for token in _tokens(name): by_token[token].append(item)
@@ -88,7 +143,7 @@ def _identity_candidates(table,name,payload,index,registry):
         matched=ix['imo'].get(imo,[])
         if matched: return matched,[],[], 'verified-IMO'
     key=_norm(name)
-    exact=ix['name'].get(key,[])
+    exact=list({str(v[ID_TABLES[table]]):v for alias in _identity_aliases(name) for v in ix['name'].get(alias,[])}.values())
     if exact: return exact,[],[], 'normalized-exact-name'
     # Restrict fuzzy comparisons to indexed tokens, but search the complete registry.
     pool={}
@@ -111,7 +166,7 @@ def _identity_candidates(table,name,payload,index,registry):
     # Cross-table exact names are a classification problem, NOT permission to
     # relabel the existing port as a government authority or vice versa.
     other='pc_assets' if table=='pc_entities' else 'pc_entities' if table=='pc_assets' else None
-    cross=index.get(other,{}).get('name',{}).get(key,[]) if other else []
+    cross=list({str(v[ID_TABLES[other]]):v for alias in _identity_aliases(name) for v in index.get(other,{}).get('name',{}).get(alias,[])}.values()) if other else []
     # A terminal may be registered as an asset under its full name while an
     # extraction proposes an abbreviated *company*. Do not create that company
     # before checking the cross-domain candidate. Never auto-merge domains.
@@ -196,10 +251,16 @@ def _validation_issue(row):
                     found = walk(v, f'{path}[{i}]')
                     if found: return found
         return None
-    issue = walk(p)
+    # Only SQL DATE columns demand day precision. JSON metadata is allowed to
+    # retain source precision (e.g. seizure_date='2026-04').
+    issue = walk({k:v for k,v in p.items() if k != 'metadata'})
     if issue: return issue
 
     if table == 'pc_entities':
+        # An extractor calling a port/terminal/zone a company does not make it one.
+        # Only hold when its own declared type clearly indicates infrastructure.
+        if _type_family(table,p.get('entity_type'))=='physical_not_entity':
+            return 'record-type review: physical infrastructure supplied as an entity'
         # Stories, strategies and industry groupings are not legal entities.
         if any(term in low for term in ('development strategy', 'advisory 20',
                   'rail freight sector', 'terminal operator 20', 'expansion project',
@@ -279,10 +340,18 @@ def _plan(sb,job,staged):
             tcol='entity_type' if table=='pc_entities' else 'asset_type' if table=='pc_assets' else None
             ptype=_norm(p.get(tcol)) if tcol else ''
             htype=_norm(hit.get(tcol)) if tcol else ''
-            if ptype and htype and ptype!=htype and not (_tokens(ptype)&_tokens(htype)):
-                exceptions.append({'Table':table,'Name':name,'Reason':'canonical name matches, type disagrees',
+            if _type_conflict(table,ptype,htype):
+                exceptions.append({'Table':table,'Name':name,'Reason':'canonical name matches, verified record types differ',
                                    'Candidates':str(hit.get(pk))})
                 continue
+            # Divergent geographic identities with the same short name must
+            # not be merged. Missing country is not a conflict by itself.
+            country_field='hq_country' if table=='pc_entities' else 'country' if table=='pc_assets' else None
+            if country_field and p.get(country_field) and hit.get(country_field):
+                if _norm(p[country_field])!=_norm(hit[country_field]):
+                    exceptions.append({'Table':table,'Name':name,'Reason':'canonical name matches but country differs',
+                                       'Candidates':str(hit.get(pk))})
+                    continue
             for r in rows:ready.append((r,'match_existing',cid))
             continue
         if fuzzy:
@@ -430,6 +499,7 @@ def render_bulk_replay(sb,active_package):
     if st.button('3 · Analyse entire staged batch for automatic publication'):
         st.session_state.pop('v15_plan',None)
         st.session_state.pop('v15_result',None)
+        st.session_state.pop('v15_confirm',None)
         try:
             ready,followers,exceptions,pub=_plan(sb,job,staged)
             st.session_state['v15_plan']={'job':job,'ready':ready,'followers':followers,'exceptions':exceptions, 'digest':_plan_digest(ready,followers,exceptions)}
@@ -441,7 +511,7 @@ def render_bulk_replay(sb,active_package):
     if exceptions:
         with st.expander('Exceptions requiring analyst review',expanded=False):st.dataframe(pd.DataFrame(exceptions),hide_index=True,use_container_width=True)
     with st.expander('Eligible sample',expanded=False):
-        st.dataframe(pd.DataFrame([{'Table':r['target_table'],'Name':r['natural_key'],'Decision':d,'Canonical':c or 'NEW'} for r,d,c in ready[:200]]),hide_index=True,use_container_width=True)
+        st.dataframe(pd.DataFrame([{'Table':r['target_table'],'Name':(r.get('payload') or {}).get(NAME_COL.get(r['target_table'],'name')) or r['natural_key'],'Decision':d,'Canonical':c or 'NEW'} for r,d,c in ready[:200]]),hide_index=True,use_container_width=True)
     confirm=st.checkbox('I approve automatic publication of source-backed, unambiguous records; hold all exceptions.',key='v15_confirm')
     if st.button('4 · BACKUP + PUBLISH ELIGIBLE BATCH + SYNC GRAPH',type='primary',disabled=not confirm or not ready):
         try:

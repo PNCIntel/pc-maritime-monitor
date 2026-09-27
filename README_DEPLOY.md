@@ -1,25 +1,30 @@
-# P&C v1.5.4 — use one shared canonical registry; guard record types
+# P&C v1.5.5 — one-file canonical matching correction
 
-This is an incremental safety fix for the existing 85-record staged job, **not** a new ingest, database migration or a claim that the remaining exceptions are automatically researched and published.
+## Why this file
+
+The uploaded current `pc_v15_bulk_replay.py` keeps the extraction and staging job, but its publisher still compares strict `entity_type` / `asset_type` strings and lacks split-name and legal-suffix alias discovery. It also incorrectly treats `YYYY-MM` dates in JSON metadata as SQL DATE errors. This replacement corrects those three defects without changing source data or database schema.
 
 ## Deploy
 
-1. In Power Admin repo ROOT, replace `pc-power-admin.py` with the attached file.
-2. In the SAME repo ROOT, replace `pc_v15_bulk_replay.py` with the attached file (replaces v1.5.3).
-3. Commit and redeploy. No SQL, Trade/Intelligence code change or re-extraction.
-4. Open Reload & republish. At the top verify `Publisher build: 1.5.4-model-guard` before doing anything else.
-5. Enter your existing job ID `cf0aead2-d558-4ca3-91d7-42b70cc5e8fe` and click **3 · Analyse entire staged batch**. Download the fresh eligible and exception exports. DO NOT use an earlier saved approval or previous export.
+1. Replace the root `pc_v15_bulk_replay.py` in the EXISTING Power Admin repository with the file under this package. Do not replace `pc-power-admin.py` or any Trade/Intelligence file.
+2. Redeploy and check the Reload & republish page displays `Publisher build: 1.5.5-alias-type-date`.
+3. Use the EXISTING staged job `cf0aead2-d558-4ca3-91d7-42b70cc5e8fe`. Do not re-extract, requeue, or reset staging.
+4. Click `3 · Analyse entire staged batch for automatic publication`. Inspect the fresh eligible and exception exports. Do not approve old results.
+5. **Do not publish the complete job until the outstanding misclassified records have been re-extracted/corrected and the source-backed event dependencies verified.** This patch fixes matching—not automatic research or classification repair.
 
-## What is fixed
+## What changes
 
-- Universal Intake's `Run Identity Match` previously looked up ONLY incoming exact SQL names, so it could not discover a fuzzy candidate not already fetched. It now uses the same complete paginated canonical registry + cross-domain candidate search as the v1.5 bulk publisher. The shared database is read-only during audit.
-- A `pc_entities` extraction with a project/advisory/strategy title, and `pc_assets` extraction with equipment purchase, expansion or vessel title, is HELD for type correction instead of inserted into the wrong table. The source PDF is NOT reloaded.
-- Short legal acronyms that the registry has not uniquely identified are HELD for authoritative alias research. A uniquely verified existing IMO still matches first.
-- Cross-domain fuzzy candidate checks hold a potential company name that actually resembles an existing terminal/asset; they do NOT automatically merge different kinds of record.
-- The deployed publisher version is shown on screen so we can tell whether Streamlit is serving the old or new file.
+- Canonical aliases embedded in names (`X / Y`) are considered for exact identity discovery; known legal endings (S.A., Ltd, LLC and similar) are stripped for candidate discovery. Multiple identities still remain exceptions.
+- `government` versus `government_agency`, `company` versus `ports_logistics_group`, and `proposed_port` versus `port` no longer generate false "type disagrees" exceptions when there is only one matching canonical identity. Port versus terminal remains distinct.
+- Different country evidence remains an explicit hold; no country conflict is silently merged. `Port of Los Angeles` is only mapped to the harbour authority when the incoming type actually describes a compatible authority; an infrastructure port remains separate.
+- Month-only dates in JSON metadata (e.g. `metadata.seizure_date: 2026-04`) preserve their source precision and no longer block the whole mobile-asset record. Incomplete top-level SQL dates such as `start_date: 2024-06` remain on hold—no invented day.
+- Eligible preview now shows the actual extracted name/title rather than an internal slug; old approval checkbox is cleared on re-analysis.
 
-## Honest limitations
+## Remaining work, explicitly not claimed as fixed
 
-- Classification defects are prevented from corrupting the shared database, but misclassified staging rows still need **automatic research and correction** before they can publish as proper developments or mobile assets. This hotfix does not mutate old staged records or write invented relationships.
-- Existing fuzzy match decisions are recommendations, not legal proof. Fully automated research and evidence-backed restaging of the held records is the next step; the current stage export alone lacks enough fields and source texts to implement and live-test that safely.
-- Tests are mocked and local. Production Supabase and LIVE Trade have **not** been tested here.
+- A record named `HPC ... advisory 2026` must be rewritten as a sourced **development linked to existing HPC**, not approved as a new company. The current stage payload cannot safely be rewritten by name alone.
+- Source-linked repairs of vessel records (Vindnes/Vestnes) and crane-fleet deliveries still require correct target schema and source-specific facts from the existing staged payload/source material.
+- Some newsletter records have **no original article URL** in their staging rows. They must be researched from the PDF's links or primary documents before public publication.
+- No production Supabase mutation, publication, graph sync, or Trade UI verification was performed in this environment.
+
+`test_local.py` runs 13 offline regression assertions and does not connect to the database.
