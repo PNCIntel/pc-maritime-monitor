@@ -15,7 +15,7 @@ import pandas as pd
 
 ID_TABLES={'pc_entities':'entity_id','pc_assets':'asset_id','pc_mobile_assets':'mobile_asset_id','pc_events':'event_id'}
 NAME_COL={'pc_entities':'name','pc_assets':'name','pc_mobile_assets':'name','pc_events':'title'}
-PUBLISHER_VERSION='1.6-ai-research-population'
+PUBLISHER_VERSION='1.6.1-saved-research-recovery'
 
 
 def _norm(x):
@@ -589,6 +589,17 @@ def render_bulk_replay(sb,active_package):
                 st.success(f'Requeued {n} stale tasks; active research not interrupted.')
                 st.rerun()
             except Exception as exc:st.error('Stale task recovery failed: '+str(exc))
+    if rs['held'] and st.button('Recover corroborated NO-CHANGE research (no API charges)',key='v161_held_recover'):
+        try:
+            from pc_v16_research import recover_unchanged_holds
+            result=recover_unchanged_holds(sb,job)
+            st.session_state['v161_recovery_report']=result
+            st.session_state.pop('v15_plan',None)
+            st.rerun()
+        except Exception as exc:st.error('Saved research recovery stopped: '+str(exc))
+    if st.session_state.get('v161_recovery_report'):
+        st.info('Saved research recovery: '+str(st.session_state['v161_recovery_report'])+
+                '. Released rows still go through normal canonical matching; unresolved identities remain held.')
     with st.expander('Research holds and errors'):
         held=(sb.table('pc_v16_research_tasks').select('staged_record_id,status,error_text')
                  .eq('ingestion_job_id',job).in_('status',['held','failed']).limit(250).execute().data or [])

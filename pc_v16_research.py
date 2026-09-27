@@ -198,6 +198,15 @@ def validate_proposal(original,research):
     if table not in TABLES or not isinstance(p,dict):return None,'Unknown target table or missing payload'
     pk,name_col=TABLES[table]
     name=str(p.get(name_col) or '').strip()
+    # A correctly classified original is not an empty record merely because
+    # the AI response omitted its name. Recover only from the original SAME-
+    # TABLE source row. Cross-table changes must name their new subject.
+    if not name and table==original.get('target_table'):
+        original_payload=original.get('payload') or {}
+        prior=original_payload.get(name_col) or original.get('natural_key')
+        if isinstance(prior,str) and prior.strip():
+            name=prior.strip()
+            p=dict(p);p[name_col]=name
     if not name or len(name)>350:return None,'No valid object/event name'
     allowed=set(research.get('allowed_evidence') or [])
     sources=research.get('sources') or []
@@ -220,8 +229,13 @@ def validate_proposal(original,research):
         payload[pk]='REPAIR_'+hashlib.sha256(str(original['staged_record_id']).encode()).hexdigest()[:20].upper()
     if table=='pc_events':
         date=payload.get('start_date')
+        if isinstance(date,str) and re.fullmatch(r'\d{4}-\d{2}',date):
+            # SQL DATE cannot represent month precision. Keep that precision in
+            # metadata and leave the canonical start_date genuinely unknown.
+            meta['date_precision']='month';meta['year_month']=date
+            payload['start_date']=None;payload['metadata']=meta;date=None
         if date and (not isinstance(date,str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}',date)):
-            return None,'Event date is incomplete: requires researched actual day or null'
+            return None,'Invalid event date; only verified YYYY-MM-DD or month precision accepted'
         if date:
             try:datetime.strptime(date,'%Y-%m-%d')
             except ValueError:return None,'Invalid event day'
@@ -398,6 +412,59 @@ def process_research_batch(sb,job,api_key,registry,batch_size=5,model='gpt-4.1-m
                    'updated_at':datetime.now(timezone.utc).isoformat()}).eq('task_id',tid).execute()
                 counts['failed']+=1
     return counts
+
+
+def recover_unchanged_holds(sb,job,limit=500):
+    """Recover prior *no change needed* findings with zero additional AI calls.
+
+    This does not declare an identity match, approve a political/regulatory
+    claim, infer a source, or modify canonical/staged data. It only releases
+    the task to the EXISTING canonical matcher when a valid original source,
+    correct original classification and researched corroboration are present.
+    Anything uncertain stays held with its original error.
+    """
+    from pc_v15_bulk_replay import _validation_issue
+    tasks=(sb.table('pc_v16_research_tasks').select('*')
+           .eq('ingestion_job_id',job).eq('status','held').limit(limit).execute().data or [])
+    report={'released':0,'retained':0,'reasons':[]}
+    for task in tasks:
+        msg=str(task.get('error_text') or task.get('result',{}).get('reason') or '').casefold()
+        result=task.get('result') or {}
+        # 'No valid name', incomplete date and insufficient evidence are NOT
+        # approvals. Match the explicit prior research reason, not a keyword.
+        confirmed_phrases=('correctly classified','classification of the port',
+            'correctly classifies','original record subject is',
+            'original record is a pc_entities','no change to target_table',
+            'existing pc_entities record')
+        negative=('insufficient','missing','not established','no valid','incorrectly',
+            'incomplete','misclassified','ambiguous','contradictory','cannot verify')
+        if not any(p in msg for p in confirmed_phrases) or any(p in msg for p in negative):
+            report['retained']+=1;continue
+        rows=(sb.table('pc_staged_records').select('*')
+              .eq('staged_record_id',task['staged_record_id']).limit(1).execute().data or [])
+        if len(rows)!=1:
+            report['retained']+=1;continue
+        row=rows[0]
+        urls=_source_urls(row)
+        if not urls or _validation_issue(row):
+            report['retained']+=1;continue
+        # Prior source-based web research is required, not the bare model text.
+        evidence=result.get('allowed_evidence') or result.get('web_citations') or []
+        if not any(isinstance(u,str) and _public_url(u) for u in evidence):
+            report['retained']+=1;continue
+        published=(sb.table('pc_v10_publication_items').select('staged_record_id')
+              .eq('staged_record_id',row['staged_record_id']).limit(1).execute().data or [])
+        if published:
+            report['retained']+=1;continue
+        recovery={**result,'confirmed_unchanged':True,
+                  'recovery_method':'source-backed original classification retained; canonical match still required'}
+        changed=(sb.table('pc_v16_research_tasks').update({
+            'status':'applied','result':recovery,'error_text':None,
+            'updated_at':datetime.now(timezone.utc).isoformat()})
+            .eq('task_id',task['task_id']).eq('status','held').execute().data or [])
+        if changed:report['released']+=1
+        else:report['retained']+=1
+    return report
 
 
 def retry_failed(sb,job):
