@@ -6,7 +6,7 @@ eligible canonical objects -> sync event graph -> sync agreements. Ambiguities a
 held as exceptions; no manual DB IDs are required.
 """
 from __future__ import annotations
-import hashlib, json, uuid
+import hashlib, json, uuid, re
 from datetime import datetime, timezone
 from collections import defaultdict, Counter
 import streamlit as st
@@ -81,6 +81,58 @@ def _canon_hits(sb,table,rows):
             by.setdefault(('name',_norm(x.get(NAME_COL[table]))),[]).append(x)
     return by
 
+def _validation_issue(row):
+    """Conservative pre-publication guard; hold, never silently alter, uncertain data."""
+    table = row.get('target_table') or ''
+    p = row.get('payload') or {}
+    name = str(p.get(NAME_COL.get(table, 'name')) or row.get('natural_key') or '').strip()
+    low = _norm(name)
+
+    # The canonical SQL DATE type cannot accept YYYY-MM. A missing day is
+    # missing information, not permission to invent the first of the month.
+    def walk(value, path='payload'):
+        if isinstance(value, dict):
+            for k, v in value.items():
+                key = str(k).lower()
+                if isinstance(v, str) and (key.endswith('_date') or key in ('date', 'start', 'end')):
+                    if re.fullmatch(r'\d{4}-\d{2}', v.strip()):
+                        return f'incomplete date {path}.{k}={v!r}; source day required'
+                    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', v.strip()):
+                        try: datetime.strptime(v.strip(), '%Y-%m-%d')
+                        except ValueError: return f'invalid date {path}.{k}={v!r}'
+                if isinstance(v, (dict, list)):
+                    found = walk(v, f'{path}.{k}')
+                    if found: return found
+        elif isinstance(value, list):
+            for i, v in enumerate(value):
+                if isinstance(v, (dict, list)):
+                    found = walk(v, f'{path}[{i}]')
+                    if found: return found
+        return None
+    issue = walk(p)
+    if issue: return issue
+
+    if table == 'pc_entities':
+        # Stories, strategies and industry groupings are not legal entities.
+        if any(term in low for term in ('development strategy', 'advisory 20',
+                  'rail freight sector', 'terminal operator 20', 'expansion project',
+                  'investment announcement')):
+            return 'record-type review: development/topic supplied as an entity'
+    if table == 'pc_assets':
+        # Equipment purchases are developments; individual cranes need
+        # equipment identities before being registered as standalone assets.
+        if (('cranes' in low or 'crane fleet' in low) and
+                any(term in low for term in ('2026','sts and rtg','delivery','bolsters'))):
+            return 'record-type review: equipment delivery supplied as an asset'
+        if any(term in low for term in ('terminal redevelopment','terminal overhaul')):
+            return 'record-type review: existing terminal versus redevelopment project'
+    if table == 'pc_mobile_assets':
+        imo = str(p.get('imo') or '').strip()
+        if imo and (not re.fullmatch(r'\d{7}', imo)):
+            return 'invalid IMO; source-backed identity review required'
+    return None
+
+
 def _plan(sb,job,staged):
     candidates=[r for r in staged if r['target_table'] in ID_TABLES]
     content=_content_keys(sb,job,[r['source_record_key'] for r in candidates])
@@ -102,6 +154,13 @@ def _plan(sb,job,staged):
     for g,rows in groups.items():
         leader=rows[0]; table=leader['target_table']; p=leader.get('payload') or {}
         name=str(p.get(NAME_COL[table]) or leader['natural_key']).strip(); source=bool(_urls(leader))
+        issues=[(r,_validation_issue(r)) for r in rows]
+        if any(issue for _,issue in issues):
+            for row,issue in issues:
+                exceptions.append({'Table':table,'Name':str((row.get('payload') or {}).get(NAME_COL[table]) or row['natural_key']),
+                                   'Reason':issue or 'duplicate group requires correction before publication',
+                                   'Staged record ID':row['staged_record_id']})
+            continue
         matched=[]
         if table=='pc_mobile_assets' and p.get('imo'):
             matched=hits.get(table,{}).get(('imo',str(p.get('imo')).strip()),[])
@@ -147,23 +206,42 @@ def _publish_chunk(sb,job,items,reviewer):
     return [{'backup':backup,'result':result}]
 
 def _publish_ready(sb,job,ready,followers,reviewer):
-    results=[]
-    # First publish all matches and NEW leaders, max 40 to leave RPC headroom.
-    for start in range(0,len(ready),40): results += _publish_chunk(sb,job,ready[start:start+40],reviewer)
-    # Map new leaders -> canonical IDs, then publish package-duplicate followers as matches.
-    leader_ids=[leader for _,leader in followers]
+    """Publish independently; one malformed record must not strand the batch.
+
+    Every successful unit gets its own immutable backup. If a group fails,
+    split it until the failing stage record can be reported by name.
+    """
+    results=[]; failures=[]
+    def publish_isolated(items):
+        if not items:return
+        try:
+            results.extend(_publish_chunk(sb,job,items,reviewer))
+        except Exception as exc:
+            if len(items)>1:
+                mid=len(items)//2
+                publish_isolated(items[:mid]);publish_isolated(items[mid:])
+            else:
+                row=items[0][0]
+                failures.append({'Table':row['target_table'],'Name':row['natural_key'],
+                   'Staged record ID':row['staged_record_id'],'Error':str(exc)[:500]})
+    # Ensure canonical identity tables are handled before developments.
+    priority={'pc_entities':0,'pc_assets':1,'pc_mobile_assets':2,'pc_events':3}
+    ordered=sorted(ready,key=lambda item:priority.get(item[0]['target_table'],4))
+    for start in range(0,len(ordered),12):publish_isolated(ordered[start:start+12])
+    leader_ids=list(dict.fromkeys(leader for _,leader in followers))
     leader_map={}
-    if leader_ids:
-        for start in range(0,len(leader_ids),100):
-            rows=(sb.table('pc_v10_publication_items').select('staged_record_id,canonical_id')
-                  .in_('staged_record_id',leader_ids[start:start+100]).execute().data or [])
-            leader_map.update({r['staged_record_id']:r['canonical_id'] for r in rows})
+    for start in range(0,len(leader_ids),100):
+        rows=(sb.table('pc_v10_publication_items').select('staged_record_id,canonical_id')
+              .in_('staged_record_id',leader_ids[start:start+100]).execute().data or [])
+        leader_map.update({r['staged_record_id']:r['canonical_id'] for r in rows})
     follow_ready=[]
     for row,leader in followers:
         cid=leader_map.get(leader)
-        if cid: follow_ready.append((row,'match_existing',cid))
-    for start in range(0,len(follow_ready),40): results += _publish_chunk(sb,job,follow_ready[start:start+40],reviewer)
-    return results,len(follow_ready)
+        if cid:follow_ready.append((row,'match_existing',cid))
+        else:failures.append({'Table':row['target_table'],'Name':row['natural_key'],
+          'Staged record ID':row['staged_record_id'],'Error':'package leader not published'})
+    for start in range(0,len(follow_ready),12):publish_isolated(follow_ready[start:start+12])
+    return results,len(follow_ready),failures
 
 def _process_job_queue(sb,job,batch=50,max_batches=30):
     from pc_bulk_worker import process_batch, update_job_summary
@@ -177,7 +255,7 @@ def _process_job_queue(sb,job,batch=50,max_batches=30):
 
 def render_bulk_replay(sb,active_package):
     st.header('Reload & republish — end-to-end')
-    st.caption('Fresh source package → stage → canonical identities → developments → verified graph → agreements. Only genuine ambiguities are held for review.')
+    st.caption('Existing staged job → validate dates and record types → publish eligible canonical records → sync verified graph → agreements. Review unresolved identity and classification exceptions.')
     if active_package:
         st.success(f'{len(active_package):,} extracted records are in memory from Universal intake.')
     else:
@@ -216,6 +294,8 @@ def render_bulk_replay(sb,active_package):
     staged=_all_staged(sb,job)
     if not staged:st.warning('No staged rows found yet.');return
     if st.button('3 · Analyse entire staged batch for automatic publication'):
+        st.session_state.pop('v15_plan',None)
+        st.session_state.pop('v15_result',None)
         try:
             ready,followers,exceptions,pub=_plan(sb,job,staged)
             st.session_state['v15_plan']={'job':job,'ready':ready,'followers':followers,'exceptions':exceptions}
@@ -231,15 +311,16 @@ def render_bulk_replay(sb,active_package):
     confirm=st.checkbox('I approve automatic publication of source-backed, unambiguous records; hold all exceptions.',key='v15_confirm')
     if st.button('4 · BACKUP + PUBLISH ELIGIBLE BATCH + SYNC GRAPH',type='primary',disabled=not confirm):
         try:
-            results,follow_count=_publish_ready(sb,job,ready,followers,reviewer.strip() or 'DCM')
+            results,follow_count,failed_rows=_publish_ready(sb,job,ready,followers,reviewer.strip() or 'DCM')
             graph=sb.rpc('pc_v12_sync_published_links',{'p_job':job}).execute().data
             agreements={}
             try:
                 from pc_v14_agreement_sync import sync_published_job
                 agreements=sync_published_job(sb,job,limit=500,reviewer=reviewer.strip() or 'DCM')
             except Exception as exc: agreements={'warning':str(exc)}
-            st.session_state['v15_result']={'publication_batches':results,'duplicate_followers':follow_count,'graph':graph,'agreements':agreements,'exceptions':exceptions}
-            st.success('Fresh replay publication completed. Open the report below and then check LIVE Trade.')
+            st.session_state['v15_result']={'publication_batches':results,'duplicate_followers':follow_count,'graph':graph,'agreements':agreements,'exceptions':exceptions,'publication_failures':failed_rows}
+            if failed_rows: st.warning(f'Partial publication: {len(failed_rows)} records held after isolated publication errors. Review report, then reanalyse this same job.')
+            else: st.success('Eligible batch publication finished. Check the report and LIVE Trade.')
         except Exception as exc:st.error('Publication stopped safely: '+str(exc))
     result=st.session_state.get('v15_result')
     if result:

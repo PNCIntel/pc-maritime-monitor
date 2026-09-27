@@ -1,67 +1,18 @@
-# Power & Corridors Universal Loader v0.7 — Bulk staging + Trade preview
+# P&C v1.5.2 — publisher safety hotfix
 
-**Release type:** Additive, review-stage only. Nothing in this package automatically writes to canonical `pc_entities`, `pc_assets`, `pc_mobile_assets`, `pc_events`, event links, routes, corridors, or client-visible Trade tables. Run migrations against a staging Supabase project first and retain a backup of your current GitHub entrypoint.
+**Scope:** one replacement file: `pc_v15_bulk_replay.py`, for the existing deployed Power Admin v1.5/v1.5.1. No SQL, Trade app, intake, or database reset. Keep the existing 85-record job `cf0aead2-d558-4ca3-91d7-42b70cc5e8fe`.
 
-## What is included
+## What it corrects
+- Dates of the form `YYYY-MM` supplied to date fields are *held as exceptions*. No arbitrary day is invented. Full invalid calendar dates are held too.
+- Conservative record-type checks hold obvious misclassifications (e.g. HPC advisory or Port of Hastings development strategy as companies; Tecon Rio Grande crane delivery as a physical asset; Quebec terminal redevelopment as a duplicate port asset). These cases require corrected staged proposals and evidence, not manual direct database writes.
+- The publish operation processes companies/assets before events, uses small backed-up groups and isolates individual RPC failures; it reports individual failures instead of aborting the entire batch.
+- Existing canonical publication items are excluded on a fresh reanalysis, so a retry does not intentionally publish them again. Refresh the page and click `3 · Analyse entire staged batch` after each run to refresh the plan.
 
-- `pc-power-admin.py`: your existing v0.6.1 research workspace plus a fast Bulk Queue page and a Trade Preview, with the white design preserved.
-- `pc_v07_admin_panel.py`: import XLSX/CSV/JSON (including prior staging-proposal exports), inspect first 25 records, queue thousands without per-row AI, and browse job progress 50 at a time.
-- `pc_v07_core.py`: transport-safe source data, dedupe fingerprints, batched identity resolution, and extraction of source-provided analysis.
-- `pc_bulk_worker.py`: independent bounded persistent worker. Grouped Supabase lookups, 100-row staging inserts, retry-safe sidecars, and optional *bounded* research queues. **No canonical writes.**
-- `pc_trade_intelligence.py`: read-only Trade developments, companies, assets, corridors, draft assessments and linked references. Staged drafts are shown only with `admin=True`.
-- `pc_trade_preview.py`: a separate authenticated administrator-only Streamlit entrypoint for Trade preview. Point a temporary second Streamlit app at this file to explore your live canonical records and unpublished pipeline.
-- `01_SUPABASE_V07.sql`: additive queue, source observations, versioned draft event assessments, research cache/tasks, row-leasing RPCs and supporting indexes.
-- `.github/workflows/pc-bulk-worker.yml`: GitHub Actions job that runs at most one instance on a five-minute schedule, plus manual dispatch.
-- `pc_bulk_requirements.txt`: minimal worker dependency set.
-- `test_v07_local.py`: source-workbook and 229-row regression tests using an in-memory mock database (no credentials or production writes).
+## Deploy and resume
+1. In **Power Admin** GitHub repository, replace ONLY root `pc_v15_bulk_replay.py` with the file in this archive; commit/deploy and restart Power Admin. Do NOT replace `pc-power-admin.py` from an older ZIP; retain the v1.5.1 persistent-intake fix.
+2. Open **Reload & republish — end-to-end**; enter existing job ID `cf0aead2-d558-4ca3-91d7-42b70cc5e8fe`.
+3. Confirm `Queued 0 / Staged 85`. Click **3 · Analyse entire staged batch** again. It should show more exceptions and fewer eligible rows than the old 77/7 analysis; inspect them before approving.
+4. Only after approving the revised list, press **4 · BACKUP + PUBLISH ELIGIBLE BATCH + SYNC GRAPH** once. Review the publication report including `publication_failures`, then confirm actual LIVE Trade pages.
+5. Keep uncertain DP World duplicate, unverified source URLs and incorrect types in exceptions until research resolves them. No fabricated IMO, full dates, or relationship claims.
 
-## Deployment — do these in order
-
-1. **Backup your current Power Admin script and database schema.** Run `01_SUPABASE_V07.sql` in a test Supabase project, inspect all warnings, then run on the live project at a suitable maintenance time. The existing-table indexes can briefly lock writes during creation on large installations. The script makes no canonical data changes.
-2. Copy `pc-power-admin.py`, `pc_v07_admin_panel.py`, `pc_v07_core.py`, `pc_trade_intelligence.py` into the same GitHub directory as your existing Power Admin entrypoint. **Keep the actual entrypoint filename (`pc-power-admin.py`) unchanged.** Your `shared/pc_auth.py` is untouched.
-3. Copy `pc_bulk_worker.py` and `pc_bulk_requirements.txt` into your repository root and `.github/workflows/pc-bulk-worker.yml` to **exactly** that workflow path. The workflow assumes these two worker files are at repository root. If your project uses a subdirectory, update the workflow's `pip` and `python` paths.
-4. In **GitHub → Settings → Secrets and variables → Actions**, add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. Never commit secrets or send these values in chat. Optional: add `OPENAI_API_KEY`. Your Streamlit secrets remain where they are, separately, for the admin application.
-5. Deploy Power Admin from `pc-power-admin.py`. In the sidebar select **Bulk queue (fast)**, upload `PC_ANALYTICAL_MULTIMODAL_MASTER_28_EVENTS_20260925(3).xlsx` or select the current extracted package, and click **Queue complete package**. The job is stored in Supabase and survives closing the browser.
-6. Open **GitHub → Actions → P&C batch staging worker → Run workflow** once to verify it processes the first 100–800 rows. Scheduled runs then process pending rows, subject to GitHub Actions scheduling and quotas. Review the queue page for counts and errors.
-7. Choose **Trade preview** inside Power Admin. It reads existing canonical Trade records immediately. After the worker stages the batch, use the **Review pipeline** tab to inspect the 28-event workbook and its draft assessments, including what happened, why it matters, commercial implications, P&C assessment and monitoring indicators.
-8. Optionally deploy `pc_trade_preview.py` as a **second, admin-only Streamlit app** to show Trade records without opening Power Admin. To add the page to your actual Trade application, import `render_trade_intelligence` from `pc_trade_intelligence` and call it after that application's **own** successful authentication, with `admin=False` for client views. Configure proper tenant-aware access/RLS before exposing any client-facing route.
-
-## Optional persistent AI research
-
-Selecting “Queue targeted AI research” in Power Admin creates research tasks for unresolved companies, physical assets, vessels and corridors; it **does not** research every news item or every relationship. The GitHub workflow ships with `PC_ENABLE_AI_RESEARCH: '0'` so no unexpected API spend occurs. Set it to `'1'` and configure `OPENAI_API_KEY` **only when ready**. The worker processes at most 3 web-research tasks per scheduled run and caches findings as **unverified leads**. AI output never changes a canonical company ID or designation automatically.
-
-Existing URL/PDF/multi-source AI extraction remains under **Research & review (existing)**. Queue the resulting extracted package in **Bulk queue (fast)**; heavy work runs separately. An independently deployed GitHub Actions worker will not continue if the Actions workflow is disabled, secrets are missing, or your plan's Action quota is exhausted.
-
-## Trade-facing content rules
-
-- **Canonical**: the existing `pc_events`, companies, assets, links and corridors. The admin preview shows all canonical statuses; the client helper filters event `trade_visible = true` and verified asset records. Your Trade application's RLS and existing tenant permissions must still be enforced by its own backend.
-- **Draft**: `pc_staged_records`, `pc_v07_event_assessments`, `pc_v07_research_cache` and source observations. These are available **only** in admin review. A staged event does not become a client-visible event merely because the worker has completed.
-- **Analysis**: the loader preserves `ALL_EVENT_ANALYSIS` sheet fields by Event ID, or existing event `metadata.event_summary`, `metadata.why_it_matters`, `metadata.commercial_implications`, `metadata.assessment` and `metadata.monitoring_indicators`. It does not invent missing assessments when no supporting information is provided.
-- **Corridors**: proposals remain unresolved until constituent routes and connections are verified. No inferred impact from mere geographical proximity.
-
-## Scale / known remaining work
-
-The local mock regression processes 229 supplied review proposals, generates 60 draft event assessments and preserves all 70 event links, then confirms safe retries. A 10,000-row test covers **in-memory preparation only**, not network speed. The real processing rate depends on Supabase latency, plan quotas, payload sizes and GitHub Actions. The first production measurement should be **time per 1,000 queued, matched and staged rows**, plus initial Trade preview page load latency.
-
-**Not yet implemented:** automatic canonical publishing/transactional apply and rollback; source-backed event deduplication against all canonical events; final propagation of newly created IDs into graph links; automatic event-to-corridor impact ratings; AI analysis of articles lacking supplied analytical text. These remain explicit analyst review states and must not be presented as done.
-
-## Troubleshooting
-
-- `pc_v07_queue` missing: migration wasn't applied to the same Supabase project the app is using.
-- Queue never drains: check GitHub Actions is enabled, workflow on default branch, and both Actions secrets exist; run workflow manually to inspect errors.
-- `permission denied` in worker: use the server-side **service-role key** in GitHub Actions; never use anon key for this privileged job.
-- All identities appear NEW: match failures must raise rather than returning an empty registry; worker explicitly retries a failed lookup and never treats the failure as proof of novelty.
-- Staged draft assessments missing: worker must process the v0.7 queue; older v0.6 jobs are not retroactively backfilled by this release.
-
-## v0.7.1 usability restoration — multi-source Home page
-
-The v0.7 entrypoint's default tab previously changed to **Bulk queue (fast)**, making the earlier multi-URL/PDF/Word interface appear to have disappeared. v0.7.1 fixes that navigation regression:
-
-- Default sidebar page is now **Universal intake · URLs + files**, retaining the previous multi-URL (up to 20), multi-file (up to 20) and optional AI web research workflow, subject to API availability and user consent.
-- The extracted package can now be sent straight to the persistent v0.7 queue using **Queue all extracted records**, without running hundreds of interactive identity checks. It remains review-only.
-- **Bulk queue · thousands of records** accepts up to 30 structured Excel/CSV/JSON files in one job. If any file fails validation, nothing is queued from that multi-file selection. The same worker and Supabase migration are reused.
-- **Trade preview** and the prior Phase 2/3 interactive review remain available.
-
-To update from deployed v0.7, replace only `pc-power-admin.py` and `pc_v07_admin_panel.py` in your existing GitHub directory. No new migration, credentials or changes to the v0.7 worker are necessary. Keep `pc_v07_core.py`, `pc_bulk_worker.py` and the GitHub Actions workflow unchanged.
-
-Important: source-text extraction is still synchronous in the universal intake page (with a limited number of URLs/files per run). Structured large batches should go through the fast queue, where staging is performed by the background worker. AI web research remains optional, costly and dependent on the configured API; no automatic canonical writes are enabled.
+**Limitations:** This is a targeted safety fix, not full automated research or a complete remapping of every P&C entity class. Test first on a staging DB where available. Local tests verify syntax, date/type guards and isolation; *live Supabase publishing is untested*. The previous failed attempt may have committed earlier groups, so the reanalysis reads `pc_v10_publication_items` to exclude them.
