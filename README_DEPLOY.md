@@ -1,18 +1,16 @@
-# P&C v1.5.2 — publisher safety hotfix
+# v1.5.3 — Shared canonical reconciliation hotfix
 
-**Scope:** one replacement file: `pc_v15_bulk_replay.py`, for the existing deployed Power Admin v1.5/v1.5.1. No SQL, Trade app, intake, or database reset. Keep the existing 85-record job `cf0aead2-d558-4ca3-91d7-42b70cc5e8fe`.
+## Scope and deployment
+Replace **only** the root `pc_v15_bulk_replay.py` in the currently deployed Power Admin repository. Preserve your v1.5.1 persistent-intake changes, v1.5.2 validation safeguards, all current Trade and Intelligence applications, and all existing SQL migrations. **No SQL, new intake, queue job, database reset or manual canonical IDs.**
 
-## What it corrects
-- Dates of the form `YYYY-MM` supplied to date fields are *held as exceptions*. No arbitrary day is invented. Full invalid calendar dates are held too.
-- Conservative record-type checks hold obvious misclassifications (e.g. HPC advisory or Port of Hastings development strategy as companies; Tecon Rio Grande crane delivery as a physical asset; Quebec terminal redevelopment as a duplicate port asset). These cases require corrected staged proposals and evidence, not manual direct database writes.
-- The publish operation processes companies/assets before events, uses small backed-up groups and isolates individual RPC failures; it reports individual failures instead of aborting the entire batch.
-- Existing canonical publication items are excluded on a fresh reanalysis, so a retry does not intentionally publish them again. Refresh the page and click `3 · Analyse entire staged batch` after each run to refresh the plan.
+Use existing staged job: `cf0aead2-d558-4ca3-91d7-42b70cc5e8fe`. After deployment, open Reload & republish, enter the job ID, and click **3 · Analyse entire staged batch**. Export/check the new results. Do not reuse old 69-eligible/15-exception counts or approve a plan from an old running Streamlit session.
 
-## Deploy and resume
-1. In **Power Admin** GitHub repository, replace ONLY root `pc_v15_bulk_replay.py` with the file in this archive; commit/deploy and restart Power Admin. Do NOT replace `pc-power-admin.py` from an older ZIP; retain the v1.5.1 persistent-intake fix.
-2. Open **Reload & republish — end-to-end**; enter existing job ID `cf0aead2-d558-4ca3-91d7-42b70cc5e8fe`.
-3. Confirm `Queued 0 / Staged 85`. Click **3 · Analyse entire staged batch** again. It should show more exceptions and fewer eligible rows than the old 77/7 analysis; inspect them before approving.
-4. Only after approving the revised list, press **4 · BACKUP + PUBLISH ELIGIBLE BATCH + SYNC GRAPH** once. Review the publication report including `publication_failures`, then confirm actual LIVE Trade pages.
-5. Keep uncertain DP World duplicate, unverified source URLs and incorrect types in exceptions until research resolves them. No fabricated IMO, full dates, or relationship claims.
+## Specific fix to prior broken workflow
+The v1.5.2 publisher checked only exact, case-sensitive SQL `IN(name)` names from the incoming batch. A staged name like `port_of_los_angeles` could incorrectly become `create_new` even if `Port of Los Angeles` already existed in the common database.
 
-**Limitations:** This is a targeted safety fix, not full automated research or a complete remapping of every P&C entity class. Test first on a staging DB where available. Local tests verify syntax, date/type guards and isolation; *live Supabase publishing is untested*. The previous failed attempt may have committed earlier groups, so the reanalysis reads `pc_v10_publication_items` to exclude them.
+v1.5.3 pages through the **full canonical identity columns** in the shared `pc_entities`, `pc_assets`, `pc_mobile_assets` and `pc_events` tables (plus cross-table entity/asset checks). It normalizes punctuation, underscores, case and accents, reuses single same-type canonical matches, detects multiple matches, and blocks fuzzy candidates / same-name cross-type clashes until verified. An IMO match takes precedence for mobile assets. It rechecks the entire live plan immediately before approval-based publication and invalidates stale plans. It never automatically equates similarly named companies or ports. Validation holds month-only dates and obvious misclassified topic/equipment records, retaining v1.5.2 backup-first per-batch publication and partial-failure isolation.
+
+A failure/incomplete registry scan **aborts analysis** instead of treating unseen records as absent. Current hard safety cap is 25,000 identities **per canonical table**. If a table exceeds that, a dedicated server-side identity query is required before permitting any new records.
+
+## Limitations and success conditions
+This **does not rewrite old staging proposals or guarantee automatic web research for unresolved identities**; those remain review/research exceptions until verified. An exact normalized name is still only an identity candidate—conflicting type evidence is held. Names absent from this core registry may exist as unindexed alternate names in other model tables: fuzzy screening reduces risk but cannot guarantee zero duplicates. The source documents are already staged; there is no reason to re-upload or re-extract. Test the new counts and exported eligible list first; inspect LIVE Trade after any separately approved publish. All local tests use mocked Supabase data; live deployment and production publishing are untested.

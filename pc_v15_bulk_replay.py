@@ -6,7 +6,8 @@ eligible canonical objects -> sync event graph -> sync agreements. Ambiguities a
 held as exceptions; no manual DB IDs are required.
 """
 from __future__ import annotations
-import hashlib, json, uuid, re
+import hashlib, json, uuid, re, unicodedata
+from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from collections import defaultdict, Counter
 import streamlit as st
@@ -16,12 +17,107 @@ ID_TABLES={'pc_entities':'entity_id','pc_assets':'asset_id','pc_mobile_assets':'
 NAME_COL={'pc_entities':'name','pc_assets':'name','pc_mobile_assets':'name','pc_events':'title'}
 
 
-def _norm(x): return ' '.join(str(x or '').strip().casefold().split())
+def _norm(x):
+    """Normalize spelling/punctuation/underscores for candidate discovery, not legal-entity proof."""
+    x = unicodedata.normalize('NFKD', str(x or '').casefold())
+    x = ''.join(c for c in x if not unicodedata.combining(c))
+    return ' '.join(re.findall(r'[a-z0-9]+', x))
+
+# Never treat these generic words as useful evidence for an entity match.
+_STOP = {'port','terminal','group','company','limited','ltd','inc','international',
+         'corporation','authority','services','logistics','shipping','the','of','and',
+         'in','at','for','a','an','new','development','project','2026','2025'}
+
+def _tokens(x):
+    return {v for v in _norm(x).split() if len(v) >= 3 and v not in _STOP}
+
+
+def _canon_registry(sb, needed):
+    """Complete, paginated shared Trade/Intel canonical lookups. Fail closed if incomplete.
+
+    Old v1.5 checked SQL IN(name) only. That misses lower-case, punctuation,
+    snake-case, alternative spacing, and Port of Los Angeles in the other table.
+    This reads ONLY ID/name/type/IMO/date fields from canonical tables, not data bodies.
+    """
+    registry = {}
+    # Cross-domain search is mandatory when publishing either entities or assets.
+    if {'pc_entities','pc_assets'} & set(needed):
+        needed = set(needed) | {'pc_entities','pc_assets'}
+    for table in sorted(needed):
+        pk = ID_TABLES[table]
+        cols = pk + ',' + NAME_COL[table]
+        if table == 'pc_entities': cols += ',entity_type,hq_country'
+        elif table == 'pc_assets': cols += ',asset_type,country'
+        elif table == 'pc_mobile_assets': cols += ',imo,flag'
+        elif table == 'pc_events': cols += ',start_date'
+        records=[]
+        batch_size=500
+        max_records=25000
+        for start in range(0, max_records + batch_size, batch_size):
+            page=(sb.table(table).select(cols).order(pk)
+                  .range(start,start+batch_size-1).execute().data or [])
+            if start >= max_records and page:
+                raise RuntimeError(f'{table} exceeds {max_records} identity rows: '
+                                   'registry scan incomplete; publication blocked until server-side lookup is added')
+            records.extend(page)
+            if len(page) < batch_size: break
+        registry[table] = records
+    return registry
+
+
+def _identity_indexes(registry):
+    ix={}
+    for table,records in registry.items():
+        by_name=defaultdict(list);by_imo=defaultdict(list);by_token=defaultdict(list)
+        for item in records:
+            name=_norm(item.get(NAME_COL[table]))
+            if name: by_name[name].append(item)
+            if table=='pc_mobile_assets' and item.get('imo'):
+                by_imo[str(item['imo']).strip()].append(item)
+            for token in _tokens(name): by_token[token].append(item)
+        ix[table]={'name':by_name,'imo':by_imo,'token':by_token}
+    return ix
+
+
+def _identity_candidates(table,name,payload,index,registry):
+    """Return exact candidates, plausible fuzzy review leads and cross-domain clashes."""
+    ix=index[table]
+    if table=='pc_mobile_assets' and payload.get('imo'):
+        imo=str(payload['imo']).strip()
+        matched=ix['imo'].get(imo,[])
+        if matched: return matched,[],[], 'verified-IMO'
+    key=_norm(name)
+    exact=ix['name'].get(key,[])
+    if exact: return exact,[],[], 'normalized-exact-name'
+    # Restrict fuzzy comparisons to indexed tokens, but search the complete registry.
+    pool={}
+    for token in _tokens(name):
+        for r in ix['token'].get(token,[]):
+            pool[str(r[ID_TABLES[table]])]=r
+    fuzzy=[]
+    for item in pool.values():
+        other=_norm(item.get(NAME_COL[table]))
+        if not other:continue
+        shared=_tokens(key) & _tokens(other)
+        short=min(_tokens(key),_tokens(other),key=len) if (_tokens(key) and _tokens(other)) else set()
+        # E.g. Baltic Hub vs Baltic Hub Container Terminal or Los Angeles
+        # vs Los Angeles Harbor Department: incomplete names are review leads.
+        meaningful_subset=bool(len(shared)>=2 and short<=shared)
+        acronym=bool(len(_tokens(key))==1 and next(iter(_tokens(key))).isalpha()
+                     and len(next(iter(_tokens(key))))==3 and shared)
+        if SequenceMatcher(None,key,other).ratio() >= 0.77 or meaningful_subset or acronym:
+            fuzzy.append(item)
+    # Cross-table exact names are a classification problem, NOT permission to
+    # relabel the existing port as a government authority or vice versa.
+    other='pc_assets' if table=='pc_entities' else 'pc_entities' if table=='pc_assets' else None
+    cross=index.get(other,{}).get('name',{}).get(key,[]) if other else []
+    return [],fuzzy,cross, 'name-search'
+
 
 def _urls(row):
     p=row.get('payload') or {}; m=p.get('metadata') or {}; d=row.get('resolution_details') or {}
     vals=[]
-    for v in (d.get('source_urls'),m.get('research_sources'),m.get('source_urls'),m.get('source_url')):
+    for v in (d.get('source_urls'),m.get('research_sources'),m.get('source_urls'),m.get('source_url'),p.get('source_url')):
         for x in v if isinstance(v,list) else ([v] if v else []):
             u=x.get('url') if isinstance(x,dict) else x
             if isinstance(u,str) and u.startswith(('http://','https://')) and u not in vals: vals.append(u)
@@ -55,31 +151,6 @@ def _content_keys(sb,job,keys):
                   .eq('ingestion_job_id',job).in_('source_record_key',chunk).execute().data or [])
             found.update(r['source_record_key'] for r in rows)
     return found
-
-def _canon_hits(sb,table,rows):
-    """Unique exact-name/date or IMO matches. Never full-registry scans."""
-    by={}
-    if table=='pc_mobile_assets':
-        imos=sorted({str((r.get('payload') or {}).get('imo') or '').strip() for r in rows if str((r.get('payload') or {}).get('imo') or '').strip()})
-        for start in range(0,len(imos),25):
-            chunk=imos[start:start+25]
-            if chunk:
-                for x in (sb.table(table).select('mobile_asset_id,name,imo,flag').in_('imo',chunk).limit(500).execute().data or []):
-                    by.setdefault(('imo',str(x.get('imo') or '')),[]).append(x)
-    names=sorted({_norm((r.get('payload') or {}).get(NAME_COL[table]) or r.get('natural_key')) for r in rows})
-    raw_names=[str((r.get('payload') or {}).get(NAME_COL[table]) or r.get('natural_key') or '').strip() for r in rows]
-    for start in range(0,len(raw_names),25):
-        chunk=list(dict.fromkeys(raw_names[start:start+25]))
-        if not chunk: continue
-        cols=ID_TABLES[table]+','+NAME_COL[table]
-        if table=='pc_entities': cols+=',entity_type,hq_country'
-        elif table=='pc_assets': cols+=',asset_type,country'
-        elif table=='pc_mobile_assets': cols+=',imo,flag'
-        else: cols+=',start_date'
-        q=sb.table(table).select(cols).in_(NAME_COL[table],chunk).limit(1000)
-        for x in (q.execute().data or []):
-            by.setdefault(('name',_norm(x.get(NAME_COL[table]))),[]).append(x)
-    return by
 
 def _validation_issue(row):
     """Conservative pre-publication guard; hold, never silently alter, uncertain data."""
@@ -116,15 +187,15 @@ def _validation_issue(row):
         # Stories, strategies and industry groupings are not legal entities.
         if any(term in low for term in ('development strategy', 'advisory 20',
                   'rail freight sector', 'terminal operator 20', 'expansion project',
-                  'investment announcement')):
+                  'investment announcement','autonomous centre','robotic autonomous centre')):
             return 'record-type review: development/topic supplied as an entity'
     if table == 'pc_assets':
         # Equipment purchases are developments; individual cranes need
         # equipment identities before being registered as standalone assets.
-        if (('cranes' in low or 'crane fleet' in low) and
-                any(term in low for term in ('2026','sts and rtg','delivery','bolsters'))):
+        if (('cranes' in low or 'crane fleet' in low or 'rmg fleet' in low or 'rtgs' in low) and
+                any(term in low for term in ('2026','sts and rtg','delivery','bolsters','expansion'))):
             return 'record-type review: equipment delivery supplied as an asset'
-        if any(term in low for term in ('terminal redevelopment','terminal overhaul')):
+        if any(term in low for term in ('terminal redevelopment','terminal overhaul','container terminal redevelopment')):
             return 'record-type review: existing terminal versus redevelopment project'
     if table == 'pc_mobile_assets':
         imo = str(p.get('imo') or '').strip()
@@ -137,57 +208,85 @@ def _plan(sb,job,staged):
     candidates=[r for r in staged if r['target_table'] in ID_TABLES]
     content=_content_keys(sb,job,[r['source_record_key'] for r in candidates])
     pub=_published(sb,[r['staged_record_id'] for r in candidates])
-    hits={}
-    for table in ID_TABLES:
-        rows=[r for r in candidates if r['target_table']==table and r['staged_record_id'] not in pub]
-        if rows: hits[table]=_canon_hits(sb,table,rows)
-    # Group package duplicates so only one NEW leader is created; followers match leader after publication.
+    needed={r['target_table'] for r in candidates if r['staged_record_id'] not in pub}
+    registry=_canon_registry(sb,needed)
+    index=_identity_indexes(registry)
     groups=defaultdict(list)
     for r in candidates:
-        if r['staged_record_id'] in pub: continue
+        if r['staged_record_id'] in pub:continue
         p=r.get('payload') or {}; table=r['target_table']
-        if table=='pc_mobile_assets' and p.get('imo'): g=(table,'imo:'+str(p['imo']).strip())
-        elif table=='pc_events': g=(table,_norm(p.get('title') or r['natural_key'])+'|'+str(p.get('start_date') or ''))
+        if table=='pc_mobile_assets' and p.get('imo'):
+            g=(table,'imo:'+str(p['imo']).strip())
+        elif table=='pc_events':
+            g=(table,_norm(p.get('title') or r['natural_key'])+'|'+str(p.get('start_date') or ''))
         else: g=(table,_norm(p.get(NAME_COL[table]) or r['natural_key']))
         groups[g].append(r)
     ready=[]; followers=[]; exceptions=[]
     for g,rows in groups.items():
-        leader=rows[0]; table=leader['target_table']; p=leader.get('payload') or {}
-        name=str(p.get(NAME_COL[table]) or leader['natural_key']).strip(); source=bool(_urls(leader))
-        issues=[(r,_validation_issue(r)) for r in rows]
-        if any(issue for _,issue in issues):
-            for row,issue in issues:
+        leader=rows[0];table=leader['target_table'];p=leader.get('payload') or {}
+        name=str(p.get(NAME_COL[table]) or leader['natural_key']).strip()
+        bad=[(r,_validation_issue(r)) for r in rows]
+        if any(issue for _,issue in bad):
+            for row,issue in bad:
                 exceptions.append({'Table':table,'Name':str((row.get('payload') or {}).get(NAME_COL[table]) or row['natural_key']),
-                                   'Reason':issue or 'duplicate group requires correction before publication',
-                                   'Staged record ID':row['staged_record_id']})
+                  'Reason':issue or 'duplicate group requires correction', 'Staged record ID':row['staged_record_id']})
             continue
-        matched=[]
-        if table=='pc_mobile_assets' and p.get('imo'):
-            matched=hits.get(table,{}).get(('imo',str(p.get('imo')).strip()),[])
-        if not matched:
-            matched=hits.get(table,{}).get(('name',_norm(name)),[])
-            if table=='pc_events' and matched:
-                date=str(p.get('start_date') or '')
-                matched=[x for x in matched if str(x.get('start_date') or '')==date]
-        # de-dup canonical hits by ID
-        pk=ID_TABLES[table]; uniq={str(x.get(pk)):x for x in matched if x.get(pk)}; matched=list(uniq.values())
-        if len(matched)>1:
-            exceptions.append({'Table':table,'Name':name,'Reason':'multiple canonical matches','Candidates':', '.join(uniq)})
+        exact,fuzzy,cross,method=_identity_candidates(table,name,p,index,registry)
+        # Event titles are not identities by themselves; match on original event date too.
+        if table=='pc_events':
+            date=str(p.get('start_date') or '')
+            exact=[x for x in exact if str(x.get('start_date') or '')==date]
+            fuzzy=[]  # Similar events must not silently be merged.
+        pk=ID_TABLES[table]
+        unique={str(x[pk]):x for x in exact if x.get(pk)}
+        if len(unique)>1:
+            exceptions.append({'Table':table,'Name':name,'Reason':'multiple canonical candidates',
+                    'Candidates':', '.join(f'{x.get(NAME_COL[table])} [{x[pk]}]' for x in unique.values())})
             continue
-        if len(matched)==1:
-            cid=str(matched[0][pk])
-            for r in rows: ready.append((r,'match_existing',cid))
+        if len(unique)==1:
+            cid=next(iter(unique))
+            # Never silently bridge a unique name match when conflicting company type/region
+            # evidence is present. This is an exception, not an opportunity to create a duplicate.
+            hit=next(iter(unique.values()))
+            tcol='entity_type' if table=='pc_entities' else 'asset_type' if table=='pc_assets' else None
+            ptype=_norm(p.get(tcol)) if tcol else ''
+            htype=_norm(hit.get(tcol)) if tcol else ''
+            if ptype and htype and ptype!=htype and not (_tokens(ptype)&_tokens(htype)):
+                exceptions.append({'Table':table,'Name':name,'Reason':'canonical name matches, type disagrees',
+                                   'Candidates':str(hit.get(pk))})
+                continue
+            for r in rows:ready.append((r,'match_existing',cid))
             continue
-        # Safe new requires original evidence; events additionally need stored narrative.
-        if not source:
-            exceptions.append({'Table':table,'Name':name,'Reason':'no source URL'})
+        if fuzzy:
+            fuzzy=sorted(fuzzy,key=lambda item:SequenceMatcher(None,_norm(name),_norm(item.get(NAME_COL[table]))).ratio(),reverse=True)
+            exceptions.append({'Table':table,'Name':name,'Reason':'fuzzy canonical candidate — research before creating',
+              'Candidates':', '.join(f"{x.get(NAME_COL[table])} [{x[pk]}]" for x in fuzzy[:5])})
+            continue
+        if cross:
+            other='pc_assets' if table=='pc_entities' else 'pc_entities'
+            exceptions.append({'Table':table,'Name':name,'Reason':'same-name object exists in another canonical domain — classify before creating',
+              'Candidates':', '.join(f"{x.get(NAME_COL[other])} [{x[ID_TABLES[other]]}]" for x in cross[:5])})
+            continue
+        if not _urls(leader):
+            exceptions.append({'Table':table,'Name':name,'Reason':'no original source URL'})
             continue
         if table=='pc_events' and leader['source_record_key'] not in content:
             exceptions.append({'Table':table,'Name':name,'Reason':'no narrative/assessment sidecar'})
             continue
+        # An absence claim can only be made after the complete registry scan.
         ready.append((leader,'create_new',None))
-        for r in rows[1:]: followers.append((r,leader['staged_record_id']))
+        for follower in rows[1:]:followers.append((follower,leader['staged_record_id']))
     return ready,followers,exceptions,pub
+
+
+def _plan_digest(ready,followers,exceptions):
+    """Used to invalidate stale Streamlit approvals after canonical DB changes."""
+    snapshot={
+      'ready':[(r['staged_record_id'],d,c) for r,d,c in ready],
+      'followers':[(r['staged_record_id'],leader) for r,leader in followers],
+      'exceptions':[(x.get('Staged record ID'),x.get('Table'),x.get('Name'),x.get('Reason')) for x in exceptions],
+    }
+    return hashlib.sha256(json.dumps(snapshot,sort_keys=True,default=str).encode()).hexdigest()
 
 def _approval(row,decision,cid,reviewer,visible):
     return {'staged_record_id':row['staged_record_id'],'ingestion_job_id':row['ingestion_job_id'],
@@ -255,7 +354,7 @@ def _process_job_queue(sb,job,batch=50,max_batches=30):
 
 def render_bulk_replay(sb,active_package):
     st.header('Reload & republish — end-to-end')
-    st.caption('Existing staged job → validate dates and record types → publish eligible canonical records → sync verified graph → agreements. Review unresolved identity and classification exceptions.')
+    st.caption('Existing staged job → paginated shared canonical lookup + fuzzy identity hold → publish validated records → sync verified graph and agreements. No ID lookup or reload.')
     if active_package:
         st.success(f'{len(active_package):,} extracted records are in memory from Universal intake.')
     else:
@@ -298,7 +397,7 @@ def render_bulk_replay(sb,active_package):
         st.session_state.pop('v15_result',None)
         try:
             ready,followers,exceptions,pub=_plan(sb,job,staged)
-            st.session_state['v15_plan']={'job':job,'ready':ready,'followers':followers,'exceptions':exceptions}
+            st.session_state['v15_plan']={'job':job,'ready':ready,'followers':followers,'exceptions':exceptions, 'digest':_plan_digest(ready,followers,exceptions)}
         except Exception as exc:st.error('Batch analysis failed: '+str(exc))
     plan=st.session_state.get('v15_plan')
     if not plan or plan.get('job')!=job:return
@@ -309,9 +408,16 @@ def render_bulk_replay(sb,active_package):
     with st.expander('Eligible sample',expanded=False):
         st.dataframe(pd.DataFrame([{'Table':r['target_table'],'Name':r['natural_key'],'Decision':d,'Canonical':c or 'NEW'} for r,d,c in ready[:200]]),hide_index=True,use_container_width=True)
     confirm=st.checkbox('I approve automatic publication of source-backed, unambiguous records; hold all exceptions.',key='v15_confirm')
-    if st.button('4 · BACKUP + PUBLISH ELIGIBLE BATCH + SYNC GRAPH',type='primary',disabled=not confirm):
+    if st.button('4 · BACKUP + PUBLISH ELIGIBLE BATCH + SYNC GRAPH',type='primary',disabled=not confirm or not ready):
         try:
-            results,follow_count,failed_rows=_publish_ready(sb,job,ready,followers,reviewer.strip() or 'DCM')
+            # Another user/job may have created these records after the analysis page loaded.
+            # No cached approval may authorize creating a duplicate on a stale registry.
+            current,follow_now,except_now,pub_now=_plan(sb,job,_all_staged(sb,job))
+            if _plan_digest(current,follow_now,except_now)!=plan['digest']:
+                st.session_state.pop('v15_plan',None)
+                st.warning('Canonical records or batch eligibility changed. Re-run step 3 to review refreshed matches before publishing.')
+                return
+            results,follow_count,failed_rows=_publish_ready(sb,job,current,follow_now,reviewer.strip() or 'DCM')
             graph=sb.rpc('pc_v12_sync_published_links',{'p_job':job}).execute().data
             agreements={}
             try:
