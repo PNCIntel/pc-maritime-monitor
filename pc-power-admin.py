@@ -94,6 +94,37 @@ if "audit_logs" not in st.session_state:
 if "deduped_package" not in st.session_state:
     st.session_state["deduped_package"] = []
 
+# v1.5.1: Recovery works after logout, Streamlit reboot and worker replacement.
+# This is visible on every workspace, including Reload & republish.
+from pc_intake_persistence import persist_extraction, recent_extractions, recover_extraction
+try:
+    _saved_extractions = recent_extractions(sb)
+except Exception as exc:
+    _saved_extractions = []
+    st.sidebar.warning("Extraction recovery unavailable: run v1.5.1 snapshot SQL migration.")
+if _saved_extractions:
+    st.sidebar.markdown("#### Saved extractions")
+    _saved_index = st.sidebar.selectbox(
+        "Recover saved package",
+        range(len(_saved_extractions)),
+        format_func=lambda i: f"{_saved_extractions[i]['record_count']} records · {_saved_extractions[i]['label']}",
+        key="pc_restore_selection")
+    if st.sidebar.button("Restore selected extraction", key="pc_restore_snapshot"):
+        try:
+            _restored = recover_extraction(sb, _saved_extractions[_saved_index]['snapshot_id'])
+            st.session_state['active_package'] = _restored['records']
+            st.session_state['source_stats'] = _restored['source_stats']
+            st.session_state['source_errors'] = _restored['source_errors']
+            st.session_state['source_reference'] = _restored['source_reference']
+            st.session_state['audit_logs'] = []
+            st.session_state['deduped_package'] = []
+            st.session_state['v151_restored'] = len(_restored['records'])
+            st.rerun()
+        except Exception as exc:
+            st.sidebar.error(f"Recovery failed: {exc}")
+if st.session_state.pop('v151_restored', None):
+    st.sidebar.success(f"Recovered {len(st.session_state['active_package']):,} extracted records")
+
 # v0.7 fast pages run before the legacy research UI, preventing expensive
 # dataframe construction and old full-page rerenders for large imports.
 # Keep the familiar multi-URL and multi-file loader as the HOME page. The
@@ -580,6 +611,17 @@ with st.container():
                 st.session_state["deduped_package"] = []
                 st.session_state["match_confirmations"] = {}
                 st.session_state["gap_research"] = {}
+                # Persist BEFORE showing the success message. Never imply
+                # the package can survive a restart unless DB confirms.
+                try:
+                    _snapshot_id = persist_extraction(sb, extracted, stats, errors,
+                        st.session_state["source_reference"])
+                    st.session_state["v151_snapshot_id"] = _snapshot_id
+                    st.success(f"Saved extraction permanently ({len(extracted):,} records). "
+                               "Safe to log out or restart; use Saved extractions to restore.")
+                except Exception as _save_error:
+                    st.error("Extraction completed but could NOT be saved to Supabase. "
+                             f"Keep this session open and queue immediately. Error: {_save_error}")
                 st.success(f"Prepared {len(extracted)} record proposals from {len(inputs)} text sources "
                            f"and {len(structured)} structured records. No canonical records written.")
         except Exception as exc:
