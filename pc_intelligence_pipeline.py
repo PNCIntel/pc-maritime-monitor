@@ -30,7 +30,7 @@ def _candidate_unresolved(staged, ready, followers, pub):
 
 def render_intelligence_pipeline(sb, job, reviewer='DCM'):
     from pc_v15_bulk_replay import (_process_job_queue,_all_staged,_plan,_publish_ready,
-        _canon_registry,_identity_candidates)
+        _canon_registry,_identity_candidates,_identity_indexes)
     from pc_v16_research import (enqueue_research,status_counts,process_research_batch,
         recover_incomplete_research,recover_saved_repair_holds,recover_unchanged_holds,
         link_researched_events)
@@ -125,7 +125,11 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                 except Exception as exc:
                     agreements={'warning':str(exc)}
                 registry=_canon_registry(sb,{'pc_entities','pc_assets','pc_mobile_assets'})
-                researched_links=link_researched_events(sb,job,registry,_identity_candidates)
+                idx=_identity_indexes(registry)
+                researched_links=link_researched_events(
+                    sb,job,registry,
+                    lambda table,name,payload,reg:_identity_candidates(table,name,payload,idx,reg)
+                )
             # Re-plan after publication to report true remaining holds.
             staged2=_all_staged(sb,job)
             ready2,followers2,exceptions2,pub2=_plan(sb,job,staged2)
