@@ -646,21 +646,106 @@ def show_df(df, cols=None, height=420):
     st.dataframe(view,use_container_width=True,hide_index=True,height=height)
 
 
-def header(title, sub=None):
-    """Render a P&C page-level heading using the existing intelligence theme."""
-    st.markdown('<div class="pc-kicker">Power & Corridors Intelligence</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="pc-title">{title}</div>', unsafe_allow_html=True)
-    if sub:
-        st.markdown(f'<div class="pc-deck">{sub}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
-
-
 def section(kicker, title, copy=None):
     st.markdown(f'<div class="pc-section-kicker">{kicker}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="pc-section-title">{title}</div>', unsafe_allow_html=True)
     if copy:
         st.markdown(f'<div class="pc-section-copy">{copy}</div>', unsafe_allow_html=True)
 
+
+def _render_inline_linked_object_context(obj_type, oid, name, event_ctx, key_prefix):
+    """Inline linked-object context; avoids jumping to the global top drill-down."""
+    obj_type=str(obj_type or "").strip()
+    oid=str(oid or "").strip()
+    name=str(name or oid or "Linked object").strip()
+    if not oid:
+        return
+    if obj_type=="entity":
+        _render_inline_company_context(oid,name,key_prefix=key_prefix)
+        return
+
+    collections={
+        "asset":("assets","asset_id"),
+        "mobile_asset":("mobile_assets","mobile_asset_id"),
+        "route":("routes","route_id"),
+    }
+    col,id_key=collections.get(obj_type,(None,None))
+    rows=(event_ctx or {}).get(col) or [] if col else []
+    rec=next((r for r in rows if str(r.get(id_key) or "")==oid),{}) if id_key else {}
+    st.markdown(f"#### {html_lib.escape(name)}")
+    if rec:
+        fields=[]
+        for k,v in rec.items():
+            txt=_clean_trade_text(v)
+            if txt and k not in {"created_at","updated_at","metadata"}:
+                fields.append({"Field":pretty_enum(k),"Value":txt})
+        if fields:
+            display_df(pd.DataFrame(fields),260)
+    rels=(event_ctx or {}).get("relationships") or []
+    touching=[r for r in rels if str(r.get("source_id") or "")==oid or str(r.get("target_id") or "")==oid]
+    if touching:
+        with st.expander("Relationships",expanded=False):
+            display_df(_human_record_table(touching),240)
+    # The full shared drill-down remains available as an optional deeper layer,
+    # but the user no longer needs it for basic context.
+    pc_drilldown_button(
+        obj_type,oid,"Open full canonical record",
+        key=f"{key_prefix}_full_{obj_type}_{oid}",use_container_width=True
+    )
+
+def _render_connected_network_inline(ctx, eid, key_prefix="eventctx"):
+    """Compact connected graph with one inline-selected object at a time."""
+    groups=[
+        ("Companies / entities","entity",ctx.get("entities") or [],"entity_id","name"),
+        ("Infrastructure / assets","asset",ctx.get("assets") or [],"asset_id","name"),
+        ("Vessels / mobile assets","mobile_asset",ctx.get("mobile_assets") or [],"mobile_asset_id","name"),
+        ("Routes / corridors","route",ctx.get("routes") or [],"route_id","route_name"),
+    ]
+    selected_key=f"{key_prefix}_selected_object"
+    any_rows=False
+    for group_label,obj_type,rows,id_key,name_key in groups:
+        if not rows: continue
+        any_rows=True
+        st.markdown(f"**{group_label}**")
+        for i,rec in enumerate(rows):
+            oid=_clean_trade_text(rec.get(id_key))
+            name=_clean_trade_text(rec.get(name_key)) or oid
+            bits=[]
+            for field in ["entity_type","subtype","hq_country","country","region_city","mode","origin_name","destination_name","imo","flag","status"]:
+                val=_clean_trade_text(rec.get(field))
+                if val and val not in bits: bits.append(val)
+            c1,c2=st.columns([4,1])
+            with c1:
+                st.markdown(f"**{html_lib.escape(name)}**" + (f" · {html_lib.escape(' · '.join(bits[:4]))}" if bits else ""))
+            with c2:
+                label={"entity":"Company","asset":"Asset","mobile_asset":"Vessel","route":"Route"}[obj_type]
+                if st.button(f"Open {label}",key=f"{key_prefix}_{obj_type}_{oid}_{i}",use_container_width=True):
+                    st.session_state[selected_key]={"type":obj_type,"id":oid,"name":name}
+                    st.rerun()
+    if not any_rows:
+        st.caption("No linked canonical objects were returned for this event.")
+
+    selected=st.session_state.get(selected_key)
+    if isinstance(selected,dict) and selected.get("id"):
+        st.markdown("---")
+        cc1,cc2=st.columns([5,1])
+        with cc1: st.markdown("#### Selected linked context")
+        with cc2:
+            if st.button("Close",key=f"{selected_key}_close",use_container_width=True):
+                st.session_state.pop(selected_key,None); st.rerun()
+        _render_inline_linked_object_context(
+            selected.get("type"),selected.get("id"),selected.get("name"),ctx,
+            key_prefix=f"{key_prefix}_selected"
+        )
+
+    links=ctx.get("links") or []
+    if links:
+        with st.expander("Relationship detail",expanded=False):
+            display_df(_human_record_table(links,["linked_type","linked_name","relationship","confidence","linked_id"]),240)
+    rels=ctx.get("relationships") or []
+    if rels:
+        with st.expander("Ownership & operating relationships",expanded=False):
+            display_df(_human_record_table(rels,["source_name","source_type","relationship_type","target_name","target_type","confidence"]),260)
 
 def event_card(row,key_prefix="event"):
     title = clean_display_text(row.get("Title", "Untitled event"))
@@ -3492,6 +3577,18 @@ if page == "Operating Picture":
     if st.session_state.get("pc_drilldown_id"):
         st.markdown("### Selected intelligence context")
         pc_render_active_drilldown(location="top",expanded=True)
+        _dd_type=str(st.session_state.get("pc_drilldown_type","") or "")
+        _dd_id=str(st.session_state.get("pc_drilldown_id","") or "")
+        if _dd_type=="event" and _dd_id:
+            try:
+                _dd_ctx=pc_event_context(_dd_id) or {}
+            except Exception:
+                _dd_ctx={}
+            if _dd_ctx:
+                st.markdown("#### Connected canonical network")
+                _render_connected_network_inline(_dd_ctx,_dd_id,key_prefix="intel_selected")
+            else:
+                st.info("No canonical linked-object context is currently published for this event.")
 
     pgsa_event_live,pgsa_vessels_live=canonical_pgsa_vessels()
     c1,c2,c3,c4,c5 = st.columns(5)
@@ -3504,7 +3601,7 @@ if page == "Operating Picture":
     left, right = st.columns([1.55,1.0],gap="large")
     with left:
         section("01 · Immediate", "Priority operating picture", "Security and operational disruption ranked by severity, recency and consequence. Commercial market developments remain in Trade.")
-        priority=ranked_operating_picture(intelligence_operational_frame(operational_latest_frame(hazard_events)),5) if not hazard_events.empty else pd.DataFrame()
+        priority=ranked_operating_picture(_intel_region_events,5) if _intel_region_events is not None and not _intel_region_events.empty else pd.DataFrame()
         if not priority.empty:
             for j,(_,r) in enumerate(priority.iterrows()):
                 event_card(r,key_prefix=f"priority_{j}")

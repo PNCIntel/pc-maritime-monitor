@@ -10656,33 +10656,6 @@ def _pc_trade_region_state():
         st.session_state["pc_trade_region_ctx"]="Global"
     return st.session_state["pc_trade_region_ctx"]
 
-def _trade_focus_filter(df, focus_cfg, columns):
-    """Filter a frame to rows matching the selected regional focus phrases.
-
-    The match is case-insensitive across the supplied descriptive columns.
-    Empty/missing frames or focus areas without phrases are returned unchanged.
-    """
-    if df is None:
-        return pd.DataFrame()
-    if not isinstance(df, pd.DataFrame) or df.empty:
-        return df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
-
-    phrases=[str(p).strip() for p in (focus_cfg or {}).get("phrases", []) if str(p).strip()]
-    if not phrases:
-        return df.copy()
-
-    available=[c for c in (columns or []) if c in df.columns]
-    if not available:
-        return df.iloc[0:0].copy()
-
-    blob=pd.Series("", index=df.index, dtype="string")
-    for c in available:
-        blob=blob.str.cat(df[c].fillna("").astype(str), sep=" ")
-
-    pattern="|".join(re.escape(p) for p in phrases)
-    return df[blob.str.contains(pattern, case=False, regex=True, na=False)].copy()
-
-
 def _pc_trade_filter_region(df, region):
     return _trade_region_filter(
         df, region,
@@ -10760,6 +10733,31 @@ def render_trade_regional_dashboard():
     return region,focus
 
 
+
+def _trade_event_relationships_panel(event_id, key_prefix="trade_rel"):
+    """Expose canonical event relationships directly in the Trade regional workspace."""
+    eid=str(event_id or "").strip()
+    if not eid:
+        st.caption("No canonical event ID is available for this record.")
+        return
+    try:
+        ctx=pc_event_context(eid) or {}
+    except Exception:
+        ctx={}
+    rels=ctx.get("relationships") or []
+    entities=ctx.get("entities") or []
+    assets=ctx.get("assets") or []
+    mobiles=ctx.get("mobile_assets") or []
+    routes=ctx.get("routes") or []
+    if not any([rels,entities,assets,mobiles,routes]):
+        st.info("No canonical relationships are currently linked to this event. The event exists, but entity/asset relationships still need to be resolved or published.")
+        return
+    st.markdown("#### Connected canonical network")
+    _render_connected_network_inline(ctx,eid,key_prefix=key_prefix)
+    if rels:
+        st.markdown("#### Relationship edges")
+        display_df(_human_record_table(rels),300)
+
 def render_trade_regional_maps():
     header(
         "Regional Maps",
@@ -10783,8 +10781,16 @@ def render_trade_regional_maps():
 
     focus_cfg=_map_focus_config(region,focus)
 
-    events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
-    locs=TABLES.get(("Events & Hazards","Event Locations"),pd.DataFrame()).copy()
+    # Canonical Supabase first: keep Trade on the same event/location path as Intelligence.
+    events=_live_trade_event_rows(5000)
+    if events is None or events.empty:
+        events=TABLES.get(("Events & Hazards","Events"),pd.DataFrame()).copy()
+    locs=_live_frame("pc_event_locations","*",12000)
+    if locs is None or locs.empty:
+        locs=TABLES.get(("Events & Hazards","Event Locations"),pd.DataFrame()).copy()
+    else:
+        locs=locs.rename(columns={"event_id":"Event ID","location_name":"Location","country":"Country",
+                                  "latitude":"Latitude","longitude":"Longitude","accuracy":"Accuracy","notes":"Notes"})
     recaap_events,recaap_locs=_trade_recaap_projection()
     if not recaap_events.empty:
         events=pd.concat([events,recaap_events],ignore_index=True,sort=False)
