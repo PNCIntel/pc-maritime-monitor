@@ -3534,7 +3534,9 @@ def render_intelligence_regional_dashboard():
 
 
 if page == "Operating Picture":
-    header("Security Operating Picture","Regional security intelligence: what changed, what is exposed, and what should be monitored next.")
+    st.markdown("<div class='pc-section-kicker'>P&C INTELLIGENCE</div>",unsafe_allow_html=True)
+    st.markdown("## Security Operating Picture")
+    st.caption("Regional security intelligence: what changed, what is exposed, and what should be monitored next.")
     _intel_region,_intel_focus,_intel_region_events=render_intelligence_regional_dashboard()
     st.markdown("---")
     active_mon = monitoring[text_col(monitoring, "Status").str.contains("Active", case=False, na=False)] if not monitoring.empty else monitoring
