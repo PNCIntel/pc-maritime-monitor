@@ -131,29 +131,26 @@ if st.session_state.pop('v151_restored', None):
 # v0.7 bulk worker and Trade preview are additional pages, not replacements.
 mode = st.sidebar.radio(
     'Workspace',
-    ['Universal intake · URLs + files', 'Reload & republish · end-to-end', 'Bulk queue · thousands of records', 'Trade preview', 'Move staged → Trade', 'Finish Trade load'],
+    ['Load intelligence', 'Load documents', 'Review exceptions', 'Jobs & history', 'Search / database'],
     index=0,
-    key='pc_workspace_v071',
+    key='pc_workspace_simple_v18',
 )
-if mode == 'Reload & republish · end-to-end':
+st.sidebar.caption('Simple operator view · research, resolve and publish against the shared P&C database')
+if mode == 'Load documents':
+    from pc_document_loader import render_document_loader
+    render_document_loader(sb)
+    st.stop()
+if mode == 'Review exceptions':
     from pc_v15_bulk_replay import render_bulk_replay
     render_bulk_replay(sb, st.session_state.get('active_package') or [])
     st.stop()
-if mode == 'Bulk queue · thousands of records':
+if mode == 'Jobs & history':
     from pc_v07_admin_panel import render_bulk_intake
     render_bulk_intake(sb, st.session_state.get('active_package') or [])
     st.stop()
-if mode == 'Trade preview':
+if mode == 'Search / database':
     from pc_trade_intelligence import render_trade_intelligence
     render_trade_intelligence(sb, admin=True)
-    st.stop()
-if mode == 'Finish Trade load':
-    from pc_v12_finish_load import render_finish_load
-    render_finish_load(sb)
-    st.stop()
-if mode == 'Move staged → Trade':
-    from pc_v10_publish_panel import render_publish_panel
-    render_publish_panel(sb)
     st.stop()
 
 st.info('Multi-source loader: paste up to 20 URLs, upload multiple Excel/CSV/JSON/PDF/DOCX files, '
@@ -390,55 +387,11 @@ def audit_identities(package: list, registry: dict) -> tuple[list, list]:
         })
     return logs, proposals
 
-
-def audit_identities_shared(sb, package: list) -> tuple[list, list]:
-    """Use the SAME complete shared canonical registry as the bulk publisher.
-
-    Legacy fetch_candidate_identities only asks SQL for identical input names,
-    making the subsequent fuzzy audit blind to all other names/aliases.
-    This is a non-mutating audit; bulk publication recomputes live matches.
-    """
-    from pc_v15_bulk_replay import (_canon_registry, _identity_indexes,
-                                    _identity_candidates, ID_TABLES, NAME_COL)
-    needed={r.get('table') for r in package} & set(IDENTITY_COLUMNS)
-    if not needed: return [], deepcopy(package)
-    registry=_canon_registry(sb, needed)
-    index=_identity_indexes(registry)
-    logs=[]
-    for item in package:
-        table=item.get('table'); p=item.get('payload') or {}
-        name=str(p.get('name') or '').strip()
-        if table not in needed or not name: continue
-        pk=IDENTITY_COLUMNS[table][0]
-        exact,fuzzy,cross,method=_identity_candidates(table,name,p,index,registry)
-        if len(exact)==1 and method=='verified-IMO':
-            status,candidate,score='IMO MATCH',exact[0],1.0
-        elif len(exact)==1:
-            status,candidate,score='EXACT NAME — REVIEW',exact[0],1.0
-        elif len(exact)>1:
-            status,candidate,score='AMBIGUOUS NAME',None,1.0
-        elif fuzzy:
-            ranked=sorted(fuzzy,key=lambda x:compute_token_ratio(name,x.get(NAME_COL[table]) or ''),reverse=True)
-            status,candidate,score='POSSIBLE MATCH — REVIEW',ranked[0],compute_token_ratio(name,ranked[0].get(NAME_COL[table]) or '')
-        elif cross:
-            status,candidate,score='CROSS-TYPE — REVIEW',None,0.0
-        else:
-            status,candidate,score='UNVERIFIED — RESEARCH',None,0.0
-        logs.append({
-            'Status':status,'Table':table,'Incoming Name':name,
-            'Canonical Match':f"{candidate[NAME_COL[table]]} ({candidate[pk]})" if candidate else 'None',
-            'Score':f'{score*100:.1f}%',
-            'Action':'Review proposed identity; source IDs unchanged' if candidate else 'Research missing/ambiguous identity before creation',
-            'Proposed Canonical ID':candidate[pk] if candidate else '',
-            'Source Package ID':p.get(pk,''),
-        })
-    return logs,deepcopy(package)
-
 # -----------------------------------------------------------------------------
 # 4. VIEW: MAIN WORKSPACE
 # -----------------------------------------------------------------------------
-st.title("P&C Universal Intake & Trade Publishing v1.0")
-st.caption("Bulk intake → batched matching → research feedback → dependency-aware graph review → resumable staging. Publishing is available only through Move staged → Trade, with explicit approval and backup.")
+st.title("P&C Intelligence Loader")
+st.caption("Add files, URLs or notes. AI extracts, researches and saves the package; unresolved issues are handled under Review exceptions.")
 
 # PHASE 1: UNIVERSAL MULTI-SOURCE INTAKE
 st.markdown("#### Phase 1: Universal intake — URLs, documents and structured files")
@@ -695,11 +648,22 @@ if st.session_state.get("active_package"):
                 sb, st.session_state["active_package"], title=queue_title,
                 ai_research=queue_research,
             )
+            st.session_state["pc_active_intelligence_job"] = job_id
             st.success(f"{'Previously queued' if reused else 'Queued'} {count:,} records "
-                       f"under job {job_id}. Open 'Bulk queue' to monitor the worker.")
+                       f"under job {job_id}. The database population control is below.")
         except Exception as exc:
             st.error(f"Background queue could not be created: {exc}. "
                      "Check the v0.7 migration and your Supabase connection.")
+
+# v1.9: Load intelligence now closes the loop into the shared canonical database.
+if mode == 'Load intelligence':
+    _job = st.session_state.get("pc_active_intelligence_job")
+    if _job:
+        from pc_intelligence_pipeline import render_intelligence_pipeline
+        render_intelligence_pipeline(sb, _job, reviewer="DCM")
+    else:
+        st.info("Extract and queue the package above. Then one button researches, resolves and populates the shared database.")
+    st.stop()
 
 # PHASE 2: PREFLIGHT DEDUPLICATION & RECONCILIATION
 if st.session_state["active_package"]:
@@ -730,21 +694,21 @@ if st.session_state["active_package"]:
     if run_dedupe:
         with st.spinner("Comparing against existing canonical identities..."):
             needed = {r.get("table") for r in active_rows} & set(IDENTITY_COLUMNS)
-            # Shared publisher registry covers ALL canonical names, not only
-            # exact input-name SQL IN matches. Fail closed on incomplete reads.
+            # A failed query aborts the ENTIRE audit; never show false NEW records.
             try:
-                audit_logs, candidate_package = audit_identities_shared(sb, active_rows)
+                indexes = {table: fetch_candidate_identities(sb, table, active_rows) for table in sorted(needed)}
             except Exception as exc:
                 st.session_state["audit_logs"] = []
                 st.session_state["deduped_package"] = []
                 st.error(f"Identity audit stopped. Database lookup failed: {exc}")
                 st.warning("No identity decisions were made. Check the existing Supabase URL/key and retry.")
             else:
+                audit_logs, candidate_package = audit_identities(active_rows, indexes)
                 st.session_state["audit_logs"] = audit_logs
                 st.session_state["deduped_package"] = candidate_package
                 st.session_state["match_confirmations"] = {}
                 st.session_state["gap_research"] = {}
-                st.success(f"Shared canonical registry audit completed for {len(needed)} registries; {len(audit_logs)} identities reviewed. No records were written.")
+                st.success(f"Targeted lookup completed for {len(needed)} registries; {len(audit_logs)} identities reviewed. No records were written.")
 
     if st.session_state["audit_logs"]:
         st.markdown("##### Preflight Identity Audit Results")
@@ -763,7 +727,7 @@ if st.session_state.get("audit_logs"):
                "from canonical identity decisions and never auto-published.")
     pending_research = [l for l in st.session_state["audit_logs"]
                         if l["Status"] in {"UNVERIFIED — RESEARCH", "AMBIGUOUS NAME",
-                                            "AMBIGUOUS IMO", "POSSIBLE MATCH — REVIEW", "CROSS-TYPE — REVIEW"}]
+                                            "AMBIGUOUS IMO", "POSSIBLE MATCH — REVIEW"}]
     st.write(f"Research queue: {len(pending_research):,} unique incoming identity decisions")
     st.download_button("Export full research queue (CSV)",
         pd.DataFrame(pending_research).to_csv(index=False).encode("utf-8"),

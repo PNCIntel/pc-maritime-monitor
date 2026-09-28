@@ -15,7 +15,7 @@ import pandas as pd
 
 ID_TABLES={'pc_entities':'entity_id','pc_assets':'asset_id','pc_mobile_assets':'mobile_asset_id','pc_events':'event_id'}
 NAME_COL={'pc_entities':'name','pc_assets':'name','pc_mobile_assets':'name','pc_events':'title'}
-PUBLISHER_VERSION='1.6.1-saved-research-recovery'
+PUBLISHER_VERSION='1.6.2-saved-findings-replay'
 
 
 def _norm(x):
@@ -589,6 +589,30 @@ def render_bulk_replay(sb,active_package):
                 st.success(f'Requeued {n} stale tasks; active research not interrupted.')
                 st.rerun()
             except Exception as exc:st.error('Stale task recovery failed: '+str(exc))
+    if rs['held'] and st.button('Repair held records from saved AI findings (no API charges)',key='v162_saved_replay'):
+        try:
+            from pc_v16_research import recover_saved_repair_holds
+            report=recover_saved_repair_holds(sb,job)
+            st.session_state['v162_saved_report']=report
+            st.session_state.pop('v15_plan',None)
+            st.rerun()
+        except Exception as exc: st.error('Saved findings replay stopped: '+str(exc))
+    if st.session_state.get('v162_saved_report'):
+        st.info('Saved AI findings replay: '+str(st.session_state['v162_saved_report']))
+    if rs['held']:
+        with st.expander('Targeted follow-up for remaining research holds (optional)'):
+            st.caption('Uses OpenAI ONLY for held records selected below; saved findings are not recharged.')
+            held_options=(sb.table('pc_v16_research_tasks').select('staged_record_id,error_text')
+               .eq('ingestion_job_id',job).eq('status','held').limit(500).execute().data or [])
+            options={str(item['staged_record_id']):str(item.get('error_text') or '') for item in held_options}
+            selection=st.multiselect('Select unresolved stages',list(options),
+                  format_func=lambda sid: sid[:8]+' · '+options[sid][:85],key='v162_target_selection')
+            if st.button('Re-research selected holds only',disabled=not selection,key='v162_target_research'):
+                from pc_v16_research import requeue_targeted_holds
+                n=requeue_targeted_holds(sb,job,selection)
+                st.session_state.pop('v15_plan',None)
+                st.success(f'{n} held records queued for targeted AI research.')
+                st.rerun()
     if rs['held'] and st.button('Recover corroborated NO-CHANGE research (no API charges)',key='v161_held_recover'):
         try:
             from pc_v16_research import recover_unchanged_holds

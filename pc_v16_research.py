@@ -467,6 +467,142 @@ def recover_unchanged_holds(sb,job,limit=500):
     return report
 
 
+
+def _repair_saved_result(original, saved):
+    """Conservative second pass over an already-paid-for structured response.
+
+    Never turn an AI hold into a repair, invent an entity name for a cross-table
+    conversion, or infer a date. Evidence checks still run in validate_proposal.
+    """
+    if not isinstance(saved, dict) or saved.get('status') != 'repair':
+        return None, 'Saved result does not authorize repair; targeted new research required'
+    result = dict(saved)
+    target = result.get('target_table')
+    if target not in TABLES or not isinstance(result.get('payload'), dict):
+        return None, 'No usable structured target/payload in saved research'
+    payload = dict(result['payload'])
+    pk, field = TABLES[target]
+    original_p = original.get('payload') or {}
+    if not payload.get(field):
+        if target == original.get('target_table'):
+            old_name = original_p.get(field) or original.get('natural_key')
+            if isinstance(old_name, str) and old_name.strip():
+                payload[field] = old_name.strip()
+        elif target == 'pc_events':
+            # A complete original event-style headline can be reused as the
+            # event title, but an organisation name cannot become a news event.
+            title = str(original.get('natural_key') or original_p.get('name') or '')
+            terms = ('strategy','expansion','advisory','contract','agreement',
+                     'groundbreaking','announces','delivery','orders','launches',
+                     'redevelopment','construction','tender','investment')
+            if len(title) >= 18 and any(t in _norm(title) for t in terms):
+                payload['title'] = title
+    if not payload.get(field):
+        return None, 'No recoverable subject name; targeted research required'
+
+    # A month known from the source must not be promoted to the first day.
+    # Preserve source precision in metadata rather than any *_date SQL field.
+    metadata = payload.get('metadata') if isinstance(payload.get('metadata'), dict) else {}
+    metadata = dict(metadata)
+    for key, val in list(payload.items()):
+        if key != 'metadata' and isinstance(val, str) and key.endswith('_date') and re.fullmatch(r'\d{4}-\d{2}', val):
+            metadata[key + '_year_month'] = val
+            metadata[key + '_precision'] = 'month'
+            payload[key] = None
+    for key, val in list(metadata.items()):
+        if isinstance(val, str) and (key.endswith('_date') or key == 'date') and re.fullmatch(r'\d{4}-\d{2}', val):
+            metadata[key + '_year_month'] = val
+            metadata[key + '_precision'] = 'month'
+            del metadata[key]
+    if target == 'pc_events':
+        date = payload.get('start_date')
+        if isinstance(date,str) and re.fullmatch(r'\d{4}-\d{2}',date):
+            metadata['year_month'] = date
+            metadata['date_precision'] = 'month'
+            payload['start_date'] = None
+    if metadata: payload['metadata'] = metadata
+    result['payload'] = payload
+    return result, None
+
+
+def recover_saved_repair_holds(sb, job, limit=500):
+    """Replay saved, evidence-backed *repair* results without new API calls.
+
+    Uses the original persisted stage row; the existing transactional RPC
+    journals each repair and prevents writes to already-published records.
+    Every task is treated independently. Unsupported holds remain held.
+    """
+    tasks = (sb.table('pc_v16_research_tasks').select('*')
+        .eq('ingestion_job_id',job).eq('status','held')
+        .order('task_id').limit(limit).execute().data or [])
+    report = {'attempted':0,'recovered':0,'still_held':0,'errors':[]}
+    for task in tasks:
+        result = task.get('result') or {}
+        if result.get('status') != 'repair':
+            report['still_held'] += 1
+            continue
+        report['attempted'] += 1
+        try:
+            stages = (sb.table('pc_staged_records').select('*')
+                .eq('staged_record_id',task['staged_record_id']).limit(1).execute().data or [])
+            if len(stages) != 1:
+                raise ValueError('Original staged record missing or non-unique')
+            original = stages[0]
+            prior = (sb.table('pc_v10_publication_items').select('staged_record_id')
+                .eq('staged_record_id',task['staged_record_id']).limit(1).execute().data or [])
+            if prior:
+                report['still_held'] += 1
+                report['errors'].append({'stage':task['staged_record_id'],'reason':'Already published; no modification'})
+                continue
+            repaired, reason = _repair_saved_result(original,result)
+            if reason:
+                report['still_held'] += 1
+                report['errors'].append({'stage':task['staged_record_id'],'reason':reason})
+                continue
+            _, issue = validate_proposal(original,repaired)
+            if issue:
+                report['still_held'] += 1
+                report['errors'].append({'stage':task['staged_record_id'],'reason':issue})
+                continue
+            # The v1.6 RPC requires a researched task. Set it only after all
+            # evidence and record checks have passed; persist corrected result
+            # before attempting the existing journalled RPC.
+            sb.table('pc_v16_research_tasks').update({
+                'status':'researched','result':repaired,'error_text':None,
+                'updated_at':datetime.now(timezone.utc).isoformat()
+            }).eq('task_id',task['task_id']).eq('status','held').execute()
+            state, detail = apply_research(sb,task,original,repaired)
+            if state == 'applied': report['recovered'] += 1
+            else:
+                report['still_held'] += 1
+                report['errors'].append({'stage':task['staged_record_id'],'reason':detail})
+        except Exception as exc:
+            report['still_held'] += 1
+            # Preserve error as a hold, not a silent success or a re-bill.
+            try:
+                sb.table('pc_v16_research_tasks').update({
+                    'status':'held','error_text':'Saved replay error: '+str(exc)[:400],
+                    'updated_at':datetime.now(timezone.utc).isoformat()
+                }).eq('task_id',task['task_id']).execute()
+            except Exception: pass
+            report['errors'].append({'stage':task['staged_record_id'],'reason':str(exc)[:300]})
+    return report
+
+
+def requeue_targeted_holds(sb, job, staged_ids):
+    """Only explicit held record IDs are re-researched; never the whole batch."""
+    wanted=set(map(str,staged_ids))
+    if not wanted: return 0
+    tasks=(sb.table('pc_v16_research_tasks').select('task_id,staged_record_id')
+           .eq('ingestion_job_id',job).eq('status','held').limit(5000).execute().data or [])
+    changed=0
+    for task in tasks:
+        if str(task['staged_record_id']) not in wanted:continue
+        sb.table('pc_v16_research_tasks').update({'status':'pending','error_text':None,
+             'updated_at':datetime.now(timezone.utc).isoformat()})           .eq('task_id',task['task_id']).eq('status','held').execute()
+        changed+=1
+    return changed
+
 def retry_failed(sb,job):
     tasks=(sb.table('pc_v16_research_tasks').select('task_id,status').eq('ingestion_job_id',job).eq('status','failed').execute().data or [])
     for t in tasks:
