@@ -646,6 +646,15 @@ def show_df(df, cols=None, height=420):
     st.dataframe(view,use_container_width=True,hide_index=True,height=height)
 
 
+def header(title, sub=None):
+    """Render a P&C page-level heading using the existing intelligence theme."""
+    st.markdown('<div class="pc-kicker">Power & Corridors Intelligence</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="pc-title">{title}</div>', unsafe_allow_html=True)
+    if sub:
+        st.markdown(f'<div class="pc-deck">{sub}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="pc-rule"></div>', unsafe_allow_html=True)
+
+
 def section(kicker, title, copy=None):
     st.markdown(f'<div class="pc-section-kicker">{kicker}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="pc-section-title">{title}</div>', unsafe_allow_html=True)

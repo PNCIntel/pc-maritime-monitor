@@ -10656,6 +10656,33 @@ def _pc_trade_region_state():
         st.session_state["pc_trade_region_ctx"]="Global"
     return st.session_state["pc_trade_region_ctx"]
 
+def _trade_focus_filter(df, focus_cfg, columns):
+    """Filter a frame to rows matching the selected regional focus phrases.
+
+    The match is case-insensitive across the supplied descriptive columns.
+    Empty/missing frames or focus areas without phrases are returned unchanged.
+    """
+    if df is None:
+        return pd.DataFrame()
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+
+    phrases=[str(p).strip() for p in (focus_cfg or {}).get("phrases", []) if str(p).strip()]
+    if not phrases:
+        return df.copy()
+
+    available=[c for c in (columns or []) if c in df.columns]
+    if not available:
+        return df.iloc[0:0].copy()
+
+    blob=pd.Series("", index=df.index, dtype="string")
+    for c in available:
+        blob=blob.str.cat(df[c].fillna("").astype(str), sep=" ")
+
+    pattern="|".join(re.escape(p) for p in phrases)
+    return df[blob.str.contains(pattern, case=False, regex=True, na=False)].copy()
+
+
 def _pc_trade_filter_region(df, region):
     return _trade_region_filter(
         df, region,
