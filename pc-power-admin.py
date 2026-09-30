@@ -536,7 +536,7 @@ with st.container():
     domain_focus = st.selectbox("Research focus", ["Auto-detect", "Vessels / fleets", "Companies / ownership",
                          "Ports / terminals / infrastructure", "Airports / aviation", "Rail / road / logistics",
                          "Corridors / transport services", "Sanctions / official designations", "Events / incidents"])
-    research_depth = st.radio("Research mode", ["Source extraction", "AI web research + extraction"], horizontal=True)
+    research_depth = st.radio("Research mode", ["AI web research + extraction", "Source extraction (diagnostic only)"], horizontal=True, help="Full research is the standard analyst workflow. Source-only extraction is for diagnostics and does not qualify a batch for publication.")
     reader_consent = st.checkbox("I agree that PUBLIC URLs will be sent to a third-party article reader (Jina)", value=False)
     ai_consent = st.checkbox("I agree to send selected source text to the configured OpenAI API", value=False)
     if st.button("Prepare sources & research package", type="primary", use_container_width=True):
@@ -639,10 +639,13 @@ if st.session_state.get("active_package"):
                "go to the v0.7 review queue. No canonical records are changed.")
     with st.form("pc_v071_direct_queue"):
         queue_title = st.text_input("Job name", "P&C multi-source intelligence intake")
-        queue_research = st.checkbox("Research unresolved identities in background (optional)", value=False)
+        queue_research = True
+        st.caption('Background research is enabled for every unpublished core object. No database knowledge needed.')
         submit_queue = st.form_submit_button("Queue all extracted records", type="primary")
     if submit_queue:
         try:
+            if research_depth.startswith('Source extraction') and st.session_state.get('source_stats'):
+                raise ValueError('Diagnostic extraction cannot be published. Select AI web research + extraction and prepare the sources again.')
             from pc_v07_core import enqueue
             job_id, count, reused = enqueue(
                 sb, st.session_state["active_package"], title=queue_title,
@@ -650,7 +653,7 @@ if st.session_state.get("active_package"):
             )
             st.session_state["pc_active_intelligence_job"] = job_id
             st.success(f"{'Previously queued' if reused else 'Queued'} {count:,} records "
-                       f"under job {job_id}. The database population control is below.")
+                       "for background processing. The next action is below.")
         except Exception as exc:
             st.error(f"Background queue could not be created: {exc}. "
                      "Check the v0.7 migration and your Supabase connection.")

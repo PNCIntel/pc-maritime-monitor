@@ -2,7 +2,7 @@
 
 This module closes the gap between Universal Intake and the canonical shared
 Trade/Intelligence database. The operator approves one load; the app processes
-its queue, researches only unresolved staged objects, repairs staging, resolves
+its queue, researches every unpublished supported staged object, repairs staging, resolves
 canonical identities, publishes eligible records with existing backup-first
 RPCs, then syncs graph links and agreements. Exceptions remain staged.
 """
@@ -20,12 +20,32 @@ def _queue_counts(sb, job):
     return out
 
 
-def _candidate_unresolved(staged, ready, followers, pub):
-    done=set(pub)
-    done.update(str(r['staged_record_id']) for r,_,_ in ready)
-    done.update(str(r['staged_record_id']) for r,_ in followers)
-    return [r for r in staged if r.get('target_table') in {'pc_entities','pc_assets','pc_mobile_assets','pc_events'}
+def _research_eligible(staged, published):
+    """All unpublished core objects require research, including exact existing matches.
+
+    Never infer that successful name matching means the source is completely researched.
+    Existing research-task rows are deduplicated in enqueue_research.
+    """
+    done = {str(x) for x in published}
+    return [r for r in staged if r.get('target_table') in
+            {'pc_entities', 'pc_assets', 'pc_mobile_assets', 'pc_events'}
             and str(r['staged_record_id']) not in done]
+
+
+def _unresearched_rows(sb, job, candidates):
+    """Exclude rows with an EXISTING persisted research task (even held/failed).
+
+    A failed task remains an exception, never implicitly approved.
+    """
+    if not candidates:
+        return []
+    existing=set()
+    for offset in range(0, len(candidates), 100):
+        ids=[str(r['staged_record_id']) for r in candidates[offset:offset+100]]
+        for task in (sb.table('pc_v16_research_tasks').select('staged_record_id')
+                     .in_('staged_record_id',ids).execute().data or []):
+            existing.add(str(task['staged_record_id']))
+    return [r for r in candidates if str(r['staged_record_id']) not in existing]
 
 
 def render_intelligence_pipeline(sb, job, reviewer='DCM'):
@@ -37,14 +57,14 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
 
     st.divider()
     st.subheader('Populate shared P&C database')
-    st.caption('One approval: process → research unresolved records → repair → canonical resolve → '
+    st.caption('One approval: process → research all core records → repair → canonical resolve → '
                'backup + publish eligible records → sync relationships and assessments. '
                'Only genuine evidence/identity conflicts remain as exceptions.')
 
     counts=_queue_counts(sb,job)
     c1,c2,c3,c4=st.columns(4)
     c1.metric('Queued',counts['queued']); c2.metric('Staged',counts['staged'])
-    c3.metric('Failed',counts['failed']); c4.metric('Job',str(job)[:8])
+    c3.metric('Failed',counts['failed']); c4.metric('Stage','Preparing')
 
     run_key='pc_v19_run_'+str(job)
     state_key='pc_v19_state_'+str(job)
@@ -80,11 +100,17 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             staged=_all_staged(sb,job)
             if not staged:
                 raise RuntimeError('No staged records exist for this job')
+            # The existing publisher has the authoritative persisted stage->canonical mapping.
             ready,followers,exceptions,pub=_plan(sb,job,staged)
-            unresolved=_candidate_unresolved(staged,ready,followers,pub)
-            if unresolved:
+            candidates=_research_eligible(staged,pub)
+            needs_research=_unresearched_rows(sb,job,candidates)
+            if needs_research:
                 registry=_canon_registry(sb,{'pc_entities','pc_assets','pc_mobile_assets'})
-                enqueue_research(sb,job,unresolved,registry,all_records=True)
+                enqueue_research(sb,job,needs_research,registry,all_records=True)
+                st.session_state[state_key]='research'
+                st.rerun()
+            status=status_counts(sb,job)
+            if status['pending'] or status['running'] or status['researched']:
                 st.session_state[state_key]='research'
                 st.rerun()
             st.session_state[state_key]='publish'
@@ -102,17 +128,31 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                 api_key=(st.secrets.get('OPENAI_API_KEY') or st.secrets.get('OPENAI_KEY')
                          or os.environ.get('OPENAI_API_KEY'))
                 if not api_key: raise RuntimeError('OPENAI_API_KEY is not configured')
-                with st.spinner('AI is researching unresolved identities, classifications and missing facts...'):
+                with st.spinner('AI is researching all unpublished identities, developments and relationships...'):
                     registry=_canon_registry(sb,{'pc_entities','pc_assets','pc_mobile_assets'})
                     process_research_batch(sb,job,api_key,registry,batch_size=5)
                 st.rerun()
             # Reuse already-paid findings before accepting holds.
             recover_saved_repair_holds(sb,job)
             recover_unchanged_holds(sb,job)
-            st.session_state[state_key]='publish'
+            rs=status_counts(sb,job)
+            if rs['researched']:
+                st.warning('Saved research could not be fully applied. Check Jobs & history; publication is blocked.')
+                return
+            if rs['pending'] or rs['running']:
+                st.warning('Research has not finished. Canonical publication is blocked.')
+                return
+            # Research may have staged additional dependent objects.
+            # Loop through planning until each core object has its own task.
+            st.session_state[state_key]='plan'
             st.rerun()
 
         if stage=='publish':
+            rs=status_counts(sb,job)
+            if rs['pending'] or rs['running'] or rs['researched']:
+                st.session_state[state_key]='research'
+                st.warning('Research still underway; publishing is paused.')
+                return
             staged=_all_staged(sb,job)
             ready,followers,exceptions,pub=_plan(sb,job,staged)
             with st.spinner(f'Publishing {len(ready)+len(followers)} eligible records with immutable backups...'):
@@ -135,6 +175,8 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             ready2,followers2,exceptions2,pub2=_plan(sb,job,staged2)
             report={
                 'job_id':job,
+                'research_status':status_counts(sb,job),
+                'source_queue_status':_queue_counts(sb,job),
                 'published_items_now':len(ready)+follow_count-len(failures),
                 'publication_failures':failures,
                 'remaining_exceptions':exceptions2,
@@ -151,7 +193,17 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
 
         if stage=='done':
             report=st.session_state.get(report_key,{})
-            st.success('Database population pass complete. Trade and Intelligence read the same canonical database.')
+            failures=len(report.get('publication_failures') or [])
+            held=report.get('remaining_exception_count',0)
+            failed_sources=(report.get('source_queue_status') or {}).get('failed',0)
+            failed_research=(report.get('research_status') or {}).get('failed',0)
+            agreement_warning=(report.get('agreements') or {}).get('warning')
+            if failures or held or failed_sources or failed_research or agreement_warning:
+                st.warning('Partial load: some records, relationships or research require attention. '
+                           'Do not consider this batch complete.')
+            else:
+                st.info('Canonical publication pass finished without reported exceptions. '
+                        'Trade/Intelligence display and specialist-table coverage are NOT yet verified.')
             a,b,c=st.columns(3)
             a.metric('Published stages',report.get('published_stage_count',0))
             b.metric('Remaining exceptions',report.get('remaining_exception_count',0))
