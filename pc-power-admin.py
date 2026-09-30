@@ -131,11 +131,18 @@ if st.session_state.pop('v151_restored', None):
 # v0.7 bulk worker and Trade preview are additional pages, not replacements.
 mode = st.sidebar.radio(
     'Workspace',
-    ['Load intelligence', 'Load documents', 'Review exceptions', 'Jobs & history', 'Search / database'],
+    ['Load intelligence', 'Research company (controlled test)', 'Load documents', 'Review exceptions', 'Jobs & history', 'Search / database'],
     index=0,
     key='pc_workspace_simple_v18',
 )
 st.sidebar.caption('Simple operator view · research, resolve and publish against the shared P&C database')
+if mode == 'Research company (controlled test)':
+    from pc_company_depth import render_company_depth
+    # Official company pages use the SAME consented public reader as intake.
+    # This function is declared later in this module; Streamlit executes top-to-bottom.
+    from pc_company_source_reader import public_company_reader, company_api_call
+    render_company_depth(sb,OPENAI_KEY,public_company_reader,company_api_call)
+    st.stop()
 if mode == 'Load documents':
     from pc_document_loader import render_document_loader
     render_document_loader(sb)

@@ -1,34 +1,33 @@
-# P&C analyst loader — targeted Phase 1 patch
+# P&C Power Admin — Svitzer company-depth controlled test
 
-## Replace files (after backing up current deployed versions)
-- `pc-power-admin.py` -> existing Power Admin entrypoint, whatever the repo's configured filename is.
-- `pc_intelligence_pipeline.py` -> repo module with that name.
+## What this package does
+Adds an **analyst-facing Company research (controlled test)** page to the existing Power Admin, alongside its existing intelligence/document loaders. This is a bounded company-depth research/publishing trial for the **existing canonical Svitzer company**.
 
-Deploy both together. No SQL migration in this patch. Existing deployed supporting Python modules remain mandatory.
+The page takes an official homepage, fetches relevant same-domain official subpages using the same consented public Jina reader principle, sends retrieved text to the configured OpenAI API, persists an evidence-linked research review in the existing `pc_ingestion_jobs` table, and presents a preview for analyst approval. Upon approval it resolves one **unique exact existing company identity**, updates `pc_company_profiles` without destroying existing populated fields, and inserts *individually approved, provenance-tagged* offices and management/leadership people/roles. It re-checks the profile through Supabase before marking that **subset** complete.
 
-## What is changed
-- Enables complete-source AI research mode as the default; makes background research mandatory when using the standard publishing path.
-- Enqueues research for every UNPUBLISHED core staged record, including exact canonical name matches and events, rather than only unresolved identities.
-- Repeats planning after a research pass to capture newly staged dependent core objects.
-- Prevents publishing while research tasks remain pending, running or unapplied 'researched'.
-- Stops displaying a misleading success banner when holds, failures or agreement-sync warnings remain.
-- Removes job IDs from the analyst queue confirmation/metric (identifiers remain in internal reports).
+**No SQL migration** is needed for this bounded trial: the supplied schema already contains these tables and fields. No raw SQL/IDs are required from the analyst.
 
-## Explicit remaining limits / NOT verified
-- Does not follow every individual newsletter headline to a separately retrieved article. Source-link discovery and reader matching must be tested using the supplied PDF newsletters and the missing `pc_newsletter_pdf.py` module.
-- Does not add full specialist-table writers (subsidiaries, ownership history, vessel name history, rail/protests, regulatory milestones); those require tested persistence adapters to existing DB procedures.
-- Does not guarantee app visibility; both dashboard readers need canonical relevance/filtering correction and post-write retrieval tests.
-- Does not retroactively re-research already-published records. Historical data-quality repair must use a separate staged enrichment workflow.
-- An existing job fingerprint can cause job reuse; start a new extraction for a new research batch, and retain historical jobs for audit.
-- This patch is STATIC/MOCK TESTED only. Do not run against production without staging trial and rollback copy.
+## IMPORTANT: what this package does NOT do
+This is **not yet the complete universal loader**. The new page **does not** publish related subsidiary/acquisition relationships, vessel objects, vessel historical identity, contracts, full fleet discovery, regulatory milestones or dashboard routing. These candidates are saved in its review job and explicitly counted as HELD. Do not mistake `completed_profile_only` (or `partial`) for a completed company import. It does not remove previous wrongly created `Svitzer Fleet`/`Svitzer Regional Commercial Teams` records, or update your Trade and Intelligence readers. Existing main intake and the Phase 1 research/reconciliation pipeline are preserved.
 
-## Analyst experience target
-1. Add URL(s), newsletter PDFs, reports, structured load files; consent to public reader + OpenAI where relevant. Click Prepare sources.
-2. Click Queue package, then Research, resolve & POPULATE DATABASE (the long-running worker resumes persisted work).
-3. Review only genuine evidence/identity exceptions. Admin monitors the full report and reader parity separately.
+A source-grounded extraction with a URL is **not** independent verification of a person's appointment, legal ownership or a vessel IMO. Analyst review is required for each published office/leadership role. Missing web pages appear as errors and fewer than two retrieved pages block the deep-research test. Jina and OpenAI receive only consented public sources; do not put confidential reports in this company mode.
 
-## Acceptance trials
-- New Svitzer homepage import must update the one canonical company; no office/team/contract/product fake companies.
-- Original article links from email newsletters must get independent source retrieval (NOT IMPLEMENTED BY THIS PATCH).
-- St Helena / MNG Maritime histories, ownership and operator differences require specialist history writer and source tests (NOT IMPLEMENTED BY THIS PATCH).
-- No batch called 'fully completed' until specialist-table and reader-parity tests pass.
+## Deployment (STAGING)
+1. Back up the deployed files. Copy `pc-power-admin.py` to your repo's existing Power Admin main file **using its configured filename**, `pc_intelligence_pipeline.py`, `pc_company_depth.py`, and `pc_company_source_reader.py` to the same repo directory (alongside the existing helper modules). The included Power Admin file is based on the previous Phase 1 patched version, not on unknown subsequent production changes; compare before replacing if you've made further edits.
+2. Retain your existing `shared/`, `pc_v07_core.py`, `pc_v15_bulk_replay.py`, `pc_v16_research.py`, `pc_document_loader.py`, `pc_newsletter_pdf.py`, other existing module dependencies and environment secrets; do not replace them with earlier copies.
+3. Deploy only to STAGING first and confirm the existing Power Admin boots. If you did not previously deploy Phase 1, deploy the included pipeline together with the main file.
+
+## The Svitzer test
+1. Choose **Research company (controlled test)** in the sidebar. Enter `Svitzer` and `https://svitzer.com/`.
+2. Check the consent box. Click **Research company and linked pages**. The expected output is an actual count of retrieved official pages, any retrieval errors, and a saved persistent review job. If it only retrieves the homepage, add official leadership/contact links manually; don't approve.
+3. Open the saved review. Inspect JSON *especially source URLs*, proposed headquarters, leadership roles, candidate vessels, related companies, missing fields and retrieval errors. If fields are absent, this test has NOT established their completeness.
+4. Select only office and leadership rows you can validate from the official cited page. Approve the profile and click **Publish verified profile and selected offices**. The web research review remains saved; vessel/ownership/contract information remains held.
+5. Check the summary for `profile_updated`, `offices_added`, `people_added`, `unresolved_count`; check the existing Svitzer company in Trade only to the extent that the Trade reader actually reads these specialist tables. Do not interpret lack of Trade visibility as absence in the DB: the existing dashboard readers still need separate repair.
+6. Run again with the same sources only when testing idempotency. Do NOT requeue the old three-record `Svitzer Fleet` extraction.
+
+## Automated local tests
+```
+python -m unittest -v test_company_depth.py
+python -m py_compile pc-power-admin.py pc_company_depth.py pc_company_source_reader.py pc_intelligence_pipeline.py
+```
+The tests exercise same-site discovery boundaries, URL provenance, malformed IMO holds, wrong-type canonical rejection, specialist profile/office writes and held fleet candidates with fake Supabase responses. They do **not** simulate live OpenAI/Jina/Supabase/Streamlit or prove full research completeness. Stop/revert if staging fails.
