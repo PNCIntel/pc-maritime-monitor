@@ -93,6 +93,8 @@ if "audit_logs" not in st.session_state:
     st.session_state["audit_logs"] = []
 if "deduped_package" not in st.session_state:
     st.session_state["deduped_package"] = []
+if "research_dossiers" not in st.session_state:
+    st.session_state["research_dossiers"] = {}
 
 # v1.5.1: Recovery works after logout, Streamlit reboot and worker replacement.
 # This is visible on every workspace, including Reload & republish.
@@ -591,16 +593,28 @@ with st.container():
                 bar = st.progress(0, text="Extracting records and researching gaps")
                 for idx, s in enumerate(inputs):
                     try:
-                        supplemental = ""
+                        dossier = None
                         if research_depth.startswith("AI") and not s.get("image_base64"):
-                            supplemental = research_with_web(s["text"], OPENAI_KEY, domain_focus)
-                        fresh = call_openai_extraction(s["text"], OPENAI_KEY, s["url"], domain_focus,
-                                                      supplemental, image_b64=s.get("image_base64"))
+                            # v3 research-first intake: understand and investigate the real-world subject
+                            # before mapping any finding to P&C database proposal tables.
+                            from pc_research_dossier import research_source_to_records
+                            fresh, dossier = research_source_to_records(
+                                s["text"], OPENAI_KEY, s["url"], domain_focus, source_label=s["label"]
+                            )
+                            st.session_state.setdefault("research_dossiers", {})[s["label"]] = dossier
+                        else:
+                            # Diagnostic/source-only extraction and image inputs retain the conservative
+                            # legacy mapper; these do not qualify as complete researched loads.
+                            fresh = call_openai_extraction(s["text"], OPENAI_KEY, s["url"], domain_focus,
+                                                          "", image_b64=s.get("image_base64"))
                         for row in fresh:
                             row["source_label"] = s["label"]
                             row["payload"].setdefault("metadata", {})["source_label"] = s["label"]
                         extracted.extend(fresh)
-                        stats.append({"Source":s["label"],"Records":len(fresh),"Research":"yes" if supplemental else "no"})
+                        stats.append({"Source":s["label"],"Records":len(fresh),
+                                      "Research":"dossier + follow-up" if dossier else "source-only",
+                                      "Questions":len((dossier or {}).get("research_questions") or []),
+                                      "Evidence URLs":len((dossier or {}).get("evidence_urls") or [])})
                     except Exception as exc:
                         errors.append({"source":s["label"],"error":str(exc)})
                     bar.progress((idx+1)/max(len(inputs),1), text=f"Processed {idx+1}/{len(inputs)} sources")
@@ -633,6 +647,18 @@ with st.container():
     if st.session_state.get("source_stats"):
         with st.expander("AI extraction by source"):
             st.dataframe(pd.DataFrame(st.session_state["source_stats"]), use_container_width=True)
+    if st.session_state.get("research_dossiers"):
+        with st.expander("Research dossiers — inspect / copy / download", expanded=False):
+            dossier_names=list(st.session_state["research_dossiers"].keys())
+            selected_dossier=st.selectbox("Source dossier", dossier_names, key="pc_v3_dossier_select")
+            dossier_obj=st.session_state["research_dossiers"].get(selected_dossier) or {}
+            raw_dossier=json.dumps(dossier_obj,ensure_ascii=False,indent=2,default=str)
+            st.caption("This is the research-before-database record: investigation → follow-up questions → real-world graph.")
+            st.code(raw_dossier,language="json")
+            safe_name=re.sub(r"[^A-Za-z0-9._-]+","_",selected_dossier or "research")[:80]
+            st.download_button("Download research dossier JSON",data=raw_dossier,
+                               file_name=f"{safe_name}_research_dossier.json",mime="application/json",
+                               use_container_width=True,key="pc_v3_download_dossier")
 
 # Direct bridge to v0.7's persistent worker. This deliberately does not
 # require per-record checkboxes or a synchronous database-wide identity scan.

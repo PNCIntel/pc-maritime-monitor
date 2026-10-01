@@ -1,95 +1,84 @@
-# P&C Connected Analyst Loader v2.0
+# P&C Research-First Analyst Loader v3
 
-This patch upgrades the existing Power Admin workflow without changing the database model.
+Purpose: fix the failure mode where a source is forced into database tables before the AI has understood and researched the real-world story.
 
-## What changed
+## What changes
 
-- Every unpublished core proposal is researched, including companies/vessels that already match canonical records.
-- Article research can return up to 12 directly evidenced additional objects and 20 relationships instead of 6/10.
-- A new connected-research stage runs **after canonical core publication** and researches directly loaded companies and vessels one evidence-backed hop deeper.
-- Company research is split into dedicated facets: identity/ownership, leadership/offices, group structure/acquisitions, operations/projects/contracts, and verified vessel fleet.
-- The analyst sees names/evidence only. Existing Supabase resolver RPCs handle canonical IDs.
-- Source-backed findings can populate:
-  - `pc_company_profiles`
-  - `pc_company_offices`
-  - `pc_people` + `pc_company_people_roles`
-  - `pc_relationships`
-  - `pc_mobile_assets`
-  - `pc_vessel_identity_history`
-  - `pc_company_operating_footprint`
-  - `pc_transactions`
-  - `pc_contracts` + `pc_contract_participants`
-  - `pc_assets` + `pc_project_details`
-- Merchant vessel creation requires a valid verified 7-digit IMO. Name-only fleet candidates are held.
-- Announced/pending transactions are preserved as transactions and do not overwrite completed ownership.
-- Connected research state is persisted in `pc_ingestion_jobs.source_scope` so it can resume after Streamlit restarts.
-- Re-running the same source under v2 creates/reuses a v2 fingerprint rather than silently reusing an older v0.7/v1.x job.
-- The document loader can optionally create a connected company-research review for the issuing organisation after saving the document.
+The Load intelligence intake now uses this order for AI web research:
 
-## Files to deploy
+1. Read the supplied article/report text.
+2. Broad web investigation of the real-world subject, without mentioning database tables or IDs.
+3. Generate up to 7 material unanswered research questions (identity/history/ownership/operator/transaction status/attribution).
+4. Run one bundled follow-up web investigation for those questions.
+5. Synthesize one real-world graph: companies, people, vessels/assets, vessel identity history, events, transactions, relationships, projects, contracts, claims, timeline, and research gaps.
+6. Deterministically map only the graph's core objects to the existing P&C proposal tables.
+7. Send those proposals through the existing v0.7 queue, identity resolver, research, canonical publisher, graph sync and v2 connected-enrichment stages.
 
-Replace/add these files together:
+The analyst does not see or enter database IDs.
 
-- `pc-power-admin.py`
-- `pc_intelligence_pipeline.py`
-- `pc_v07_core.py`
-- `pc_v16_research.py`
-- `pc_document_loader.py`
-- `pc_connected_research.py` (new)
+## Files
 
-No new SQL migration is required by this patch. It uses tables and RPCs already present in the supplied data model.
+- `pc-power-admin.py` — modified intake path and research dossier review/download UI.
+- `pc_research_dossier.py` — new research-first investigator and deterministic core mapper.
+- Existing v2 files are included unchanged except where already modified in v2.
 
-## Svitzer acceptance test
+## Important guardrails
 
-1. Deploy to staging.
-2. Open **Research company**.
-3. Company: `Svitzer`
-4. Official website: `https://svitzer.com/`
-5. Click **Research company**.
-6. Review the category counts and evidence-backed findings.
-7. Confirm one approval and click **Approve & populate company graph**.
+- A former vessel name does not create a second physical vessel.
+- Valid IMO values must be exactly 7 digits before they are placed on a proposal.
+- Abstract fleets, leadership groups, and regional commercial teams are not physical assets.
+- Announced/pending transactions are not silently converted into completed ownership.
+- Allegations and disputed attribution remain qualified claims.
+- The research dossier preserves connected findings for downstream specialist publication.
 
-### The test should no longer look like the old result
+## API cost / bounded behaviour
 
-The old result (`Svitzer`, `Svitzer Fleet`, `Svitzer Regional Commercial Teams`) is not sufficient.
+For each text URL/report in `AI web research + extraction` mode, v3 normally performs:
 
-A useful Svitzer research pass should attempt all of these categories separately:
+- 1 broad OpenAI web-search call
+- 1 small JSON call to identify remaining research questions
+- 0 or 1 bundled follow-up OpenAI web-search call
+- 1 JSON graph-synthesis call
 
-- company profile / headquarters
-- named leadership and exact roles
-- offices / operating footprint
-- subsidiaries, acquisitions, parent/child relationships
-- contracts / projects / partnerships
-- verified individual vessels with IMO where found
-- vessel identity history where evidence supports it
-- research gaps for anything not verified
+This is intentionally bounded for batches such as 10 articles; it does not launch one API call per discovered entity.
 
-`Svitzer Fleet` must **not** become one physical asset. `Svitzer Regional Commercial Teams` must **not** become a company.
+## Deployment
 
-## Normal article/newsletter workflow
+Replace the current v2 files with the files in this ZIP, including the new `pc_research_dossier.py`. No SQL migration is required by this patch.
 
-The analyst still uses **Load intelligence**:
+Deploy to staging first.
 
-1. paste URLs / upload newsletters, files or notes;
-2. choose **AI web research + extraction** and prepare the package;
-3. queue the package;
-4. click **Research, resolve & POPULATE DATABASE**;
-5. review the connected findings once and approve connected enrichment.
+## First acceptance test — TWZ St Helena
 
-No SQL, canonical IDs or table selection is exposed to the analyst.
+Load only:
 
-## Important limitations
+`https://www.twz.com/news-features/claims-swirl-around-u-s-marines-injured-aboard-mystery-vessel-attacked-in-the-strait-of-hormuz`
 
-This is a controlled v2 improvement, not a claim that every one of the ~360 database tables is now automatically populated. The connected publisher covers the specialist structures listed above, which are the critical paths for the Svitzer / AD Ports / DP World / KKR / MNG-St Helena cases.
+Use `AI web research + extraction`.
 
-The current document loader still stores the document, metadata and entity links first; v2 additionally creates a connected company-research review for the issuer. It does not yet convert every financial line item in an annual report into all financial specialist tables.
+Before queuing, open **Research dossiers — inspect / copy / download**.
 
-Dashboard reader fixes are separate from this loader patch. Publication into the canonical database does not by itself prove every Trade/Intelligence screen is querying the relevant table.
+The dossier should, where supported by evidence, identify:
 
-## Local validation performed
+- one physical vessel anchored by IMO 8716306
+- St Helena / MNG Tahiti as identity history, not two ships
+- MNG Maritime as a connected company with its role kept distinct from legal ownership unless verified
+- the Hormuz incident as an event
+- unconfirmed/attributed claims kept qualified
+- research gaps such as unresolved current ownership if not verified
 
-- All supplied Python files compile with `py_compile`.
-- `test_connected_research.py`: 3 tests passed.
-- Tests cover IMO checksum validation, prevention of generic fleet creation without verified IMO, and safe date/numeric cleaning.
+Then queue and run `Research, resolve & POPULATE DATABASE`.
 
-Live Supabase and live OpenAI/web-search execution have not been run from this environment; staging is required before production deployment.
+Success is not staging alone. Check that the canonical vessel/company/event records and connected history are published or explicitly held with a reason.
+
+## Regression tests performed locally
+
+`pytest -q test_research_dossier.py test_connected_research.py`
+
+Result: 6 passed.
+
+Python compile checks also passed for the modified/new files.
+
+## Known limitation
+
+The source-level dossier and graph are now research-first, but final specialist publication still relies on the existing v2 connected publisher. If the dossier is correct but a specialist relationship/history does not reach its table, the remaining defect is in that publisher, not in source understanding. The dossier download makes that boundary visible for debugging.
