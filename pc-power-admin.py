@@ -599,7 +599,11 @@ with st.container():
                             # before mapping any finding to P&C database proposal tables.
                             from pc_research_dossier import research_source_to_records
                             fresh, dossier = research_source_to_records(
-                                s["text"], OPENAI_KEY, s["url"], domain_focus, source_label=s["label"]
+                                source_text=s["text"],
+                                source_url=s["url"],
+                                focus=domain_focus,
+                                api_key=OPENAI_KEY,
+                                source_label=s["label"],
                             )
                             st.session_state.setdefault("research_dossiers", {})[s["label"]] = dossier
                         else:
