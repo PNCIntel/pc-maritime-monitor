@@ -750,6 +750,66 @@ with st.container():
                                file_name=f"{safe_name}_research_dossier.json",mime="application/json",
                                use_container_width=True,key="pc_v3_download_dossier")
 
+    st.divider()
+    st.subheader("Validate / replay saved research dossier")
+    st.caption("Re-use a previously researched dossier without another OpenAI/web-search call. "
+               "The deterministic validation gate repairs unsafe wording, holds ambiguous roles and dates, "
+               "then rebuilds queueable core proposals. No database IDs or SQL are required.")
+    replay_file=st.file_uploader("Research dossier JSON",type=["json"],key="pc_v34_replay_dossier")
+    if replay_file is not None:
+        try:
+            replay_obj=json.loads(replay_file.getvalue().decode("utf-8"))
+            from pc_graph_validator import validate_dossier
+            validated_obj,validation_report=validate_dossier(replay_obj)
+            a,b,c=st.columns(3)
+            a.metric("Automatic repairs",len(validation_report.get("repairs") or []))
+            b.metric("Held findings",len(validation_report.get("holds") or []))
+            c.metric("Excluded context",len(validation_report.get("dropped") or []))
+            with st.expander("Validation report",expanded=True):
+                st.json(validation_report,expanded=False)
+            with st.expander("Validated dossier — copy / download",expanded=False):
+                validated_raw=json.dumps(validated_obj,ensure_ascii=False,indent=2,default=str)
+                st.code(validated_raw,language="json")
+                replay_safe=re.sub(r"[^A-Za-z0-9._-]+","_",Path(replay_file.name).stem)[:80]
+                st.download_button("Download validated dossier JSON",data=validated_raw,
+                                   file_name=f"{replay_safe}_validated.json",mime="application/json",
+                                   use_container_width=True,key="pc_v34_download_validated")
+            approve_replay=st.checkbox("I reviewed the validation report and approve creating a queueable package from the unheld findings",
+                                       key="pc_v34_replay_approve")
+            if st.button("Build package from validated dossier",type="primary",disabled=not approve_replay,
+                         use_container_width=True,key="pc_v34_replay_build"):
+                from pc_research_dossier import graph_to_core_records
+                label=Path(replay_file.name).stem
+                replay_records=graph_to_core_records(validated_obj,source_label=label)
+                if not replay_records:
+                    st.error("The validated dossier contains no publishable core proposals. Review held findings.")
+                else:
+                    # Mark records so downstream connected enrichment can distinguish replay from fresh AI research.
+                    for rr in replay_records:
+                        meta=(rr.get("payload") or {}).setdefault("metadata",{})
+                        meta["validated_dossier_replay"] = True
+                        meta["validator_version"] = validation_report.get("version")
+                    st.session_state["active_package"]=replay_records
+                    st.session_state["research_dossiers"][label]=validated_obj
+                    replay_stats=[{"Source":label,"Records":len(replay_records),"Research":"saved dossier replay",
+                                   "Questions":len(validated_obj.get("research_questions") or []),
+                                   "Evidence URLs":len(validated_obj.get("evidence_urls") or []),
+                                   "Repairs":len(validation_report.get("repairs") or []),
+                                   "Held":len(validation_report.get("holds") or [])}]
+                    st.session_state["source_stats"]=replay_stats
+                    st.session_state["source_errors"]=[]
+                    st.session_state["source_reference"]=validated_obj.get("source_url") or label
+                    try:
+                        snap=persist_extraction(sb,replay_records,replay_stats,[],st.session_state["source_reference"])
+                        st.session_state["v151_snapshot_id"]=snap
+                        st.success(f"Validated replay saved permanently: {len(replay_records)} core proposals. "
+                                   "Use Queue all extracted records below; no research API call was made.")
+                    except Exception as exc:
+                        st.warning(f"Validated package built but snapshot persistence failed: {exc}. "
+                                   "Keep this session open and queue it below.")
+        except Exception as exc:
+            st.error("Saved dossier could not be validated: "+str(exc))
+
 # Direct bridge to v0.7's persistent worker. This deliberately does not
 # require per-record checkboxes or a synchronous database-wide identity scan.
 if st.session_state.get("active_package"):

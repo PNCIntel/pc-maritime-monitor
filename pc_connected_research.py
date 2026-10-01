@@ -453,13 +453,65 @@ def _save_scope(sb,job,scope):
     sb.table('pc_ingestion_jobs').update({'source_scope':scope}).eq('ingestion_job_id',job).execute()
 
 
+
+
+def _validated_replay_plans(sb, job):
+    """Build connected-review plans from a validated saved dossier already staged for this job.
+
+    No OpenAI/web call. This lets analysts replay a researched dossier without paying to
+    research the same source again.
+    """
+    stages=(sb.table('pc_staged_records').select('target_table,natural_key,payload,source_url')
+            .eq('ingestion_job_id',job).limit(5000).execute().data or [])
+    plans=[]; seen=set()
+    for s in stages:
+        if s.get('target_table')!='pc_mobile_assets':
+            continue
+        p=s.get('payload') or {}; m=p.get('metadata') or {}
+        if not m.get('validated_dossier_replay'):
+            continue
+        name=p.get('name') or s.get('natural_key'); imo=p.get('imo')
+        key=(str(imo or ''),_norm(name))
+        if key in seen: continue
+        seen.add(key)
+        connected=m.get('research_dossier_connected_findings') or {}
+        hist=list(m.get('identity_history') or [])
+        if not hist:
+            for h in connected.get('identity_history') or []:
+                if imo and str(h.get('imo') or '').strip()==str(imo): hist.append(h)
+                elif _norm(h.get('asset_name'))==_norm(name): hist.append(h)
+        rels=[]
+        aliases={_norm(name)}
+        for h in hist:
+            if _norm(h.get('identifier_type'))=='name': aliases.add(_norm(h.get('identifier_value')))
+        for r in connected.get('relationships') or []:
+            if _norm(r.get('source_name')) in aliases or _norm(r.get('target_name')) in aliases:
+                rels.append(r)
+        plan={'subject_type':'vessel','subject_name':name,
+              'vessel':{'name':name,'imo':imo,'asset_type':p.get('asset_type'),'subtype':p.get('subtype'),
+                        'flag':p.get('flag'),'year_built':p.get('year_built'),'source_urls':_stage_source_urls(s)},
+              'identity_history':hist,'relationships':rels,
+              'transactions':connected.get('transactions') or [],'claims':connected.get('claims') or [],
+              'events':[],'research_gaps':connected.get('research_gaps') or [],
+              'validator_holds':connected.get('validator_holds') or [],
+              'validator_report':connected.get('validator_report') or {},
+              'evidence_urls':_stage_source_urls(s),'replayed_from_validated_dossier':True}
+        plans.append(plan)
+    return plans
+
 def init_job_connected(sb,job):
     scope=_load_scope(sb,job)
     state=scope.get('connected_research') or {}
     if state.get('subjects') is not None: return state
-    subjects=job_subjects(sb,job)
-    state={'version':'2.0','status':'researching','subjects':subjects,'plans':[],
-           'next_index':0,'started_at':datetime.now(timezone.utc).isoformat()}
+    replay_plans=_validated_replay_plans(sb,job)
+    if replay_plans:
+        state={'version':'2.1-validated-replay','status':'review','subjects':[],
+               'plans':replay_plans,'next_index':0,'started_at':datetime.now(timezone.utc).isoformat(),
+               'replayed_without_ai':True}
+    else:
+        subjects=job_subjects(sb,job)
+        state={'version':'2.0','status':'researching','subjects':subjects,'plans':[],
+               'next_index':0,'started_at':datetime.now(timezone.utc).isoformat()}
     scope['connected_research']=state; _save_scope(sb,job,scope); return state
 
 
@@ -487,10 +539,11 @@ def publish_job_connected(sb,job):
     for plan in state.get('plans') or []:
         if plan.get('subject_type')=='company': reports.append(publish_company_plan(sb,job,plan))
         else:
-            # Vessel history plans are converted to a single-company-like publication path only for vessel core/history.
+            # Vessel replay publishes core/history plus source-backed entity<->vessel relationships.
+            # Transactions involving a vessel remain held unless/until the transaction schema has an explicit asset target.
             v=plan.get('vessel') or {}; vr=_resolve_vessel(sb,job,v)
             rep={'subject':plan.get('subject_name'),'vessels':0,'vessel_history':0,'entities':0,'relationships':0,'holds':[],
-                 'research_gaps':plan.get('research_gaps') or []}
+                 'research_gaps':plan.get('research_gaps') or [],'validator_holds':plan.get('validator_holds') or []}
             if vr.get('status')!='OK': rep['holds'].append({'type':'vessel','name':v.get('name'),'reason':vr.get('reason')})
             else:
                 vid=vr['canonical_id']; rep['vessels']=1
@@ -504,7 +557,40 @@ def publish_job_connected(sb,job):
                         'valid_from':_date(h.get('valid_from')),'valid_to':_date(h.get('valid_to')),'jurisdiction':h.get('jurisdiction'),
                         'change_reason':h.get('change_reason'),'verification_status':vs,
                         'metadata':{'research_sources':h.get('source_urls') or [],'connected_research_job':str(job)}}).execute(); rep['vessel_history']+=1
-            rep['complete']=not rep['holds'] and not rep['research_gaps']; reports.append(rep)
+                aliases={_norm(v.get('name'))}
+                for h in plan.get('identity_history') or []:
+                    if _norm(h.get('identifier_type'))=='name': aliases.add(_norm(h.get('identifier_value')))
+                for rel in plan.get('relationships') or []:
+                    sname=rel.get('source_name'); tname=rel.get('target_name'); role=str(rel.get('relationship') or '').strip()
+                    if not sname or not tname or not role: continue
+                    if _norm(tname) in aliases:
+                        er=_resolve_entity(sb,job,{'name':sname,'entity_type':'company','source_urls':rel.get('source_urls') or []})
+                        if er.get('status')!='OK':
+                            rep['holds'].append({'type':'vessel_relationship','name':sname,'reason':er.get('reason')}); continue
+                        eid=er['canonical_id']; rep['entities']+=1
+                        relid=_hash_id('REL',eid,role,vid,rel.get('effective_from'))
+                        sb.table('pc_relationships').upsert({'relationship_id':relid,'source_type':'entity','source_id':eid,
+                            'relationship_type':_norm(role).replace(' ','_')[:80],'target_type':'mobile_asset','target_id':vid,
+                            'valid_from':_date(rel.get('effective_from')),'valid_to':_date(rel.get('effective_to')),
+                            'confidence':'reported','record_status':'approved','notes':rel.get('evidence_summary'),
+                            'metadata':{'research_sources':rel.get('source_urls') or [],'connected_research_job':str(job)}},
+                            on_conflict='relationship_id').execute(); rep['relationships']+=1
+                    elif _norm(sname) in aliases:
+                        er=_resolve_entity(sb,job,{'name':tname,'entity_type':'company','source_urls':rel.get('source_urls') or []})
+                        if er.get('status')!='OK':
+                            rep['holds'].append({'type':'vessel_relationship','name':tname,'reason':er.get('reason')}); continue
+                        eid=er['canonical_id']; rep['entities']+=1
+                        relid=_hash_id('REL',vid,role,eid,rel.get('effective_from'))
+                        sb.table('pc_relationships').upsert({'relationship_id':relid,'source_type':'mobile_asset','source_id':vid,
+                            'relationship_type':_norm(role).replace(' ','_')[:80],'target_type':'entity','target_id':eid,
+                            'valid_from':_date(rel.get('effective_from')),'valid_to':_date(rel.get('effective_to')),
+                            'confidence':'reported','record_status':'approved','notes':rel.get('evidence_summary'),
+                            'metadata':{'research_sources':rel.get('source_urls') or [],'connected_research_job':str(job)}},
+                            on_conflict='relationship_id').execute(); rep['relationships']+=1
+                for tx in plan.get('transactions') or []:
+                    rep['holds'].append({'type':'vessel_transaction','name':tx.get('target_name'),
+                        'reason':'Vessel transaction preserved in dossier but not written: pc_transactions asset-target mapping not verified'})
+            rep['complete']=not rep['holds'] and not rep['research_gaps'] and not rep.get('validator_holds'); reports.append(rep)
     summary={'subjects':len(reports),'complete_subjects':sum(1 for r in reports if r.get('complete')),
              'holds':sum(len(r.get('holds') or []) for r in reports),'reports':reports}
     state['publication_report']=summary; state['status']='published' if summary['holds']==0 else 'published_partial'

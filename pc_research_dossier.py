@@ -293,7 +293,7 @@ def graph_to_core_records(dossier: dict, source_label: str = "") -> list[dict]:
         title=str(e.get("title") or "").strip()
         if not title: continue
         meta=meta_for(e,"event")
-        for k in ("why_it_matters","commercial_implications","assessment","monitoring_indicators"):
+        for k in ("why_it_matters","commercial_implications","assessment","monitoring_indicators","verification_status"):
             if e.get(k) is not None: meta[k]=e.get(k)
         # Preserve discovered graph context for later relationship synthesis.
         meta["discovered_relationships"] = graph.get("relationships") or []
@@ -314,7 +314,8 @@ def graph_to_core_records(dossier: dict, source_label: str = "") -> list[dict]:
                         "source_label":source_label,"research_object_kind":"primary_company"}},"confidence":None})
 
     # Store graph-wide connected findings once on each primary/core record without creating pseudo-objects.
-    compact_graph={k:graph.get(k) or [] for k in ("people","identity_history","transactions","relationships","projects","contracts","locations","claims","timeline","research_gaps")}
+    compact_graph={k:graph.get(k) or [] for k in ("people","identity_history","transactions","relationships","projects","contracts","locations","claims","timeline","research_gaps","validator_holds")}
+    compact_graph["validator_report"] = graph.get("validator_report") or {}
     for r in records:
         m=(r.get("payload") or {}).setdefault("metadata",{})
         m["research_dossier_connected_findings"] = compact_graph

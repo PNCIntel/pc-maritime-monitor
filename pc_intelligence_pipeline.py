@@ -132,7 +132,13 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             st.session_state[report_key]=report
             # Connected enrichment starts only after canonical core identities exist.
             state=init_job_connected(sb,job)
-            st.session_state[state_key]='connected_research' if state.get('subjects') else 'done'; st.rerun()
+            if state.get('status')=='review' and state.get('plans'):
+                st.session_state[state_key]='connected_review'
+            elif state.get('subjects'):
+                st.session_state[state_key]='connected_research'
+            else:
+                st.session_state[state_key]='done'
+            st.rerun()
 
         if stage=='connected_research':
             key=_api_key()
@@ -154,6 +160,8 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             state=(_load_scope(sb,job).get('connected_research') or {})
             plans=state.get('plans') or []
             st.subheader('Review connected findings')
+            if state.get('replayed_without_ai'):
+                st.info('These connected findings were replayed from the validated saved dossier; no additional OpenAI/web research call was made.')
             rows=[]
             for p in plans:
                 rows.append({'Subject':p.get('subject_name'),'Type':p.get('subject_type'),
