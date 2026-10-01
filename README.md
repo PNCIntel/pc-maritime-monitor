@@ -1,33 +1,95 @@
-# P&C Power Admin — Svitzer company-depth controlled test
+# P&C Connected Analyst Loader v2.0
 
-## What this package does
-Adds an **analyst-facing Company research (controlled test)** page to the existing Power Admin, alongside its existing intelligence/document loaders. This is a bounded company-depth research/publishing trial for the **existing canonical Svitzer company**.
+This patch upgrades the existing Power Admin workflow without changing the database model.
 
-The page takes an official homepage, fetches relevant same-domain official subpages using the same consented public Jina reader principle, sends retrieved text to the configured OpenAI API, persists an evidence-linked research review in the existing `pc_ingestion_jobs` table, and presents a preview for analyst approval. Upon approval it resolves one **unique exact existing company identity**, updates `pc_company_profiles` without destroying existing populated fields, and inserts *individually approved, provenance-tagged* offices and management/leadership people/roles. It re-checks the profile through Supabase before marking that **subset** complete.
+## What changed
 
-**No SQL migration** is needed for this bounded trial: the supplied schema already contains these tables and fields. No raw SQL/IDs are required from the analyst.
+- Every unpublished core proposal is researched, including companies/vessels that already match canonical records.
+- Article research can return up to 12 directly evidenced additional objects and 20 relationships instead of 6/10.
+- A new connected-research stage runs **after canonical core publication** and researches directly loaded companies and vessels one evidence-backed hop deeper.
+- Company research is split into dedicated facets: identity/ownership, leadership/offices, group structure/acquisitions, operations/projects/contracts, and verified vessel fleet.
+- The analyst sees names/evidence only. Existing Supabase resolver RPCs handle canonical IDs.
+- Source-backed findings can populate:
+  - `pc_company_profiles`
+  - `pc_company_offices`
+  - `pc_people` + `pc_company_people_roles`
+  - `pc_relationships`
+  - `pc_mobile_assets`
+  - `pc_vessel_identity_history`
+  - `pc_company_operating_footprint`
+  - `pc_transactions`
+  - `pc_contracts` + `pc_contract_participants`
+  - `pc_assets` + `pc_project_details`
+- Merchant vessel creation requires a valid verified 7-digit IMO. Name-only fleet candidates are held.
+- Announced/pending transactions are preserved as transactions and do not overwrite completed ownership.
+- Connected research state is persisted in `pc_ingestion_jobs.source_scope` so it can resume after Streamlit restarts.
+- Re-running the same source under v2 creates/reuses a v2 fingerprint rather than silently reusing an older v0.7/v1.x job.
+- The document loader can optionally create a connected company-research review for the issuing organisation after saving the document.
 
-## IMPORTANT: what this package does NOT do
-This is **not yet the complete universal loader**. The new page **does not** publish related subsidiary/acquisition relationships, vessel objects, vessel historical identity, contracts, full fleet discovery, regulatory milestones or dashboard routing. These candidates are saved in its review job and explicitly counted as HELD. Do not mistake `completed_profile_only` (or `partial`) for a completed company import. It does not remove previous wrongly created `Svitzer Fleet`/`Svitzer Regional Commercial Teams` records, or update your Trade and Intelligence readers. Existing main intake and the Phase 1 research/reconciliation pipeline are preserved.
+## Files to deploy
 
-A source-grounded extraction with a URL is **not** independent verification of a person's appointment, legal ownership or a vessel IMO. Analyst review is required for each published office/leadership role. Missing web pages appear as errors and fewer than two retrieved pages block the deep-research test. Jina and OpenAI receive only consented public sources; do not put confidential reports in this company mode.
+Replace/add these files together:
 
-## Deployment (STAGING)
-1. Back up the deployed files. Copy `pc-power-admin.py` to your repo's existing Power Admin main file **using its configured filename**, `pc_intelligence_pipeline.py`, `pc_company_depth.py`, and `pc_company_source_reader.py` to the same repo directory (alongside the existing helper modules). The included Power Admin file is based on the previous Phase 1 patched version, not on unknown subsequent production changes; compare before replacing if you've made further edits.
-2. Retain your existing `shared/`, `pc_v07_core.py`, `pc_v15_bulk_replay.py`, `pc_v16_research.py`, `pc_document_loader.py`, `pc_newsletter_pdf.py`, other existing module dependencies and environment secrets; do not replace them with earlier copies.
-3. Deploy only to STAGING first and confirm the existing Power Admin boots. If you did not previously deploy Phase 1, deploy the included pipeline together with the main file.
+- `pc-power-admin.py`
+- `pc_intelligence_pipeline.py`
+- `pc_v07_core.py`
+- `pc_v16_research.py`
+- `pc_document_loader.py`
+- `pc_connected_research.py` (new)
 
-## The Svitzer test
-1. Choose **Research company (controlled test)** in the sidebar. Enter `Svitzer` and `https://svitzer.com/`.
-2. Check the consent box. Click **Research company and linked pages**. The expected output is an actual count of retrieved official pages, any retrieval errors, and a saved persistent review job. If it only retrieves the homepage, add official leadership/contact links manually; don't approve.
-3. Open the saved review. Inspect JSON *especially source URLs*, proposed headquarters, leadership roles, candidate vessels, related companies, missing fields and retrieval errors. If fields are absent, this test has NOT established their completeness.
-4. Select only office and leadership rows you can validate from the official cited page. Approve the profile and click **Publish verified profile and selected offices**. The web research review remains saved; vessel/ownership/contract information remains held.
-5. Check the summary for `profile_updated`, `offices_added`, `people_added`, `unresolved_count`; check the existing Svitzer company in Trade only to the extent that the Trade reader actually reads these specialist tables. Do not interpret lack of Trade visibility as absence in the DB: the existing dashboard readers still need separate repair.
-6. Run again with the same sources only when testing idempotency. Do NOT requeue the old three-record `Svitzer Fleet` extraction.
+No new SQL migration is required by this patch. It uses tables and RPCs already present in the supplied data model.
 
-## Automated local tests
-```
-python -m unittest -v test_company_depth.py
-python -m py_compile pc-power-admin.py pc_company_depth.py pc_company_source_reader.py pc_intelligence_pipeline.py
-```
-The tests exercise same-site discovery boundaries, URL provenance, malformed IMO holds, wrong-type canonical rejection, specialist profile/office writes and held fleet candidates with fake Supabase responses. They do **not** simulate live OpenAI/Jina/Supabase/Streamlit or prove full research completeness. Stop/revert if staging fails.
+## Svitzer acceptance test
+
+1. Deploy to staging.
+2. Open **Research company**.
+3. Company: `Svitzer`
+4. Official website: `https://svitzer.com/`
+5. Click **Research company**.
+6. Review the category counts and evidence-backed findings.
+7. Confirm one approval and click **Approve & populate company graph**.
+
+### The test should no longer look like the old result
+
+The old result (`Svitzer`, `Svitzer Fleet`, `Svitzer Regional Commercial Teams`) is not sufficient.
+
+A useful Svitzer research pass should attempt all of these categories separately:
+
+- company profile / headquarters
+- named leadership and exact roles
+- offices / operating footprint
+- subsidiaries, acquisitions, parent/child relationships
+- contracts / projects / partnerships
+- verified individual vessels with IMO where found
+- vessel identity history where evidence supports it
+- research gaps for anything not verified
+
+`Svitzer Fleet` must **not** become one physical asset. `Svitzer Regional Commercial Teams` must **not** become a company.
+
+## Normal article/newsletter workflow
+
+The analyst still uses **Load intelligence**:
+
+1. paste URLs / upload newsletters, files or notes;
+2. choose **AI web research + extraction** and prepare the package;
+3. queue the package;
+4. click **Research, resolve & POPULATE DATABASE**;
+5. review the connected findings once and approve connected enrichment.
+
+No SQL, canonical IDs or table selection is exposed to the analyst.
+
+## Important limitations
+
+This is a controlled v2 improvement, not a claim that every one of the ~360 database tables is now automatically populated. The connected publisher covers the specialist structures listed above, which are the critical paths for the Svitzer / AD Ports / DP World / KKR / MNG-St Helena cases.
+
+The current document loader still stores the document, metadata and entity links first; v2 additionally creates a connected company-research review for the issuer. It does not yet convert every financial line item in an annual report into all financial specialist tables.
+
+Dashboard reader fixes are separate from this loader patch. Publication into the canonical database does not by itself prove every Trade/Intelligence screen is querying the relevant table.
+
+## Local validation performed
+
+- All supplied Python files compile with `py_compile`.
+- `test_connected_research.py`: 3 tests passed.
+- Tests cover IMO checksum validation, prevention of generic fleet creation without verified IMO, and safe date/numeric cleaning.
+
+Live Supabase and live OpenAI/web-search execution have not been run from this environment; staging is required before production deployment.

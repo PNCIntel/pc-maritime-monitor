@@ -1,10 +1,7 @@
-"""P&C v1.9 - one-action intelligence population pipeline.
+"""P&C v2.0 connected analyst loader pipeline.
 
-This module closes the gap between Universal Intake and the canonical shared
-Trade/Intelligence database. The operator approves one load; the app processes
-its queue, researches every unpublished supported staged object, repairs staging, resolves
-canonical identities, publishes eligible records with existing backup-first
-RPCs, then syncs graph links and agreements. Exceptions remain staged.
+Analyst workflow: queue source package -> one research/populate action -> review only
+connected findings/true exceptions -> approve connected enrichment. No SQL/IDs in UI.
 """
 from __future__ import annotations
 import os
@@ -20,32 +17,19 @@ def _queue_counts(sb, job):
     return out
 
 
-def _research_eligible(staged, published):
-    """All unpublished core objects require research, including exact existing matches.
+def _candidate_research(staged, pub):
+    """Research every unpublished core proposal, not just unresolved identities.
 
-    Never infer that successful name matching means the source is completely researched.
-    Existing research-task rows are deduplicated in enqueue_research.
+    Existing companies/vessels still need enrichment. This closes the Svitzer failure
+    where a matched company skipped research and only shallow source extraction survived.
     """
-    done = {str(x) for x in published}
-    return [r for r in staged if r.get('target_table') in
-            {'pc_entities', 'pc_assets', 'pc_mobile_assets', 'pc_events'}
-            and str(r['staged_record_id']) not in done]
+    done=set(map(str,pub or []))
+    return [r for r in staged if r.get('target_table') in {'pc_entities','pc_assets','pc_mobile_assets','pc_events'}
+            and str(r.get('staged_record_id')) not in done]
 
 
-def _unresearched_rows(sb, job, candidates):
-    """Exclude rows with an EXISTING persisted research task (even held/failed).
-
-    A failed task remains an exception, never implicitly approved.
-    """
-    if not candidates:
-        return []
-    existing=set()
-    for offset in range(0, len(candidates), 100):
-        ids=[str(r['staged_record_id']) for r in candidates[offset:offset+100]]
-        for task in (sb.table('pc_v16_research_tasks').select('staged_record_id')
-                     .in_('staged_record_id',ids).execute().data or []):
-            existing.add(str(task['staged_record_id']))
-    return [r for r in candidates if str(r['staged_record_id']) not in existing]
+def _api_key():
+    return (st.secrets.get('OPENAI_API_KEY') or st.secrets.get('OPENAI_KEY') or os.environ.get('OPENAI_API_KEY'))
 
 
 def render_intelligence_pipeline(sb, job, reviewer='DCM'):
@@ -54,33 +38,38 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
     from pc_v16_research import (enqueue_research,status_counts,process_research_batch,
         recover_incomplete_research,recover_saved_repair_holds,recover_unchanged_holds,
         link_researched_events)
+    from pc_connected_research import init_job_connected, process_next_job_subject, publish_job_connected
 
     st.divider()
-    st.subheader('Populate shared P&C database')
-    st.caption('One approval: process → research all core records → repair → canonical resolve → '
-               'backup + publish eligible records → sync relationships and assessments. '
-               'Only genuine evidence/identity conflicts remain as exceptions.')
+    st.subheader('Research, resolve & publish')
+    st.caption('Source research → classification repair → canonical resolution → core publication → '
+               'connected company/vessel research → specialist tables. Analysts review names and evidence, not database IDs.')
 
     counts=_queue_counts(sb,job)
     c1,c2,c3,c4=st.columns(4)
     c1.metric('Queued',counts['queued']); c2.metric('Staged',counts['staged'])
-    c3.metric('Failed',counts['failed']); c4.metric('Stage','Preparing')
+    c3.metric('Failed',counts['failed']); c4.metric('Job',str(job)[:8])
 
-    run_key='pc_v19_run_'+str(job)
-    state_key='pc_v19_state_'+str(job)
-    report_key='pc_v19_report_'+str(job)
-
+    run_key='pc_v20_run_'+str(job); state_key='pc_v20_state_'+str(job); report_key='pc_v20_report_'+str(job)
+    # Recover connected-research progress from Postgres after logout/reboot.
     if not st.session_state.get(run_key):
-        if st.button('Research, resolve & POPULATE DATABASE',type='primary',use_container_width=True,
-                     key='pc_v19_start_'+str(job)):
-            st.session_state[run_key]=True
-            st.session_state[state_key]='queue'
-            st.session_state.pop(report_key,None)
-            st.rerun()
+        try:
+            from pc_connected_research import _load_scope
+            _cs=(_load_scope(sb,job).get('connected_research') or {})
+            _status=_cs.get('status')
+            if _status in {'researching','review','published','published_partial'}:
+                st.session_state[run_key]=True
+                st.session_state[state_key]={'researching':'connected_research','review':'connected_review',
+                                             'published':'done','published_partial':'done'}[_status]
+        except Exception:
+            pass
+    if not st.session_state.get(run_key):
+        if st.button('Research, resolve & POPULATE DATABASE',type='primary',use_container_width=True,key='pc_v20_start_'+str(job)):
+            st.session_state[run_key]=True; st.session_state[state_key]='queue'; st.session_state.pop(report_key,None); st.rerun()
         return
 
     stage=st.session_state.get(state_key,'queue')
-    st.info('Automatic load is running. Completed work is persisted in Supabase; a restart can resume the same job.')
+    st.info('Work is persisted in Supabase. If Streamlit restarts, reopen this job and resume.')
 
     try:
         if stage=='queue':
@@ -89,135 +78,126 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                     _process_job_queue(sb,job,batch=50,max_batches=40)
                 st.rerun()
             if counts['processing']:
-                st.warning('Some queue rows are still marked processing. Wait briefly or use Jobs & history recovery.')
-                return
+                st.warning('Some queue rows are still marked processing. Wait briefly or use Jobs & history recovery.'); return
             if counts['failed']:
-                st.warning(f"{counts['failed']} queue rows failed and will remain exceptions; continuing with staged records.")
-            st.session_state[state_key]='plan'
-            st.rerun()
+                st.warning(f"{counts['failed']} queue rows failed and remain exceptions; continuing with staged records.")
+            st.session_state[state_key]='plan'; st.rerun()
 
         if stage=='plan':
             staged=_all_staged(sb,job)
-            if not staged:
-                raise RuntimeError('No staged records exist for this job')
-            # The existing publisher has the authoritative persisted stage->canonical mapping.
+            if not staged: raise RuntimeError('No staged records exist for this job')
             ready,followers,exceptions,pub=_plan(sb,job,staged)
-            candidates=_research_eligible(staged,pub)
-            needs_research=_unresearched_rows(sb,job,candidates)
-            if needs_research:
+            research_rows=_candidate_research(staged,pub)
+            if research_rows:
                 registry=_canon_registry(sb,{'pc_entities','pc_assets','pc_mobile_assets'})
-                enqueue_research(sb,job,needs_research,registry,all_records=True)
-                st.session_state[state_key]='research'
-                st.rerun()
-            status=status_counts(sb,job)
-            if status['pending'] or status['running'] or status['researched']:
-                st.session_state[state_key]='research'
-                st.rerun()
-            st.session_state[state_key]='publish'
-            st.rerun()
+                enqueue_research(sb,job,research_rows,registry,all_records=True)
+                st.session_state[state_key]='research'; st.rerun()
+            st.session_state[state_key]='publish'; st.rerun()
 
         if stage=='research':
             rs=status_counts(sb,job)
             r1,r2,r3,r4=st.columns(4)
-            r1.metric('AI pending',rs['pending']);r2.metric('Repaired',rs['applied'])
-            r3.metric('Evidence holds',rs['held']);r4.metric('Failed',rs['failed'])
+            r1.metric('Research pending',rs['pending']); r2.metric('Repaired',rs['applied'])
+            r3.metric('Evidence holds',rs['held']); r4.metric('Failed',rs['failed'])
             if rs['running']:
-                recover_incomplete_research(sb,job)
-                rs=status_counts(sb,job)
+                recover_incomplete_research(sb,job); rs=status_counts(sb,job)
             if rs['pending']:
-                api_key=(st.secrets.get('OPENAI_API_KEY') or st.secrets.get('OPENAI_KEY')
-                         or os.environ.get('OPENAI_API_KEY'))
-                if not api_key: raise RuntimeError('OPENAI_API_KEY is not configured')
-                with st.spinner('AI is researching all unpublished identities, developments and relationships...'):
+                key=_api_key()
+                if not key: raise RuntimeError('OPENAI_API_KEY is not configured')
+                with st.spinner('Researching identities, classification, relationships and missing facts...'):
                     registry=_canon_registry(sb,{'pc_entities','pc_assets','pc_mobile_assets'})
-                    process_research_batch(sb,job,api_key,registry,batch_size=5)
+                    process_research_batch(sb,job,key,registry,batch_size=5)
                 st.rerun()
-            # Reuse already-paid findings before accepting holds.
-            recover_saved_repair_holds(sb,job)
-            recover_unchanged_holds(sb,job)
-            rs=status_counts(sb,job)
-            if rs['researched']:
-                st.warning('Saved research could not be fully applied. Check Jobs & history; publication is blocked.')
-                return
-            if rs['pending'] or rs['running']:
-                st.warning('Research has not finished. Canonical publication is blocked.')
-                return
-            # Research may have staged additional dependent objects.
-            # Loop through planning until each core object has its own task.
-            st.session_state[state_key]='plan'
-            st.rerun()
+            recover_saved_repair_holds(sb,job); recover_unchanged_holds(sb,job)
+            st.session_state[state_key]='publish'; st.rerun()
 
         if stage=='publish':
-            rs=status_counts(sb,job)
-            if rs['pending'] or rs['running'] or rs['researched']:
-                st.session_state[state_key]='research'
-                st.warning('Research still underway; publishing is paused.')
-                return
-            staged=_all_staged(sb,job)
-            ready,followers,exceptions,pub=_plan(sb,job,staged)
-            with st.spinner(f'Publishing {len(ready)+len(followers)} eligible records with immutable backups...'):
-                results,follow_count,failures=_publish_ready(sb,job,ready,followers,reviewer or 'DCM') if ready else ([],0,[])
+            staged=_all_staged(sb,job); ready,followers,exceptions,pub=_plan(sb,job,staged)
+            with st.spinner(f'Publishing {len(ready)+len(followers)} eligible core records and graph links...'):
+                results,follow_count,failures=_publish_ready(sb,job,ready,followers,reviewer or 'Analyst') if ready else ([],0,[])
                 graph=sb.rpc('pc_v12_sync_published_links',{'p_job':job}).execute().data
                 agreements={}
                 try:
                     from pc_v14_agreement_sync import sync_published_job
-                    agreements=sync_published_job(sb,job,limit=1000,reviewer=reviewer or 'DCM')
-                except Exception as exc:
-                    agreements={'warning':str(exc)}
-                registry=_canon_registry(sb,{'pc_entities','pc_assets','pc_mobile_assets'})
-                idx=_identity_indexes(registry)
-                researched_links=link_researched_events(
-                    sb,job,registry,
-                    lambda table,name,payload,reg:_identity_candidates(table,name,payload,idx,reg)
-                )
-            # Re-plan after publication to report true remaining holds.
-            staged2=_all_staged(sb,job)
-            ready2,followers2,exceptions2,pub2=_plan(sb,job,staged2)
-            report={
-                'job_id':job,
-                'research_status':status_counts(sb,job),
-                'source_queue_status':_queue_counts(sb,job),
-                'published_items_now':len(ready)+follow_count-len(failures),
-                'publication_failures':failures,
-                'remaining_exceptions':exceptions2,
-                'remaining_exception_count':len(exceptions2),
-                'published_stage_count':len(pub2),
-                'graph_sync':graph,
-                'researched_relationships':researched_links,
-                'agreements':agreements,
-                'assessment_note':'Event assessment sidecars already stored in pc_v08_trade_content / v1.6 sidecars are retained and published with their developments.'
-            }
+                    agreements=sync_published_job(sb,job,limit=1000,reviewer=reviewer or 'Analyst')
+                except Exception as exc: agreements={'warning':str(exc)}
+                registry=_canon_registry(sb,{'pc_entities','pc_assets','pc_mobile_assets'}); idx=_identity_indexes(registry)
+                researched_links=link_researched_events(sb,job,registry,
+                    lambda table,name,payload,reg:_identity_candidates(table,name,payload,idx,reg))
+            staged2=_all_staged(sb,job); _,_,exceptions2,pub2=_plan(sb,job,staged2)
+            report={'job_id':job,'published_items_now':len(ready)+follow_count-len(failures),
+                    'publication_failures':failures,'remaining_exceptions':exceptions2,
+                    'remaining_exception_count':len(exceptions2),'published_stage_count':len(pub2),
+                    'graph_sync':graph,'researched_relationships':researched_links,'agreements':agreements}
             st.session_state[report_key]=report
-            st.session_state[state_key]='done'
-            st.rerun()
+            # Connected enrichment starts only after canonical core identities exist.
+            state=init_job_connected(sb,job)
+            st.session_state[state_key]='connected_research' if state.get('subjects') else 'done'; st.rerun()
+
+        if stage=='connected_research':
+            key=_api_key()
+            if not key: raise RuntimeError('OPENAI_API_KEY is not configured')
+            from pc_connected_research import _load_scope
+            state=(_load_scope(sb,job).get('connected_research') or {})
+            subjects=state.get('subjects') or []; idx=int(state.get('next_index') or 0)
+            st.subheader('Connected research')
+            st.caption('Researching directly loaded companies and vessels one evidence-backed hop deeper: leadership, offices, subsidiaries, ownership, assets, contracts and vessel histories.')
+            st.progress(idx/max(len(subjects),1),text=f'{idx}/{len(subjects)} connected subjects researched')
+            if idx < len(subjects):
+                with st.spinner('Researching '+subjects[idx]['name']+'...'):
+                    process_next_job_subject(sb,job,key)
+                st.rerun()
+            st.session_state[state_key]='connected_review'; st.rerun()
+
+        if stage=='connected_review':
+            from pc_connected_research import _load_scope
+            state=(_load_scope(sb,job).get('connected_research') or {})
+            plans=state.get('plans') or []
+            st.subheader('Review connected findings')
+            rows=[]
+            for p in plans:
+                rows.append({'Subject':p.get('subject_name'),'Type':p.get('subject_type'),
+                    'Offices':len(p.get('offices') or []),'People':len(p.get('people') or []),
+                    'Related companies':len(p.get('related_companies') or []),'Vessels':len(p.get('vessels') or []),
+                    'Transactions':len(p.get('transactions') or []),'Contracts':len(p.get('contracts') or []),
+                    'Projects':len(p.get('projects') or []),'Research gaps':len(p.get('research_gaps') or [])})
+            if rows:
+                import pandas as pd
+                st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+            with st.expander('Evidence-backed connected research details'):
+                st.json(plans,expanded=False)
+            st.warning('Approval writes only source-backed findings. Ambiguous identities and vessels without verified IMO remain held automatically.')
+            approve=st.checkbox('I reviewed the connected findings and approve publication of unambiguous source-backed records',key='pc_v20_connected_approve_'+str(job))
+            if st.button('Approve connected enrichment & finish',type='primary',disabled=not approve,key='pc_v20_connected_publish_'+str(job)):
+                with st.spinner('Updating specialist company, vessel, transaction, contract and project tables...'):
+                    creport=publish_job_connected(sb,job)
+                rep=st.session_state.get(report_key,{}) or {}; rep['connected_enrichment']=creport
+                st.session_state[report_key]=rep; st.session_state[state_key]='done'; st.rerun()
+            return
 
         if stage=='done':
             report=st.session_state.get(report_key,{})
-            failures=len(report.get('publication_failures') or [])
-            held=report.get('remaining_exception_count',0)
-            failed_sources=(report.get('source_queue_status') or {}).get('failed',0)
-            failed_research=(report.get('research_status') or {}).get('failed',0)
-            agreement_warning=(report.get('agreements') or {}).get('warning')
-            if failures or held or failed_sources or failed_research or agreement_warning:
-                st.warning('Partial load: some records, relationships or research require attention. '
-                           'Do not consider this batch complete.')
+            connected=report.get('connected_enrichment') or {}
+            holds=(connected.get('holds') if isinstance(connected,dict) else 0) or 0
+            if report.get('remaining_exception_count') or report.get('publication_failures') or holds:
+                st.warning('Population pass completed with held items. Published records are available; held identities/evidence remain for analyst review.')
             else:
-                st.info('Canonical publication pass finished without reported exceptions. '
-                        'Trade/Intelligence display and specialist-table coverage are NOT yet verified.')
-            a,b,c=st.columns(3)
+                st.success('Population pass completed with no reported core or connected holds.')
+            a,b,c,d=st.columns(4)
             a.metric('Published stages',report.get('published_stage_count',0))
-            b.metric('Remaining exceptions',report.get('remaining_exception_count',0))
+            b.metric('Core exceptions',report.get('remaining_exception_count',0))
             c.metric('Publication failures',len(report.get('publication_failures') or []))
+            d.metric('Connected holds',holds)
             if report.get('remaining_exceptions'):
-                with st.expander('Only remaining exceptions',expanded=False):
+                with st.expander('Remaining core exceptions'):
                     import pandas as pd
                     st.dataframe(pd.DataFrame(report['remaining_exceptions']),hide_index=True,use_container_width=True)
             with st.expander('Population report'):
                 st.json(report,expanded=False)
-            if st.button('Run reconciliation again after resolving exceptions',key='pc_v19_again_'+str(job)):
-                st.session_state[state_key]='plan';st.rerun()
+            if st.button('Run reconciliation again after resolving exceptions',key='pc_v20_again_'+str(job)):
+                st.session_state[state_key]='plan'; st.rerun()
+
     except Exception as exc:
         st.error('Automatic population stopped safely: '+str(exc))
-        st.caption('The job and completed work remain persisted. Fix the reported issue and click Resume.')
-        if st.button('Resume this load',key='pc_v19_resume_'+str(job)):
-            st.rerun()
+        st.caption('Completed work remains persisted. Fix the reported issue and click Resume.')
+        if st.button('Resume this load',key='pc_v20_resume_'+str(job)): st.rerun()

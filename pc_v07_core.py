@@ -75,17 +75,17 @@ def normalize_rows(records):
  return out
 
 
-def enqueue(sb, records, title='P&C universal bulk intake', ai_research=False):
+def enqueue(sb, records, title='P&C universal bulk intake', ai_research=True):
  rows=normalize_rows(records)
  if not rows: raise ValueError('Empty package')
- fingerprint=hashlib.sha256(canonical_json([(r['target_table'],r['natural_key'],r['payload']) for r in rows]).encode()).hexdigest()
+ fingerprint=hashlib.sha256(canonical_json(['connected_research_v2',[(r['target_table'],r['natural_key'],r['payload']) for r in rows]]).encode()).hexdigest()
  existing=(sb.table('pc_ingestion_jobs').select('ingestion_job_id').contains('source_scope',{'v07_sha256':fingerprint}).limit(2).execute().data or [])
  if len(existing)>1: raise RuntimeError('Duplicate ingestion jobs detected; investigate')
  if existing: job_id=existing[0]['ingestion_job_id']; reused=True
  else:
   inserted=sb.table('pc_ingestion_jobs').insert({
    'job_type':'UNIVERSAL_BATCH_V07','title':title[:180],'status':'queued',
-   'source_scope':{'v07_sha256':fingerprint,'workflow':'review_only','ai_research':bool(ai_research)},
+   'source_scope':{'v07_sha256':fingerprint,'workflow':'connected_research_v2','ai_research':True,'connected_deep_research':True},
    'stats':{'expected_records':len(rows)}
   }).execute().data
   if not inserted: raise RuntimeError('Could not create ingestion job')

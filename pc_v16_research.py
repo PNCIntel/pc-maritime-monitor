@@ -162,7 +162,7 @@ def _research_one(api_key,row,candidates,model='gpt-4.1-mini'):
       "for start_date and put date_precision/year_month in metadata. Do not assume newsletter "
       "publication date equals event date. No legal ownership, financing or concessions without "
       "specific direct source. Keep analytical scenarios labeled as such. "
-      "Only real evidenced extra objects, max 6; only directly evidenced links, max 10. "
+      "Only real evidenced extra objects, max 12; only directly evidenced links, max 20. "
       "A vessel IMO must be seven digits and independently evidenced; otherwise omit. "
       "Keep substantive narrative in event description and metadata.why_it_matters, "
       "metadata.commercial_implications, metadata.assessment and metadata.monitoring_indicators. "
@@ -250,7 +250,7 @@ def validate_proposal(original,research):
 
 def _safe_related(research,source_urls):
     out=[]
-    for item in (research.get('relationships') or [])[:10]:
+    for item in (research.get('relationships') or [])[:20]:
         if not isinstance(item,dict):continue
         t=item.get('linked_type');name=str(item.get('linked_name') or '').strip()
         url=item.get('evidence_url'); rel=str(item.get('relationship') or '').strip()
@@ -262,7 +262,7 @@ def _safe_related(research,source_urls):
 
 def _additional(research,source_urls):
     result=[]
-    for item in (research.get('additional_objects') or [])[:6]:
+    for item in (research.get('additional_objects') or [])[:12]:
         if not isinstance(item,dict):continue
         table=item.get('table');p=item.get('payload');url=item.get('evidence_url')
         if table not in TABLES or table=='pc_events' or not isinstance(p,dict) or url not in source_urls:continue
