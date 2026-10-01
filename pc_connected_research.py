@@ -420,7 +420,7 @@ def _stage_source_urls(row):
 
 def job_subjects(sb,job,max_subjects=30):
     """Return directly loaded canonical companies/vessels for one ingestion job."""
-    stages=(sb.table('pc_staged_records').select('staged_record_id,target_table,natural_key,payload,source_url')
+    stages=(sb.table('pc_staged_records').select('staged_record_id,target_table,natural_key,payload')
             .eq('ingestion_job_id',job).limit(5000).execute().data or [])
     pubs=(sb.table('pc_v10_publication_items').select('staged_record_id,canonical_table,canonical_id')
           .eq('ingestion_job_id',job).limit(5000).execute().data or [])
@@ -461,7 +461,7 @@ def _validated_replay_plans(sb, job):
     No OpenAI/web call. This lets analysts replay a researched dossier without paying to
     research the same source again.
     """
-    stages=(sb.table('pc_staged_records').select('target_table,natural_key,payload,source_url')
+    stages=(sb.table('pc_staged_records').select('target_table,natural_key,payload')
             .eq('ingestion_job_id',job).limit(5000).execute().data or [])
     plans=[]; seen=set()
     for s in stages:
