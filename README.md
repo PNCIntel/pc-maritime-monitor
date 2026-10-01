@@ -82,3 +82,9 @@ Python compile checks also passed for the modified/new files.
 ## Known limitation
 
 The source-level dossier and graph are now research-first, but final specialist publication still relies on the existing v2 connected publisher. If the dossier is correct but a specialist relationship/history does not reach its table, the remaining defect is in that publisher, not in source understanding. The dossier download makes that boundary visible for debugging.
+
+## v3.2 source retrieval hotfix
+- Public URL intake no longer depends on Jina availability.
+- Tries publisher page directly first, then Jina.
+- HTTP 429/403/reader failures no longer discard the source; URL-only research seed proceeds to OpenAI web research.
+- Empty proposal sets are reported as research/extraction failures rather than misleading Supabase snapshot errors.

@@ -419,27 +419,102 @@ def _parse_urls(raw: str) -> list:
 
 
 def _fetch_article_reader(url: str) -> str:
-    """Jina is third-party. Only expressly consented public URLs are sent to it."""
+    """Retrieve a public source without making the research pipeline depend on one reader.
+
+    Order:
+      1. Try the publisher directly with a browser-like UA.
+      2. Fall back to Jina when direct HTML is blocked or unusable.
+      3. If both fail, return a URL-only research seed. The research-first AI stage
+         can still investigate the public URL with web search instead of dropping it.
+    """
     import ipaddress
     import socket
+    from html.parser import HTMLParser
+    from urllib.error import HTTPError, URLError
+
     hostname = urllib.parse.urlsplit(url).hostname
-    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
+    if not hostname or hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
         raise ValueError("Private or local hosts are not allowed")
-    # Reject IP literals and private DNS destinations before contacting the reader.
     try:
         ipaddress.ip_address(hostname)
         raise ValueError("IP-literal URLs are not supported")
     except ValueError as exc:
-        if str(exc) == "IP-literal URLs are not supported": raise
+        if str(exc) == "IP-literal URLs are not supported":
+            raise
     resolved = socket.getaddrinfo(hostname, None)
     if not resolved or any(not ipaddress.ip_address(r[4][0]).is_global for r in resolved):
         raise ValueError("A public, resolvable host is required")
-    endpoint = "https://r.jina.ai/" + url
-    req = urllib.request.Request(endpoint, headers={"User-Agent": "PC-Research-Loader/0.4"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = resp.read(450_000).decode("utf-8", errors="replace")
-    if not data.strip(): raise ValueError("Article retrieval returned no text")
-    return data[:70_000]
+
+    class _VisibleText(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.skip = 0
+            self.parts = []
+        def handle_starttag(self, tag, attrs):
+            if tag in {"script", "style", "noscript", "svg"}:
+                self.skip += 1
+        def handle_endtag(self, tag):
+            if tag in {"script", "style", "noscript", "svg"} and self.skip:
+                self.skip -= 1
+        def handle_data(self, data):
+            if not self.skip:
+                t = " ".join(str(data or "").split())
+                if len(t) >= 2:
+                    self.parts.append(t)
+
+    errors = []
+
+    # Direct publisher fetch first. This avoids making normal intake depend on
+    # Jina quotas/rate limits.
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; PC-Research-Loader/3.2; +research)",
+            "Accept": "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.8",
+        })
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            ctype = str(resp.headers.get("Content-Type") or "").lower()
+            raw = resp.read(650_000)
+        if "html" in ctype or raw.lstrip().startswith(b"<"):
+            parser = _VisibleText()
+            parser.feed(raw.decode("utf-8", errors="replace"))
+            direct = "\n".join(parser.parts)
+        else:
+            direct = raw.decode("utf-8", errors="replace")
+        if len(direct.strip()) >= 500:
+            return direct[:70_000]
+        errors.append("direct fetch returned too little readable text")
+    except Exception as exc:
+        errors.append(f"direct fetch: {type(exc).__name__}: {exc}")
+
+    # Optional Jina fallback. A 429 here must never discard the source.
+    try:
+        endpoint = "https://r.jina.ai/" + url
+        req = urllib.request.Request(endpoint, headers={
+            "User-Agent": "PC-Research-Loader/3.2",
+            "Accept": "text/plain,text/markdown,*/*;q=0.5",
+        })
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read(450_000).decode("utf-8", errors="replace")
+        if len(data.strip()) >= 200:
+            return data[:70_000]
+        errors.append("Jina returned too little readable text")
+    except HTTPError as exc:
+        errors.append(f"Jina HTTP {exc.code}")
+    except (URLError, TimeoutError, OSError) as exc:
+        errors.append(f"Jina fetch: {type(exc).__name__}: {exc}")
+
+    # Research-first mode does not require the article body to exist locally.
+    # Preserve the source as a research seed so OpenAI web search can investigate
+    # the URL/topic and build the dossier.
+    return (
+        "PUBLIC SOURCE URL RESEARCH SEED\n"
+        f"URL: {url}\n"
+        "The article body could not be retrieved by the intake reader. "
+        "Use the source URL as the starting point for web research and verify all material facts "
+        "with accessible primary or authoritative sources.\n"
+        "Retrieval notes: " + " | ".join(errors)[:1500]
+    )
 
 
 def _json_or_none(value):
@@ -630,19 +705,23 @@ with st.container():
                 st.session_state["deduped_package"] = []
                 st.session_state["match_confirmations"] = {}
                 st.session_state["gap_research"] = {}
-                # Persist BEFORE showing the success message. Never imply
-                # the package can survive a restart unless DB confirms.
-                try:
-                    _snapshot_id = persist_extraction(sb, extracted, stats, errors,
-                        st.session_state["source_reference"])
-                    st.session_state["v151_snapshot_id"] = _snapshot_id
-                    st.success(f"Saved extraction permanently ({len(extracted):,} records). "
-                               "Safe to log out or restart; use Saved extractions to restore.")
-                except Exception as _save_error:
-                    st.error("Extraction completed but could NOT be saved to Supabase. "
-                             f"Keep this session open and queue immediately. Error: {_save_error}")
-                st.success(f"Prepared {len(extracted)} record proposals from {len(inputs)} text sources "
-                           f"and {len(structured)} structured records. No canonical records written.")
+                # Persist BEFORE showing success. An empty proposal set is a research/extraction
+                # failure, not a Supabase persistence failure.
+                if extracted:
+                    try:
+                        _snapshot_id = persist_extraction(sb, extracted, stats, errors,
+                            st.session_state["source_reference"])
+                        st.session_state["v151_snapshot_id"] = _snapshot_id
+                        st.success(f"Saved extraction permanently ({len(extracted):,} records). "
+                                   "Safe to log out or restart; use Saved extractions to restore.")
+                    except Exception as _save_error:
+                        st.error("Extraction completed but could NOT be saved to Supabase. "
+                                 f"Keep this session open and queue immediately. Error: {_save_error}")
+                    st.success(f"Prepared {len(extracted)} record proposals from {len(inputs)} text sources "
+                               f"and {len(structured)} structured records. No canonical records written.")
+                else:
+                    st.error("Research completed but produced no database proposals. Inspect the source errors "
+                             "and research dossier; nothing was queued or saved as a successful extraction.")
         except Exception as exc:
             st.error(f"Intake stopped: {exc}")
     if st.session_state.get("source_errors"):
