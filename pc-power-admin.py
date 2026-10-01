@@ -637,7 +637,7 @@ with st.container():
                 try:
                     inputs.append({"label":url,"url":url,"text":_fetch_article_reader(url)})
                 except Exception as exc:
-                    errors.append({"source":url,"error":str(exc)})
+                    errors.append({"source":url,"stage":"fetch","error":str(exc)})
                 progress.progress((i+1)/max(len(urls)+(len(uploads or [])),1), text="Fetching public sources")
             for f in (uploads or []):
                 try:
@@ -645,7 +645,7 @@ with st.container():
                     structured.extend(rec)
                     inputs.extend(texts)
                 except Exception as exc:
-                    errors.append({"source":f.name,"error":str(exc)})
+                    errors.append({"source":f.name,"stage":"file_parse","error":str(exc)})
             if pasted.strip():
                 inputs.append({"label":"Pasted text", "url":"", "text":pasted[:90_000]})
             # Save errors and individual source snapshots. Do not hide partial failures.
@@ -695,7 +695,14 @@ with st.container():
                                       "Questions":len((dossier or {}).get("research_questions") or []),
                                       "Evidence URLs":len((dossier or {}).get("evidence_urls") or [])})
                     except Exception as exc:
-                        errors.append({"source":s["label"],"error":str(exc)})
+                        errtxt=str(exc)
+                        if errtxt.startswith("OpenAI HTTP") or errtxt.startswith("OpenAI transport"):
+                            stage="ai_research"
+                        elif "Broad web investigation" in errtxt:
+                            stage="ai_research"
+                        else:
+                            stage="research_or_mapping"
+                        errors.append({"source":s["label"],"stage":stage,"error":errtxt})
                     bar.progress((idx+1)/max(len(inputs),1), text=f"Processed {idx+1}/{len(inputs)} sources")
                 st.session_state["source_errors"] = errors
                 st.session_state["source_stats"] = stats

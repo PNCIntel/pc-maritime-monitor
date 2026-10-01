@@ -6,22 +6,57 @@ that the existing queue/resolver/publisher can process, while preserving a resea
  dossier for analyst review and later connected enrichment.
 """
 from __future__ import annotations
-import json, re, urllib.request
+import json, re, urllib.request, time, random
 from copy import deepcopy
 from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
 
 MODEL = "gpt-4.1-mini"
 
 
-def _api(endpoint: str, api_key: str, payload: dict, timeout: int = 140) -> dict:
-    req = urllib.request.Request(
-        "https://api.openai.com/v1/" + endpoint,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Authorization": "Bearer " + api_key.strip(), "Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
+def _api(endpoint: str, api_key: str, payload: dict, timeout: int = 140, max_attempts: int = 5) -> dict:
+    """Call OpenAI with bounded retry/backoff for transient rate limits/server errors.
+
+    A 429 is common when a multi-source analyst batch launches several web-search
+    calls close together. Respect Retry-After when present and otherwise back off
+    exponentially. Permanent quota/auth errors surface with the response body so
+    the UI can tell the analyst what actually failed.
+    """
+    url = "https://api.openai.com/v1/" + endpoint
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    last_error = None
+    for attempt in range(max_attempts):
+        req = urllib.request.Request(
+            url, data=body,
+            headers={"Authorization": "Bearer " + api_key.strip(), "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.load(r)
+        except HTTPError as exc:
+            raw = ""
+            try:
+                raw = exc.read().decode("utf-8", errors="replace")[:1800]
+            except Exception:
+                pass
+            detail = raw or str(exc)
+            last_error = RuntimeError(f"OpenAI HTTP {exc.code}: {detail}")
+            if exc.code not in {429, 500, 502, 503, 504} or attempt >= max_attempts - 1:
+                raise last_error
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                delay = float(retry_after) if retry_after else min(45.0, 3.0 * (2 ** attempt))
+            except (TypeError, ValueError):
+                delay = min(45.0, 3.0 * (2 ** attempt))
+            # tiny jitter prevents two sequential source jobs from re-colliding
+            time.sleep(delay + random.uniform(0.2, 0.8))
+        except (URLError, TimeoutError, OSError) as exc:
+            last_error = RuntimeError(f"OpenAI transport error: {type(exc).__name__}: {exc}")
+            if attempt >= max_attempts - 1:
+                raise last_error
+            time.sleep(min(20.0, 2.0 * (2 ** attempt)))
+    raise last_error or RuntimeError("OpenAI request failed")
 
 
 def _public_url(url: str) -> bool:
