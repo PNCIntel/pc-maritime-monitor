@@ -7,6 +7,7 @@ held as exceptions; no manual DB IDs are required.
 """
 from __future__ import annotations
 import hashlib, json, uuid, re, unicodedata, os
+from copy import deepcopy
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from collections import defaultdict, Counter
@@ -15,7 +16,7 @@ import pandas as pd
 
 ID_TABLES={'pc_entities':'entity_id','pc_assets':'asset_id','pc_mobile_assets':'mobile_asset_id','pc_events':'event_id'}
 NAME_COL={'pc_entities':'name','pc_assets':'name','pc_mobile_assets':'name','pc_events':'title'}
-PUBLISHER_VERSION='3.5.4-calendar-date-match'
+PUBLISHER_VERSION='3.6.0-source-isolated-batch'
 from pc_source_graph import event_day
 
 
@@ -228,6 +229,8 @@ def _validation_issue(row):
     """Conservative pre-publication guard; hold, never silently alter, uncertain data."""
     table = row.get('target_table') or ''
     p = row.get('payload') or {}
+    if (p.get('metadata') or {}).get('canonical_hold'):
+        return str(p['metadata']['canonical_hold'])
     name = str(p.get(NAME_COL.get(table, 'name')) or row.get('natural_key') or '').strip()
     low = _norm(name)
 
@@ -272,6 +275,8 @@ def _validation_issue(row):
         if re.search(r'\b(centre|center)\b',low) and ('navy' in low or 'robotic' in low):
             return 'record-type review: organisational unit versus standalone company requires evidence'
     if table == 'pc_assets':
+        if _norm(p.get('asset_type')) in {'military unit','vessel','ship'}:
+            return 'record-type review: military formation or vessel is not physical infrastructure'
         # Equipment purchases are developments; individual cranes need
         # equipment identities before being registered as standalone assets.
         if (('cranes' in low or 'crane fleet' in low or 'rmg fleet' in low or 'rtgs' in low) and
@@ -289,19 +294,58 @@ def _validation_issue(row):
             return 'record-type review: vessel supplied as pc_assets; use pc_mobile_assets with verified identity'
     if table == 'pc_mobile_assets':
         imo = str(p.get('imo') or '').strip()
-        if imo and (not re.fullmatch(r'\d{7}', imo)):
+        from pc_source_graph import valid_imo
+        if imo and not valid_imo(imo):
             return 'invalid IMO; source-backed identity review required'
     return None
 
 
+def _identity_scope(sb,job):
+    rows=(sb.table('pc_ingestion_jobs').select('source_scope').eq('ingestion_job_id',job).limit(1).execute().data or [])
+    if len(rows)!=1: raise ValueError('Missing job for identity publication checkpoint')
+    return deepcopy(rows[0].get('source_scope') or {})
+
+
+def _recover_identity_payloads(sb,job):
+    rows=(sb.table('pc_ingestion_jobs').select('source_scope').eq('ingestion_job_id',job).limit(1).execute().data or [])
+    if not rows: return False
+    scope=rows[0].get('source_scope') or {}; pending=scope.get('identity_restore_pending') or {}
+    if not pending: return False
+    for sid,payload in pending.items():
+        sb.table('pc_staged_records').update({'payload':payload}).eq('staged_record_id',sid).eq('ingestion_job_id',job).execute()
+    scope.pop('identity_restore_pending',None)
+    sb.table('pc_ingestion_jobs').update({'source_scope':scope}).eq('ingestion_job_id',job).execute()
+    return True
+
+
+def _held_company_match(row,task,registry):
+    """Resolve only an existing identity; retain the full research hold journal."""
+    from pc_source_graph import is_dossier
+    if row.get('target_table')!='pc_entities' or not is_dossier(row) or task.get('status')!='held': return None
+    p=row.get('payload') or {}; result=task.get('result') or {}; proposed=result.get('payload') or {}
+    if result.get('original_source_confirmed') is not True or result.get('target_table')!='pc_entities': return None
+    if _validation_issue(row) or not _urls(row): return None
+    if _norm(proposed.get('name'))!=_norm(p.get('name')): return None
+    if _norm(proposed.get('entity_type'))!=_norm(p.get('entity_type')): return None
+    evidence=result.get('allowed_evidence') or result.get('web_citations') or []
+    if not set(_urls(row)) & {x for x in evidence if isinstance(x,str)}: return None
+    matches=[x for x in registry.get('pc_entities',[]) if _norm(x.get('name'))==_norm(p.get('name'))]
+    if len(matches)!=1: return None
+    hit=matches[0]
+    if _type_conflict('pc_entities',p.get('entity_type'),hit.get('entity_type')): return None
+    if p.get('hq_country') and hit.get('hq_country') and _norm(p['hq_country'])!=_norm(hit['hq_country']): return None
+    return str(hit['entity_id'])
+
+
 def _plan(sb,job,staged):
+    if _recover_identity_payloads(sb,job): staged=_all_staged(sb,job)
     candidates=[r for r in staged if r['target_table'] in ID_TABLES]
     content=_content_keys(sb,job,[r['source_record_key'] for r in candidates])
     pub=_published(sb,[r['staged_record_id'] for r in candidates])
     # Research exceptions are not eligible merely because the old deterministic
     # planner would have declared them new. AI must repair or explicitly hold.
     from pc_v16_research import TABLES as V16_TABLES
-    tasks=(sb.table('pc_v16_research_tasks').select('staged_record_id,status,error_text')
+    tasks=(sb.table('pc_v16_research_tasks').select('staged_record_id,status,error_text,result')
              .eq('ingestion_job_id',job).limit(5000).execute().data or [])
     holds={str(x['staged_record_id']):x for x in tasks if x['status']!='applied'}
     binding_rows=(sb.table('pc_v16_verified_bindings').select('staged_record_id,canonical_table,canonical_id')
@@ -310,9 +354,20 @@ def _plan(sb,job,staged):
     needed={r['target_table'] for r in candidates if r['staged_record_id'] not in pub}
     registry=_canon_registry(sb,needed)
     index=_identity_indexes(registry)
+    identity_ready=[]
+    for r in candidates:
+        sid=str(r['staged_record_id']); task=holds.get(sid)
+        if not task or r['staged_record_id'] in pub: continue
+        cid=_held_company_match(r,task,registry)
+        if cid:
+            safe=deepcopy(r); safe['identity_only_match']=True
+            safe['retained_research_hold']=task.get('error_text') or (task.get('result') or {}).get('reason')
+            identity_ready.append((safe,'match_existing',cid))
+            holds.pop(sid)
+    identity_ids={str(r['staged_record_id']) for r,_,_ in identity_ready}
     groups=defaultdict(list)
     for r in candidates:
-        if r['staged_record_id'] in pub or str(r['staged_record_id']) in holds:continue
+        if r['staged_record_id'] in pub or str(r['staged_record_id']) in holds or str(r['staged_record_id']) in identity_ids:continue
         p=r.get('payload') or {}; table=r['target_table']
         if table=='pc_mobile_assets' and p.get('imo'):
             g=(table,'imo:'+str(p['imo']).strip())
@@ -320,7 +375,7 @@ def _plan(sb,job,staged):
             g=(table,_norm(p.get('title') or r['natural_key'])+'|'+str(event_day(p.get('start_date')) or p.get('start_date') or ''))
         else: g=(table,_norm(p.get(NAME_COL[table]) or r['natural_key']))
         groups[g].append(r)
-    ready=[]; followers=[]; exceptions=[]
+    ready=list(identity_ready); followers=[]; exceptions=[]
     for r in candidates:
         h=holds.get(str(r['staged_record_id']))
         if h and r['staged_record_id'] not in pub:
@@ -421,7 +476,7 @@ def _plan(sb,job,staged):
 def _plan_digest(ready,followers,exceptions):
     """Used to invalidate stale Streamlit approvals after canonical DB changes."""
     snapshot={
-      'ready':[(r['staged_record_id'],d,c) for r,d,c in ready],
+      'ready':[(r['staged_record_id'],d,c,bool(r.get('identity_only_match')),hashlib.sha256(json.dumps(r.get('payload') or {},sort_keys=True,default=str).encode()).hexdigest()) for r,d,c in ready],
       'followers':[(r['staged_record_id'],leader) for r,leader in followers],
       'exceptions':[(x.get('Staged record ID'),x.get('Table'),x.get('Name'),x.get('Reason')) for x in exceptions],
     }
@@ -440,8 +495,34 @@ def _publish_chunk(sb,job,items,reviewer):
     sb.table('pc_v10_approvals').upsert(approvals,on_conflict='staged_record_id').execute()
     ids=[r['staged_record_id'] for r,_,_ in items]
     backup=sb.rpc('pc_v10_backup_staged',{'p_job':job,'p_stage_ids':ids,'p_reviewer':reviewer}).execute().data
-    result=sb.rpc('pc_v10_publish_approved',{'p_job':job,'p_stage_ids':ids,'p_backup':backup,'p_reviewer':reviewer}).execute().data
-    return [{'backup':backup,'result':result}]
+    # Identity-only recovery uses the existing canonical values in the RPC payload.
+    # Back up the original first, preserve its dossier for review, and restore it
+    # afterward. No uncertain subtype, claim or relationship enters the entity.
+    restored=[]
+    try:
+        from pc_v16_research import ALLOWED
+        for row,decision,cid in items:
+            if not row.get('identity_only_match'): continue
+            canonical=(sb.table('pc_entities').select('*').eq('entity_id',cid).limit(2).execute().data or [])
+            if len(canonical)!=1: raise ValueError('Exact company identity changed before publication')
+            hit=canonical[0]
+            proposed=row.get('payload') or {}
+            if _norm(hit.get('name'))!=_norm(proposed.get('name')): raise ValueError('Company name changed before publication')
+            if _type_conflict('pc_entities',proposed.get('entity_type'),hit.get('entity_type')): raise ValueError('Company type changed before publication')
+            if proposed.get('hq_country') and hit.get('hq_country') and _norm(proposed['hq_country'])!=_norm(hit['hq_country']): raise ValueError('Company country changed before publication')
+            originals=(sb.table('pc_staged_records').select('payload').eq('staged_record_id',row['staged_record_id']).limit(1).execute().data or [])
+            if len(originals)!=1: raise ValueError('Missing staged identity proposal')
+            restored.append((row['staged_record_id'],originals[0]['payload']))
+            scope=_identity_scope(sb,job)
+            scope.setdefault('identity_restore_pending',{})[row['staged_record_id']]=originals[0]['payload']
+            sb.table('pc_ingestion_jobs').update({'source_scope':scope}).eq('ingestion_job_id',job).execute()
+            payload={k:deepcopy(v) for k,v in hit.items() if k in ALLOWED['pc_entities']}
+            sb.table('pc_staged_records').update({'payload':payload}).eq('staged_record_id',row['staged_record_id']).execute()
+        result=sb.rpc('pc_v10_publish_approved',{'p_job':job,'p_stage_ids':ids,'p_backup':backup,'p_reviewer':reviewer}).execute().data
+    finally:
+        if restored: _recover_identity_payloads(sb,job)
+    return [{'backup':backup,'result':result,
+             'identity_only_matches':[{'name':r['natural_key'],'canonical_id':c,'retained_research_hold':r.get('retained_research_hold')} for r,_,c in items if r.get('identity_only_match')]}]
 
 def _publish_ready(sb,job,ready,followers,reviewer):
     """Publish independently; one malformed record must not strand the batch.

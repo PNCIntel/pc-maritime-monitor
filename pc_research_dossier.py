@@ -359,6 +359,13 @@ def graph_to_core_records(dossier: dict, source_label: str = "") -> list[dict]:
     for r in records:
         m=(r.get("payload") or {}).setdefault("metadata",{})
         m["research_dossier_connected_findings"] = compact_graph
+    # Retain a non-recursive per-source proposal when canonical identities merge.
+    # Review reconstruction must not attribute article B's graph to article A.
+    from copy import deepcopy
+    for r in records:
+        snapshot=deepcopy(r)
+        snapshot['payload']['metadata'].pop('source_snapshots',None)
+        r['payload']['metadata']['source_proposals']=[snapshot]
     return reconcile_records(records)
 
 

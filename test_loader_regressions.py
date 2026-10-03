@@ -272,7 +272,7 @@ class RegressionTests(unittest.TestCase):
         db=DB({'pc_staged_records':rows,'pc_ingestion_jobs':[{'ingestion_job_id':'j','source_scope':{'connected_research':old}}]})
         with patch.object(connected,'research_company',side_effect=AssertionError('Unexpected research call')):
             state=connected.init_job_connected(db,'j')
-        self.assertEqual(state['version'],'3.5.5-source-bounded-replay')
+        self.assertEqual(state['version'],'3.6.0-source-bounded-replay')
         self.assertEqual(len(state['plans']),6)
         company=next(p for p in state['plans'] if p['subject_type']=='company')
         vessel=next(p for p in state['plans'] if p['subject_type']=='vessel')
@@ -285,7 +285,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_same_version_stale_review_refreshes(self):
         expected=[{'subject_type':'company','subject_name':'Ambrey','events':[],'claims':[]}]
-        stale={'version':'3.5.5-source-bounded-replay','status':'review','subjects':[],
+        stale={'version':'3.6.0-source-bounded-replay','status':'review','subjects':[],
                'replayed_without_ai':True,'plans':[{'subject_name':'Ambrey','events':[{'title':'incident'}],'claims':[{'claim':'shared'}]}]}
         db=DB({'pc_ingestion_jobs':[{'ingestion_job_id':'j','source_scope':{'connected_research':stale}}]})
         with patch.object(connected,'_validated_replay_plans',return_value=expected),patch.object(connected,'research_company',side_effect=AssertionError('No research allowed')):

@@ -77,11 +77,9 @@ def normalize_rows(records):
  return out
 
 
-def enqueue(sb, records, title='P&C universal bulk intake', ai_research=True):
- from pc_source_graph import reconcile_records, bind_existing_events, require_unambiguous_events
- records=reconcile_records(records)
- require_unambiguous_events(records)
- records=bind_existing_events(sb,records)
+def enqueue(sb, records, title='P&C universal bulk intake', ai_research=True, intake_report=None):
+ from pc_source_graph import prepare_batch_records
+ records=prepare_batch_records(sb,records)
  intake_sources={}
  records=deepcopy(records)
  for record in records:
@@ -97,7 +95,7 @@ def enqueue(sb, records, title='P&C universal bulk intake', ai_research=True):
  else:
   inserted=sb.table('pc_ingestion_jobs').insert({
    'job_type':'UNIVERSAL_BATCH_V07','title':title[:180],'status':'queued',
-   'source_scope':{'v07_sha256':fingerprint,'workflow':'connected_research_v2','ai_research':bool(ai_research),'connected_deep_research':bool(ai_research),'input_sources':list(intake_sources.values())},
+   'source_scope':{'v07_sha256':fingerprint,'workflow':'connected_research_v2','ai_research':bool(ai_research),'connected_deep_research':bool(ai_research),'input_sources':list(intake_sources.values()),'intake_report':intake_report or {}},
    'stats':{'expected_records':len(rows)}
   }).execute().data
   if not inserted: raise RuntimeError('Could not create ingestion job')

@@ -4,7 +4,7 @@ Analyst workflow: queue source package -> one research/populate action -> review
 connected findings/true exceptions -> approve connected enrichment. No SQL/IDs in UI.
 """
 from __future__ import annotations
-import os
+import os, json, hashlib
 import streamlit as st
 
 
@@ -29,6 +29,34 @@ def _candidate_research(staged, pub):
             and str(r.get('staged_record_id')) not in done and not is_dossier(r)]
 
 
+def source_publication_report(staged,published,exceptions,failures,intake_report=None):
+    """Per-input outcomes remain visible even when canonical proposals merge."""
+    from pc_source_graph import source_key
+    output={}; published_ids={str(x) for x in published}
+    for row in staged:
+        m=(row.get('payload') or {}).get('metadata') or {}
+        views=m.get('source_proposals') or [row]
+        sources={}
+        for v in views:
+            vm=(v.get('payload') or {}).get('metadata') or {}
+            key=vm.get('intake_source_key') or m.get('intake_source_key') or 'legacy'
+            sources[key]=vm.get('intake_source_url') or vm.get('source_label') or key
+        for obs in m.get('source_observations') or []:
+            if obs.get('source_key'): sources.setdefault(obs['source_key'],obs.get('source_url') or obs['source_key'])
+        for key,label in sources.items():
+            own=output.setdefault(key,{'source':label,'staged':0,'published':0,'held':0,'failures':0})
+            own['staged']+=1
+            if str(row['staged_record_id']) in published_ids: own['published']+=1
+            elif any(x.get('Staged record ID')==row['staged_record_id'] or
+                     (x.get('Table')==row['target_table'] and x.get('Name')==row['natural_key']) for x in exceptions): own['held']+=1
+            if any(x.get('Staged record ID')==row['staged_record_id'] for x in failures): own['failures']+=1
+    for err in (intake_report or {}).get('errors') or []:
+        label=err.get('source') or 'unknown source'; key=source_key(label) if str(label).startswith('http') else source_key('',label)
+        own=output.setdefault(key,{'source':label,'staged':0,'published':0,'held':0,'failures':0})
+        own.setdefault('intake_errors',[]).append(err)
+    return list(output.values())
+
+
 def _api_key():
     return (st.secrets.get('OPENAI_API_KEY') or st.secrets.get('OPENAI_KEY') or os.environ.get('OPENAI_API_KEY'))
 
@@ -43,7 +71,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
 
     st.divider()
     st.subheader('Research, resolve & publish')
-    st.caption('Loader build v3.5.5 · saved review refresh enabled')
+    st.caption('Loader build v3.6.0 · saved review refresh enabled')
     st.caption('Source research → classification repair → canonical resolution → core publication → '
                'connected company/vessel research → specialist tables. Analysts review names and evidence, not database IDs.')
 
@@ -147,12 +175,14 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                     lambda table,name,payload,reg:_identity_candidates(table,name,payload,idx,reg))
             staged2=_all_staged(sb,job); _,_,exceptions2,pub2=_plan(sb,job,staged2)
             report={'job_id':job,'published_items_now':len(ready)+follow_count-len(failures),
-                    'publication_failures':failures,'remaining_exceptions':exceptions2,
+                    'publication_failures':failures,'retained_research_holds':[{'name':r['natural_key'],'reason':r.get('retained_research_hold')} for r,_,_ in ready if r.get('identity_only_match')],'remaining_exceptions':exceptions2,
                     'remaining_exception_count':len(exceptions2),'published_stage_count':len(pub2),
                     'graph_sync':graph,'researched_relationships':researched_links,'agreements':agreements}
             st.session_state[report_key]=report
             from pc_connected_research import _load_scope, _save_scope
-            saved_scope=_load_scope(sb,job); saved_scope['loader_publication_report']=report
+            saved_scope=_load_scope(sb,job)
+            report['source_results']=source_publication_report(staged2,pub2,exceptions2,failures,saved_scope.get('intake_report'))
+            saved_scope['loader_publication_report']=report
             _save_scope(sb,job,saved_scope)
             # Connected enrichment starts only after canonical core identities exist.
             state=init_job_connected(sb,job,retry=True)
@@ -257,7 +287,6 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                 with st.expander('Evidence-backed connected research details'):
                     st.json(plans,expanded=False)
             st.warning('Approval writes only source-backed findings. Ambiguous identities and vessels without verified IMO remain held automatically.')
-            import hashlib, json
             review_revision=hashlib.sha256(json.dumps(plans,sort_keys=True,default=str).encode()).hexdigest()[:16]
             approve=st.checkbox('I reviewed the connected findings and approve publication of unambiguous source-backed records',key='pc_v20_connected_approve_'+str(job)+'_'+review_revision)
             if st.button('Approve connected enrichment & finish',type='primary',disabled=not approve,key='pc_v20_connected_publish_'+str(job)):
@@ -275,7 +304,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                 report['connected_enrichment']=(saved_scope.get('connected_research') or {}).get('publication_report') or {}
             connected=report.get('connected_enrichment') or {}
             holds=(connected.get('holds') if isinstance(connected,dict) else 0) or 0
-            if report.get('remaining_exception_count') or report.get('publication_failures') or holds:
+            if report.get('remaining_exception_count') or report.get('publication_failures') or holds or report.get('retained_research_holds'):
                 st.warning('Population pass completed with held items. Published records are available; held identities/evidence remain for analyst review.')
             else:
                 st.success('Population pass completed with no reported core or connected holds.')
@@ -284,10 +313,21 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             b.metric('Core exceptions',report.get('remaining_exception_count',0))
             c.metric('Publication failures',len(report.get('publication_failures') or []))
             d.metric('Connected holds',holds)
+            if report.get('source_results'):
+                with st.expander('Results by input source',expanded=True):
+                    st.dataframe(report['source_results'],hide_index=True,use_container_width=True)
+            if report.get('retained_research_holds'):
+                with st.expander('Research holds retained after identity-only matching'):
+                    st.dataframe(report['retained_research_holds'],hide_index=True,use_container_width=True)
             if report.get('remaining_exceptions'):
                 with st.expander('Remaining core exceptions'):
                     import pandas as pd
                     st.dataframe(pd.DataFrame(report['remaining_exceptions']),hide_index=True,use_container_width=True)
+            st.download_button(
+                'Download complete population report (JSON)',
+                data=json.dumps(report,indent=2,ensure_ascii=False,default=str),
+                file_name='pc_population_report_'+str(job)+'.json',
+                mime='application/json',key='pc_v20_report_download_'+str(job))
             with st.expander('Population report'):
                 st.json(report,expanded=False)
             if st.button('Run reconciliation again after resolving exceptions',key='pc_v20_again_'+str(job)):

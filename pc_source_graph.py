@@ -247,3 +247,28 @@ def bind_existing_events(sb, records):
             row['payload'].setdefault('metadata',{})['event_resolution']='matched_existing_strong_identity'
         out.append(row)
     return out
+
+
+def prepare_batch_records(sb, records):
+    """Keep ambiguous event proposals held; do not strand independent sources."""
+    records=reconcile_records(records)
+    groups={}
+    for row in records:
+        if (row.get('table') or row.get('target_table'))=='pc_events':
+            key=event_candidate_key(row['payload'])
+            if key: groups.setdefault(key,[]).append(row)
+    for group in groups.values():
+        try: require_unambiguous_events(group)
+        except ValueError as exc:
+            for row in group:
+                row['payload'].setdefault('metadata',{})['canonical_hold']=str(exc)
+    out=[]
+    for row in records:
+        if (row.get('payload') or {}).get('metadata',{}).get('canonical_hold'):
+            out.append(row); continue
+        try: out.extend(bind_existing_events(sb,[row]))
+        except ValueError as exc:
+            held=deepcopy(row)
+            held['payload'].setdefault('metadata',{})['canonical_hold']=str(exc)
+            out.append(held)
+    return out

@@ -480,7 +480,13 @@ def _validated_replay_plans(sb, job):
     from pc_source_graph import is_dossier, unique, valid_imo
     stages=(sb.table('pc_staged_records').select('target_table,natural_key,payload')
             .eq('ingestion_job_id',job).limit(5000).execute().data or [])
-    rows=[r for r in stages if is_dossier(r)]
+    rows=[]
+    for r in stages:
+        if not is_dossier(r): continue
+        views=((r.get('payload') or {}).get('metadata') or {}).get('source_proposals') or []
+        if views:
+            rows.extend({**v,'target_table':v.get('table') or v.get('target_table')} for v in views)
+        else: rows.append(r)
     if not rows: return []
     groups={}
     for row in rows:
@@ -601,6 +607,8 @@ def _publish_dossier_company_edges(sb,job,plan):
 
 
 def init_job_connected(sb,job,retry=False):
+    from pc_v15_bulk_replay import _recover_identity_payloads
+    _recover_identity_payloads(sb,job)
     scope=_load_scope(sb,job)
     state=scope.get('connected_research') or {}
     if retry and state.get('status') in {'published_partial','published'}:
@@ -620,13 +628,13 @@ def init_job_connected(sb,job,retry=False):
         unfinished=current_status in ('', 'researching', 'review')
         needs_refresh=(
             unfinished and (
-                current_version != '3.5.5-source-bounded-replay'
+                current_version != '3.6.0-source-bounded-replay'
                 or not state.get('replayed_without_ai')
                 or state.get('plans') != replay_plans
             )
         )
         if needs_refresh:
-            state={'version':'3.5.5-source-bounded-replay','status':'review','subjects':[],
+            state={'version':'3.6.0-source-bounded-replay','status':'review','subjects':[],
                    'plans':replay_plans,'next_index':0,
                    'started_at':state.get('started_at') or datetime.now(timezone.utc).isoformat(),
                    'refreshed_at':datetime.now(timezone.utc).isoformat(),
@@ -640,7 +648,7 @@ def init_job_connected(sb,job,retry=False):
     if state.get('subjects') is not None:
         return state
     if replay_plans:
-        state={'version':'3.5.5-source-bounded-replay','status':'review','subjects':[],
+        state={'version':'3.6.0-source-bounded-replay','status':'review','subjects':[],
                'plans':replay_plans,'next_index':0,'started_at':datetime.now(timezone.utc).isoformat(),
                'replayed_without_ai':True}
     else:

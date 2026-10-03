@@ -637,8 +637,24 @@ def _parse_uploaded(uploaded) -> tuple[list, list]:
             from pypdf import PdfReader
         except ImportError as exc:
             raise RuntimeError("PDF support requires pypdf in requirements.txt") from exc
-        from pc_newsletter_pdf import extract_pdf
-        text, embedded_links, image_b64 = extract_pdf(data)
+        try:
+            from pc_newsletter_pdf import extract_pdf
+            text, embedded_links, image_b64 = extract_pdf(data)
+        except ModuleNotFoundError as exc:
+            if exc.name != 'pc_newsletter_pdf': raise
+            reader=PdfReader(BytesIO(data))
+            text='\n'.join(page.extract_text() or '' for page in reader.pages)[:90_000]
+            embedded_links=[]; image_b64=None
+            for page in reader.pages:
+                for annotation in page.get('/Annots') or []:
+                    action=annotation.get_object().get('/A') or {}
+                    uri=action.get('/URI')
+                    if isinstance(uri,str) and uri.startswith(('https://','http://')) and uri not in embedded_links:
+                        embedded_links.append(uri)
+            if len(text.strip())<80:
+                raise ValueError('Printed PDF has no usable text; scanned newsletters require the OCR/image newsletter helper')
+        if embedded_links:
+            text+='\nEmbedded article URLs for source verification:\n'+'\n'.join(embedded_links[:100])
         return [], [{"label":filename,"url":"","text":text,
                      "embedded_links":embedded_links,"image_base64":image_b64}]
     elif ext == ".docx":
@@ -646,7 +662,8 @@ def _parse_uploaded(uploaded) -> tuple[list, list]:
             from docx import Document
         except ImportError as exc:
             raise RuntimeError("DOCX support requires python-docx in requirements.txt") from exc
-        text="\n".join(x.text for x in Document(BytesIO(data)).paragraphs)[:90_000]
+        from pc_document_loader import _text_from_file
+        text=_text_from_file(uploaded)[:90_000]
     elif ext in {".txt", ".md"}:
         text = data.decode("utf-8", errors="replace")[:90_000]
     else:
@@ -884,6 +901,8 @@ if st.session_state.get("active_package"):
             job_id, count, reused = enqueue(
                 sb, st.session_state["active_package"], title=queue_title,
                 ai_research=True,
+                intake_report={'sources':st.session_state.get('source_stats') or [],
+                               'errors':st.session_state.get('source_errors') or []},
             )
             st.session_state["pc_active_intelligence_job"] = job_id
             st.success(f"{'Previously queued' if reused else 'Queued'} {count:,} records "

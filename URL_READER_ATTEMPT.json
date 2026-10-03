@@ -1,0 +1,105 @@
+{
+  "elapsed_seconds": 0.01,
+  "results": [
+    {
+      "url": "https://www.dpworld.com/en/news/usa/2026_02_06_psj-americold-launch",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.dpworld.com/en/news/four-of-europes-largest-quay-cranes-arrive-at-dp-worlds-uk-ports",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.dpworld.com/en/news/releases/uae/petrochem-and-dp-world-inaugurate-aed-300-million-terminal-at-jebel-ali-port",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.dpworld.com/en/news/releases/uae/dp-world-appoints-ahmad-yousef-al-hassan-as-ceo-for-gcc-region",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.cmacgm-group.com/en/news-media/cma-cgm-and-fattal-announce-acquisition-fattal-group-cma-cgm-group",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.dpworld.com/en/news/dp-world--al-dahra-partner-to-strengthen-food-security-and-build-gcc-agri-logistics",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.dpworld.com/en/news/releases/uae/dp-world-launches-uae-e-invoicing-solution",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.dpworld.com/en/news/dp-world-marks-new-milestone-in-canada-with-contrecoeur-expansion-groundbreaking",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.cmacgm-group.com/en/news-media/cma-cgm-announces-acquisition-freightliner-uk-intermodal-logistics",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.dpworld.com/en/news/dp-world-to-expand-uae-gateway-network-with-new-fujairah-terminals",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://investor.maersk.com/news-releases/news-release-details/interim-report-q2-2026",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://investor.maersk.com/news-releases/news-release-details/interim-report-q1-2026",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.adportsgroup.com/en/news-and-media/2026/05/05/ad-ports-group-cma-terminals-khalifa-port-and-cma-cgm-group-sign-mou",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://wpvip.adportsgroup.com/adportsgroup/news-and-media/2026/05/13/ad-ports-group-delivers-yoy-net-profit-growth-to-aed-653-million-in-q1-2026/",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.cmacgm-group.com/en/news-media/cma-cgm-group-acquire-fedex-supply-chain-strengthening-logistics-presence-north-america",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://wpvip.adportsgroup.com/adportsgroup/news-and-media/2026/06/23/ad-ports-group-launches-ai-powered-intelligence-headquarters-ihq/",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.cmacgm-group.com/en/news-media/second-quarter-2026-financial-results",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://investors.fedex.com/news-and-events/investor-news/investor-news-details/2026/CMA-CGM-Group-to-Acquire-FedEx-Supply-Chain-at-an-Enterprise-Value-of-1-4-billion-Strengthening-Its-Logistics-Presence-in-North-America/default.aspx",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.dpworld.com/en/news/releases/uae/dp-world-attracts-over-aed-854-million-in-investments-at-jafza",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    },
+    {
+      "url": "https://www.cevalogistics.com/en/news-and-media/newsroom/press-release/cma-cgm-group-completes-acquisition-of-fedex-supply-chain",
+      "reader_result": "error",
+      "error": "[Errno -3] Temporary failure in name resolution"
+    }
+  ]
+}

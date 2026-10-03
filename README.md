@@ -1,7 +1,90 @@
-# P&C Analyst Loader v3.5.5 — connected source resolution
+# P&C Analyst Loader v3.6.0 — connected source resolution
 
 This is a replacement-file patch for the existing P&C application repository.
 It is not a standalone application or a database migration.
+
+## Multi-source intake changes in v3.6.0
+
+This updates the existing **Load intelligence → Universal intake** screen. Enter
+up to 20 article URLs and add PDF, DOCX, TXT/MD newsletters or structured files to
+one package. Printed newsletters are extraction sources; this intake does not
+insert them into `pc_documents`. The separate **Load documents** screen still
+stores documents as reports/evidence.
+
+- Merged company/vessel/event proposals retain non-recursive original per-source
+  proposals. Connected review reconstructs each source separately instead of
+  assigning one article's claims or relationships to another article.
+- Ambiguous in-batch or existing-event candidates receive a canonical hold in
+  staging. Independent records continue through enqueue/publication. Database
+  connection failures still stop enqueue; they are not misreported as evidence holds.
+- Older company research holds can match an existing exact name when structured
+  saved research confirms the same source/name/type and canonical country/type
+  checks pass. This is identity-only MATCH, never CREATE. The original held
+  findings and research journal remain retained. Canonical publication uses the
+  existing canonical entity values, after immutable backup, rather than uncertain
+  extracted facts. A durable job checkpoint restores original staging after the
+  RPC or on resume if interrupted. The deployed RPC behavior still needs verification.
+- No fuzzy event merge, organization-to-company coercion, invented IMO, or deletion
+  of historical canonical rows is introduced. Military formations and vessels in
+  infrastructure rows are held; supplied IMOs must pass the checksum.
+- The final report shows per-input published/held/failed counts, including failed
+  intake sources. Shared identities can contribute to multiple source rows; source
+  counts must not be summed to infer unique canonical record counts.
+- Word newsletter tables are extracted. Text-based PDF newsletter extraction has
+  a fallback when the existing `pc_newsletter_pdf` helper is absent; embedded article
+  URLs are retained for verification. Existing newsletter image/OCR handling is
+  used when available. Scanned files without usable text or that helper are held.
+
+### Validation results and limits
+
+`python -m compileall -q .` and
+`python -m unittest test_loader_regressions test_batch_loader -q`: **54 tests pass**.
+See `BATCH_TEST_REPORT.md` for the covered scenarios and exact limitations.
+The mixed downstream test uses 20 real URL labels with explicitly generated test
+facts plus two newsletter-style document sources: 22 independent source contexts,
+24 event proposals and one shared existing company. It exercises normalization,
+source grouping, canonical planning, backup/publication doubles and retry. It is
+not a fresh AI extraction of those 20 articles.
+
+The application's actual URL reader was attempted on all 20 URLs. This workspace
+failed DNS resolution for every host before retrieval. No OpenAI API key is
+configured here and no live Supabase service was used. Consequently no live
+URL → AI → Supabase success is claimed. Four primary article pages were separately
+accessible through web retrieval; that is not an application reader test.
+
+### Install and verify in the deployed application
+
+Replace all files in this ZIP and reboot Streamlit; confirm **Loader build v3.6.0**.
+Keep existing authentication, secrets, migrations and repository dependencies.
+For the existing legacy job, use **Run reconciliation again after resolving
+exceptions**. Exact company identities should be matched while their broader
+research holds remain in the report. Review and approve connected enrichment;
+verify event links and publication audit rows in the database.
+
+For a fresh batch, paste the URL list in `fixtures/BATCH_20_URLS.txt` and add
+text-based newsletter PDFs/DOCX files to Universal intake. Review source errors,
+queue the package, run population, review enrichment, then download the complete
+JSON report. Confirm one result per input, no missing sources, explicit genuine
+holds, and no duplicate identities/history/event links after a retry. Fresh AI
+research uses the deployed API and may incur charges already authorized through
+the intake consent controls. If publisher SQL must be checked, run the included
+read-only function-definition query and provide its output; it changes no data.
+
+## Full population report download in v3.5.6
+
+The completed population screen now includes **Download complete population report
+(JSON)** above the collapsed report. It exports the full displayed report, including
+nested connected subject reports and event-link results. Reopened jobs assemble
+saved core and connected reports before download. No rerun is required to download
+a completed job's report. The individual `pc_intelligence_pipeline.py` is the only
+Python file changed from v3.5.5; the ZIP also includes all earlier fixes.
+
+This release does not override AI research holds. The copied report for the legacy
+job shows four research-held company stages, two newly published items, no publication
+failures, and three connected holds. The complete JSON is needed to inspect the held
+findings and event link result. Company identity resolution and incident/relationship
+uncertainty must be handled separately without blindly clearing research journals.
+Compile checks and the existing 40 offline regression tests pass.
 
 ## Saved-review refresh fix in v3.5.5
 
