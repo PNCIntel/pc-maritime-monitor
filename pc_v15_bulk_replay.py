@@ -16,7 +16,7 @@ import pandas as pd
 
 ID_TABLES={'pc_entities':'entity_id','pc_assets':'asset_id','pc_mobile_assets':'mobile_asset_id','pc_events':'event_id'}
 NAME_COL={'pc_entities':'name','pc_assets':'name','pc_mobile_assets':'name','pc_events':'title'}
-PUBLISHER_VERSION='3.6.0-source-isolated-batch'
+PUBLISHER_VERSION='3.6.2-reviewed-saved-job-repair'
 from pc_source_graph import event_day
 
 
@@ -27,7 +27,7 @@ def _norm(x):
     return ' '.join(re.findall(r'[a-z0-9]+', x))
 
 # Never treat these generic words as useful evidence for an entity match.
-_STOP = {'port','terminal','group','company','limited','ltd','inc','international',
+_STOP = {'airport','airports','ports','com','port','terminal','group','company','limited','ltd','inc','international',
          'corporation','authority','services','logistics','shipping','the','of','and',
          'in','at','for','a','an','new','development','project','2026','2025'}
 
@@ -147,6 +147,9 @@ def _identity_candidates(table,name,payload,index,registry):
     key=_norm(name)
     exact=list({str(v[ID_TABLES[table]]):v for alias in _identity_aliases(name) for v in ix['name'].get(alias,[])}.values())
     if exact: return exact,[],[], 'normalized-exact-name'
+    if table=='pc_mobile_assets' and payload.get('imo'):
+        from pc_source_graph import valid_imo
+        if valid_imo(payload['imo']):return [],[],[], 'new-verified-IMO'
     # Restrict fuzzy comparisons to indexed tokens, but search the complete registry.
     pool={}
     for token in _tokens(name):
@@ -354,6 +357,8 @@ def _plan(sb,job,staged):
     needed={r['target_table'] for r in candidates if r['staged_record_id'] not in pub}
     registry=_canon_registry(sb,needed)
     index=_identity_indexes(registry)
+    from pc_connected_research import _load_scope
+    reviewed=_load_scope(sb,job).get('reviewed_identity_decisions') or {}
     identity_ready=[]
     for r in candidates:
         sid=str(r['staged_record_id']); task=holds.get(sid)
@@ -394,6 +399,22 @@ def _plan(sb,job,staged):
         # A journalled, source-backed alias binding may resolve a fuzzy match,
         # but ONLY if the same canonical row still exists and types/countries agree.
         binding=bindings.get(str(leader['staged_record_id'])) if table!='pc_events' else None
+        review=reviewed.get(str(leader['staged_record_id']))
+        if review:
+            from pc_reviewed_job_repair import fingerprint
+            current=fingerprint({'payload':leader['payload'],'natural_key':leader['natural_key']})
+            if current!=review.get('fingerprint') or not review.get('evidence_urls'):
+                exceptions.append({'Table':table,'Name':name,'Reason':'Reviewed identity changed; review again'})
+                continue
+            if review.get('decision')=='match_existing':
+                binding={'canonical_table':table,'canonical_id':review.get('canonical_id')}
+            elif review.get('decision')=='create_new':
+                exact,_,_,_=_identity_candidates(table,name,p,index,registry)
+                if exact:
+                    exceptions.append({'Table':table,'Name':name,'Reason':'Reviewed creation now has an existing candidate; review again'})
+                    continue
+                for r in rows:ready.append((r,'create_new',None))
+                continue
         if binding and binding['canonical_table']==table:
             pk=ID_TABLES[table]
             hits=[x for x in registry.get(table,[]) if str(x.get(pk))==str(binding['canonical_id'])]
@@ -405,6 +426,9 @@ def _plan(sb,job,staged):
                     (not countrycol or not p.get(countrycol) or not hit.get(countrycol) or _norm(p[countrycol])==_norm(hit[countrycol]))):
                     for r in rows:ready.append((r,'match_existing',str(binding['canonical_id'])))
                     continue
+            if review:
+                exceptions.append({'Table':table,'Name':name,'Reason':'Reviewed canonical identity is absent or conflicts; review again'})
+                continue
         exact,fuzzy,cross,method=_identity_candidates(table,name,p,index,registry)
         # Event titles are not identities by themselves; match on original event date too.
         if table=='pc_events':
@@ -613,6 +637,8 @@ def render_bulk_replay(sb,active_package):
         st.warning('Finish queue processing before canonical publication.');return
     staged=_all_staged(sb,job)
     if not staged:st.warning('No staged rows found yet.');return
+    from pc_reviewed_job_repair import render_job_repair
+    render_job_repair(sb,job,reviewer)
     # v1.6: model-aware AI research is IN the existing staged job, not another
     # extraction screen. Durable task state and reversible repair survive logout.
     from pc_v16_research import (enqueue_research,status_counts,process_research_batch,
