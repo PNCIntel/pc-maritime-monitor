@@ -685,6 +685,37 @@ def render_bulk_replay(sb,active_package):
         except Exception as exc:st.error('AI research pass stopped: '+str(exc))
     if st.session_state.get('v16_last'):
         st.caption('Most recent research pass: '+str(st.session_state['v16_last']))
+    # Saved curated dossiers already contain source-backed research. Allow the
+    # analyst to release untouched pending tasks without repeating research.
+    if rs['pending']:
+        if st.button('Use saved dossier evidence for pending tasks (no new research calls)',key='v16_use_saved_dossiers'):
+            released=0; retained=0
+            pending=(sb.table('pc_v16_research_tasks').select('task_id,staged_record_id')
+                     .eq('ingestion_job_id',job).eq('status','pending').limit(500).execute().data or [])
+            for task in pending:
+                rows=(sb.table('pc_staged_records').select('payload')
+                      .eq('staged_record_id',task['staged_record_id']).limit(1).execute().data or [])
+                if len(rows)!=1:
+                    retained+=1; continue
+                payload=rows[0].get('payload') or {}; meta=payload.get('metadata') or {}
+                mode=str(meta.get('ingestion_mode') or '')
+                dossier=str(meta.get('dossier_version') or '')
+                urls=meta.get('research_sources') or []
+                if mode!='AI_RESEARCH_DOSSIER_V3' or not dossier.startswith('curated-source-proposals-') or not urls:
+                    retained+=1; continue
+                changed=(sb.table('pc_v16_research_tasks').update({
+                    'status':'applied',
+                    'result':{'status':'saved_dossier_reused',
+                              'reason':'Persisted curated source dossier reused; canonical validation still applies.',
+                              'replayed_from_saved_dossier':True},
+                    'error_text':None,
+                    'updated_at':datetime.now(timezone.utc).isoformat()
+                }).eq('task_id',task['task_id']).eq('status','pending').execute().data or [])
+                if changed: released+=1
+                else: retained+=1
+            st.success(f'Released {released} saved-dossier tasks; retained {retained} for research.')
+            st.session_state.pop('v15_plan',None)
+            st.rerun()
     if rs['failed'] and st.button('Retry failed research calls',key='v16_retry'):
         count=retry_failed(sb,job);st.success(f'Requeued {count} failed tasks.');st.rerun()
     e1,e2=st.columns(2)
