@@ -503,10 +503,10 @@ def _fetch_article_reader(url: str) -> str:
             self.skip = 0
             self.parts = []
         def handle_starttag(self, tag, attrs):
-            if tag in {"script", "style", "noscript", "svg"}:
+            if tag in {"script", "style", "noscript", "svg", "nav", "header", "footer", "aside"}:
                 self.skip += 1
         def handle_endtag(self, tag):
-            if tag in {"script", "style", "noscript", "svg"} and self.skip:
+            if tag in {"script", "style", "noscript", "svg", "nav", "header", "footer", "aside"} and self.skip:
                 self.skip -= 1
         def handle_data(self, data):
             if not self.skip:
@@ -696,8 +696,7 @@ with st.container():
                 raise ValueError("Please confirm third-party public-URL retrieval consent")
             # Structured imports never need OpenAI consent; only text sent to
             # extraction/research does. This is checked after parsing below.
-            if research_depth.startswith("AI") and not OPENAI_KEY:
-                raise ValueError("OpenAI API key is not configured")
+            # The API key is required below only for inputs actually sent to AI.
             if len(uploads or []) > 20:
                 raise ValueError("Limit to 20 files per run; use the bulk page for larger structured imports")
             inputs, structured, errors = [], [], []
@@ -1413,4 +1412,3 @@ if st.session_state.get("deduped_package"):
                 st.success(f"Staged {count} review proposals in job {job_id}. Canonical tables unchanged.")
         except Exception as exc:
             st.error(f"Review staging failed: {exc}. Check the ingestion job before retrying.")
-

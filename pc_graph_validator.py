@@ -58,6 +58,10 @@ def _neutral_event_title(event, graph):
     nature = _norm(event.get("event_nature"))
     primary = graph.get("primary_subject") or {}
     subject = str(primary.get("name") or "vessel").strip()
+    # A candidate vessel identity must not become a definite incident subject.
+    if any('vessel' in _norm(c.get('claim')) and any(w in _norm(c.get('claim')) for w in ('identity','involvement','identified','presence'))
+           and _norm(c.get('status')) in {'unconfirmed','hypothesis','contested'} for c in graph.get('claims') or []):
+        subject='a vessel'
     loc = str(event.get("location") or "").strip()
     if any(x in et or x in nature for x in ("missile", "projectile", "strike", "attack")):
         where = f" in {loc}" if loc else ""
@@ -205,6 +209,18 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
             continue
         rels.append(r)
     graph["relationships"] = rels
+    held_names=set()
+    for hold in (graph.get('validator_holds') or []) + report['holds']:
+        item=hold.get('finding') or hold.get('item') or {}
+        if hold.get('section') in {'companies','physical_assets','mobile_assets'} or any(s in str(hold.get('path')) for s in ('graph.companies[','graph.physical_assets[','graph.mobile_assets[')):
+            if item.get('name'):held_names.add(_norm(item['name']))
+    approved_names={_norm(x.get('name')) for section in ('companies','physical_assets','mobile_assets') for x in graph.get(section) or []}
+    filtered=[]
+    for i,rel in enumerate(graph['relationships']):
+        if any(_norm(rel.get(k)) in held_names-approved_names for k in ('source_name','target_name')):
+            report['holds'].append({'path':f'graph.relationships[{i}]','reason':'Relationship depends on a held root','item':rel})
+        else:filtered.append(rel)
+    graph['relationships']=filtered
 
     # 5) Charter is a relationship/service arrangement, not an acquisition transaction.
     txs = []
@@ -319,6 +335,6 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
     graph["claims"]=unique(graph.get("claims") or [])
     graph["validator_holds"] = copy.deepcopy(report["holds"])
     graph["validator_report"] = {k: v for k, v in report.items() if k != "holds"}
-    out["validated_version"] = "research-first-v3.5.1"
+    out["validated_version"] = "research-first-v3.6.1"
     out["validation_report"] = report
     return out, report

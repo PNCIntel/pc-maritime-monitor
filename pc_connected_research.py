@@ -628,13 +628,13 @@ def init_job_connected(sb,job,retry=False):
         unfinished=current_status in ('', 'researching', 'review')
         needs_refresh=(
             unfinished and (
-                current_version != '3.6.0-source-bounded-replay'
+                current_version != '3.6.1-source-graph-publication'
                 or not state.get('replayed_without_ai')
                 or state.get('plans') != replay_plans
             )
         )
         if needs_refresh:
-            state={'version':'3.6.0-source-bounded-replay','status':'review','subjects':[],
+            state={'version':'3.6.1-source-graph-publication','status':'review','subjects':[],
                    'plans':replay_plans,'next_index':0,
                    'started_at':state.get('started_at') or datetime.now(timezone.utc).isoformat(),
                    'refreshed_at':datetime.now(timezone.utc).isoformat(),
@@ -648,7 +648,7 @@ def init_job_connected(sb,job,retry=False):
     if state.get('subjects') is not None:
         return state
     if replay_plans:
-        state={'version':'3.6.0-source-bounded-replay','status':'review','subjects':[],
+        state={'version':'3.6.1-source-graph-publication','status':'review','subjects':[],
                'plans':replay_plans,'next_index':0,'started_at':datetime.now(timezone.utc).isoformat(),
                'replayed_without_ai':True}
     else:
@@ -687,6 +687,7 @@ def _publish_dossier_event_links(sb,job):
             holds.append({'type':'event_link','reason':'Event not yet canonically published'}); continue
         p=row.get('payload') or {}; m=p.get('metadata') or {}
         for ident in normalize_identifiers(m.get('involved_identifiers') or []):
+            if ident.startswith(('entity:','asset:')):continue
             if ident.startswith('name:'): continue
             text=str(ident).strip(); imo=text.split(':',1)[-1] if text.lower().startswith('imo:') else text
             if not valid_imo(imo):
@@ -718,11 +719,7 @@ def publish_job_connected(sb,job):
             rep=publish_company_plan(sb,job,plan)
             if plan.get('replayed_from_validated_dossier'):
                 rep.setdefault('holds',[]).extend(plan.get('validator_holds') or [])
-                for section in ('dossier_transactions','dossier_contracts','dossier_projects'):
-                    for finding in plan.get(section) or []:
-                        rep['holds'].append({'type':section,'finding':finding,
-                            'reason':'Generic dossier mapping requires analyst review; not silently converted to company schema'})
-                rep['holds'].extend(_publish_dossier_company_edges(sb,job,plan))
+                # Source graph publisher below writes these once after core publication.
                 rep['complete']=not rep['holds'] and not rep.get('research_gaps')
             reports.append(rep)
         else:
@@ -761,7 +758,7 @@ def publish_job_connected(sb,job):
                             'relationship_type':_norm(role).replace(' ','_')[:80],'target_type':'mobile_asset','target_id':vid,
                             'valid_from':_date(rel.get('effective_from')),'valid_to':_date(rel.get('effective_to')),
                             'confidence':'reported','record_status':'approved','notes':rel.get('evidence_summary'),
-                            'metadata':{'research_sources':rel.get('source_urls') or [],'connected_research_job':str(job),'date_evidence':rel.get('date_evidence') or {}}},
+                            'metadata':{'research_sources':rel.get('source_urls') or [],'connected_research_job':str(job),'date_evidence':rel.get('date_evidence') or {},'source_finding':rel,'verification_status':rel.get('status') or 'reported'}},
                             on_conflict='relationship_id').execute(); rep['relationships']+=1
                     elif _norm(sname) in aliases:
                         er=_resolve_entity(sb,job,{'name':tname,'entity_type':'company','source_urls':rel.get('source_urls') or []})
@@ -773,7 +770,7 @@ def publish_job_connected(sb,job):
                             'relationship_type':_norm(role).replace(' ','_')[:80],'target_type':'entity','target_id':eid,
                             'valid_from':_date(rel.get('effective_from')),'valid_to':_date(rel.get('effective_to')),
                             'confidence':'reported','record_status':'approved','notes':rel.get('evidence_summary'),
-                            'metadata':{'research_sources':rel.get('source_urls') or [],'connected_research_job':str(job),'date_evidence':rel.get('date_evidence') or {}}},
+                            'metadata':{'research_sources':rel.get('source_urls') or [],'connected_research_job':str(job),'date_evidence':rel.get('date_evidence') or {},'source_finding':rel,'verification_status':rel.get('status') or 'reported'}},
                             on_conflict='relationship_id').execute(); rep['relationships']+=1
                 for tx in plan.get('transactions') or []:
                     rep['holds'].append({'type':'vessel_transaction','name':tx.get('target_name'),
@@ -788,6 +785,11 @@ def publish_job_connected(sb,job):
     event_links=_publish_dossier_event_links(sb,job)
     summary['event_links']=event_links
     summary['holds']+=len(event_links['holds'])
+    from pc_dossier_publication import publish_dossier_graph
+    stages=(sb.table('pc_staged_records').select('*').eq('ingestion_job_id',job).limit(5000).execute().data or [])
+    source_graph=publish_dossier_graph(sb,job,stages,_publications_for_stages(sb,stages))
+    summary['source_graph']=source_graph
+    summary['holds']+=len(source_graph['holds'])
     state['publication_report']=summary; state['status']='published' if summary['complete_subjects']==summary['subjects'] and summary['holds']==0 else 'published_partial'
     state['completed_at']=datetime.now(timezone.utc).isoformat(); scope['connected_research']=state; _save_scope(sb,job,scope)
     return summary

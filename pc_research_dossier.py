@@ -196,8 +196,8 @@ people [{{name,position,organization,evidence_summary,source_urls,confidence}}],
 mobile_assets [{{name,asset_type,subtype,imo,mmsi,registration,call_sign,flag,year_built,evidence_summary,source_urls,confidence}}],
 physical_assets [{{name,asset_type,subtype,country,region_city,evidence_summary,source_urls,confidence}}],
 identity_history [{{asset_name,imo,identifier_type,identifier_value,valid_from,valid_to,change_reason,source_urls,confidence}}],
-events [{{title,incident_reference,incident_authority,involved_identifiers,source_title,start_date,event_nature,event_domain,event_type,location,description,why_it_matters,commercial_implications,assessment,monitoring_indicators,source_urls,confidence}}],
-transactions [{{buyer_name,target_name,seller_name,transaction_type,status,announced_date,effective_date,equity_percent,value,currency,regulatory_status,evidence_summary,source_urls,confidence}}],
+events [{{title,incident_reference,incident_authority,involved_identifiers,event_links:[{{linked_type,linked_name,relationship,verification_status,source_urls}}],source_title,start_date,event_nature,event_domain,event_type,location,description,why_it_matters,commercial_implications,assessment,monitoring_indicators,source_urls,confidence}}],
+transactions [{{buyer_name,target_name,seller_name,seller_participants,transaction_type,status,announced_date,effective_date,equity_percent,reported_value,value_basis,currency,regulatory_status,evidence_summary,source_urls,confidence}}],
 relationships [{{source_name,target_name,relationship,effective_from,effective_to,status,evidence_summary,source_urls,confidence}}],
 projects [{{name,project_type,country,region_city,status,sponsor_name,developer_name,evidence_summary,source_urls,confidence}}],
 contracts [{{provider_name,customer_name,contract_type,status,effective_from,effective_to,evidence_summary,source_urls,confidence}}],
@@ -213,6 +213,12 @@ Rules:
 - proposed/pending transactions remain proposed/pending until evidence of closing.
 - allegations/attribution must stay in claims or appropriately qualified events.
 - source_urls on every substantive object must be drawn from the evidence set below.
+- Ignore navigation, footers, investor menus and related article teasers. A menu is not article evidence.
+- Include explicit event_links for affected/involved companies and infrastructure, not just vessels.
+- Relationships must state endpoint source_type/target_type (entity, asset, mobile_asset) where names collide.
+- Link terminals to their parent ports and operators when evidenced. Do not confuse a port company with the physical port.
+- Distinguish announcement from closing dates, fund manager from fund owner, and enterprise value from equity consideration.
+- Never combine multiple sellers into a synthetic company name. Preserve seller_participants if the schema has only one seller field.
 
 SOURCE URL: {source_url or 'none'}
 SOURCE TEXT:\n{text[:18000]}
@@ -338,7 +344,7 @@ def graph_to_core_records(dossier: dict, source_label: str = "") -> list[dict]:
         meta=meta_for(e,"event")
         for k in ("why_it_matters","commercial_implications","assessment","monitoring_indicators","verification_status"):
             if e.get(k) is not None: meta[k]=e.get(k)
-        for key in ("incident_reference", "incident_authority", "involved_identifiers"):
+        for key in ("incident_reference", "incident_authority", "involved_identifiers", "event_links"):
             if e.get(key): meta[key] = e[key]
         # Preserve discovered graph context for later relationship synthesis.
         meta["discovered_relationships"] = graph.get("relationships") or []

@@ -18,8 +18,8 @@ def run():
     assert v['graph']['events'][0]['involved_identifiers'][0]=='imo:8716306'
     assert v['graph']['events'][0]['event_type']=='attack'
     assert len(v['graph']['claims'])==1
-    assert len(r['holds'])==5
+    assert len(r['holds'])==6
     assert not any(x.get('relationship')=='owned_and_operated_by' for x in v['graph']['relationships'])
-    print('St Helena fixture regression: PASS (7 core objects, 5 held findings)')
+    print('St Helena fixture regression: PASS (7 core objects, 6 held findings)')
 
 if __name__=='__main__': run()

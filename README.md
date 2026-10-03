@@ -1,9 +1,32 @@
-# P&C Analyst Loader v3.6.0 — connected source resolution
+# P&C Analyst Loader v3.6.1 — source graph publication
+
+Replace the corresponding files in the existing Power Admin repository and reboot Streamlit. Confirm **Loader build v3.6.1** before importing the batch.
+
+This patch publishes saved source-backed company/infrastructure relationships, event links, transactions, project details and contracts after their core records have canonical publication IDs. Missing or ambiguous endpoints and database constraint errors stay visible as holds. Company and physical-asset names can coincide: endpoint types disambiguate them. Transaction values preserve their basis, and future projects remain planned. Vessel relationship history retains its source finding and qualification. Replay refreshes saved research without calling AI again.
+
+## Nine researched articles
+
+`production_batch_9/NINE_ARTICLES_RESEARCHED_PROPOSALS.json` contains 63 core proposals for the existing **Load intelligence → Universal intake** structured-file input. It carries the per-source graph findings for the connected publisher. These are researched proposals, not production publication results. Existing canonical records should match rather than duplicate.
+
+Upload that JSON, prepare the package, review identity matches, then apply/reconcile canonical records and publish connected enrichment through the existing workflow. `NINE_ARTICLES_SOURCE_GRAPHS.json` is the readable research trail; do not upload it as a replacement for the structured proposals. The KSIE original page was unavailable, so its facts cite alternative reporting explicitly. Uncertain St Helena involvement stays qualified. No aircraft identity is inferred from a model number.
+
+Run `VERIFY_AFTER_LOAD.sql` with the returned job UUID. It checks core publication through staging and returns connected records. Refresh both Trade and Intelligence apps, then inspect companies, ports/terminals, vessels, events and Deals, Projects & Contracts. Check CLI closing on 1 October, its 2 October announcement and USD 835 million enterprise value; KEZAD facility remains planned for 2028; Pacific Link remains proposed. Confirm company and asset records called Port of Tauranga are linked with their correct types.
+
+## Verification performed
+
+58 loader unittest checks, 8 article-context checks and 5 additional function checks passed (71 total). Coverage includes document reuse and company jobs, company publication and retry, held roots, typed endpoints, unpublished identities, partial failures, transaction value mapping and source context isolation. Python compilation passed.
+
+An offline publisher check of the curated batch produced 11 company/infrastructure relationships, 26 event links, 1 transaction, 8 project details and 1 contract with no unresolved endpoints. Existing vessel replay handles vessel relationships and history separately. This check used resolved test IDs and a database double: it does not validate Supabase constraints or prove production writes.
+
+## Current deployment blocker
+
+The supplied Trade and Intelligence apps loaded successfully. Their UI exposes read/analysis controls and directs writes through Power Admin. No current Power Admin URL, repository/deployment connection or configured database credentials is available in this workspace. This patch is not deployed and the nine articles have not been verified as loaded in production. Newsletter cleanup has not been executed.
+
 
 This is a replacement-file patch for the existing P&C application repository.
 It is not a standalone application or a database migration.
 
-## Multi-source intake changes in v3.6.0
+## Multi-source intake changes in v3.6.1
 
 This updates the existing **Load intelligence → Universal intake** screen. Enter
 up to 20 article URLs and add PDF, DOCX, TXT/MD newsletters or structured files to
@@ -54,7 +77,7 @@ accessible through web retrieval; that is not an application reader test.
 
 ### Install and verify in the deployed application
 
-Replace all files in this ZIP and reboot Streamlit; confirm **Loader build v3.6.0**.
+Replace all files in this ZIP and reboot Streamlit; confirm **Loader build v3.6.1**.
 Keep existing authentication, secrets, migrations and repository dependencies.
 For the existing legacy job, use **Run reconciliation again after resolving
 exceptions**. Exact company identities should be matched while their broader

@@ -35,6 +35,8 @@ def normalize_identifiers(values):
             value=str(item.get('value') or item.get('identifier_value') or '').strip()
             if typ=='imo' and valid_imo(value): token='imo:'+value
             elif typ in {'name','vessel_name'} and value: token='name:'+value
+            elif typ in {'entity','company','asset','physical_asset'} and value:
+                token=('entity' if typ in {'entity','company'} else 'asset')+':'+value
             else: continue
         else:
             text=str(item or '').strip()
@@ -42,6 +44,7 @@ def normalize_identifiers(values):
             if valid_imo(text): token='imo:'+text
             elif sep and typ.casefold()=='imo' and valid_imo(value): token='imo:'+value
             elif sep and typ.casefold() in {'name','vessel_name'} and value: token='name:'+value
+            elif sep and typ.casefold() in {'entity','asset'} and value:token=typ.casefold()+':'+value
             else: continue
         if token not in result: result.append(token)
     return result
