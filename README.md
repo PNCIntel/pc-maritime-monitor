@@ -1,7 +1,52 @@
-# P&C Analyst Loader v3.5.3 — connected source resolution
+# P&C Analyst Loader v3.5.4 — connected source resolution
 
 This is a replacement-file patch for the existing P&C application repository.
 It is not a standalone application or a database migration.
+
+## Existing-event match and partial retry fix in v3.5.4
+
+The attached `pc_v15_bulk_replay.py` is included. Matching now compares validated
+calendar days for ISO dates and timestamps, along with exact normalized titles.
+Multiple candidates, incomplete dates, and same-title date conflicts stay held.
+The backup, approval and server-side publication RPC workflow is retained.
+Partial reconciliation now reopens saved connected review and retries enrichment.
+Shared vessel validator holds are counted in the final report. Extreme E's
+company/organization conflict remains held. Historical assets are not deleted.
+
+### Test the saved job
+
+1. Install all files, including `pc_v15_bulk_replay.py`, restart Streamlit and
+   check the `Loader build v3.5.4` marker.
+2. Open job `f2a4acf4-6d66-4eb3-b544-c1ec723d4e8c`. Click **Run reconciliation
+   again after resolving exceptions**. Existing staging and source evidence are
+   reused; no JSON upload or repeat web research is required.
+3. The planner tested against your export selects MATCH for event
+   `EVT_PC_97538C73504F6A4F7B60` and MNG Maritime
+   `ENTITY_A8441761CA8A779845A5`. Extreme E remains held for identity review.
+4. Review and approve connected enrichment. Verify the event-to-vessel link and
+   remaining holds in the report. Partial status is expected while holds remain.
+5. Run the supplied full database export SQL again. Confirm the same event/vessel
+   IDs, one link between them in `pc_event_links`, publication audit rows for the
+   matched stages, and no duplicate history or relationships after another retry.
+   Inspect canonical event fields and metadata; the server-side MATCH RPC controls
+   how these are updated and still needs live verification.
+
+### Company and document tests
+
+- Company loader: research a known company with official evidence, review and
+  approve, then retry the saved job. Verify no duplicate company profiles, offices,
+  people roles or footprint rows. Ambiguous identities and invalid IMOs stay held.
+- Document loader: upload a DOCX with paragraphs and table text twice. Verify the
+  table text is extracted, one SHA-matched document remains and the saved company
+  research job is reused. Missing issuer evidence holds identity creation; invalid
+  calendar dates remain null.
+
+Offline checks: `python -m compileall -q .` and
+`python -m unittest test_loader_regressions -q` pass (39 tests). These cover
+company facets, repeated uploads, source validation, event links, date matching
+and partial retries with a database double. The planner also passed against the
+supplied export. No live database writes were made here; deployed dependencies
+and server-side publication RPC behavior still require the checks above.
 
 ## Publication-table compatibility fix in v3.5.3
 
@@ -40,7 +85,7 @@ refresh. A new replay of the included corrected JSON produces seven core proposa
    database functions, Streamlit secrets and requirements.
 4. Restart Streamlit. Restore the saved extraction or job and test the St Helena dossier again.
 
-Updated modules: `pc-power-admin.py`, `pc_source_graph.py`, `pc_research_dossier.py`,
+Updated modules: `pc_v15_bulk_replay.py`, `pc-power-admin.py`, `pc_source_graph.py`, `pc_research_dossier.py`,
 `pc_graph_validator.py`, `pc_v07_core.py`, `pc_v16_research.py`,
 `pc_connected_research.py`, `pc_intelligence_pipeline.py`, `pc_document_loader.py`.
 

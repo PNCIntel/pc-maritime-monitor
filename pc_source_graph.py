@@ -1,6 +1,6 @@
 """Source-bounded proposals and lossless, conservative observation reconciliation."""
 from copy import deepcopy
-from datetime import date
+from datetime import date, datetime
 import hashlib
 import json
 import re
@@ -51,6 +51,22 @@ def stable_identifiers(values):
     return tuple(sorted(x for x in normalize_identifiers(values) if x.startswith('imo:')))
 
 
+def event_day(value):
+    """Use the recorded calendar day; validate full ISO timestamps and dates.
+
+    Do not convert offsets to UTC or invent a day for month/year precision.
+    """
+    text = str(value or '').strip()
+    try:
+        if re.fullmatch(r'\d{4}-\d{2}-\d{2}', text):
+            return date.fromisoformat(text).isoformat()
+        if re.match(r'^\d{4}-\d{2}-\d{2}[T ]', text):
+            return datetime.fromisoformat(text.replace('Z', '+00:00')).date().isoformat()
+    except ValueError:
+        pass
+    return None
+
+
 def event_key(payload):
     """Explicit authority reference wins; fallback requires exact full context/title.
 
@@ -64,11 +80,8 @@ def event_key(payload):
         return ('reference', norm(authority), norm(ref))
     ids = m.get('involved_identifiers') or payload.get('involved_identifiers') or []
     ids = stable_identifiers(ids)
-    day = payload.get('start_date')
-    try:
-        day = date.fromisoformat(str(day)).isoformat()
-    except ValueError:
-        return None
+    day = event_day(payload.get('start_date'))
+    if not day: return None
     fields = [norm(payload.get(k)) for k in ('event_type', 'location', 'title')]
     if ids and all(fields):
         return ('exact_context', day, *fields, tuple(ids))

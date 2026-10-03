@@ -297,4 +297,53 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(subjects),1)
         self.assertEqual(subjects[0]['canonical_id'],'C1')
 
+class PublisherRegressionTests(unittest.TestCase):
+    def stage(self, day='2026-09-14'):
+        return {'staged_record_id':'S','ingestion_job_id':'j','target_table':'pc_events',
+                'source_record_key':'source','natural_key':'Projectile strike on M/V St. Helena in Strait of Hormuz',
+                'payload':{'title':'Projectile strike on M/V St. Helena in Strait of Hormuz','start_date':day,
+                           'metadata':{'source_url':'https://a.test/report'}}}
+    def database(self, events):
+        return DB({'pc_events':events,'pc_v08_trade_content':[{'ingestion_job_id':'j','source_record_key':'source'}]})
+    def plan(self, events, day='2026-09-14'):
+        import pc_v15_bulk_replay as publisher
+        return publisher._plan(self.database(events),'j',[self.stage(day)])
+    def test_live_timestamp_matches_existing_event(self):
+        old={'event_id':'EVT_PC_97538C73504F6A4F7B60','title':self.stage()['natural_key'],
+             'start_date':'2026-09-14T00:00:00+00:00'}
+        ready,followers,exceptions,pub=self.plan([old])
+        self.assertEqual([(d,c) for _,d,c in ready],[('match_existing',old['event_id'])])
+        self.assertEqual(exceptions,[])
+    def test_title_date_conflict_is_held(self):
+        old={'event_id':'E','title':self.stage()['natural_key'],'start_date':'2026-09-15T00:00:00Z'}
+        ready,_,exceptions,_=self.plan([old])
+        self.assertEqual(ready,[]); self.assertEqual(len(exceptions),1)
+    def test_multiple_same_day_events_are_held(self):
+        old={'title':self.stage()['natural_key'],'start_date':'2026-09-14T00:00:00Z'}
+        ready,_,exceptions,_=self.plan([{**old,'event_id':'E1'},{**old,'event_id':'E2'}])
+        self.assertEqual(ready,[]); self.assertEqual(len(exceptions),1)
+    def test_missing_event_date_does_not_match(self):
+        old={'event_id':'E','title':self.stage()['natural_key'],'start_date':None}
+        ready,_,exceptions,_=self.plan([old],None)
+        self.assertEqual(ready,[]); self.assertEqual(len(exceptions),1)
+    def test_calendar_day_validation(self):
+        for value in ('2026-09','2026-02-30','2026-09-14Tgarbage'):
+            self.assertIsNone(graph.event_day(value))
+        self.assertEqual(graph.event_day('2026-09-14T23:30:00-04:00'),'2026-09-14')
+    def test_partial_job_retries_event_link_and_counts_validator_holds(self):
+        state={'status':'published_partial','plans':[{'subject_type':'context','subject_name':'source',
+               'validator_holds':[{'reason':'uncertain claim'}]}],'publication_report':{'holds':99}}
+        db=DB({'pc_ingestion_jobs':[{'ingestion_job_id':'j','source_scope':{'connected_research':state}}]})
+        with patch.object(connected,'_publish_dossier_event_links',return_value={'linked':1,'holds':[]}) as links:
+            report=connected.publish_job_connected(db,'j')
+        links.assert_called_once(); self.assertEqual(report['event_links']['linked'],1)
+        self.assertEqual(report['holds'],1)
+    def test_retry_reopens_saved_plans_without_research(self):
+        plan={'subject_type':'context','subject_name':'source','validator_holds':[]}
+        state={'status':'published_partial','subjects':[],'plans':[plan]}
+        db=DB({'pc_ingestion_jobs':[{'ingestion_job_id':'j','source_scope':{'connected_research':state}}]})
+        with patch.object(connected,'_validated_replay_plans',return_value=[plan]):
+            result=connected.init_job_connected(db,'j',retry=True)
+        self.assertEqual(result['status'],'review'); self.assertTrue(result['replayed_without_ai'])
+
 if __name__=='__main__': unittest.main(verbosity=2)

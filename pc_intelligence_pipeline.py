@@ -43,7 +43,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
 
     st.divider()
     st.subheader('Research, resolve & publish')
-    st.caption('Loader build v3.5.3 · saved review refresh enabled')
+    st.caption('Loader build v3.5.4 · saved review refresh enabled')
     st.caption('Source research → classification repair → canonical resolution → core publication → '
                'connected company/vessel research → specialist tables. Analysts review names and evidence, not database IDs.')
 
@@ -155,7 +155,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             saved_scope=_load_scope(sb,job); saved_scope['loader_publication_report']=report
             _save_scope(sb,job,saved_scope)
             # Connected enrichment starts only after canonical core identities exist.
-            state=init_job_connected(sb,job)
+            state=init_job_connected(sb,job,retry=True)
             if state.get('status')=='review' and state.get('plans'):
                 st.session_state[state_key]='connected_review'
             elif state.get('subjects'):

@@ -600,9 +600,14 @@ def _publish_dossier_company_edges(sb,job,plan):
     return holds
 
 
-def init_job_connected(sb,job):
+def init_job_connected(sb,job,retry=False):
     scope=_load_scope(sb,job)
     state=scope.get('connected_research') or {}
+    if retry and state.get('status') in {'published_partial','published'}:
+        state['status']='review'
+        state['version']=''  # Revalidate saved dossier findings; no web research.
+        scope['connected_research']=state
+        _save_scope(sb,job,scope)
 
     # Validated-dossier replay is authoritative for an unfinished replay job. Older
     # releases persisted a thin connected_research object before the full dossier
@@ -694,7 +699,7 @@ def publish_job_connected(sb,job):
     scope=_load_scope(sb,job); state=scope.get('connected_research') or {}
     if state.get('status') not in {'review','published_partial','published'}:
         raise RuntimeError('Connected research is not ready for analyst approval')
-    if state.get('status') in {'published_partial','published'}: return state.get('publication_report') or {}
+    if state.get('status')=='published': return state.get('publication_report') or {}
     reports=[]
     for plan in state.get('plans') or []:
         if plan.get('subject_type')=='context':
@@ -771,7 +776,7 @@ def publish_job_connected(sb,job):
             rep.setdefault('holds',[]).append({'type':'research_dependency','finding':finding,'reason':'Dependent finding awaits connected identity review'})
         if rep.get('holds'): rep['complete']=False
     summary={'subjects':len(reports),'complete_subjects':sum(1 for r in reports if r.get('complete')),
-             'holds':sum(len(r.get('holds') or []) for r in reports),'reports':reports}
+             'holds':sum(len(r.get('holds') or [])+len(r.get('validator_holds') or []) for r in reports),'reports':reports}
     event_links=_publish_dossier_event_links(sb,job)
     summary['event_links']=event_links
     summary['holds']+=len(event_links['holds'])

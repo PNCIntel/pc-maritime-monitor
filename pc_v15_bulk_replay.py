@@ -15,7 +15,8 @@ import pandas as pd
 
 ID_TABLES={'pc_entities':'entity_id','pc_assets':'asset_id','pc_mobile_assets':'mobile_asset_id','pc_events':'event_id'}
 NAME_COL={'pc_entities':'name','pc_assets':'name','pc_mobile_assets':'name','pc_events':'title'}
-PUBLISHER_VERSION='1.6.2-saved-findings-replay'
+PUBLISHER_VERSION='3.5.4-calendar-date-match'
+from pc_source_graph import event_day
 
 
 def _norm(x):
@@ -316,7 +317,7 @@ def _plan(sb,job,staged):
         if table=='pc_mobile_assets' and p.get('imo'):
             g=(table,'imo:'+str(p['imo']).strip())
         elif table=='pc_events':
-            g=(table,_norm(p.get('title') or r['natural_key'])+'|'+str(p.get('start_date') or ''))
+            g=(table,_norm(p.get('title') or r['natural_key'])+'|'+str(event_day(p.get('start_date')) or p.get('start_date') or ''))
         else: g=(table,_norm(p.get(NAME_COL[table]) or r['natural_key']))
         groups[g].append(r)
     ready=[]; followers=[]; exceptions=[]
@@ -352,8 +353,14 @@ def _plan(sb,job,staged):
         exact,fuzzy,cross,method=_identity_candidates(table,name,p,index,registry)
         # Event titles are not identities by themselves; match on original event date too.
         if table=='pc_events':
-            date=str(p.get('start_date') or '')
-            exact=[x for x in exact if str(x.get('start_date') or '')==date]
+            day=event_day(p.get('start_date'))
+            title_hits=exact
+            exact=[x for x in title_hits if day and event_day(x.get('start_date'))==day]
+            if title_hits and not exact:
+                exceptions.append({'Table':table,'Name':name,
+                    'Reason':'canonical event title exists but dates differ or are incomplete; review before creating',
+                    'Staged record ID':leader['staged_record_id']})
+                continue
             fuzzy=[]  # Similar events must not silently be merged.
         pk=ID_TABLES[table]
         unique={str(x[pk]):x for x in exact if x.get(pk)}
