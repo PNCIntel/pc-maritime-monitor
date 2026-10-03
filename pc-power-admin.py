@@ -127,6 +127,58 @@ if _saved_extractions:
 if st.session_state.pop('v151_restored', None):
     st.sidebar.success(f"Recovered {len(st.session_state['active_package']):,} extracted records")
 
+# v3.4.3: restart-safe job handoff. Connected review/research state is persisted
+# in pc_ingestion_jobs.source_scope, but Streamlit session_state forgets which job
+# was open after a deploy/restart. Surface resumable jobs by analyst-friendly title.
+def _recent_resumable_intelligence_jobs(sb, limit=12):
+    try:
+        rows=(sb.table('pc_ingestion_jobs')
+              .select('ingestion_job_id,title,job_type,status,source_scope,stats,created_at')
+              .order('created_at',desc=True).limit(limit).execute().data or [])
+    except Exception:
+        return []
+    out=[]
+    for row in rows:
+        if row.get('job_type') == 'COMPANY_CONNECTED_RESEARCH':
+            continue
+        scope=row.get('source_scope') or {}
+        connected=scope.get('connected_research') or {}
+        cstatus=str(connected.get('status') or '').strip().lower()
+        if cstatus not in {'researching','review'}:
+            continue
+        plans=connected.get('plans') or []
+        subjects=connected.get('subjects') or []
+        out.append({
+            'job_id':str(row.get('ingestion_job_id')),
+            'title':row.get('title') or 'Intelligence load',
+            'connected_status':cstatus,
+            'plan_count':len(plans),
+            'subject_count':len(subjects),
+            'created_at':row.get('created_at'),
+        })
+    return out
+
+_resumable_jobs=_recent_resumable_intelligence_jobs(sb)
+if _resumable_jobs and not st.session_state.get('pc_active_intelligence_job'):
+    st.sidebar.markdown('#### Interrupted load')
+    _resume_idx=st.sidebar.selectbox(
+        'Resume saved job',
+        range(len(_resumable_jobs)),
+        format_func=lambda i: (f"{_resumable_jobs[i]['title']} · "
+                               f"{_resumable_jobs[i]['connected_status']} · "
+                               f"{_resumable_jobs[i]['plan_count']} review plan(s)"),
+        key='pc_resume_job_selection')
+    if st.sidebar.button('Resume interrupted load',type='primary',key='pc_resume_persisted_job'):
+        _resume=_resumable_jobs[_resume_idx]
+        st.session_state['pc_active_intelligence_job']=_resume['job_id']
+        # Force the simple workspace back to the loader page; the pipeline itself
+        # reconstructs connected_research/connected_review from persisted scope.
+        st.session_state['pc_workspace_simple_v18']='Load intelligence'
+        st.session_state['pc_resumed_job_notice']=_resume['title']
+        st.rerun()
+if st.session_state.pop('pc_resumed_job_notice',None):
+    st.sidebar.success('Resumed persisted load. No source reload or AI research restart required.')
+
 # v0.7 fast pages run before the legacy research UI, preventing expensive
 # dataframe construction and old full-page rerenders for large imports.
 # Keep the familiar multi-URL and multi-file loader as the HOME page. The
@@ -845,7 +897,10 @@ if mode == 'Load intelligence':
         from pc_intelligence_pipeline import render_intelligence_pipeline
         render_intelligence_pipeline(sb, _job, reviewer="DCM")
     else:
-        st.info("Extract and queue the package above. Then one button researches, resolves and populates the shared database.")
+        if _resumable_jobs:
+            st.warning('A persisted load is waiting for connected research/review. Use **Resume interrupted load** in the sidebar; do not reload or requeue the source.')
+        else:
+            st.info("Extract and queue the package above. Then one button researches, resolves and populates the shared database.")
     st.stop()
 
 # PHASE 2: PREFLIGHT DEDUPLICATION & RECONCILIATION
