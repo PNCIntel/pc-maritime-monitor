@@ -523,10 +523,44 @@ def _validated_replay_plans(sb, job):
 def init_job_connected(sb,job):
     scope=_load_scope(sb,job)
     state=scope.get('connected_research') or {}
-    if state.get('subjects') is not None: return state
+
+    # Validated-dossier replay is authoritative for an unfinished replay job. Older
+    # releases persisted a thin connected_research object before the full dossier
+    # graph mapper existed. On restart that stale object prevented the newer mapper
+    # from ever running. Rebuild it deterministically from staged replay metadata.
     replay_plans=_validated_replay_plans(sb,job)
     if replay_plans:
-        state={'version':'2.1-validated-replay','status':'review','subjects':[],
+        current_version=str(state.get('version') or '')
+        current_status=str(state.get('status') or '')
+        unfinished=current_status in ('', 'researching', 'review')
+        needs_refresh=(
+            unfinished and (
+                current_version != '2.2-validated-replay-full-graph'
+                or not state.get('replayed_without_ai')
+                or not state.get('plans')
+                or any(
+                    not (p.get('relationships') or p.get('events') or p.get('claims')
+                         or p.get('validator_holds') or p.get('research_gaps'))
+                    for p in (state.get('plans') or [])
+                )
+            )
+        )
+        if needs_refresh:
+            state={'version':'2.2-validated-replay-full-graph','status':'review','subjects':[],
+                   'plans':replay_plans,'next_index':0,
+                   'started_at':state.get('started_at') or datetime.now(timezone.utc).isoformat(),
+                   'refreshed_at':datetime.now(timezone.utc).isoformat(),
+                   'replayed_without_ai':True}
+            scope['connected_research']=state
+            _save_scope(sb,job,scope)
+            return state
+        if state.get('subjects') is not None:
+            return state
+
+    if state.get('subjects') is not None:
+        return state
+    if replay_plans:
+        state={'version':'2.2-validated-replay-full-graph','status':'review','subjects':[],
                'plans':replay_plans,'next_index':0,'started_at':datetime.now(timezone.utc).isoformat(),
                'replayed_without_ai':True}
     else:
