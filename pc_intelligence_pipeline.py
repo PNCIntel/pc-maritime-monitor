@@ -144,7 +144,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             _status=_cs.get('status')
             if _status in {'researching','review','published','published_partial'}:
                 st.session_state[run_key]=True
-                st.session_state[state_key]={'researching':'connected_research','review':'connected_review',
+                st.session_state[state_key]={'researching':'connected_research','review':'connected_publish',
                                              'published':'done','published_partial':'done'}[_status]
         except Exception:
             pass
