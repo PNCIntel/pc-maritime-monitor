@@ -259,4 +259,25 @@ class RegressionTests(unittest.TestCase):
         v,_=validate_dossier({'graph':{'physical_assets':[{'name':'Example Shipyard','asset_type':'shipyard','source_urls':['https://a.test']} ]}})
         self.assertEqual(len(v['graph']['physical_assets']),1)
 
+    def test_old_saved_review_refreshes_without_research(self):
+        import json
+        from pathlib import Path
+        d=json.loads((Path(__file__).parent/'fixtures/st_helena_input.json').read_text())
+        rows=[{'ingestion_job_id':'j','target_table':x['table'],'natural_key':x['natural_key'],'payload':x['payload']} for x in dossier.graph_to_core_records(d)]
+        old={'version':'3.5-source-bounded-replay','status':'review','subjects':[],
+             'replayed_without_ai':True,'plans':[{'subject_name':'Ambrey','identity_history':[{'identifier_type':'former_name'}]}]}
+        db=DB({'pc_staged_records':rows,'pc_ingestion_jobs':[{'ingestion_job_id':'j','source_scope':{'connected_research':old}}]})
+        with patch.object(connected,'research_company',side_effect=AssertionError('Unexpected research call')):
+            state=connected.init_job_connected(db,'j')
+        self.assertEqual(state['version'],'3.5.2-source-bounded-replay')
+        self.assertEqual(len(state['plans']),6)
+        company=next(p for p in state['plans'] if p['subject_type']=='company')
+        vessel=next(p for p in state['plans'] if p['subject_type']=='vessel')
+        self.assertEqual(company['identity_history'],[])
+        self.assertEqual(vessel['identity_history'][0]['identifier_type'],'name')
+        self.assertEqual(sum(len(p['validator_holds']) for p in state['plans']),5)
+        self.assertEqual(len(vessel['claims']),1)
+        again=connected.init_job_connected(db,'j')
+        self.assertEqual(state['refreshed_at'],again['refreshed_at'])
+
 if __name__=='__main__': unittest.main(verbosity=2)

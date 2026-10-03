@@ -43,6 +43,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
 
     st.divider()
     st.subheader('Research, resolve & publish')
+    st.caption('Loader build v3.5.2 · saved review refresh enabled')
     st.caption('Source research → classification repair → canonical resolution → core publication → '
                'connected company/vessel research → specialist tables. Analysts review names and evidence, not database IDs.')
 
@@ -179,8 +180,8 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             st.session_state[state_key]='connected_review'; st.rerun()
 
         if stage=='connected_review':
-            from pc_connected_research import _load_scope
-            state=(_load_scope(sb,job).get('connected_research') or {})
+            # Reconcile persisted review plans before displaying or approving them.
+            state=init_job_connected(sb,job)
             plans=state.get('plans') or []
             st.subheader('Review connected findings')
             if state.get('replayed_without_ai'):

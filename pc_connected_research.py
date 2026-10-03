@@ -605,18 +605,13 @@ def init_job_connected(sb,job):
         unfinished=current_status in ('', 'researching', 'review')
         needs_refresh=(
             unfinished and (
-                current_version != '3.5.1-source-bounded-replay'
+                current_version != '3.5.2-source-bounded-replay'
                 or not state.get('replayed_without_ai')
                 or not state.get('plans')
-                or any(
-                    not (p.get('relationships') or p.get('events') or p.get('claims')
-                         or p.get('validator_holds') or p.get('research_gaps'))
-                    for p in (state.get('plans') or [])
-                )
             )
         )
         if needs_refresh:
-            state={'version':'3.5.1-source-bounded-replay','status':'review','subjects':[],
+            state={'version':'3.5.2-source-bounded-replay','status':'review','subjects':[],
                    'plans':replay_plans,'next_index':0,
                    'started_at':state.get('started_at') or datetime.now(timezone.utc).isoformat(),
                    'refreshed_at':datetime.now(timezone.utc).isoformat(),
@@ -630,7 +625,7 @@ def init_job_connected(sb,job):
     if state.get('subjects') is not None:
         return state
     if replay_plans:
-        state={'version':'3.5.1-source-bounded-replay','status':'review','subjects':[],
+        state={'version':'3.5.2-source-bounded-replay','status':'review','subjects':[],
                'plans':replay_plans,'next_index':0,'started_at':datetime.now(timezone.utc).isoformat(),
                'replayed_without_ai':True}
     else:

@@ -1,7 +1,22 @@
-# P&C Analyst Loader v3.5.1 — connected source resolution
+# P&C Analyst Loader v3.5.2 — connected source resolution
 
 This is a replacement-file patch for the existing P&C application repository.
 It is not a standalone application or a database migration.
+
+## Resume-path fix in v3.5.2
+
+Opening a persisted connected review now calls the current plan reconciler before
+rendering or approval. Previously the session-resume route displayed the saved old
+plan directly, so v3.5.1 validation could be skipped despite the new files being present.
+Empty findings on a legitimate company no longer cause repeated plan rebuilding.
+
+For the screenshot's existing job: install this patch, restart Streamlit, then reopen
+that saved job. No source upload or research call is required. Verify the visible
+`Loader build v3.5.2` label and the shared source-context table. Company rows must
+show zero vessel name-history rows; the vessel history type must be `name`.
+The repaired source context should show one claim narrative and five held findings.
+Existing queue/staging counts are historical and are not reduced or deleted by review
+refresh. A new replay of the included corrected JSON produces seven core proposals.
 
 ## Install
 
@@ -83,7 +98,7 @@ From this directory:
     python -m compileall -q .
     python -m unittest test_loader_regressions -v
 
-29 offline regression tests pass. They use an in-memory database/query contract and mock
+30 offline regression tests pass. They use an in-memory database/query contract and mock
 research responses; they make no network calls or production writes. Coverage includes
 source-bounded investigation, repeat document upload, DOCX tables, company publication
 retries, pending ownership, IMO verification, same/different events, source disagreements,
