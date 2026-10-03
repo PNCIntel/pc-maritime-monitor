@@ -23,9 +23,10 @@ def _candidate_research(staged, pub):
     Existing companies/vessels still need enrichment. This closes the Svitzer failure
     where a matched company skipped research and only shallow source extraction survived.
     """
+    from pc_source_graph import is_dossier
     done=set(map(str,pub or []))
     return [r for r in staged if r.get('target_table') in {'pc_entities','pc_assets','pc_mobile_assets','pc_events'}
-            and str(r.get('staged_record_id')) not in done]
+            and str(r.get('staged_record_id')) not in done and not is_dossier(r)]
 
 
 def _api_key():
@@ -46,9 +47,28 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                'connected company/vessel research → specialist tables. Analysts review names and evidence, not database IDs.')
 
     counts=_queue_counts(sb,job)
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric('Queued',counts['queued']); c2.metric('Staged',counts['staged'])
-    c3.metric('Failed',counts['failed']); c4.metric('Job',str(job)[:8])
+    stages_for_count = _all_staged(sb, job)
+    source_ids = set()
+    for r in stages_for_count:
+        m = (r.get('payload') or {}).get('metadata') or {}
+        if m.get('intake_source_key'): source_ids.add(m['intake_source_key'])
+        for obs in m.get('source_observations') or []:
+            if obs.get('source_key'): source_ids.add(obs['source_key'])
+    c1,c2,c3,c4,c5=st.columns(5)
+    c1.metric('Intake sources',len(source_ids) if source_ids else 'legacy / unknown')
+    c2.metric('Queued objects',counts['queued'])
+    c3.metric('Staged objects',len(stages_for_count))
+    c4.metric('Failed queue rows',counts['failed']); c5.metric('Job',str(job)[:8])
+    st.caption(f"Processed queue rows: {counts['staged']}. Research citations do not count as intake sources.")
+    if stages_for_count:
+        from collections import Counter
+        totals=Counter(r.get('target_table') for r in stages_for_count)
+        labels={'pc_entities':'Companies / organisations','pc_assets':'Physical assets',
+                'pc_mobile_assets':'Mobile assets','pc_events':'Events','pc_event_links':'Event links',
+                'pc_relationships':'Relationships'}
+        with st.expander('Staged object breakdown'):
+            st.dataframe([{'Object type':labels.get(k,k),'Objects':v} for k,v in totals.items()],
+                         hide_index=True,use_container_width=True)
 
     run_key='pc_v20_run_'+str(job); state_key='pc_v20_state_'+str(job); report_key='pc_v20_report_'+str(job)
     # Recover connected-research progress from Postgres after logout/reboot.
@@ -130,6 +150,9 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                     'remaining_exception_count':len(exceptions2),'published_stage_count':len(pub2),
                     'graph_sync':graph,'researched_relationships':researched_links,'agreements':agreements}
             st.session_state[report_key]=report
+            from pc_connected_research import _load_scope, _save_scope
+            saved_scope=_load_scope(sb,job); saved_scope['loader_publication_report']=report
+            _save_scope(sb,job,saved_scope)
             # Connected enrichment starts only after canonical core identities exist.
             state=init_job_connected(sb,job)
             if state.get('status')=='review' and state.get('plans'):
@@ -169,7 +192,10 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                     'Vessels':vessel_count,'Name / identity history':len(p.get('identity_history') or []),
                     'Relationships':len(p.get('relationships') or []),'Events':len(p.get('events') or []),
                     'Claims':len(p.get('claims') or []),'Transactions':len(p.get('transactions') or []),
-                    'Validator holds':len(p.get('validator_holds') or []),'Research gaps':len(p.get('research_gaps') or [])})
+                    'Validator holds':len(p.get('validator_holds') or []),'Research gaps':len(p.get('research_gaps') or []),
+                    'Dependent findings held':len(p.get('research_dependent_findings') or []),
+                    'Source observations':len(p.get('source_observations') or []),
+                    'Conflicting fields':len(p.get('field_conflicts') or [])})
             if rows:
                 import pandas as pd
                 st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
@@ -199,7 +225,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                             st.dataframe(pd.DataFrame(cl),hide_index=True,use_container_width=True)
                         if not ev and not cl: st.info('No event or claim rows.')
                     with tabs[3]:
-                        holds=p.get('validator_holds') or []; gaps=p.get('research_gaps') or []
+                        holds=(p.get('validator_holds') or []) + (p.get('research_dependent_findings') or []) + (p.get('field_conflicts') or []); gaps=p.get('research_gaps') or []
                         if holds:
                             st.markdown('**Validator holds**')
                             st.dataframe(pd.DataFrame(holds),hide_index=True,use_container_width=True)
@@ -222,7 +248,11 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             return
 
         if stage=='done':
-            report=st.session_state.get(report_key,{})
+            from pc_connected_research import _load_scope
+            saved_scope=_load_scope(sb,job)
+            report=st.session_state.get(report_key) or saved_scope.get('loader_publication_report') or {}
+            if 'connected_enrichment' not in report:
+                report['connected_enrichment']=(saved_scope.get('connected_research') or {}).get('publication_report') or {}
             connected=report.get('connected_enrichment') or {}
             holds=(connected.get('holds') if isinstance(connected,dict) else 0) or 0
             if report.get('remaining_exception_count') or report.get('publication_failures') or holds:

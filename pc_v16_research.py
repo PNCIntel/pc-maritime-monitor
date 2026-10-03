@@ -289,24 +289,22 @@ def _save_sidecars(sb,stage):
 
 
 def _save_extra_objects(sb,task,source_row,extra):
-    """Missing objects are staged for the SAME job; publisher matches canonical first."""
-    job=source_row['ingestion_job_id']
-    for item in extra:
-        p=item['payload'];table=item['table'];name=p['name']
-        fingerprint=hashlib.sha256((str(source_row['staged_record_id'])+'|'+table+'|'+_norm(name)).encode()).hexdigest()
-        source_key='v16obj:'+fingerprint[:45]
-        existing=(sb.table('pc_staged_records').select('staged_record_id').eq('ingestion_job_id',job)
-                  .eq('source_record_key',source_key).limit(1).execute().data or [])
-        if existing:continue
-        p=dict(p);p[TABLES[table][0]]='REPAIR_OBJ_'+fingerprint[:20].upper()
-        staged={'ingestion_job_id':job,'target_table':table,'natural_key':name,'action':'REVIEW',
-                'payload':p,'source_record_key':source_key,'validation_status':'pending','review_status':'pending',
-                'resolution_status':'UNRESOLVED','resolution_method':'v1.6 researched dependent object',
-                'resolution_details':{'v16_parent_stage_id':source_row['staged_record_id'],
-                                      'v16_research_task_id':task['task_id'],
-                                      'source_urls':[item['evidence_url']]}}
-        sb.table('pc_staged_records').insert(staged).execute()
-        _save_sidecars(sb,staged)
+    """Attach research dependencies to their parent, never spawn staging roots.
+
+    Publication of a new dependency requires connected graph review. Repeated task
+    application deduplicates saved findings on the same parent stage.
+    """
+    from pc_source_graph import unique
+    if not extra: return
+    rows=(sb.table('pc_staged_records').select('payload')
+          .eq('staged_record_id',source_row['staged_record_id']).limit(1).execute().data or [])
+    payload=dict((rows[0].get('payload') if rows else source_row['payload']) or {})
+    meta=dict(payload.get('metadata') or {})
+    findings=[{**item, 'status':'held_for_connected_review',
+               'research_task_id':str(task['task_id'])} for item in extra]
+    meta['research_dependent_findings']=unique((meta.get('research_dependent_findings') or [])+findings)
+    payload['metadata']=meta
+    sb.table('pc_staged_records').update({'payload':payload}).eq('staged_record_id',source_row['staged_record_id']).execute()
 
 
 def _save_links(sb,task,stage,links):

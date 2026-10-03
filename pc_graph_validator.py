@@ -254,6 +254,8 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
         graph[section] = cleaned
 
     # 10) Persist validator result and explicit unresolved items in dossier.
+    from pc_source_graph import unique
+    report["holds"] = unique((graph.get("validator_holds") or []) + report["holds"])
     graph["validator_holds"] = copy.deepcopy(report["holds"])
     graph["validator_report"] = {k: v for k, v in report.items() if k != "holds"}
     out["validated_version"] = "research-first-v3.4"

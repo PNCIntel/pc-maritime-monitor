@@ -108,6 +108,12 @@ def investigate_source(source_text: str, source_url: str, focus: str, api_key: s
       3) synthesis into a real-world graph
     """
     text = (source_text or "")[:36000]
+    # Freeze source-derived roots before any web enrichment. Related research findings
+    # remain connected evidence; they cannot silently create additional intake roots.
+    anchors = _json_chat(api_key, "Extract only objects explicitly present in the supplied source. Output JSON only.",
+        "Return JSON with companies [{name}], mobile_assets [{name,imo}], physical_assets [{name}], "
+        "events [{title,incident_reference,incident_authority}]. Do not research or invent objects. "
+        "Former names are aliases of one mobile asset, not separate assets. SOURCE:\n" + text)
     broad_prompt = f"""
 You are the senior research investigator for Power & Corridors.
 Research the SOURCE as a real-world problem. Do NOT think about SQL, database tables or IDs.
@@ -116,6 +122,8 @@ SOURCE URL: {source_url or 'none'}
 DOMAIN HINT: {focus}
 SOURCE TEXT:\n{text}
 
+SOURCE-DERIVED ROOTS: {json.dumps(anchors)}
+Resolve and enrich only these roots. Do not create independent research intake objects.
 Investigate beyond the supplied text when useful. Prefer primary/official/company/regulator/
 registry sources, then strong specialist reporting. Follow identity clues and chronology.
 Pay special attention to:
@@ -176,6 +184,10 @@ Give full public URLs. If evidence conflicts, preserve the conflict instead of c
         f"""
 Build a real-world graph from this investigation. Do NOT map to database tables or invent database IDs.
 Represent one physical object once. Preserve history instead of overwriting it.
+SOURCE-DERIVED ROOTS: {json.dumps(anchors)}
+Only these roots may appear in companies/mobile_assets/physical_assets/events.
+Use source_title for the exact source-extracted event title. Research may resolve names and IMO.
+New dependent entities belong in relationships, not independent core arrays.
 
 Required JSON keys:
 primary_subject {{name,type,summary}},
@@ -184,7 +196,7 @@ people [{{name,position,organization,evidence_summary,source_urls,confidence}}],
 mobile_assets [{{name,asset_type,subtype,imo,mmsi,registration,call_sign,flag,year_built,evidence_summary,source_urls,confidence}}],
 physical_assets [{{name,asset_type,subtype,country,region_city,evidence_summary,source_urls,confidence}}],
 identity_history [{{asset_name,imo,identifier_type,identifier_value,valid_from,valid_to,change_reason,source_urls,confidence}}],
-events [{{title,start_date,event_nature,event_domain,event_type,location,description,why_it_matters,commercial_implications,assessment,monitoring_indicators,source_urls,confidence}}],
+events [{{title,incident_reference,incident_authority,involved_identifiers,source_title,start_date,event_nature,event_domain,event_type,location,description,why_it_matters,commercial_implications,assessment,monitoring_indicators,source_urls,confidence}}],
 transactions [{{buyer_name,target_name,seller_name,transaction_type,status,announced_date,effective_date,equity_percent,value,currency,regulatory_status,evidence_summary,source_urls,confidence}}],
 relationships [{{source_name,target_name,relationship,effective_from,effective_to,status,evidence_summary,source_urls,confidence}}],
 projects [{{name,project_type,country,region_city,status,sponsor_name,developer_name,evidence_summary,source_urls,confidence}}],
@@ -209,8 +221,30 @@ FOLLOW-UP RESEARCH:\n{follow_text[:24000]}
 EVIDENCE URLS:\n{json.dumps(evidence_urls)}
 """, max_tokens=6500)
 
+    from pc_source_graph import norm, valid_imo
+    excluded = []
+    for section in ('companies', 'mobile_assets', 'physical_assets', 'events'):
+        roots = anchors.get(section) or []
+        kept = []
+        for item in graph.get(section) or []:
+            names = {norm(item.get('name') or item.get('title')), norm(item.get('source_title'))}
+            supported = any(norm(root.get('name') or root.get('title')) in names for root in roots)
+            if section == 'mobile_assets' and valid_imo(item.get('imo')):
+                supported = supported or any(str(root.get('imo')) == str(item['imo']) for root in roots)
+                supported = supported or any(
+                    str(h.get('imo')) == str(item['imo']) and
+                    any(norm(h.get('identifier_value')) == norm(root.get('name')) for root in roots)
+                    for h in graph.get('identity_history') or [])
+            if supported: kept.append(item)
+            else: excluded.append({'section': section, 'finding': item,
+                                   'reason': 'Research-only root; retained for review, not intake'})
+        graph[section] = kept
+    graph.setdefault('validator_holds', []).extend(excluded)
     return {
-        "version": "research-first-v3",
+        "source_snapshot_sha256": __import__("hashlib").sha256(text.encode()).hexdigest(),
+        "source_snapshot_text": text,
+        "source_roots": anchors,
+        "version": "research-first-v3.5",
         "source_url": source_url or None,
         "focus": focus,
         "research_questions": questions,
@@ -226,7 +260,7 @@ def _clean_urls(obj, fallback):
     if not isinstance(urls, list):
         urls = []
     out = [u for u in urls if _public_url(u)]
-    return list(dict.fromkeys(out + fallback))[:20]
+    return list(dict.fromkeys(out or fallback))[:20]
 
 
 def graph_to_core_records(dossier: dict, source_label: str = "") -> list[dict]:
@@ -235,17 +269,26 @@ def graph_to_core_records(dossier: dict, source_label: str = "") -> list[dict]:
     Specialist history/transactions/relationships remain in metadata for the connected publisher;
     canonical IDs are resolved later by the existing P&C pipeline.
     """
+    from pc_source_graph import source_key, reconcile_records
     graph = dossier.get("graph") or {}
-    fallback = ([dossier.get("source_url")] if _public_url(dossier.get("source_url")) else []) + (dossier.get("evidence_urls") or [])[:8]
+    fallback = [dossier.get("source_url")] if _public_url(dossier.get("source_url")) else []
     records = []
 
     def meta_for(obj, object_kind):
         return {
+            "intake_source_url": dossier.get("source_url"),
+            "intake_source_key": source_key(dossier.get("source_url"), source_label),
             "research_sources": _clean_urls(obj, fallback),
             "ingestion_mode": "AI_RESEARCH_DOSSIER_V3",
             "review_required": True,
             "source_label": source_label,
             "evidence_summary": obj.get("evidence_summary"),
+            "source_snapshot_sha256": dossier.get("source_snapshot_sha256"),
+            "source_snapshots": ([{"source_key":source_key(dossier.get("source_url"), source_label),
+                "url":dossier.get("source_url"), "label":source_label,
+                "sha256":dossier.get("source_snapshot_sha256"),
+                "text":dossier.get("source_snapshot_text"),
+                "snapshot_kind":"supplied_source_excerpt"}] if dossier.get("source_snapshot_text") else []),
             "research_object_kind": object_kind,
             "dossier_version": dossier.get("version"),
         }
@@ -295,6 +338,8 @@ def graph_to_core_records(dossier: dict, source_label: str = "") -> list[dict]:
         meta=meta_for(e,"event")
         for k in ("why_it_matters","commercial_implications","assessment","monitoring_indicators","verification_status"):
             if e.get(k) is not None: meta[k]=e.get(k)
+        for key in ("incident_reference", "incident_authority", "involved_identifiers"):
+            if e.get(key): meta[key] = e[key]
         # Preserve discovered graph context for later relationship synthesis.
         meta["discovered_relationships"] = graph.get("relationships") or []
         meta["claims"] = graph.get("claims") or []
@@ -305,13 +350,8 @@ def graph_to_core_records(dossier: dict, source_label: str = "") -> list[dict]:
                  "description":e.get("description"),"metadata":meta}
         records.append({"table":"pc_events","natural_key":title,"payload":payload,"confidence":e.get("confidence")})
 
-    # Ensure a primary company/vessel is not lost when synthesis omitted it from arrays.
-    primary=graph.get("primary_subject") or {}; pname=str(primary.get("name") or "").strip(); ptype=str(primary.get("type") or "").casefold()
-    existing={(r["table"], str((r.get("payload") or {}).get("name") or "").casefold()) for r in records}
-    if pname and "company" in ptype and ("pc_entities",pname.casefold()) not in existing:
-        records.append({"table":"pc_entities","natural_key":pname,"payload":{"name":pname,"entity_type":"company",
-            "metadata":{"research_sources":fallback[:20],"ingestion_mode":"AI_RESEARCH_DOSSIER_V3","review_required":True,
-                        "source_label":source_label,"research_object_kind":"primary_company"}},"confidence":None})
+    # Core arrays are the validator-approved roots. An omitted primary subject must
+    # not bypass validation by becoming an unverified fallback company proposal.
 
     # Store graph-wide connected findings once on each primary/core record without creating pseudo-objects.
     compact_graph={k:graph.get(k) or [] for k in ("people","identity_history","transactions","relationships","projects","contracts","locations","claims","timeline","research_gaps","validator_holds")}
@@ -319,10 +359,12 @@ def graph_to_core_records(dossier: dict, source_label: str = "") -> list[dict]:
     for r in records:
         m=(r.get("payload") or {}).setdefault("metadata",{})
         m["research_dossier_connected_findings"] = compact_graph
-    return records
+    return reconcile_records(records)
 
 
 def research_source_to_records(source_text: str, source_url: str, focus: str, api_key: str,
                                source_label: str = "") -> tuple[list[dict], dict]:
     dossier=investigate_source(source_text,source_url,focus,api_key)
+    from pc_graph_validator import validate_dossier
+    dossier, _ = validate_dossier(dossier)
     return graph_to_core_records(dossier,source_label=source_label), dossier

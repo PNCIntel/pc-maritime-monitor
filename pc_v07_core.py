@@ -48,6 +48,8 @@ def json_safe(value):
 
 
 def normalize_rows(records):
+ from pc_source_graph import reconcile_records
+ records = reconcile_records(records)
  out=[]
  seen_keys=set()
  for i, r in enumerate(records):
@@ -76,6 +78,16 @@ def normalize_rows(records):
 
 
 def enqueue(sb, records, title='P&C universal bulk intake', ai_research=True):
+ from pc_source_graph import reconcile_records, bind_existing_events, require_unambiguous_events
+ records=reconcile_records(records)
+ require_unambiguous_events(records)
+ records=bind_existing_events(sb,records)
+ intake_sources={}
+ records=deepcopy(records)
+ for record in records:
+  meta=(record.get('payload') or {}).get('metadata') or {}
+  for snapshot in meta.pop('source_snapshots',[]) or []:
+   intake_sources[snapshot['source_key']]=snapshot
  rows=normalize_rows(records)
  if not rows: raise ValueError('Empty package')
  fingerprint=hashlib.sha256(canonical_json(['connected_research_v2',[(r['target_table'],r['natural_key'],r['payload']) for r in rows]]).encode()).hexdigest()
@@ -85,7 +97,7 @@ def enqueue(sb, records, title='P&C universal bulk intake', ai_research=True):
  else:
   inserted=sb.table('pc_ingestion_jobs').insert({
    'job_type':'UNIVERSAL_BATCH_V07','title':title[:180],'status':'queued',
-   'source_scope':{'v07_sha256':fingerprint,'workflow':'connected_research_v2','ai_research':True,'connected_deep_research':True},
+   'source_scope':{'v07_sha256':fingerprint,'workflow':'connected_research_v2','ai_research':bool(ai_research),'connected_deep_research':bool(ai_research),'input_sources':list(intake_sources.values())},
    'stats':{'expected_records':len(rows)}
   }).execute().data
   if not inserted: raise RuntimeError('Could not create ingestion job')

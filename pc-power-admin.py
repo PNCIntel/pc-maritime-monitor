@@ -756,6 +756,8 @@ with st.container():
                             stage="research_or_mapping"
                         errors.append({"source":s["label"],"stage":stage,"error":errtxt})
                     bar.progress((idx+1)/max(len(inputs),1), text=f"Processed {idx+1}/{len(inputs)} sources")
+                from pc_source_graph import reconcile_records
+                extracted = reconcile_records(extracted)
                 st.session_state["source_errors"] = errors
                 st.session_state["source_stats"] = stats
                 st.session_state["active_package"] = extracted

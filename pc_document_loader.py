@@ -1,7 +1,7 @@
 from __future__ import annotations
 import io, json, os, re, hashlib, urllib.request
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 import streamlit as st
 
@@ -30,7 +30,10 @@ def _text_from_file(uploaded):
         return '\n'.join((p.extract_text() or '') for p in reader.pages)[:180000]
     if ext == '.docx':
         from docx import Document
-        return '\n'.join(p.text for p in Document(io.BytesIO(data)).paragraphs)[:180000]
+        doc = Document(io.BytesIO(data))
+        parts = [p.text for p in doc.paragraphs]
+        parts += [' | '.join(c.text for c in row.cells) for table in doc.tables for row in table.rows]
+        return '\n'.join(parts)[:180000]
     if ext == '.pptx':
         from pptx import Presentation
         prs = Presentation(io.BytesIO(data)); parts=[]
@@ -126,14 +129,19 @@ def _ensure_source_entity(sb, org, research, entities):
     status,match,cands=_resolve_entity(name,entities)
     if status=='match': return match['entity_id'], f"Matched existing: {match['name']}"
     if status in {'ambiguous','review'}:
-        labels=', '.join(f"{c['name']} [{c['entity_id']}]" for c in cands[:5])
+        labels=', '.join(c['name'] for c in cands[:5])
         return None, 'Needs review: '+labels
+    from pc_source_graph import norm
+    evidence=(research or {}).get('source_urls') or []
+    if not evidence or not norm((research or {}).get('name')) == norm(name):
+        return None, 'Issuer held: authoritative identity evidence missing or mismatched'
     otype=((org or {}).get('organization_type') or (research or {}).get('organization_type') or 'organization')
     eid=_new_entity_id(name,otype)
     meta={'created_by':'pc_document_loader_v18','document_source_entity':True}
     if research: meta['identity_research']=research
     payload={'entity_id':eid,'name':name,'entity_type':otype,'metadata':meta}
-    sb.table('pc_entities').insert(payload).execute()
+    payload['metadata']['research_sources']=evidence
+    sb.table('pc_entities').upsert(payload,on_conflict='entity_id').execute()
     entities.append(payload)
     return eid, f'Created source organisation: {name}'
 
@@ -152,20 +160,29 @@ def render_document_loader(sb):
     if not key:
         st.error('OPENAI_API_KEY is not configured.'); return
     url_list=[u.strip() for u in urls.splitlines() if u.strip()]
+    from pc_connected_research import _public_url
+    if len(url_list)>len(uploads) or any(not _public_url(u) for u in url_list):
+        st.error('Supply valid public URLs, at most one per document in upload order.'); return
     entities=_all_entities(sb)
     results=[]
     for i,f in enumerate(uploads):
         source_url=url_list[i] if i<len(url_list) else ''
         try:
-            text=_text_from_file(f)
-            if len(text.strip())<80: raise ValueError('No usable document text extracted')
-            analysis=_analyse_document(text,key,products,source_url)
+            digest=hashlib.sha256(f.getvalue()).hexdigest()
+            prior=(sb.table('pc_documents').select('*').contains('metadata',{'document_sha256':digest}).limit(2).execute().data or [])
+            if len(prior)>1: raise ValueError('Duplicate stored document fingerprints require review')
+            existing=prior[0] if prior else None
+            analysis=((existing.get('metadata') or {}).get('ai_extraction') if existing else None)
+            if not analysis:
+                text=_text_from_file(f)
+                if len(text.strip())<80: raise ValueError('No usable document text extracted; scanned PDF needs OCR')
+                analysis=_analyse_document(text,key,products,source_url)
             org=analysis.get('source_organization') or {}
             research=_research_org(org.get('name'),key) if org.get('name') else None
             source_entity_id,msg=_ensure_source_entity(sb,org,research,entities)
             title=analysis.get('title') or Path(f.name).stem
-            pubdate=analysis.get('published_date')
-            if pubdate and not re.fullmatch(r'\d{4}-\d{2}-\d{2}',str(pubdate)): pubdate=None
+            from pc_graph_validator import _clean_date
+            pubdate=_clean_date(analysis.get('published_date'))
             authors=[str(x).strip() for x in (analysis.get('authors') or []) if str(x).strip()]
             topics=[str(x).strip() for x in (analysis.get('topics') or []) if str(x).strip()]
             geos=[str(x).strip() for x in (analysis.get('geographies') or []) if str(x).strip()]
@@ -173,22 +190,40 @@ def render_document_loader(sb):
             abstract=str(analysis.get('analytical_abstract') or '').strip()
             findings=analysis.get('key_findings') or []
             search='\n'.join([title,summary,abstract,' '.join(authors),' '.join(topics),' '.join(geos),str(org.get('name') or '')])
-            meta={'filename':f.name,'why_it_matters':analysis.get('why_it_matters'),'source_notes':analysis.get('source_notes'),
+            meta={'document_sha256':digest,'filename':f.name,'why_it_matters':analysis.get('why_it_matters'),'source_notes':analysis.get('source_notes'),
                   'research_gaps':analysis.get('research_gaps') or [],'source_org_research':research,'ai_extraction':analysis}
             row={'title':title,'document_type':analysis.get('document_type'),'published_date':pubdate,
                  'source_entity_id':source_entity_id,'source_name':org.get('name'),'source_url':source_url or None,
                  'authors':authors,'products':products,'summary':summary,'analytical_abstract':abstract,
                  'key_findings':findings,'topics':topics,'geographies':geos,'search_text':search,'metadata':meta,
-                 'updated_at':datetime.utcnow().isoformat()+'Z'}
-            inserted=sb.table('pc_documents').insert(row).execute().data or []
-            if not inserted: raise RuntimeError('Document insert returned no row')
-            doc_id=inserted[0]['document_id']
+                 'updated_at':datetime.now(timezone.utc).isoformat()}
+            if existing:
+                doc_id=existing['document_id']
+                oldmeta=existing.get('metadata') or {}
+                row['metadata']={**oldmeta,**meta}
+                row['metadata']['source_urls']=list(dict.fromkeys((oldmeta.get('source_urls') or [])+([existing.get('source_url')] if existing.get('source_url') else [])+([source_url] if source_url else [])))
+                row['products']=list(dict.fromkeys((existing.get('products') or [])+products))
+                if not source_url: row['source_url']=existing.get('source_url')
+                if not source_entity_id: row['source_entity_id']=existing.get('source_entity_id')
+                sb.table('pc_documents').update(row).eq('document_id',doc_id).execute()
+            else:
+                inserted=sb.table('pc_documents').insert(row).execute().data or []
+                if not inserted: raise RuntimeError('Document insert returned no row')
+                doc_id=inserted[0]['document_id']
             connected_job=None
-            if connected_research and org.get('name'):
+            is_company=any(t in str(org.get('organization_type') or '').casefold()
+                           for t in ('company','corporation','business','carrier','operator','commercial'))
+            if connected_research and org.get('name') and is_company:
                 try:
                     from pc_connected_research import research_company
-                    plan=research_company(key,org.get('name'),[source_url] if source_url else [])
-                    jr=sb.table('pc_ingestion_jobs').insert({
+                    oldjobs=(sb.table('pc_ingestion_jobs').select('ingestion_job_id')
+                        .eq('job_type','COMPANY_CONNECTED_RESEARCH')
+                        .contains('source_scope',{'document_id':str(doc_id)}).limit(1).execute().data or [])
+                    if oldjobs:
+                        connected_job=str(oldjobs[0]['ingestion_job_id'])
+                    else:
+                        plan=research_company(key,org.get('name'),[source_url] if source_url else [])
+                        jr=sb.table('pc_ingestion_jobs').insert({
                         'job_type':'COMPANY_CONNECTED_RESEARCH',
                         'title':'Document-connected research: '+str(org.get('name')),
                         'status':'review',
@@ -199,7 +234,8 @@ def render_document_loader(sb):
                                  'transactions':len(plan.get('transactions') or []),'contracts':len(plan.get('contracts') or []),
                                  'projects':len(plan.get('projects') or []),'research_gaps':len(plan.get('research_gaps') or [])}
                     }).execute().data or []
-                    connected_job=str(jr[0]['ingestion_job_id']) if jr else None
+                        connected_job=str(jr[0]['ingestion_job_id']) if jr else None
+                    if connected_job: st.session_state['pc_connected_company_job']=connected_job
                 except Exception as _crexc:
                     connected_job='HELD: '+str(_crexc)[:160]
             for a in authors:
@@ -220,8 +256,10 @@ def render_document_loader(sb):
                 sb.table('pc_document_entity_links').upsert({'document_id':doc_id,'entity_id':eid,'relationship':rel,
                     'confidence':conf,'evidence':{'document_title':title,'source_url':source_url or None}},
                     on_conflict='document_id,entity_id,relationship').execute()
-            results.append({'Document':title,'Source organisation':org.get('name'),'Canonical source':source_entity_id or 'HELD','Status':msg,'Links':len(seen),'Connected research':connected_job or 'not requested'})
+            results.append({'Document':title,'Source organisation':org.get('name'),'Canonical source':source_entity_id or 'HELD','Status':msg,'Links':len(seen),'Connected research':connected_job or ('issuer identity only' if connected_research and not is_company else 'not requested'), 'Reused document':bool(existing)})
         except Exception as exc:
             results.append({'Document':f.name,'Status':'ERROR: '+str(exc)[:300]})
-    st.success(f'Processed {len(results)} document(s).')
+    failed=sum(1 for r in results if str(r.get('Status') or '').startswith('ERROR:'))
+    if failed: st.warning(f'Saved {len(results)-failed} document(s); {failed} failed. See details below.')
+    else: st.success(f'Saved {len(results)} document(s).')
     st.dataframe(results,use_container_width=True,hide_index=True)
