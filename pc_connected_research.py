@@ -424,12 +424,22 @@ def _stage_source_urls(row):
     return vals
 
 
+def _publications_for_stages(sb, stages):
+    """Publication rows are scoped through stage IDs, not a nonexistent job column."""
+    ids=list(dict.fromkeys(str(r['staged_record_id']) for r in stages if r.get('staged_record_id')))
+    out=[]
+    for start in range(0,len(ids),100):
+        out.extend(sb.table('pc_v10_publication_items')
+            .select('staged_record_id,canonical_table,canonical_id')
+            .in_('staged_record_id',ids[start:start+100]).execute().data or [])
+    return out
+
+
 def job_subjects(sb,job,max_subjects=30):
     """Return directly loaded canonical companies/vessels for one ingestion job."""
     stages=(sb.table('pc_staged_records').select('staged_record_id,target_table,natural_key,payload')
             .eq('ingestion_job_id',job).limit(5000).execute().data or [])
-    pubs=(sb.table('pc_v10_publication_items').select('staged_record_id,canonical_table,canonical_id')
-          .eq('ingestion_job_id',job).limit(5000).execute().data or [])
+    pubs=_publications_for_stages(sb,stages)
     pub={str(x['staged_record_id']):x for x in pubs}
     result=[]; seen=set()
     for s in stages:
@@ -655,8 +665,7 @@ def _publish_dossier_event_links(sb,job):
     from pc_source_graph import is_dossier, valid_imo, normalize_identifiers
     stages=(sb.table('pc_staged_records').select('staged_record_id,target_table,payload')
             .eq('ingestion_job_id',job).limit(5000).execute().data or [])
-    pubs=(sb.table('pc_v10_publication_items').select('staged_record_id,canonical_table,canonical_id')
-          .eq('ingestion_job_id',job).limit(5000).execute().data or [])
+    pubs=_publications_for_stages(sb,stages)
     pub={str(r['staged_record_id']):r for r in pubs}; holds=[]; count=0
     for row in stages:
         if row.get('target_table')!='pc_events' or not is_dossier(row): continue

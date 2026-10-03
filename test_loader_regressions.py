@@ -22,7 +22,10 @@ class Query:
     def __init__(self,db,table):
         self.db=db; self.table=table; self.filters=[]; self.op='select'; self.data=None; self.cap=None; self.conflict=''
     def select(self,*args,**kw): return self
-    def eq(self,k,v): self.filters.append(lambda x:x.get(k)==v); return self
+    def eq(self,k,v):
+        if self.table=='pc_v10_publication_items' and k=='ingestion_job_id':
+            raise ValueError('column pc_v10_publication_items.ingestion_job_id does not exist')
+        self.filters.append(lambda x:x.get(k)==v); return self
     def contains(self,k,v): self.filters.append(lambda x:all((x.get(k) or {}).get(a)==b for a,b in v.items())); return self
     def in_(self,k,v): self.filters.append(lambda x:x.get(k) in v); return self
     def order(self,*args,**kw): return self
@@ -222,7 +225,7 @@ class RegressionTests(unittest.TestCase):
     def test_dossier_event_asset_link_is_idempotent(self):
         e=event()['payload']; e['metadata']['dossier_version']='v3'
         db=DB({'pc_staged_records':[{'ingestion_job_id':'j','staged_record_id':'s','target_table':'pc_events','payload':e}],
-               'pc_v10_publication_items':[{'ingestion_job_id':'j','staged_record_id':'s','canonical_table':'pc_events','canonical_id':'E1'}],
+               'pc_v10_publication_items':[{'staged_record_id':'s','canonical_table':'pc_events','canonical_id':'E1'}],
                'pc_mobile_assets':[{'mobile_asset_id':'M1','name':'St Helena','imo':'8716306'}]})
         connected._publish_dossier_event_links(db,'j'); connected._publish_dossier_event_links(db,'j')
         self.assertEqual(len(db.rows['pc_event_links']),1)
@@ -235,7 +238,7 @@ class RegressionTests(unittest.TestCase):
         e=event()['payload']; e['metadata']['dossier_version']='v3'
         e['metadata']['involved_identifiers']=[{'type':'IMO','value':'8716306'},{'type':'vessel_name','value':'St Helena'}]
         db=DB({'pc_staged_records':[{'ingestion_job_id':'j','staged_record_id':'s','target_table':'pc_events','payload':e}],
-               'pc_v10_publication_items':[{'ingestion_job_id':'j','staged_record_id':'s','canonical_table':'pc_events','canonical_id':'E1'}],
+               'pc_v10_publication_items':[{'staged_record_id':'s','canonical_table':'pc_events','canonical_id':'E1'}],
                'pc_mobile_assets':[{'mobile_asset_id':'M1','name':'St Helena','imo':'8716306'}]})
         report=connected._publish_dossier_event_links(db,'j')
         self.assertEqual(report['linked'],1); self.assertEqual(report['holds'],[])
@@ -279,5 +282,19 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(vessel['claims']),1)
         again=connected.init_job_connected(db,'j')
         self.assertEqual(state['refreshed_at'],again['refreshed_at'])
+
+    def test_publication_lookup_scopes_through_stage_ids(self):
+        db=DB({'pc_v10_publication_items':[
+            {'staged_record_id':'S1','canonical_id':'E1','canonical_table':'pc_events'},
+            {'staged_record_id':'S2','canonical_id':'E2','canonical_table':'pc_events'}]})
+        rows=connected._publications_for_stages(db,[{'staged_record_id':'S1'}])
+        self.assertEqual([r['canonical_id'] for r in rows],['E1'])
+    def test_company_job_subjects_without_publication_job_column(self):
+        db=DB({'pc_staged_records':[{'ingestion_job_id':'j','staged_record_id':'S1','target_table':'pc_entities',
+                                    'payload':{'name':'A','entity_type':'company'}}],
+               'pc_v10_publication_items':[{'staged_record_id':'S1','canonical_table':'pc_entities','canonical_id':'C1'}]})
+        subjects=connected.job_subjects(db,'j')
+        self.assertEqual(len(subjects),1)
+        self.assertEqual(subjects[0]['canonical_id'],'C1')
 
 if __name__=='__main__': unittest.main(verbosity=2)

@@ -1,7 +1,21 @@
-# P&C Analyst Loader v3.5.2 — connected source resolution
+# P&C Analyst Loader v3.5.3 — connected source resolution
 
 This is a replacement-file patch for the existing P&C application repository.
 It is not a standalone application or a database migration.
+
+## Publication-table compatibility fix in v3.5.3
+
+`pc_v10_publication_items` has no `ingestion_job_id` column in the live schema.
+Both company/vessel subject discovery and dossier event linking now scope their
+publication queries with this job's `pc_staged_records.staged_record_id` values.
+Queries use batches of 100 stage IDs; no schema change or new column is required.
+Tests now reject attempts to use the nonexistent publication job column.
+
+Install the files, restart Streamlit and reopen the same job. Verify the visible
+`Loader build v3.5.3` marker, then approve connected enrichment again. Do not
+re-extract, requeue or repeat web research. The previous attempt may have completed
+company or vessel writes before the event-link lookup failed; retry reuses existing
+specialist rows rather than assuming the entire attempt was rolled back.
 
 ## Resume-path fix in v3.5.2
 
@@ -98,7 +112,7 @@ From this directory:
     python -m compileall -q .
     python -m unittest test_loader_regressions -v
 
-30 offline regression tests pass. They use an in-memory database/query contract and mock
+32 offline regression tests pass. They use an in-memory database/query contract and mock
 research responses; they make no network calls or production writes. Coverage includes
 source-bounded investigation, repeat document upload, DOCX tables, company publication
 retries, pending ownership, IMO verification, same/different events, source disagreements,
