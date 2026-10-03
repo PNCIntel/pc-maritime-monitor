@@ -157,15 +157,22 @@ def _apply_event_decision_and_reconcile(sb, item, analyst, analyst_name, decisio
     if not evidence:
         raise ValueError("No HTTPS source evidence is attached to this staged event")
 
+    reviewed_payload=json.loads(json.dumps(stage["payload"]))
+    reviewed_meta=reviewed_payload.get("metadata") or {}
+    reviewed_meta.pop("canonical_hold",None)
+    reviewed_payload["metadata"]=reviewed_meta
+
     repair_item={
         "staged_record_id":sid,
         "expected_fingerprint":fingerprint({
             "payload":stage["payload"],
             "natural_key":stage["natural_key"]
         }),
+        "payload":reviewed_payload,
+        "natural_key":stage["natural_key"],
         "decision":decision,
         "evidence_urls":evidence,
-        "reason":"Analyst workbench event identity decision",
+        "reason":"Analyst workbench event identity decision; stale canonical hold cleared by explicit analyst resolution.",
     }
     if canonical_id:
         repair_item["canonical_id"]=canonical_id
