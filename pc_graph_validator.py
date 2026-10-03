@@ -86,6 +86,47 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
     graph = out.setdefault("graph", {})
     report = {"version": "graph-validator-v1", "repairs": [], "holds": [], "dropped": [], "warnings": []}
 
+    from pc_source_graph import unique, normalize_identifiers
+    # Recover narratives removed by previous neutralization without claiming they are true.
+    prior_report=dossier.get('validation_report') or graph.get('validator_report') or {}
+    for repair in prior_report.get('repairs') or []:
+        path=str(repair.get('path') or '')
+        match=re.fullmatch(r'graph.events\[(\d+)\].description',path)
+        if not match or not repair.get('before'): continue
+        index=int(match.group(1)); events=graph.get('events') or []
+        if index>=len(events): continue
+        graph.setdefault('claims',[]).append({'claim':repair['before'],'status':'unconfirmed',
+            'claim_type':'source_narrative_containing_unverified_claims',
+            'evidence_summary':'Original extracted narrative retained before validator neutralization; not independently verified',
+            'source_urls':_source_urls(events[index])})
+    graph['claims']=unique(graph.get('claims') or [])
+    # Restore partial date evidence from the earlier repair trail; do not invent exact days.
+    for repair in prior_report.get('repairs') or []:
+        match=re.fullmatch(r'graph\.(\w+)\[(\d+)\]\.(\w+)',str(repair.get('path') or ''))
+        if not match or not repair.get('before'): continue
+        section,index,field=match.group(1),int(match.group(2)),match.group(3)
+        items=graph.get(section) or []
+        if index<len(items) and field in {'valid_from','valid_to','effective_from','effective_to'}:
+            raw=str(repair['before'])
+            if re.fullmatch(r'\d{4}(?:-\d{2}|s)?',raw):
+                items[index].setdefault('date_evidence',{})[field]={'value':raw,'precision':'month' if '-' in raw else 'decade' if raw.endswith('s') else 'year'}
+
+    # Vessels and military formations are not fixed infrastructure. Unresolved mobile
+    # identities stay held; no fabricated IMO or forced company/unit taxonomy.
+    fixed=[]
+    for i,item in enumerate(graph.get('physical_assets') or []):
+        kind=_norm(str(item.get('asset_type') or '')+' '+str(item.get('subtype') or ''))
+        if any(word in kind for word in ('military unit','ready group','expeditionary unit')):
+            report['holds'].append({'path':f'graph.physical_assets[{i}]','reason':'Military formation is organisational context, not physical infrastructure','item':item})
+        elif _norm(item.get('asset_type')) in {'vessel','ship','aircraft','train','truck','mobile asset'}:
+            if _valid_imo(item.get('imo')):
+                graph.setdefault('mobile_assets',[]).append(copy.deepcopy(item))
+                _add(report,'repairs',f'graph.physical_assets[{i}]','Verified vessel moved to mobile assets')
+            else:
+                report['holds'].append({'path':f'graph.physical_assets[{i}]','reason':'Mobile asset misclassified as infrastructure; canonical identifier requires resolution','item':item})
+        else: fixed.append(item)
+    graph['physical_assets']=fixed
+
     # 1) Normalize dates everywhere we know date semantics.
     date_fields = {
         "identity_history": ("valid_from", "valid_to"),
@@ -106,6 +147,9 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
                 before = item.get(field)
                 after = _clean_date(before)
                 if before != after:
+                    raw=str(before or '')
+                    if re.fullmatch(r'\d{4}(?:-\d{2}|s)?',raw):
+                        item.setdefault('date_evidence',{})[field]={'value':raw,'precision':'month' if '-' in raw else 'decade' if raw.endswith('s') else 'year'}
                     item[field] = after
                     _add(report, "repairs", f"graph.{section}[{i}].{field}", "Invalid/unknown date normalized to NULL", before, after)
 
@@ -137,6 +181,10 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
         if not _source_urls(h):
             report["holds"].append({"path": f"graph.identity_history[{i}]", "reason": "No source URL for identity-history claim", "item": h})
             continue
+        if _norm(h.get('identifier_type')) in {'former name','previous name','current name','vessel name'}:
+            before=h['identifier_type']; h['identifier_type']='name'
+            h['name_role']='former' if _norm(before) in {'former name','previous name'} else 'current'
+            _add(report,'repairs',f'graph.identity_history[{i}].identifier_type','Name-history type normalized to supported name identifier',before,'name')
         if h.get("identifier_type") == "name" and not h.get("identifier_value"):
             report["holds"].append({"path": f"graph.identity_history[{i}]", "reason": "Name-history row has no name value", "item": h})
             continue
@@ -149,7 +197,7 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
         if not isinstance(r, dict):
             continue
         role = str(r.get("relationship") or "").strip()
-        if "/" in role or " and " in role.casefold():
+        if "/" in role or " and " in _norm(role):
             report["holds"].append({"path": f"graph.relationships[{i}]", "reason": f"Combined relationship role must be resolved before publication: {role}", "item": r})
             continue
         if not _source_urls(r):
@@ -221,9 +269,16 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
     for i, e in enumerate(graph.get("events") or []):
         if not isinstance(e, dict):
             continue
+        before_ids=e.get('involved_identifiers') or []
+        e['involved_identifiers']=normalize_identifiers(before_ids)
+        if before_ids!=e['involved_identifiers']:
+            _add(report,'repairs',f'graph.events[{i}].involved_identifiers','Involvement identifiers normalized',before_ids,e['involved_identifiers'])
         conf = _norm(e.get("confidence"))
         securityish = any(k in _norm(e.get("event_type")) + " " + _norm(e.get("event_nature")) for k in ("attack", "missile", "strike", "projectile"))
         if securityish and (uncertain or conf in {"medium", "low"}):
+            if any(x in _norm(e.get('event_type')) for x in ('missile','iranian')):
+                before_type=e.get('event_type'); e['event_type']='attack'
+                _add(report,'repairs',f'graph.events[{i}].event_type','Unverified weapon/attribution removed from event taxonomy',before_type,'attack')
             before_title = e.get("title")
             neutral = _neutral_event_title(e, graph)
             if neutral and neutral != before_title:
@@ -238,6 +293,11 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
                 "see linked claims and source evidence."
             )
             if before_desc != e["description"]:
+                if before_desc:
+                    graph.setdefault('claims',[]).append({'claim':before_desc,'status':'unconfirmed',
+                        'claim_type':'source_narrative_containing_unverified_claims',
+                        'evidence_summary':'Original extracted narrative retained before validator neutralization; not independently verified',
+                        'source_urls':_source_urls(e)})
                 _add(report, "repairs", f"graph.events[{i}].description", "Unconfirmed attribution/personnel effects moved out of factual event description", before_desc, e["description"])
             e["verification_status"] = "reported"
 
@@ -256,8 +316,9 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
     # 10) Persist validator result and explicit unresolved items in dossier.
     from pc_source_graph import unique
     report["holds"] = unique((graph.get("validator_holds") or []) + report["holds"])
+    graph["claims"]=unique(graph.get("claims") or [])
     graph["validator_holds"] = copy.deepcopy(report["holds"])
     graph["validator_report"] = {k: v for k, v in report.items() if k != "holds"}
-    out["validated_version"] = "research-first-v3.4"
+    out["validated_version"] = "research-first-v3.5.1"
     out["validation_report"] = report
     return out, report

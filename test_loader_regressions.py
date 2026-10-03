@@ -123,14 +123,17 @@ class RegressionTests(unittest.TestCase):
             'companies':[{'name':'Owner','source_urls':['https://a.test']}],
             'mobile_assets':[{'name':'St Helena','imo':'8716306','source_urls':['https://a.test']}],
             'events':[{'title':'Fire','source_urls':['https://a.test']}],
-            'identity_history':[{'asset_name':'St Helena','imo':'8716306','identifier_type':'name','identifier_value':'MNG Tahiti'}],
+            'identity_history':[{'asset_name':'St Helena','imo':'8716306','identifier_type':'name','identifier_value':'MNG Tahiti','source_urls':['https://a.test']}],
             'relationships':[{'source_name':'Owner','target_name':'St Helena','relationship':'owner','source_urls':['https://a.test']}],
             'claims':[{'claim':'Crew count disputed'}]}}
         records=dossier.graph_to_core_records(d)
         rows=[{'ingestion_job_id':'j','target_table':r['table'],'payload':r['payload'],'natural_key':r['natural_key']} for r in records]
         plans=connected._validated_replay_plans(DB({'pc_staged_records':rows}),'j')
         self.assertEqual({p['subject_type'] for p in plans},{'company','vessel'})
-        self.assertTrue(all(p['events'] and p['claims'] for p in plans))
+        self.assertTrue(all(p['source_context']['events'] and p['source_context']['claims'] for p in plans))
+        company=next(p for p in plans if p['subject_type']=='company')
+        self.assertEqual(company['identity_history'],[])
+        self.assertEqual(company['events'],[])
         vessel=next(p for p in plans if p['subject_type']=='vessel')
         self.assertEqual(len(vessel['identity_history']),1)
     def test_event_only_replay_is_reviewable(self):
@@ -224,5 +227,36 @@ class RegressionTests(unittest.TestCase):
         connected._publish_dossier_event_links(db,'j'); connected._publish_dossier_event_links(db,'j')
         self.assertEqual(len(db.rows['pc_event_links']),1)
         self.assertEqual(db.rows['pc_event_links'][0]['linked_id'],'M1')
+
+    def test_real_st_helena_dossier_shapes(self):
+        from test_graph_validator import run
+        run()
+    def test_structured_identifiers_link_to_existing_vessel(self):
+        e=event()['payload']; e['metadata']['dossier_version']='v3'
+        e['metadata']['involved_identifiers']=[{'type':'IMO','value':'8716306'},{'type':'vessel_name','value':'St Helena'}]
+        db=DB({'pc_staged_records':[{'ingestion_job_id':'j','staged_record_id':'s','target_table':'pc_events','payload':e}],
+               'pc_v10_publication_items':[{'ingestion_job_id':'j','staged_record_id':'s','canonical_table':'pc_events','canonical_id':'E1'}],
+               'pc_mobile_assets':[{'mobile_asset_id':'M1','name':'St Helena','imo':'8716306'}]})
+        report=connected._publish_dossier_event_links(db,'j')
+        self.assertEqual(report['linked'],1); self.assertEqual(report['holds'],[])
+    def test_st_helena_replay_reports_source_holds_once(self):
+        import json
+        from pathlib import Path
+        v,r=validate_dossier(json.loads((Path(__file__).parent/'fixtures/st_helena_input.json').read_text()))
+        rows=[{'ingestion_job_id':'j','target_table':x['table'],'natural_key':x['natural_key'],'payload':x['payload']} for x in dossier.graph_to_core_records(v)]
+        plans=connected._validated_replay_plans(DB({'pc_staged_records':rows}),'j')
+        self.assertEqual(len(plans),6)
+        self.assertEqual(sum(len(p['validator_holds']) for p in plans),5)
+    def test_repeated_validation_keeps_claim_and_partial_date(self):
+        import json
+        from pathlib import Path
+        d=json.loads((Path(__file__).parent/'fixtures/st_helena_input.json').read_text())
+        a,_=validate_dossier(d); b,_=validate_dossier(a)
+        self.assertEqual(a['graph']['claims'],b['graph']['claims'])
+        self.assertEqual(a['graph']['identity_history'],b['graph']['identity_history'])
+
+    def test_shipyard_remains_fixed_infrastructure(self):
+        v,_=validate_dossier({'graph':{'physical_assets':[{'name':'Example Shipyard','asset_type':'shipyard','source_urls':['https://a.test']} ]}})
+        self.assertEqual(len(v['graph']['physical_assets']),1)
 
 if __name__=='__main__': unittest.main(verbosity=2)

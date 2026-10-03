@@ -1,4 +1,4 @@
-# P&C Analyst Loader v3.5.0 — connected source resolution
+# P&C Analyst Loader v3.5.1 — connected source resolution
 
 This is a replacement-file patch for the existing P&C application repository.
 It is not a standalone application or a database migration.
@@ -14,6 +14,36 @@ It is not a standalone application or a database migration.
 Updated modules: `pc-power-admin.py`, `pc_source_graph.py`, `pc_research_dossier.py`,
 `pc_graph_validator.py`, `pc_v07_core.py`, `pc_v16_research.py`,
 `pc_connected_research.py`, `pc_intelligence_pipeline.py`, `pc_document_loader.py`.
+
+## St Helena test from the supplied dossier and review CSVs
+
+Use `St_Helena_validated_v3_5_1.json` in this ZIP for the next replay:
+
+1. Install this release and restart Streamlit.
+2. Open Load intelligence -> Validate / replay saved research dossier.
+3. Upload the included validated JSON; review the five held findings.
+4. Build and queue the package, then run the resolution/publication workflow.
+5. Expect seven core proposals: five companies, one vessel and one event. Existing
+   canonical matches may mean fewer newly created database rows.
+6. In connected review, expect the vessel's former name only on its vessel row;
+   companies show only their own relationships. Shared source context shows one
+   event, one preserved unverified narrative, five holds and five research gaps.
+
+This replay uses saved evidence and performs no fresh web investigation.
+
+The five holds preserve two military formations as organisational context, two
+misclassified vessel references pending proper mobile identity resolution, and the
+combined `owned_and_operated_by` relationship pending role clarification.
+
+`former_name` becomes supported `name` history with `name_role=former`. Partial month
+and decade dates stay in date_evidence; exact canonical dates remain null.
+Structured IMO/name identifiers are normalized for event linking. Unverified missile
+attribution is removed from the event taxonomy; the original extracted description
+survives as an unconfirmed narrative, not independently verified facts.
+
+Saved unfinished review plans are revalidated on resume. This does not delete or
+reclassify canonical rows that an earlier build already published. The uploaded CSVs
+are review exports; they do not establish whether those canonical rows exist.
 
 ## Changes
 
@@ -53,14 +83,14 @@ From this directory:
     python -m compileall -q .
     python -m unittest test_loader_regressions -v
 
-24 offline regression tests pass. They use an in-memory database/query contract and mock
+29 offline regression tests pass. They use an in-memory database/query contract and mock
 research responses; they make no network calls or production writes. Coverage includes
 source-bounded investigation, repeat document upload, DOCX tables, company publication
 retries, pending ownership, IMO verification, same/different events, source disagreements,
 existing-event binding, full connected replay, and event-to-vessel links.
 
-`test_graph_validator.py` is an inherited test that requires the original St Helena JSON
-fixture at its configured external path; that fixture was not supplied with this ZIP.
+`test_graph_validator.py` now uses the supplied St Helena JSON in `fixtures/`.
+Run `python test_graph_validator.py` for the dedicated fixture test.
 Historical `README_v3_4_*.txt` notes refer to earlier releases.
 
 ## Live test checklist

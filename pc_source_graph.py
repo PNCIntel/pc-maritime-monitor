@@ -25,6 +25,32 @@ def valid_imo(value):
     return bool(re.fullmatch(r'\d{7}', value)) and sum(int(value[i]) * (7-i) for i in range(6)) % 10 == int(value[-1])
 
 
+def normalize_identifiers(values):
+    """Accept structured extraction and legacy tokens without inventing identities."""
+    result=[]
+    if not isinstance(values,list): values=[]
+    for item in values:
+        if isinstance(item,dict):
+            typ=norm(item.get('type') or item.get('identifier_type')).replace(' ','_')
+            value=str(item.get('value') or item.get('identifier_value') or '').strip()
+            if typ=='imo' and valid_imo(value): token='imo:'+value
+            elif typ in {'name','vessel_name'} and value: token='name:'+value
+            else: continue
+        else:
+            text=str(item or '').strip()
+            typ,sep,value=text.partition(':')
+            if valid_imo(text): token='imo:'+text
+            elif sep and typ.casefold()=='imo' and valid_imo(value): token='imo:'+value
+            elif sep and typ.casefold() in {'name','vessel_name'} and value: token='name:'+value
+            else: continue
+        if token not in result: result.append(token)
+    return result
+
+
+def stable_identifiers(values):
+    return tuple(sorted(x for x in normalize_identifiers(values) if x.startswith('imo:')))
+
+
 def event_key(payload):
     """Explicit authority reference wins; fallback requires exact full context/title.
 
@@ -37,7 +63,7 @@ def event_key(payload):
     if ref and authority:
         return ('reference', norm(authority), norm(ref))
     ids = m.get('involved_identifiers') or payload.get('involved_identifiers') or []
-    ids = sorted(set(str(x).strip() for x in ids if str(x).strip()))
+    ids = stable_identifiers(ids)
     day = payload.get('start_date')
     try:
         day = date.fromisoformat(str(day)).isoformat()
@@ -137,7 +163,7 @@ def is_dossier(row):
 
 def event_candidate_key(payload):
     m=payload.get('metadata') or {}
-    ids=tuple(sorted(set(str(x) for x in m.get('involved_identifiers') or [])))
+    ids=stable_identifiers(m.get('involved_identifiers') or [])
     day=str(payload.get('start_date') or '')[:10]
     kind=norm(payload.get('event_type')); location=norm(payload.get('location'))
     if not day or not kind or not location: return None

@@ -495,8 +495,24 @@ def _validated_replay_plans(sb, job):
                 ev={k:v for k,v in p.items() if k!='metadata'}
                 ev['source_urls']=_stage_source_urls(row)
                 ev['source_observations']=m.get('source_observations') or []
+                for field in ('incident_reference','incident_authority','involved_identifiers'):
+                    if m.get(field): ev[field]=m[field]
                 aggregate['events']=unique(aggregate['events']+[ev])
-        common={**aggregate,'mobile_subject_names':list({_norm((r.get('payload') or {}).get('name')) for r in own if r.get('target_table')=='pc_mobile_assets'} | {_norm(h.get('identifier_value')) for h in aggregate['identity_history'] if h.get('identifier_type')=='name'}),'validator_report':report,'replayed_from_validated_dossier':True,
+        # Revalidate legacy persisted context on resume as well as fresh replay input.
+        # This repairs review plans only; it never deletes previously published canonical rows.
+        from pc_graph_validator import validate_dossier
+        mobile=[{**{k:v for k,v in (r.get('payload') or {}).items() if k!='metadata'},
+                 'source_urls':_stage_source_urls(r)} for r in own if r.get('target_table')=='pc_mobile_assets']
+        physical=[{**{k:v for k,v in (r.get('payload') or {}).items() if k!='metadata'},
+                   'source_urls':_stage_source_urls(r)} for r in own if r.get('target_table')=='pc_assets']
+        restored={**aggregate,'mobile_assets':mobile,'physical_assets':physical,
+                  'primary_subject':{'name':mobile[0].get('name'),'type':'vessel'} if mobile else {},
+                  'validator_report':report}
+        validated,validation=validate_dossier({'graph':restored})
+        for field in aggregate:
+            aggregate[field]=(validated.get('graph') or {}).get(field) or []
+        report=validation
+        common={**aggregate,'source_context':aggregate,'mobile_subject_names':list({_norm((r.get('payload') or {}).get('name')) for r in own if r.get('target_table')=='pc_mobile_assets'} | {_norm(h.get('identifier_value')) for h in aggregate['identity_history'] if h.get('identifier_type')=='name'}),'validator_report':report,'replayed_from_validated_dossier':True,
                 'replay_detection':'dossier_metadata_v3.5','source_dossier_key':source}
         subject_plans=[]; seen=set()
         for row in own:
@@ -510,6 +526,11 @@ def _validated_replay_plans(sb, job):
                 plan={**common,'subject_type':'company','subject_name':name,
                       'company':{**{k:v for k,v in p.items() if k!='metadata'},'source_urls':refs},
                       'offices':[],'vessels':[],'footprint':[],'related_companies':[]}
+                # Source-wide vessel history and incident context are not company findings.
+                plan['identity_history']=[]
+                plan['relationships']=[r for r in aggregate['relationships'] if
+                    _norm(r.get('source_name'))==_norm(name) or _norm(r.get('target_name'))==_norm(name)]
+                plan['events']=[]; plan['claims']=[]
                 # Only assign people explicitly affiliated with this company.
                 plan['people']=[{**x,'position_title':x.get('position_title') or x.get('position')}
                     for x in aggregate['people'] if _norm(x.get('organization'))==_norm(name)]
@@ -532,6 +553,13 @@ def _validated_replay_plans(sb, job):
         if not subject_plans:
             subject_plans=[{**common,'subject_type':'context','subject_name':'Source findings',
                             'evidence_urls':unique([u for row in own for u in _stage_source_urls(row)])}]
+        # Shared source holds/gaps are reported once, on its primary vessel (or first subject).
+        representative=next((p for p in subject_plans if p.get('subject_type')=='vessel'),subject_plans[0])
+        for plan in subject_plans:
+            plan['source_context_reference']=source
+            if plan is not representative:
+                plan['validator_holds']=[]; plan['research_gaps']=[]
+                plan['research_dependent_findings']=[]
         plans.extend(subject_plans)
     return plans
 
@@ -577,7 +605,7 @@ def init_job_connected(sb,job):
         unfinished=current_status in ('', 'researching', 'review')
         needs_refresh=(
             unfinished and (
-                current_version != '3.5-source-bounded-replay'
+                current_version != '3.5.1-source-bounded-replay'
                 or not state.get('replayed_without_ai')
                 or not state.get('plans')
                 or any(
@@ -588,7 +616,7 @@ def init_job_connected(sb,job):
             )
         )
         if needs_refresh:
-            state={'version':'3.5-source-bounded-replay','status':'review','subjects':[],
+            state={'version':'3.5.1-source-bounded-replay','status':'review','subjects':[],
                    'plans':replay_plans,'next_index':0,
                    'started_at':state.get('started_at') or datetime.now(timezone.utc).isoformat(),
                    'refreshed_at':datetime.now(timezone.utc).isoformat(),
@@ -602,7 +630,7 @@ def init_job_connected(sb,job):
     if state.get('subjects') is not None:
         return state
     if replay_plans:
-        state={'version':'3.5-source-bounded-replay','status':'review','subjects':[],
+        state={'version':'3.5.1-source-bounded-replay','status':'review','subjects':[],
                'plans':replay_plans,'next_index':0,'started_at':datetime.now(timezone.utc).isoformat(),
                'replayed_without_ai':True}
     else:
@@ -629,7 +657,7 @@ def process_next_job_subject(sb,job,api_key,model=MODEL):
 
 def _publish_dossier_event_links(sb,job):
     """Connect explicitly identified involvement after both endpoints resolve."""
-    from pc_source_graph import is_dossier, valid_imo
+    from pc_source_graph import is_dossier, valid_imo, normalize_identifiers
     stages=(sb.table('pc_staged_records').select('staged_record_id,target_table,payload')
             .eq('ingestion_job_id',job).limit(5000).execute().data or [])
     pubs=(sb.table('pc_v10_publication_items').select('staged_record_id,canonical_table,canonical_id')
@@ -641,7 +669,8 @@ def _publish_dossier_event_links(sb,job):
         if not ep:
             holds.append({'type':'event_link','reason':'Event not yet canonically published'}); continue
         p=row.get('payload') or {}; m=p.get('metadata') or {}
-        for ident in m.get('involved_identifiers') or []:
+        for ident in normalize_identifiers(m.get('involved_identifiers') or []):
+            if ident.startswith('name:'): continue
             text=str(ident).strip(); imo=text.split(':',1)[-1] if text.lower().startswith('imo:') else text
             if not valid_imo(imo):
                 holds.append({'type':'event_link','identifier':text,'reason':'Unsupported or invalid involvement identifier'}); continue
@@ -698,7 +727,7 @@ def publish_job_connected(sb,job):
                     sb.table('pc_vessel_identity_history').insert({'mobile_asset_id':vid,'identifier_type':typ,'identifier_value':str(val),
                         'valid_from':_date(h.get('valid_from')),'valid_to':_date(h.get('valid_to')),'jurisdiction':h.get('jurisdiction'),
                         'change_reason':h.get('change_reason'),'verification_status':vs,
-                        'metadata':{'research_sources':h.get('source_urls') or [],'connected_research_job':str(job)}}).execute(); rep['vessel_history']+=1
+                        'metadata':{'research_sources':h.get('source_urls') or [],'connected_research_job':str(job),'date_evidence':h.get('date_evidence') or {},'name_role':h.get('name_role')}}).execute(); rep['vessel_history']+=1
                 aliases={_norm(v.get('name'))}
                 for h in plan.get('identity_history') or []:
                     if _norm(h.get('identifier_type'))=='name': aliases.add(_norm(h.get('identifier_value')))
@@ -715,7 +744,7 @@ def publish_job_connected(sb,job):
                             'relationship_type':_norm(role).replace(' ','_')[:80],'target_type':'mobile_asset','target_id':vid,
                             'valid_from':_date(rel.get('effective_from')),'valid_to':_date(rel.get('effective_to')),
                             'confidence':'reported','record_status':'approved','notes':rel.get('evidence_summary'),
-                            'metadata':{'research_sources':rel.get('source_urls') or [],'connected_research_job':str(job)}},
+                            'metadata':{'research_sources':rel.get('source_urls') or [],'connected_research_job':str(job),'date_evidence':rel.get('date_evidence') or {}}},
                             on_conflict='relationship_id').execute(); rep['relationships']+=1
                     elif _norm(sname) in aliases:
                         er=_resolve_entity(sb,job,{'name':tname,'entity_type':'company','source_urls':rel.get('source_urls') or []})
@@ -727,7 +756,7 @@ def publish_job_connected(sb,job):
                             'relationship_type':_norm(role).replace(' ','_')[:80],'target_type':'entity','target_id':eid,
                             'valid_from':_date(rel.get('effective_from')),'valid_to':_date(rel.get('effective_to')),
                             'confidence':'reported','record_status':'approved','notes':rel.get('evidence_summary'),
-                            'metadata':{'research_sources':rel.get('source_urls') or [],'connected_research_job':str(job)}},
+                            'metadata':{'research_sources':rel.get('source_urls') or [],'connected_research_job':str(job),'date_evidence':rel.get('date_evidence') or {}}},
                             on_conflict='relationship_id').execute(); rep['relationships']+=1
                 for tx in plan.get('transactions') or []:
                     rep['holds'].append({'type':'vessel_transaction','name':tx.get('target_name'),

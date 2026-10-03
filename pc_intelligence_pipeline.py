@@ -185,6 +185,17 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             st.subheader('Review connected findings')
             if state.get('replayed_without_ai'):
                 st.info('These connected findings were replayed from the validated saved dossier; no additional OpenAI/web research call was made.')
+            contexts={p.get('source_context_reference'):p.get('source_context') for p in plans if p.get('source_context')}
+            if contexts:
+                st.caption('Source context is shared. Subject rows count only findings attached to that subject; vessel history is not repeated as company history.')
+                st.dataframe([{'Source dossier':str(key)[:12],
+                    'Source events':len(context.get('events') or []),
+                    'Source claims':len(context.get('claims') or []),
+                    'Source holds':len(context.get('validator_holds') or []),
+                    'Source gaps':len(context.get('research_gaps') or [])} for key,context in contexts.items()],
+                    hide_index=True,use_container_width=True)
+                with st.expander('Shared source context and evidence'):
+                    st.json(list(contexts.values()),expanded=False)
             rows=[]
             for p in plans:
                 vessel_count=len(p.get('vessels') or []) or (1 if p.get('vessel') else 0)
