@@ -54,8 +54,6 @@ def publish_dossier_graph(sb,job,stages,pubs):
             def edge(rel=rel):
                 src=endpoint(source,rel.get('source_name'),rel.get('source_type'))
                 dst=endpoint(source,rel.get('target_name'),rel.get('target_type'))
-                # Existing vessel replay owns vessel relationship/history writes.
-                if 'mobile_asset' in (src[0],dst[0]):return
                 role=norm(rel.get('relationship')).replace(' ','_')
                 if not role or '/' in str(rel.get('relationship')):raise ValueError('Unresolved relationship role')
                 status=norm(rel.get('status'))
@@ -69,12 +67,6 @@ def publish_dossier_graph(sb,job,stages,pubs):
                 if rel.get('ownership_percent') is not None:row['ownership_percent']=_num(rel['ownership_percent'])
                 if rel.get('operating_control') is not None:row['operating_control']=rel['operating_control']
                 sb.table('pc_relationships').upsert(row,on_conflict='relationship_id').execute()
-            # Vessel plan writes these edges; don't count a no-op as publication.
-            try:
-                a=endpoint(source,rel.get('source_name'),rel.get('source_type'))
-                b=endpoint(source,rel.get('target_name'),rel.get('target_type'))
-                if 'mobile_asset' in (a[0],b[0]):continue
-            except ValueError:pass
             attempt('relationships',rel,edge)
 
         for txn in unique(findings.get('transactions') or []):

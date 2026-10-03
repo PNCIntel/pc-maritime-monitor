@@ -71,7 +71,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
 
     st.divider()
     st.subheader('Research, resolve & publish')
-    st.caption('Loader build v3.6.1 · source graph publication enabled')
+    st.caption('Loader build v3.6.2 · source graph publication enabled')
     st.caption('Source research → classification repair → canonical resolution → core publication → '
                'connected company/vessel research → specialist tables. Analysts review names and evidence, not database IDs.')
 

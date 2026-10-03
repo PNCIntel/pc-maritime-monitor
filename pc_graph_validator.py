@@ -54,6 +54,15 @@ def _add(report, bucket, path, reason, before=None, after=None):
 
 
 def _neutral_event_title(event, graph):
+    links=event.get('event_links') or []
+    subjects=[l for l in links if l.get('linked_type') in {'mobile_asset','asset'}]
+    if subjects:
+        selected=subjects[0]
+        label=selected.get('linked_name') or 'the reported subject'
+        if any(w in _norm(selected.get('qualification')) for w in ('unconfirmed','unknown','possible')):
+            label='a vessel' if selected.get('linked_type')=='mobile_asset' else 'an infrastructure asset'
+        loc=str(event.get('location') or '').strip()
+        return 'Reported projectile strike on '+label+(f' in {loc}' if loc else '')
     et = _norm(event.get("event_type"))
     nature = _norm(event.get("event_nature"))
     primary = graph.get("primary_subject") or {}
@@ -97,6 +106,7 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
         path=str(repair.get('path') or '')
         match=re.fullmatch(r'graph.events\[(\d+)\].description',path)
         if not match or not repair.get('before'): continue
+        if 'see linked claims and source evidence' in str(repair['before']): continue
         index=int(match.group(1)); events=graph.get('events') or []
         if index>=len(events): continue
         graph.setdefault('claims',[]).append({'claim':repair['before'],'status':'unconfirmed',
@@ -281,7 +291,6 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
     graph["people"] = people
 
     # 8) Security events with uncertain attribution/effects are neutralized structurally.
-    uncertain = _has_uncertain_attack_claim(graph)
     for i, e in enumerate(graph.get("events") or []):
         if not isinstance(e, dict):
             continue
@@ -291,7 +300,17 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
             _add(report,'repairs',f'graph.events[{i}].involved_identifiers','Involvement identifiers normalized',before_ids,e['involved_identifiers'])
         conf = _norm(e.get("confidence"))
         securityish = any(k in _norm(e.get("event_type")) + " " + _norm(e.get("event_nature")) for k in ("attack", "missile", "strike", "projectile"))
-        if securityish and (uncertain or conf in {"medium", "low"}):
+        # Article-wide uncertainty must not erase other incident subjects.
+        event_claims=e.get('claims') or []
+        if len(graph.get('events') or [])==1:
+            event_claims=event_claims+(graph.get('claims') or [])
+        else:
+            names=[_norm(l.get('linked_name')) for l in e.get('event_links') or []]
+            names.append(_norm(e.get('location')))
+            event_claims=event_claims+[c for c in graph.get('claims') or []
+                if any(n and n in _norm(c.get('claim')) for n in names)]
+        uncertain=_has_uncertain_attack_claim({'claims':event_claims})
+        if securityish and uncertain:
             if any(x in _norm(e.get('event_type')) for x in ('missile','iranian')):
                 before_type=e.get('event_type'); e['event_type']='attack'
                 _add(report,'repairs',f'graph.events[{i}].event_type','Unverified weapon/attribution removed from event taxonomy',before_type,'attack')
@@ -304,12 +323,12 @@ def validate_dossier(dossier: dict) -> tuple[dict, dict]:
             loc = str(e.get("location") or "the reported location")
             date = str(e.get("start_date") or "the reported date")
             e["description"] = (
-                f"A vessel was reported struck by a projectile at {loc} on {date}. "
-                "Attribution, the vessel identity and reported personnel effects remain subject to verification; "
+                f"{_neutral_event_title(e, graph)} was reported on {date}. "
+                "Unconfirmed attribution, identity or effects remain qualified in linked claims; "
                 "see linked claims and source evidence."
             )
             if before_desc != e["description"]:
-                if before_desc:
+                if before_desc and 'see linked claims and source evidence' not in before_desc:
                     graph.setdefault('claims',[]).append({'claim':before_desc,'status':'unconfirmed',
                         'claim_type':'source_narrative_containing_unverified_claims',
                         'evidence_summary':'Original extracted narrative retained before validator neutralization; not independently verified',

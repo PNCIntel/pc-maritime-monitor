@@ -249,7 +249,9 @@ class RegressionTests(unittest.TestCase):
         rows=[{'ingestion_job_id':'j','target_table':x['table'],'natural_key':x['natural_key'],'payload':x['payload']} for x in dossier.graph_to_core_records(v)]
         plans=connected._validated_replay_plans(DB({'pc_staged_records':rows}),'j')
         self.assertEqual(len(plans),6)
-        self.assertEqual(sum(len(p['validator_holds']) for p in plans),5)
+        holds=[h for p in plans for h in p['validator_holds']]
+        self.assertEqual(len(holds),6)
+        self.assertTrue(any(h['reason']=='Relationship depends on a held root' for h in holds))
     def test_repeated_validation_keeps_claim_and_partial_date(self):
         import json
         from pathlib import Path
@@ -272,13 +274,13 @@ class RegressionTests(unittest.TestCase):
         db=DB({'pc_staged_records':rows,'pc_ingestion_jobs':[{'ingestion_job_id':'j','source_scope':{'connected_research':old}}]})
         with patch.object(connected,'research_company',side_effect=AssertionError('Unexpected research call')):
             state=connected.init_job_connected(db,'j')
-        self.assertEqual(state['version'],'3.6.0-source-bounded-replay')
+        self.assertEqual(state['version'],'3.6.2-published-endpoint-replay')
         self.assertEqual(len(state['plans']),6)
         company=next(p for p in state['plans'] if p['subject_type']=='company')
         vessel=next(p for p in state['plans'] if p['subject_type']=='vessel')
         self.assertEqual(company['identity_history'],[])
         self.assertEqual(vessel['identity_history'][0]['identifier_type'],'name')
-        self.assertEqual(sum(len(p['validator_holds']) for p in state['plans']),5)
+        self.assertEqual(sum(len(p['validator_holds']) for p in state['plans']),6)
         self.assertEqual(len(vessel['claims']),1)
         again=connected.init_job_connected(db,'j')
         self.assertEqual(state['refreshed_at'],again['refreshed_at'])

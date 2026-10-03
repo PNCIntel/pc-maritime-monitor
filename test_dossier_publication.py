@@ -19,6 +19,50 @@ def setup():
     return stages,pubs
 
 class PublicationTests(unittest.TestCase):
+    def test_unrelated_generic_name_tokens_are_not_identity_candidates(self):
+        from pc_v15_bulk_replay import _identity_candidates,_identity_indexes
+        cases=[('pc_entities','Noatum Ports',{'name':'Neltume Ports','entity_id':'other'}),
+          ('pc_entities','JD.com',{'name':'Amazon.com, Inc.','entity_id':'other'}),
+          ('pc_assets','Navi Mumbai International Airport',{'name':'Navoi International Airport','asset_id':'other'}),
+          ('pc_mobile_assets','Mersin Prosperity',{'name':'Malaysia Prosperity','mobile_asset_id':'other','imo':'9251822'})]
+        for table,name,other in cases:
+            registry={table:[other]}; index=_identity_indexes(registry)
+            payload={'name':name}
+            if table=='pc_mobile_assets':payload['imo']='9327554'
+            exact,fuzzy,cross,_=_identity_candidates(table,name,payload,index,registry)
+            self.assertEqual((exact,fuzzy,cross),([],[],[]),name)
+    def test_medium_confidence_does_not_erase_distinct_incident_names(self):
+        from pc_graph_validator import validate_dossier
+        events=[{'title':name+' reported struck','event_type':'projectile strike','start_date':'2026-09-29',
+          'location':'Hormuz','confidence':'medium','source_urls':[URL],
+          'event_links':[{'linked_type':'mobile_asset','linked_name':name}]} for name in ('Mersin Prosperity','Sinbad')]
+        events.append({'title':'Reported strike disrupts Yanbu loading','event_type':'projectile strike','location':'Yanbu',
+          'source_urls':[URL],'event_links':[{'linked_type':'asset','linked_name':'Yanbu Port'}]})
+        value,_=validate_dossier({'graph':{'events':events,'claims':[{'claim':'Yanbu attacker attribution remains unconfirmed','status':'unconfirmed','source_urls':[URL]}]}})
+        self.assertEqual([e['title'] for e in value['graph']['events'][:2]],[e['title'] for e in events[:2]])
+        self.assertIn('Yanbu Port',value['graph']['events'][2]['title'])
+        self.assertNotIn('vessel',value['graph']['events'][2]['description'].lower())
+    def test_published_company_is_not_resolved_again_by_name(self):
+        from unittest.mock import patch
+        from pc_connected_research import publish_company_plan
+        plan={'subject_name':'AD Ports Group','replayed_from_validated_dossier':True,
+          'published_canonical_id':'COMP_ADPORTS','company':{'name':'AD Ports Group','source_urls':[URL]}}
+        db=DB({'pc_entities':[{'entity_id':'COMP_ADPORTS','name':'AD Ports Group'},
+                                 {'entity_id':'duplicate','name':'AD Ports Group'}]})
+        with patch('pc_connected_research._resolve_entity',side_effect=AssertionError('Should use publication ID')):
+            report=publish_company_plan(db,'job',plan)
+        self.assertEqual(report['holds'],[])
+        self.assertEqual(db.rows['pc_company_profiles'][0]['entity_id'],'COMP_ADPORTS')
+    def test_source_graph_uses_published_organization_for_vessel_role(self):
+        stages,pubs=setup()
+        stages.append({'staged_record_id':'4','target_table':'pc_mobile_assets','payload':{'name':'St Helena',
+            'metadata':{'ingestion_mode':'AI_RESEARCH_DOSSIER_V3','intake_source_key':'s'}}})
+        pubs.append({'staged_record_id':'4','canonical_id':'vessel-id'})
+        stages[0]['payload']['metadata']['research_dossier_connected_findings']['relationships'].append({
+            'source_name':'Buyer','target_name':'St Helena','relationship':'historical charterer','status':'historical','source_urls':[URL]})
+        db=DB();report=publish_dossier_graph(db,'job',stages,pubs)
+        self.assertEqual(report['relationships'],2)
+        self.assertTrue(any(r['target_id']=='vessel-id' and r['source_id']=='id0' for r in db.rows['pc_relationships']))
     def test_typed_links_sidecars_and_retry(self):
         stages,pubs=setup(); db=DB()
         report=publish_dossier_graph(db,'job',stages,pubs)

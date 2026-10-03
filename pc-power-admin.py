@@ -653,6 +653,7 @@ def _parse_uploaded(uploaded) -> tuple[list, list]:
                         embedded_links.append(uri)
             if len(text.strip())<80:
                 raise ValueError('Printed PDF has no usable text; scanned newsletters require the OCR/image newsletter helper')
+        embedded_links=list(dict.fromkeys(u for link in embedded_links for u in [link.get('url') or link.get('uri') if isinstance(link,dict) else link] if isinstance(u,str) and u.startswith(('https://','http://'))))
         if embedded_links:
             text+='\nEmbedded article URLs for source verification:\n'+'\n'.join(embedded_links[:100])
         return [], [{"label":filename,"url":"","text":text,

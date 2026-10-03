@@ -219,7 +219,10 @@ def publish_company_plan(sb,job,plan):
             'relationships':0,'vessels':0,'vessel_history':0,'footprint':0,'transactions':0,
             'contracts':0,'projects':0,'holds':[],'research_gaps':plan.get('research_gaps') or []}
     c=plan.get('company') or {'name':plan.get('subject_name')}
-    cr=_resolve_entity(sb,job,c)
+    if plan.get('replayed_from_validated_dossier'):
+        cid=plan.get('published_canonical_id')
+        cr={'status':'OK','canonical_id':cid} if cid else {'status':'REVIEW','reason':'Core company is not published'}
+    else:cr=_resolve_entity(sb,job,c)
     if cr.get('status')!='OK':
         report['holds'].append({'type':'company','name':c.get('name'),'reason':cr.get('reason')}); return report
     cid=cr['canonical_id']; report['entities']+=1
@@ -478,15 +481,16 @@ def _validated_replay_plans(sb, job):
     reconstructing vessel history alone. No second web investigation is performed.
     """
     from pc_source_graph import is_dossier, unique, valid_imo
-    stages=(sb.table('pc_staged_records').select('target_table,natural_key,payload')
+    stages=(sb.table('pc_staged_records').select('staged_record_id,target_table,natural_key,payload')
             .eq('ingestion_job_id',job).limit(5000).execute().data or [])
+    published={str(p['staged_record_id']):p for p in _publications_for_stages(sb,stages)}
     rows=[]
     for r in stages:
         if not is_dossier(r): continue
         views=((r.get('payload') or {}).get('metadata') or {}).get('source_proposals') or []
         if views:
-            rows.extend({**v,'target_table':v.get('table') or v.get('target_table')} for v in views)
-        else: rows.append(r)
+            rows.extend({**v,'target_table':v.get('table') or v.get('target_table'),'published_canonical_id':(published.get(str(r.get('staged_record_id'))) or {}).get('canonical_id')} for v in views)
+        else: rows.append({**r,'published_canonical_id':(published.get(str(r.get('staged_record_id'))) or {}).get('canonical_id')})
     if not rows: return []
     groups={}
     for row in rows:
@@ -565,6 +569,7 @@ def _validated_replay_plans(sb, job):
                 plan={**common,'subject_type':'vessel','subject_name':name,
                       'vessel':{**{k:v for k,v in p.items() if k!='metadata'},'source_urls':refs},
                       'identity_history':hist,'relationships':rels}
+            plan['published_canonical_id']=row.get('published_canonical_id')
             plan['evidence_urls']=refs; subject_plans.append(plan)
         if not subject_plans:
             subject_plans=[{**common,'subject_type':'context','subject_name':'Source findings',
@@ -628,13 +633,13 @@ def init_job_connected(sb,job,retry=False):
         unfinished=current_status in ('', 'researching', 'review')
         needs_refresh=(
             unfinished and (
-                current_version != '3.6.1-source-graph-publication'
+                current_version != '3.6.2-published-endpoint-replay'
                 or not state.get('replayed_without_ai')
                 or state.get('plans') != replay_plans
             )
         )
         if needs_refresh:
-            state={'version':'3.6.1-source-graph-publication','status':'review','subjects':[],
+            state={'version':'3.6.2-published-endpoint-replay','status':'review','subjects':[],
                    'plans':replay_plans,'next_index':0,
                    'started_at':state.get('started_at') or datetime.now(timezone.utc).isoformat(),
                    'refreshed_at':datetime.now(timezone.utc).isoformat(),
@@ -648,7 +653,7 @@ def init_job_connected(sb,job,retry=False):
     if state.get('subjects') is not None:
         return state
     if replay_plans:
-        state={'version':'3.6.1-source-graph-publication','status':'review','subjects':[],
+        state={'version':'3.6.2-published-endpoint-replay','status':'review','subjects':[],
                'plans':replay_plans,'next_index':0,'started_at':datetime.now(timezone.utc).isoformat(),
                'replayed_without_ai':True}
     else:
@@ -745,7 +750,7 @@ def publish_job_connected(sb,job):
                 aliases={_norm(v.get('name'))}
                 for h in plan.get('identity_history') or []:
                     if _norm(h.get('identifier_type'))=='name': aliases.add(_norm(h.get('identifier_value')))
-                for rel in plan.get('relationships') or []:
+                for rel in ([] if plan.get('replayed_from_validated_dossier') else plan.get('relationships') or []):
                     sname=rel.get('source_name'); tname=rel.get('target_name'); role=str(rel.get('relationship') or '').strip()
                     if not sname or not tname or not role: continue
                     if _norm(tname) in aliases:
