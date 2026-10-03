@@ -108,9 +108,11 @@ def render_job_repair(sb, job, reviewer):
     import streamlit as st
     with st.expander('Review saved-job identity and event repairs'):
         st.caption('Export saved proposals and current canonical identities; review a cited repair file, then apply it to this same job. Original staging is backed up and event originals are journalled. No AI calls.')
-        if st.button('Prepare saved-job export', key='repair_export_'+job):
-            st.session_state['repair_export_'+job] = export_job(sb, job)
-        export = st.session_state.get('repair_export_'+job)
+        export_button_key='repair_export_button_'+job
+        export_state_key='repair_export_data_'+job
+        if st.button('Prepare saved-job export', key=export_button_key):
+            st.session_state[export_state_key] = export_job(sb, job)
+        export = st.session_state.get(export_state_key)
         if export:
             st.download_button('Download saved-job records and identities', json.dumps(export, ensure_ascii=False, indent=2, default=str), 'saved_job_'+job+'.json', 'application/json')
         uploaded = st.file_uploader('Reviewed saved-job repair JSON', type=['json'], key='repair_upload_'+job)
