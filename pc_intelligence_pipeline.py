@@ -264,6 +264,32 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
         if stage=='connected_publish':
             with st.spinner('Publishing source-backed connected enrichment; ambiguous findings remain held...'):
                 creport=publish_job_connected(sb,job)
+            try:
+                from pc_exception_workbench import sync_plan_exceptions
+                connected_queue=[]
+                for report_item in (creport.get('reports') or []):
+                    subject=report_item.get('subject') or 'Connected subject'
+                    for hold in (report_item.get('holds') or []):
+                        connected_queue.append({
+                            'Table':'connected_enrichment',
+                            'Name':subject,
+                            'Reason':'Connected enrichment hold: '+str(hold.get('reason') or hold),
+                            'Staged record ID':None,
+                        })
+                for hold in ((creport.get('event_links') or {}).get('holds') or []):
+                    connected_queue.append({
+                        'Table':'pc_event_links',
+                        'Name':'Event link',
+                        'Reason':'Connected event-link hold: '+str(hold.get('reason') or hold),
+                        'Staged record ID':None,
+                    })
+                # Merge connected holds with current core exceptions so sync does
+                # not auto-clear still-valid planner exceptions.
+                staged_now=_all_staged(sb,job)
+                _,_,core_exceptions,_=_plan(sb,job,staged_now)
+                sync_plan_exceptions(sb,job,list(core_exceptions)+connected_queue)
+            except Exception as exc:
+                st.warning('Connected holds could not be synced to Analyst Workbench: '+str(exc))
             rep=st.session_state.get(report_key,{}) or {}
             rep['connected_enrichment']=creport
             st.session_state[report_key]=rep
