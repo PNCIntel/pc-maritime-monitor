@@ -456,67 +456,103 @@ def _save_scope(sb,job,scope):
 
 
 def _validated_replay_plans(sb, job):
-    """Build connected-review plans from a validated saved dossier already staged for this job.
+    """Build connected-review plans from a research-dossier job already in staging.
 
-    No OpenAI/web call. This lets analysts replay a researched dossier without paying to
-    research the same source again.
+    Supports both newer validated replay rows and older v3 dossier rows created before
+    ``validated_dossier_replay`` was persisted.  No OpenAI/web call is made.
     """
     stages=(sb.table('pc_staged_records').select('target_table,natural_key,payload')
             .eq('ingestion_job_id',job).limit(5000).execute().data or [])
-    plans=[]; seen=set()
+
+    # Reconstruct graph-wide context from every staged row. Older replay jobs often kept
+    # relationships/claims/transactions on the event proposal while vessel-name history
+    # lived on the vessel proposal.
+    aggregate={'identity_history':[],'relationships':[],'transactions':[],'claims':[],
+               'events':[],'timeline':[],'locations':[],'research_gaps':[],
+               'validator_holds':[],'validator_report':{}}
+    dossier_rows=[]
+
+    def _extend_unique(key, vals):
+        if not isinstance(vals,list): return
+        seen={json.dumps(x,sort_keys=True,default=str) for x in aggregate[key]}
+        for x in vals:
+            try: marker=json.dumps(x,sort_keys=True,default=str)
+            except Exception: marker=str(x)
+            if marker not in seen:
+                aggregate[key].append(x); seen.add(marker)
+
     for s in stages:
+        p=s.get('payload') or {}; m=p.get('metadata') or {}
+        is_dossier=(bool(m.get('validated_dossier_replay'))
+                    or str(m.get('ingestion_mode') or '').startswith('AI_RESEARCH_DOSSIER')
+                    or bool(m.get('dossier_version'))
+                    or bool(m.get('research_object_kind')))
+        if not is_dossier:
+            continue
+        dossier_rows.append(s)
+        connected=m.get('research_dossier_connected_findings') or {}
+        for key in ('identity_history','relationships','transactions','claims','timeline',
+                    'locations','research_gaps','validator_holds'):
+            _extend_unique(key, connected.get(key) or [])
+        if connected.get('validator_report') and not aggregate['validator_report']:
+            aggregate['validator_report']=connected.get('validator_report') or {}
+
+        # Older graph_to_core_records versions preserved these fields directly on events.
+        _extend_unique('relationships', m.get('discovered_relationships') or [])
+        _extend_unique('claims', m.get('claims') or [])
+        _extend_unique('transactions', m.get('transactions') or [])
+        _extend_unique('identity_history', m.get('identity_history') or [])
+        _extend_unique('research_gaps', m.get('research_gaps') or [])
+        _extend_unique('validator_holds', m.get('validator_holds') or [])
+
+        if s.get('target_table')=='pc_events':
+            ep=p
+            ev={'title':ep.get('title') or s.get('natural_key'),
+                'start_date':ep.get('start_date'),'event_nature':ep.get('event_nature'),
+                'event_domain':ep.get('event_domain'),'event_type':ep.get('event_type'),
+                'location':ep.get('location'),'description':ep.get('description'),
+                'why_it_matters':m.get('why_it_matters'),
+                'commercial_implications':m.get('commercial_implications'),
+                'assessment':m.get('assessment'),'monitoring_indicators':m.get('monitoring_indicators'),
+                'source_urls':_stage_source_urls(s)}
+            _extend_unique('events',[ev])
+
+    if not dossier_rows:
+        return []
+
+    plans=[]; seen=set()
+    for s in dossier_rows:
         if s.get('target_table')!='pc_mobile_assets':
             continue
         p=s.get('payload') or {}; m=p.get('metadata') or {}
-        if not m.get('validated_dossier_replay'):
-            continue
         name=p.get('name') or s.get('natural_key'); imo=p.get('imo')
         key=(str(imo or ''),_norm(name))
         if key in seen: continue
         seen.add(key)
-        connected=m.get('research_dossier_connected_findings') or {}
-        hist=list(m.get('identity_history') or [])
-        if not hist:
-            for h in connected.get('identity_history') or []:
-                if imo and str(h.get('imo') or '').strip()==str(imo): hist.append(h)
-                elif _norm(h.get('asset_name'))==_norm(name): hist.append(h)
-        rels=[]
+
+        hist=[]
+        for h in aggregate['identity_history']:
+            if imo and str(h.get('imo') or '').strip()==str(imo): hist.append(h)
+            elif _norm(h.get('asset_name'))==_norm(name): hist.append(h)
         aliases={_norm(name)}
         for h in hist:
             if _norm(h.get('identifier_type'))=='name': aliases.add(_norm(h.get('identifier_value')))
-        for r in connected.get('relationships') or []:
+        rels=[]
+        for r in aggregate['relationships']:
             if _norm(r.get('source_name')) in aliases or _norm(r.get('target_name')) in aliases:
                 rels.append(r)
-        # Replay the validated dossier directly into analyst review. Do not ask the older
-        # connected-research extractor to rediscover facts that have already been researched
-        # and validated. Event/claim/timeline rows are review context; the core event itself
-        # was already staged by graph_to_core_records.
-        events=list(connected.get('events') or [])
-        if not events:
-            # Older compact dossier metadata did not duplicate events. Recover the event(s)
-            # already staged for this job so the analyst can review the event/claim split.
-            erows=(sb.table('pc_staged_records').select('natural_key,payload')
-                   .eq('ingestion_job_id',job).eq('target_table','pc_events').limit(500).execute().data or [])
-            for er in erows:
-                ep=er.get('payload') or {}; em=ep.get('metadata') or {}
-                events.append({'title':ep.get('title') or er.get('natural_key'),
-                    'start_date':ep.get('start_date'),'event_nature':ep.get('event_nature'),
-                    'event_domain':ep.get('event_domain'),'event_type':ep.get('event_type'),
-                    'location':ep.get('location'),'description':ep.get('description'),
-                    'why_it_matters':em.get('why_it_matters'),'commercial_implications':em.get('commercial_implications'),
-                    'assessment':em.get('assessment'),'monitoring_indicators':em.get('monitoring_indicators'),
-                    'source_urls':_stage_source_urls(er)})
+
         plan={'subject_type':'vessel','subject_name':name,
               'vessel':{'name':name,'imo':imo,'asset_type':p.get('asset_type'),'subtype':p.get('subtype'),
                         'flag':p.get('flag'),'year_built':p.get('year_built'),'source_urls':_stage_source_urls(s)},
               'identity_history':hist,'relationships':rels,
-              'transactions':connected.get('transactions') or [],'claims':connected.get('claims') or [],
-              'events':events,'timeline':connected.get('timeline') or [],
-              'locations':connected.get('locations') or [],
-              'research_gaps':connected.get('research_gaps') or [],
-              'validator_holds':connected.get('validator_holds') or [],
-              'validator_report':connected.get('validator_report') or {},
-              'evidence_urls':_stage_source_urls(s),'replayed_from_validated_dossier':True}
+              'transactions':aggregate['transactions'],'claims':aggregate['claims'],
+              'events':aggregate['events'],'timeline':aggregate['timeline'],
+              'locations':aggregate['locations'],'research_gaps':aggregate['research_gaps'],
+              'validator_holds':aggregate['validator_holds'],
+              'validator_report':aggregate['validator_report'],
+              'evidence_urls':_stage_source_urls(s),'replayed_from_validated_dossier':True,
+              'replay_detection':'dossier_metadata_v3'}
         plans.append(plan)
     return plans
 
