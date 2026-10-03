@@ -13,6 +13,7 @@ from pathlib import Path
 from copy import deepcopy
 from collections import defaultdict
 from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Reuse the existing P&C Supabase client; no PostgreSQL DSN required.
 ROOT = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd()
@@ -211,7 +212,7 @@ if mode == 'Search / database':
     render_trade_intelligence(sb, admin=True)
     st.stop()
 
-st.info('Multi-source loader: paste up to 20 URLs, upload multiple Excel/CSV/JSON/PDF/DOCX files, '
+st.info('Multi-source loader: paste up to 250 URLs, upload multiple Excel/CSV/JSON/PDF/DOCX files, '
         'or add research notes. After extraction, queue the entire package for background processing '
         'without doing thousands of interactive identity checks.')
 
@@ -702,12 +703,23 @@ with st.container():
                 raise ValueError("Limit to 20 files per run; use the bulk page for larger structured imports")
             inputs, structured, errors = [], [], []
             progress = st.progress(0, text="Reading input sources")
-            for i, url in enumerate(urls):
-                try:
-                    inputs.append({"label":url,"url":url,"text":_fetch_article_reader(url)})
-                except Exception as exc:
-                    errors.append({"source":url,"stage":"fetch","error":str(exc)})
-                progress.progress((i+1)/max(len(urls)+(len(uploads or [])),1), text="Fetching public sources")
+            if urls:
+                fetched={}
+                with ThreadPoolExecutor(max_workers=min(8,max(1,len(urls)))) as pool:
+                    futures={pool.submit(_fetch_article_reader,url):url for url in urls}
+                    done=0
+                    for future in as_completed(futures):
+                        url=futures[future]
+                        try:
+                            fetched[url]=future.result()
+                        except Exception as exc:
+                            errors.append({"source":url,"stage":"fetch","error":str(exc)})
+                        done+=1
+                        progress.progress(done/max(len(urls)+(len(uploads or [])),1),
+                                          text=f"Fetched {done}/{len(urls)} public sources")
+                for url in urls:
+                    if url in fetched:
+                        inputs.append({"label":url,"url":url,"text":fetched[url]})
             for f in (uploads or []):
                 try:
                     rec, texts = _parse_uploaded(f)
@@ -735,44 +747,45 @@ with st.container():
                 extracted = deepcopy(structured)
                 stats = []
                 bar = st.progress(0, text="Extracting records and researching gaps")
-                for idx, s in enumerate(inputs):
-                    try:
-                        dossier = None
-                        if research_depth.startswith("AI") and not s.get("image_base64"):
-                            # v3 research-first intake: understand and investigate the real-world subject
-                            # before mapping any finding to P&C database proposal tables.
-                            from pc_research_dossier import research_source_to_records
-                            fresh, dossier = research_source_to_records(
-                                source_text=s["text"],
-                                source_url=s["url"],
-                                focus=domain_focus,
-                                api_key=OPENAI_KEY,
-                                source_label=s["label"],
-                            )
-                            st.session_state.setdefault("research_dossiers", {})[s["label"]] = dossier
-                        else:
-                            # Diagnostic/source-only extraction and image inputs retain the conservative
-                            # legacy mapper; these do not qualify as complete researched loads.
-                            fresh = call_openai_extraction(s["text"], OPENAI_KEY, s["url"], domain_focus,
-                                                          "", image_b64=s.get("image_base64"))
-                        for row in fresh:
-                            row["source_label"] = s["label"]
-                            row["payload"].setdefault("metadata", {})["source_label"] = s["label"]
-                        extracted.extend(fresh)
-                        stats.append({"Source":s["label"],"Records":len(fresh),
-                                      "Research":"dossier + follow-up" if dossier else "source-only",
-                                      "Questions":len((dossier or {}).get("research_questions") or []),
-                                      "Evidence URLs":len((dossier or {}).get("evidence_urls") or [])})
-                    except Exception as exc:
-                        errtxt=str(exc)
-                        if errtxt.startswith("OpenAI HTTP") or errtxt.startswith("OpenAI transport"):
-                            stage="ai_research"
-                        elif "Broad web investigation" in errtxt:
-                            stage="ai_research"
-                        else:
-                            stage="research_or_mapping"
-                        errors.append({"source":s["label"],"stage":stage,"error":errtxt})
-                    bar.progress((idx+1)/max(len(inputs),1), text=f"Processed {idx+1}/{len(inputs)} sources")
+                def _research_one_input(s):
+                    dossier=None
+                    if research_depth.startswith("AI") and not s.get("image_base64"):
+                        from pc_research_dossier import research_source_to_records
+                        fresh,dossier=research_source_to_records(
+                            source_text=s["text"],source_url=s["url"],focus=domain_focus,
+                            api_key=OPENAI_KEY,source_label=s["label"])
+                    else:
+                        fresh=call_openai_extraction(s["text"],OPENAI_KEY,s["url"],domain_focus,
+                                                     "",image_b64=s.get("image_base64"))
+                    for row in fresh:
+                        row["source_label"]=s["label"]
+                        row["payload"].setdefault("metadata",{})["source_label"]=s["label"]
+                    return s,fresh,dossier
+
+                if inputs:
+                    workers=min(4,max(1,len(inputs)))
+                    with ThreadPoolExecutor(max_workers=workers) as pool:
+                        futures={pool.submit(_research_one_input,s):s for s in inputs}
+                        done=0
+                        for future in as_completed(futures):
+                            s=futures[future]
+                            try:
+                                _,fresh,dossier=future.result()
+                                extracted.extend(fresh)
+                                if dossier is not None:
+                                    st.session_state.setdefault("research_dossiers",{})[s["label"]]=dossier
+                                stats.append({"Source":s["label"],"Records":len(fresh),
+                                              "Research":"dossier + follow-up" if dossier else "source-only",
+                                              "Questions":len((dossier or {}).get("research_questions") or []),
+                                              "Evidence URLs":len((dossier or {}).get("evidence_urls") or [])})
+                            except Exception as exc:
+                                errtxt=str(exc)
+                                stage=("ai_research" if errtxt.startswith("OpenAI HTTP")
+                                       or errtxt.startswith("OpenAI transport")
+                                       or "Broad web investigation" in errtxt else "research_or_mapping")
+                                errors.append({"source":s["label"],"stage":stage,"error":errtxt})
+                            done+=1
+                            bar.progress(done/max(len(inputs),1),text=f"Processed {done}/{len(inputs)} sources")
                 from pc_source_graph import reconcile_records
                 extracted = reconcile_records(extracted)
                 st.session_state["source_errors"] = errors
@@ -885,14 +898,14 @@ with st.container():
 # require per-record checkboxes or a synchronous database-wide identity scan.
 if st.session_state.get("active_package"):
     st.divider()
-    st.subheader("Queue extracted package for background processing")
+    st.subheader("Run production ingestion")
     st.caption("All extracted records, including relationships and analytical metadata, "
                "go to the v0.7 review queue. No canonical records are changed.")
     with st.form("pc_v071_direct_queue"):
         queue_title = st.text_input("Job name", "P&C multi-source intelligence intake")
         queue_research = True
         st.caption('Background research is enabled for every unpublished core object. No database knowledge needed.')
-        submit_queue = st.form_submit_button("Queue all extracted records", type="primary")
+        submit_queue = st.form_submit_button("Run production ingestion", type="primary")
     if submit_queue:
         try:
             if research_depth.startswith('Source extraction') and st.session_state.get('source_stats'):
