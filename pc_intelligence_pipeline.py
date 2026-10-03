@@ -164,16 +164,54 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                 st.info('These connected findings were replayed from the validated saved dossier; no additional OpenAI/web research call was made.')
             rows=[]
             for p in plans:
+                vessel_count=len(p.get('vessels') or []) or (1 if p.get('vessel') else 0)
                 rows.append({'Subject':p.get('subject_name'),'Type':p.get('subject_type'),
-                    'Offices':len(p.get('offices') or []),'People':len(p.get('people') or []),
-                    'Related companies':len(p.get('related_companies') or []),'Vessels':len(p.get('vessels') or []),
-                    'Transactions':len(p.get('transactions') or []),'Contracts':len(p.get('contracts') or []),
-                    'Projects':len(p.get('projects') or []),'Research gaps':len(p.get('research_gaps') or [])})
+                    'Vessels':vessel_count,'Name / identity history':len(p.get('identity_history') or []),
+                    'Relationships':len(p.get('relationships') or []),'Events':len(p.get('events') or []),
+                    'Claims':len(p.get('claims') or []),'Transactions':len(p.get('transactions') or []),
+                    'Validator holds':len(p.get('validator_holds') or []),'Research gaps':len(p.get('research_gaps') or [])})
             if rows:
                 import pandas as pd
                 st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
-            with st.expander('Evidence-backed connected research details'):
-                st.json(plans,expanded=False)
+
+            # For replayed dossiers, show the exact connected graph in analyst language before
+            # approval. IDs and SQL remain hidden; evidence and uncertainty stay visible.
+            if state.get('replayed_without_ai') and plans:
+                for i,p in enumerate(plans):
+                    st.markdown('#### '+str(p.get('subject_name') or 'Connected subject'))
+                    v=p.get('vessel') or {}
+                    if v:
+                        st.caption('Canonical vessel candidate · IMO '+str(v.get('imo') or 'unverified'))
+                    tabs=st.tabs(['Identity history','Relationships','Event & claims','Holds / gaps','Raw dossier'])
+                    with tabs[0]:
+                        hist=p.get('identity_history') or []
+                        st.dataframe(pd.DataFrame(hist),hide_index=True,use_container_width=True) if hist else st.info('No identity-history rows in the validated dossier.')
+                    with tabs[1]:
+                        rels=p.get('relationships') or []
+                        st.dataframe(pd.DataFrame(rels),hide_index=True,use_container_width=True) if rels else st.info('No publishable relationships; ambiguous roles may be held below.')
+                    with tabs[2]:
+                        ev=p.get('events') or []; cl=p.get('claims') or []
+                        if ev:
+                            st.markdown('**Verified/neutral event record**')
+                            st.dataframe(pd.DataFrame(ev),hide_index=True,use_container_width=True)
+                        if cl:
+                            st.markdown('**Attributed or unresolved claims — not promoted to event fact**')
+                            st.dataframe(pd.DataFrame(cl),hide_index=True,use_container_width=True)
+                        if not ev and not cl: st.info('No event or claim rows.')
+                    with tabs[3]:
+                        holds=p.get('validator_holds') or []; gaps=p.get('research_gaps') or []
+                        if holds:
+                            st.markdown('**Validator holds**')
+                            st.dataframe(pd.DataFrame(holds),hide_index=True,use_container_width=True)
+                        if gaps:
+                            st.markdown('**Research gaps**')
+                            st.dataframe(pd.DataFrame({'Research gap':gaps}),hide_index=True,use_container_width=True)
+                        if not holds and not gaps: st.success('No validator holds or research gaps.')
+                    with tabs[4]:
+                        st.json(p,expanded=False)
+            else:
+                with st.expander('Evidence-backed connected research details'):
+                    st.json(plans,expanded=False)
             st.warning('Approval writes only source-backed findings. Ambiguous identities and vessels without verified IMO remain held automatically.')
             approve=st.checkbox('I reviewed the connected findings and approve publication of unambiguous source-backed records',key='pc_v20_connected_approve_'+str(job))
             if st.button('Approve connected enrichment & finish',type='primary',disabled=not approve,key='pc_v20_connected_publish_'+str(job)):

@@ -487,12 +487,33 @@ def _validated_replay_plans(sb, job):
         for r in connected.get('relationships') or []:
             if _norm(r.get('source_name')) in aliases or _norm(r.get('target_name')) in aliases:
                 rels.append(r)
+        # Replay the validated dossier directly into analyst review. Do not ask the older
+        # connected-research extractor to rediscover facts that have already been researched
+        # and validated. Event/claim/timeline rows are review context; the core event itself
+        # was already staged by graph_to_core_records.
+        events=list(connected.get('events') or [])
+        if not events:
+            # Older compact dossier metadata did not duplicate events. Recover the event(s)
+            # already staged for this job so the analyst can review the event/claim split.
+            erows=(sb.table('pc_staged_records').select('natural_key,payload')
+                   .eq('ingestion_job_id',job).eq('target_table','pc_events').limit(500).execute().data or [])
+            for er in erows:
+                ep=er.get('payload') or {}; em=ep.get('metadata') or {}
+                events.append({'title':ep.get('title') or er.get('natural_key'),
+                    'start_date':ep.get('start_date'),'event_nature':ep.get('event_nature'),
+                    'event_domain':ep.get('event_domain'),'event_type':ep.get('event_type'),
+                    'location':ep.get('location'),'description':ep.get('description'),
+                    'why_it_matters':em.get('why_it_matters'),'commercial_implications':em.get('commercial_implications'),
+                    'assessment':em.get('assessment'),'monitoring_indicators':em.get('monitoring_indicators'),
+                    'source_urls':_stage_source_urls(er)})
         plan={'subject_type':'vessel','subject_name':name,
               'vessel':{'name':name,'imo':imo,'asset_type':p.get('asset_type'),'subtype':p.get('subtype'),
                         'flag':p.get('flag'),'year_built':p.get('year_built'),'source_urls':_stage_source_urls(s)},
               'identity_history':hist,'relationships':rels,
               'transactions':connected.get('transactions') or [],'claims':connected.get('claims') or [],
-              'events':[],'research_gaps':connected.get('research_gaps') or [],
+              'events':events,'timeline':connected.get('timeline') or [],
+              'locations':connected.get('locations') or [],
+              'research_gaps':connected.get('research_gaps') or [],
               'validator_holds':connected.get('validator_holds') or [],
               'validator_report':connected.get('validator_report') or {},
               'evidence_urls':_stage_source_urls(s),'replayed_from_validated_dossier':True}
