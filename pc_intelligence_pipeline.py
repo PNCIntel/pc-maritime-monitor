@@ -212,6 +212,20 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                 researched_links=link_researched_events(sb,job,registry,
                     lambda table,name,payload,reg:_identity_candidates(table,name,payload,idx,reg))
             staged2=_all_staged(sb,job); _,_,exceptions2,pub2=_plan(sb,job,staged2)
+            try:
+                from pc_exception_workbench import sync_plan_exceptions
+                queue_exceptions=list(exceptions2)
+                for failure in failures or []:
+                    if isinstance(failure,dict):
+                        queue_exceptions.append({
+                            'Table':failure.get('Table') or failure.get('table') or failure.get('target_table'),
+                            'Name':failure.get('Name') or failure.get('name') or failure.get('natural_key') or 'Publication failure',
+                            'Reason':'Publication failure: '+str(failure.get('Reason') or failure.get('error') or failure),
+                            'Staged record ID':failure.get('Staged record ID') or failure.get('staged_record_id'),
+                        })
+                sync_plan_exceptions(sb,job,queue_exceptions)
+            except Exception as exc:
+                st.warning('Shared analyst exception queue sync unavailable: '+str(exc))
             report={'job_id':job,'published_items_now':len(ready)+follow_count-len(failures),
                     'publication_failures':failures,'retained_research_holds':[{'name':r['natural_key'],'reason':r.get('retained_research_hold')} for r,_,_ in ready if r.get('identity_only_match')],'remaining_exceptions':exceptions2,
                     'remaining_exception_count':len(exceptions2),'published_stage_count':len(pub2),
