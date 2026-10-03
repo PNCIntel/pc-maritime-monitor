@@ -61,6 +61,42 @@ def _api_key():
     return (st.secrets.get('OPENAI_API_KEY') or st.secrets.get('OPENAI_KEY') or os.environ.get('OPENAI_API_KEY'))
 
 
+def _release_saved_dossier_tasks(sb, job):
+    """Release redundant pending research tasks for already-curated dossier rows.
+
+    No canonical or staged records are changed. Normal planner validation,
+    duplicate checks and reviewed identity decisions still apply.
+    """
+    tasks=(sb.table('pc_v16_research_tasks').select('task_id,staged_record_id')
+           .eq('ingestion_job_id',job).eq('status','pending').limit(5000).execute().data or [])
+    released=0
+    for task in tasks:
+        rows=(sb.table('pc_staged_records').select('payload')
+              .eq('staged_record_id',task['staged_record_id']).limit(1).execute().data or [])
+        if len(rows)!=1:
+            continue
+        payload=rows[0].get('payload') or {}; meta=payload.get('metadata') or {}
+        mode=str(meta.get('ingestion_mode') or '')
+        dossier=str(meta.get('dossier_version') or '')
+        urls=meta.get('research_sources') or []
+        if not (mode.startswith('AI_RESEARCH_DOSSIER') or meta.get('validated_dossier_replay')):
+            continue
+        if not dossier and not meta.get('validated_dossier_replay'):
+            continue
+        if not urls:
+            continue
+        changed=(sb.table('pc_v16_research_tasks').update({
+            'status':'applied',
+            'result':{'status':'saved_dossier_reused',
+                      'reason':'Persisted curated dossier evidence reused; canonical validation still applies.',
+                      'replayed_from_saved_dossier':True},
+            'error_text':None
+        }).eq('task_id',task['task_id']).eq('status','pending').execute().data or [])
+        if changed:
+            released+=1
+    return released
+
+
 def render_intelligence_pipeline(sb, job, reviewer='DCM'):
     from pc_v15_bulk_replay import (_process_job_queue,_all_staged,_plan,_publish_ready,
         _canon_registry,_identity_candidates,_identity_indexes)
@@ -71,7 +107,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
 
     st.divider()
     st.subheader('Research, resolve & publish')
-    st.caption('Loader build v3.6.2 · source graph publication enabled')
+    st.caption('Production loader v4.0 · straight-through publication with exception holds')
     st.caption('Source research → classification repair → canonical resolution → core publication → '
                'connected company/vessel research → specialist tables. Analysts review names and evidence, not database IDs.')
 
@@ -135,6 +171,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
         if stage=='plan':
             staged=_all_staged(sb,job)
             if not staged: raise RuntimeError('No staged records exist for this job')
+            _release_saved_dossier_tasks(sb,job)
             ready,followers,exceptions,pub=_plan(sb,job,staged)
             research_rows=_candidate_research(staged,pub)
             if research_rows:
@@ -144,6 +181,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             st.session_state[state_key]='publish'; st.rerun()
 
         if stage=='research':
+            _release_saved_dossier_tasks(sb,job)
             rs=status_counts(sb,job)
             r1,r2,r3,r4=st.columns(4)
             r1.metric('Research pending',rs['pending']); r2.metric('Repaired',rs['applied'])
@@ -187,7 +225,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             # Connected enrichment starts only after canonical core identities exist.
             state=init_job_connected(sb,job,retry=True)
             if state.get('status')=='review' and state.get('plans'):
-                st.session_state[state_key]='connected_review'
+                st.session_state[state_key]='connected_publish'
             elif state.get('subjects'):
                 st.session_state[state_key]='connected_research'
             else:
@@ -207,7 +245,16 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                 with st.spinner('Researching '+subjects[idx]['name']+'...'):
                     process_next_job_subject(sb,job,key)
                 st.rerun()
-            st.session_state[state_key]='connected_review'; st.rerun()
+            st.session_state[state_key]='connected_publish'; st.rerun()
+
+        if stage=='connected_publish':
+            with st.spinner('Publishing source-backed connected enrichment; ambiguous findings remain held...'):
+                creport=publish_job_connected(sb,job)
+            rep=st.session_state.get(report_key,{}) or {}
+            rep['connected_enrichment']=creport
+            st.session_state[report_key]=rep
+            st.session_state[state_key]='done'
+            st.rerun()
 
         if stage=='connected_review':
             # Reconcile persisted review plans before displaying or approving them.
