@@ -43,7 +43,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
 
     st.divider()
     st.subheader('Research, resolve & publish')
-    st.caption('Loader build v3.5.4 · saved review refresh enabled')
+    st.caption('Loader build v3.5.5 · saved review refresh enabled')
     st.caption('Source research → classification repair → canonical resolution → core publication → '
                'connected company/vessel research → specialist tables. Analysts review names and evidence, not database IDs.')
 
@@ -184,6 +184,12 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
             state=init_job_connected(sb,job)
             plans=state.get('plans') or []
             st.subheader('Review connected findings')
+            if st.button('Reconcile canonical records from saved staging',key='pc_v20_review_reconcile_'+str(job)):
+                st.session_state[state_key]='plan'
+                st.session_state.pop(report_key,None)
+                st.rerun()
+                return
+            st.caption('Use reconciliation to retry core publication before approving enrichment. Saved dossier staging is reused.')
             if state.get('replayed_without_ai'):
                 st.info('These connected findings were replayed from the validated saved dossier; no additional OpenAI/web research call was made.')
             contexts={p.get('source_context_reference'):p.get('source_context') for p in plans if p.get('source_context')}
@@ -251,7 +257,9 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                 with st.expander('Evidence-backed connected research details'):
                     st.json(plans,expanded=False)
             st.warning('Approval writes only source-backed findings. Ambiguous identities and vessels without verified IMO remain held automatically.')
-            approve=st.checkbox('I reviewed the connected findings and approve publication of unambiguous source-backed records',key='pc_v20_connected_approve_'+str(job))
+            import hashlib, json
+            review_revision=hashlib.sha256(json.dumps(plans,sort_keys=True,default=str).encode()).hexdigest()[:16]
+            approve=st.checkbox('I reviewed the connected findings and approve publication of unambiguous source-backed records',key='pc_v20_connected_approve_'+str(job)+'_'+review_revision)
             if st.button('Approve connected enrichment & finish',type='primary',disabled=not approve,key='pc_v20_connected_publish_'+str(job)):
                 with st.spinner('Updating specialist company, vessel, transaction, contract and project tables...'):
                     creport=publish_job_connected(sb,job)

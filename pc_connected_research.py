@@ -620,13 +620,13 @@ def init_job_connected(sb,job,retry=False):
         unfinished=current_status in ('', 'researching', 'review')
         needs_refresh=(
             unfinished and (
-                current_version != '3.5.2-source-bounded-replay'
+                current_version != '3.5.5-source-bounded-replay'
                 or not state.get('replayed_without_ai')
-                or not state.get('plans')
+                or state.get('plans') != replay_plans
             )
         )
         if needs_refresh:
-            state={'version':'3.5.2-source-bounded-replay','status':'review','subjects':[],
+            state={'version':'3.5.5-source-bounded-replay','status':'review','subjects':[],
                    'plans':replay_plans,'next_index':0,
                    'started_at':state.get('started_at') or datetime.now(timezone.utc).isoformat(),
                    'refreshed_at':datetime.now(timezone.utc).isoformat(),
@@ -640,7 +640,7 @@ def init_job_connected(sb,job,retry=False):
     if state.get('subjects') is not None:
         return state
     if replay_plans:
-        state={'version':'3.5.2-source-bounded-replay','status':'review','subjects':[],
+        state={'version':'3.5.5-source-bounded-replay','status':'review','subjects':[],
                'plans':replay_plans,'next_index':0,'started_at':datetime.now(timezone.utc).isoformat(),
                'replayed_without_ai':True}
     else:

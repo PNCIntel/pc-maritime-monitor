@@ -1,7 +1,32 @@
-# P&C Analyst Loader v3.5.4 — connected source resolution
+# P&C Analyst Loader v3.5.5 — connected source resolution
 
 This is a replacement-file patch for the existing P&C application repository.
 It is not a standalone application or a database migration.
+
+## Saved-review refresh fix in v3.5.5
+
+v3.5.4 changed the mapper but retained the old persisted-review version. An
+unfinished job could retain stale plans when that version already matched.
+v3.5.5 compares the saved plans with freshly validated staging on each review.
+Changed plans invalidate the approval checkbox. No additional web research is
+performed by this refresh. Stable plans are reused without repeated writes.
+
+The screenshot shows legacy job `e3d231b2-a03d-4596-ad67-2b48e97f72bf`, with 10
+staged objects. It differs from the newer seven-object replay job. Testing its
+export now produces company rows with zero events, claims and vessel histories.
+The legacy source retains its own four claim records and two vessel history
+records; this patch does not replace them with the newer dossier or independently
+verify their factual contents. Earlier canonical writes are not deleted.
+
+Install all patch files, restart Streamlit and verify `Loader build v3.5.5`.
+Open the saved job. On the connected review screen, click **Reconcile canonical
+records from saved staging** to run core matching/publication before enrichment.
+Review the refreshed findings, then approve. Re-export the database to verify
+publication audit rows and the event-to-vessel link. Do not re-upload the source.
+
+Compile checks and 40 offline tests pass, including stale plans bearing the same
+version and legacy-job review reconstruction against the supplied database export.
+Live server-side publication still requires verification in the deployed app.
 
 ## Existing-event match and partial retry fix in v3.5.4
 
