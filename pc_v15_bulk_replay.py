@@ -485,8 +485,15 @@ def _plan(sb,job,staged):
         pk=ID_TABLES[table]
         unique={str(x[pk]):x for x in exact if x.get(pk)}
         if len(unique)>1:
+            preferred=_preferred_exact_candidate(table,list(unique.values()),p)
+            if preferred:
+                cid=str(preferred[pk])
+                for rr in rows:
+                    ready.append((rr,'match_existing',cid))
+                continue
             exceptions.append({'Table':table,'Name':name,'Reason':'multiple canonical candidates',
-                    'Candidates':', '.join(f'{x.get(NAME_COL[table])} [{x[pk]}]' for x in unique.values())})
+                    'Candidates':', '.join(f'{x.get(NAME_COL[table])} [{x[pk]}]' for x in unique.values()),
+                    'Staged record ID':leader['staged_record_id']})
             continue
         if len(unique)==1:
             cid=next(iter(unique))
@@ -510,15 +517,27 @@ def _plan(sb,job,staged):
                     continue
             for r in rows:ready.append((r,'match_existing',cid))
             continue
+        if table=='pc_assets' and _generic_asset_label(name,p):
+            geo=_geographic_asset_candidates(p,registry)
+            exceptions.append({
+                'Table':table,
+                'Name':name,
+                'Reason':'generic infrastructure label requires existing-asset resolution before creation',
+                'Candidates':', '.join(f"{x.get('name')} [{x.get('asset_id')}]" for x in geo[:10]),
+                'Staged record ID':leader['staged_record_id']
+            })
+            continue
         if fuzzy:
             fuzzy=sorted(fuzzy,key=lambda item:SequenceMatcher(None,_norm(name),_norm(item.get(NAME_COL[table]))).ratio(),reverse=True)
             exceptions.append({'Table':table,'Name':name,'Reason':'fuzzy canonical candidate — research before creating',
-              'Candidates':', '.join(f"{x.get(NAME_COL[table])} [{x[pk]}]" for x in fuzzy[:5])})
+              'Candidates':', '.join(f"{x.get(NAME_COL[table])} [{x[pk]}]" for x in fuzzy[:5]),
+              'Staged record ID':leader['staged_record_id']})
             continue
         if cross:
             other='pc_assets' if table=='pc_entities' else 'pc_entities'
             exceptions.append({'Table':table,'Name':name,'Reason':'same-name object exists in another canonical domain — classify before creating',
-              'Candidates':', '.join(f"{x.get(NAME_COL[other])} [{x[ID_TABLES[other]]}]" for x in cross[:5])})
+              'Candidates':', '.join(f"{x.get(NAME_COL[other])} [{x[ID_TABLES[other]]}]" for x in cross[:5]),
+              'Staged record ID':leader['staged_record_id']})
             continue
         if table=='pc_entities' and re.fullmatch(r'[A-Za-z]{2,4}',name.strip()):
             # Short names/acronyms (QSL, etc.) have too many possible legal
