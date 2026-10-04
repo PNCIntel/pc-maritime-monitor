@@ -219,6 +219,118 @@ def _apply_event_decision_and_reconcile(sb, item, analyst, analyst_name, decisio
     }
 
 
+def _stage_for_exception(sb,item):
+    sid=str(item.get("staged_record_id") or "").strip()
+    job=str(item.get("ingestion_job_id") or "")
+    if sid:
+        rows=(sb.table("pc_staged_records").select("*")
+              .eq("ingestion_job_id",job).eq("staged_record_id",sid)
+              .limit(2).execute().data or [])
+        return rows[0] if len(rows)==1 else None
+    table=str(item.get("target_table") or "")
+    name=str(item.get("subject_name") or "").strip()
+    if not table or not name:
+        return None
+    rows=(sb.table("pc_staged_records").select("*")
+          .eq("ingestion_job_id",job).eq("target_table",table)
+          .eq("natural_key",name).limit(5).execute().data or [])
+    return rows[0] if len(rows)==1 else None
+
+
+def _identity_candidates(sb,stage):
+    table=stage.get("target_table")
+    p=stage.get("payload") or {}
+    name=str(p.get("name") or stage.get("natural_key") or "").strip()
+    cfg={
+        "pc_entities":("entity_id","name","entity_type,hq_country"),
+        "pc_assets":("asset_id","name","asset_type,country"),
+        "pc_mobile_assets":("mobile_asset_id","name","asset_type,imo,flag"),
+    }.get(table)
+    if not cfg or not name:
+        return [],None
+    pk,name_col,extra=cfg
+    cols=pk+","+name_col+","+extra
+    rows=[]
+    seen=set()
+    try:
+        exact=(sb.table(table).select(cols).eq(name_col,name).limit(50).execute().data or [])
+    except Exception:
+        exact=[]
+    try:
+        near=(sb.table(table).select(cols).ilike(name_col,"%"+name.replace("%","")+"%")
+              .limit(50).execute().data or [])
+    except Exception:
+        near=[]
+    for r in exact+near:
+        rid=str(r.get(pk) or "")
+        if rid and rid not in seen:
+            seen.add(rid); rows.append(r)
+    return rows[:30],pk
+
+
+def _apply_identity_decision_and_reconcile(sb,item,analyst_name,decision,canonical_id=None):
+    from pc_reviewed_job_repair import apply_repair, fingerprint
+    from pc_v15_bulk_replay import _all_staged, _plan, _publish_ready
+
+    stage=_stage_for_exception(sb,item)
+    if not stage:
+        raise ValueError("Could not uniquely locate the staged record for this exception")
+    table=stage.get("target_table")
+    if table not in {"pc_entities","pc_assets","pc_mobile_assets","pc_events"}:
+        raise ValueError("This exception type is not directly resolvable yet")
+
+    evidence=_stage_evidence_urls(stage)
+    if not evidence:
+        raise ValueError("No HTTPS source evidence is attached to this staged record")
+
+    reviewed_payload=json.loads(json.dumps(stage.get("payload") or {}))
+    reviewed_meta=reviewed_payload.get("metadata") or {}
+    reviewed_meta.pop("canonical_hold",None)
+    reviewed_payload["metadata"]=reviewed_meta
+
+    repair_item={
+        "staged_record_id":str(stage["staged_record_id"]),
+        "expected_fingerprint":fingerprint({
+            "payload":stage["payload"],
+            "natural_key":stage["natural_key"]
+        }),
+        "payload":reviewed_payload,
+        "natural_key":stage["natural_key"],
+        "decision":decision,
+        "evidence_urls":evidence,
+        "reason":"Analyst workbench canonical identity decision",
+    }
+    if canonical_id:
+        repair_item["canonical_id"]=canonical_id
+
+    job=str(item["ingestion_job_id"])
+    repaired=apply_repair(sb,job,{
+        "job_id":job,
+        "reason":"Analyst workbench identity resolution by "+analyst_name,
+        "items":[repair_item],
+    },analyst_name)
+
+    staged=_all_staged(sb,job)
+    ready,followers,exceptions,_=_plan(sb,job,staged)
+    failures=[]; published_now=0
+    if ready:
+        _,follow_count,failures=_publish_ready(sb,job,ready,followers,analyst_name)
+        published_now=len(ready)+follow_count-len(failures)
+    try:
+        sb.rpc("pc_v12_sync_published_links",{"p_job":job}).execute()
+    except Exception:
+        pass
+    staged2=_all_staged(sb,job)
+    _,_,remaining,_=_plan(sb,job,staged2)
+    sync_plan_exceptions(sb,job,remaining)
+    return {
+        "repair":repaired,
+        "published_now":published_now,
+        "publication_failures":failures,
+        "remaining_exceptions":len(remaining),
+    }
+
+
 def render_exception_workbench(sb, ctx):
     analyst, analyst_name=_analyst_identity(ctx)
     st.title("Analyst Exception Workbench")
@@ -232,6 +344,18 @@ def render_exception_workbench(sb, ctx):
         st.error("Multi-analyst queue is not available yet. Apply 058_multi_analyst_exception_workbench.sql to Supabase, then refresh.")
         st.caption(str(exc))
         return
+
+    job_filter=str(st.session_state.get("pc_exception_job_filter") or "").strip()
+    core_only=bool(st.session_state.get("pc_exception_core_only"))
+    if job_filter:
+        rows=[r for r in rows if str(r.get("ingestion_job_id") or "")==job_filter]
+        st.info("Showing blocking exceptions for the current load.")
+        if st.button("Show all active exceptions",key="pc_clear_exception_job_filter"):
+            st.session_state.pop("pc_exception_job_filter",None)
+            st.session_state.pop("pc_exception_core_only",None)
+            st.rerun()
+    if core_only:
+        rows=[r for r in rows if r.get("staged_record_id") or r.get("target_table") in {"pc_entities","pc_assets","pc_mobile_assets","pc_events"}]
 
     open_count=sum(1 for r in rows if r.get("status")=="open")
     mine=sum(1 for r in rows if r.get("status")=="claimed" and r.get("assigned_to")==analyst)
@@ -361,6 +485,69 @@ def render_exception_workbench(sb, ctx):
 
             with a3:
                 if st.button("Release to queue",key="release_event_"+selected_id):
+                    ok=sb.rpc("pc_release_exception",{
+                        "p_exception":item["exception_id"],
+                        "p_analyst":analyst,
+                        "p_version":item["version"]
+                    }).execute().data
+                    if not ok:
+                        st.warning("Item changed since you opened it; refresh.")
+                    st.rerun()
+            return
+
+    if item.get("target_table") in {"pc_entities","pc_assets","pc_mobile_assets"}:
+        stage=_stage_for_exception(sb,item)
+        if stage:
+            p=stage.get("payload") or {}
+            st.markdown("#### Staged identity")
+            st.dataframe(pd.DataFrame([{
+                "Name":p.get("name") or stage.get("natural_key"),
+                "Type":p.get("entity_type") or p.get("asset_type") or p.get("subtype"),
+                "Country":p.get("hq_country") or p.get("country"),
+                "IMO":p.get("imo"),
+            }]),hide_index=True,use_container_width=True)
+
+            candidates,pk=_identity_candidates(sb,stage)
+            st.markdown("#### Canonical candidates")
+            selected_canonical=None
+            if candidates and pk:
+                st.dataframe(pd.DataFrame(candidates),hide_index=True,use_container_width=True)
+                cmap={str(r[pk]):r for r in candidates if r.get(pk)}
+                if cmap:
+                    selected_canonical=st.selectbox(
+                        "Existing record to match",
+                        list(cmap),
+                        key="identity_candidate_"+selected_id,
+                        format_func=lambda x:
+                            str(cmap[x].get("name") or x)+" · "+
+                            str(cmap[x].get("hq_country") or cmap[x].get("country") or cmap[x].get("imo") or "")
+                    )
+            else:
+                st.info("No exact or close canonical name candidate found.")
+
+            st.caption("Choose the identity action. The saved job is repaired and reconciled immediately.")
+            a1,a2,a3=st.columns(3)
+            with a1:
+                if st.button("Match selected existing",type="primary",
+                             disabled=not selected_canonical,key="match_identity_"+selected_id):
+                    try:
+                        result=_apply_identity_decision_and_reconcile(
+                            sb,item,analyst_name,"match_existing",selected_canonical)
+                        st.success("Decision applied and job reconciled: "+str(result))
+                        st.rerun()
+                    except Exception as exc:
+                        st.error("Identity match held: "+str(exc))
+            with a2:
+                if st.button("Create as distinct record",key="new_identity_"+selected_id):
+                    try:
+                        result=_apply_identity_decision_and_reconcile(
+                            sb,item,analyst_name,"create_new")
+                        st.success("Decision applied and job reconciled: "+str(result))
+                        st.rerun()
+                    except Exception as exc:
+                        st.error("Create-new decision held: "+str(exc))
+            with a3:
+                if st.button("Release to queue",key="release_identity_"+selected_id):
                     ok=sb.rpc("pc_release_exception",{
                         "p_exception":item["exception_id"],
                         "p_analyst":analyst,
