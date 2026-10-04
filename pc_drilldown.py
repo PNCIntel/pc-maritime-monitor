@@ -662,7 +662,11 @@ def _render_company_history(entity_id):
         from pc_trade_live import render_live_company_agreements
         render_live_company_agreements(_sb(),str(entity_id))
     except Exception as exc:
-        st.caption("Agreements registry unavailable: "+str(exc))
+        msg=str(exc)
+        if "PGRST205" in msg or "schema cache" in msg or "does not exist" in msg:
+            st.caption("No normalized agreements registry is available for this company in the current database.")
+        else:
+            st.caption("Agreement data is temporarily unavailable.")
 
 def render_drilldown(object_type,object_id,key_prefix="top"):
     typ=_type(object_type)
