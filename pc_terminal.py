@@ -1930,6 +1930,130 @@ def _render_search_results(results: list[dict], lens: str):
                         args=(lens,x["type"],x["id"],x["name"]),
                     )
 
+
+def _daily_nav(lens: str):
+    _clear_context()
+    st.session_state[f"pc_terminal_search_{lens}"] = ""
+    st.session_state[f"pc_terminal_nav_{lens}"] = "Daily Brief"
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _daily_events() -> list[dict]:
+    # Page the canonical event table; do not silently accept PostgREST's row cap.
+    sb = _sb()
+    if sb is None:
+        raise RuntimeError("Database connection unavailable")
+    rows = []
+    offset = 0
+    while True:
+        page = (sb.table("pc_events").select("*").order("event_id")
+                .range(offset, offset + 499).execute().data or [])
+        rows.extend(page)
+        if len(page) < 500:
+            return rows
+        offset += len(page)
+
+
+def _daily_open(lens: str, event_id: str, title: str):
+    st.session_state[f"pc_terminal_nav_{lens}"] = "Development"
+    _set_context("event", event_id, title)
+
+
+def _render_daily_brief(lens: str):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    st.title("P&C Daily")
+    st.markdown("### What Changed in the Global Trade System")
+    st.caption("Database sample · shared developments and linked exposure across all product views")
+    day = st.date_input("Brief date (UAE)", datetime.now(ZoneInfo("Asia/Dubai")).date(),
+                        key="pc_daily_date")
+    mode = st.radio("Coverage", ["Selected day", "Last 7 days", "Latest available sample"],
+                    horizontal=True, key="pc_daily_coverage")
+    try:
+        events = _daily_events()
+    except Exception:
+        st.error("The brief could not read canonical developments. Retry with Refresh database.")
+        return
+    dated = []
+    for e in events:
+        # Occurrence date controls coverage; ingestion does not make an old event new.
+        stamp = pd.to_datetime(e.get("start_date"), utc=True, errors="coerce")
+        if pd.isna(stamp):
+            continue
+        occurrence = stamp.tz_convert("Asia/Dubai").date()
+        if occurrence <= day:
+            dated.append((occurrence, e))
+    start = day - timedelta(days=6 if mode == "Last 7 days" else 0)
+    chosen = [(d, e) for d, e in dated if d >= start]
+    if mode == "Latest available sample":
+        chosen = sorted(dated, key=lambda x: (x[0], str(x[1].get("event_id"))), reverse=True)[:80]
+        st.warning("Historical sample from the latest available occurrence dates; this is not a last-24-hours brief.")
+    elif mode == "Selected day":
+        st.caption("Date-based coverage for the selected UAE calendar day; precise rolling-hour coverage requires occurrence timestamps.")
+    seen = set()
+    unique = []
+    for d, e in chosen:
+        signature = (_norm(e.get("title")), d)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        unique.append((d, e))
+    # Use recorded impact and severity without giving conflict an automatic ranking bonus.
+    def rank(item):
+        d, e = item
+        severity = {"critical": 4, "severe": 4, "high": 3, "medium": 2, "moderate": 2, "low": 1}.get(str(e.get("severity", "")).lower(), 0)
+        impact = bool(e.get("commercial_impact") or e.get("operational_impact"))
+        return (severity, impact, d, str(e.get("event_id", "")))
+    picked = sorted(unique, key=rank, reverse=True)[:8]
+    if not picked:
+        st.info("No dated canonical developments in this period. Select Latest available sample to inspect existing records.")
+        return
+    st.caption(f"{len(unique)} distinct developments in coverage · {len(picked)} selected · "
+               f"occurrence dates {min(d for d, _ in chosen)} to {max(d for d, _ in chosen)}")
+    st.markdown("#### At a glance")
+    for _, e in picked[:5]:
+        st.write("• " + str(e.get("title") or "Untitled development"))
+    export = ["# P&C Daily", "## What Changed in the Global Trade System", f"Brief date: {day} · {mode}", ""]
+    for i, (d, e) in enumerate(picked, 1):
+        title = str(e.get("title") or "Untitled development")
+        eid = str(e.get("event_id") or "")
+        meta = _meta(e)
+        with st.container(border=True):
+            st.markdown(f"### {i:02d} — {title}")
+            st.caption(f"{d} · {_event_region_label(e)} · {_event_theme(e)} · recorded severity: {e.get('severity') or 'Unspecified'}")
+            export.extend([f"### {i:02d} — {title}", f"Occurrence: {d}"])
+            fields = [("What changed", e.get("description")),
+                      ("Commercial / operational implications", e.get("commercial_impact") or e.get("operational_impact")),
+                      ("Monitoring & indicators", e.get("monitoring_indicators") or meta.get("monitoring_indicators") or meta.get("indicators"))]
+            for label, value in fields:
+                st.markdown("**" + label + "**")
+                text = _clean(value) if value else "Not recorded — analyst assessment required."
+                st.write(text)
+                export.extend([f"**{label}**", text])
+            links = _filtered_rows("pc_event_links", "event_id", eid, 500) if eid else []
+            st.markdown("**Linked exposure**")
+            exposure = []
+            for link in links:
+                typ = str(link.get("linked_type") or link.get("object_type") or "")
+                oid = str(link.get("linked_id") or "")
+                if typ == "vessel": typ = "mobile_asset"
+                if typ in OBJECTS and oid:
+                    exposure.append(object_label(typ, oid))
+            exposure_text = "; ".join(dict.fromkeys(exposure)) or "No resolved exposure links recorded."
+            st.write(exposure_text)
+            export.extend(["**Linked exposure**", exposure_text])
+            for url in _event_source_urls(e):
+                st.link_button("Source evidence", url)
+                export.append(url)
+            if not _event_source_urls(e):
+                st.caption("Source URL not recorded; verify in the development dossier.")
+            if eid:
+                st.button("Open development and evidence", key=f"pc_daily_open_{lens}_{i}_{eid}",
+                          on_click=_daily_open, args=(lens, eid, title))
+            export.append("")
+    st.download_button("Download sample brief", "\n".join(export),
+                       file_name=f"PC_Daily_{day}.md", mime="text/markdown")
+
 def _sidebar_nav(lens: str, label: str, query: str=""):
     _clear_context()
     st.session_state[f"pc_terminal_search_{lens}"]=query
@@ -1956,6 +2080,8 @@ def render_terminal(lens: str = "trade"):
                          index=0 if st.session_state.get("pc_terminal_theme","Light")=="Light" else 1,
                          key="pc_terminal_theme")
         st.divider()
+        st.button("Daily Brief", key=f"pc_daily_sidebar_{lens}", use_container_width=True,
+                  on_click=_daily_nav, args=(lens,))
         navs={
             "trade":[
                 ("Home",""),("Companies","company"),("Infrastructure","port"),
@@ -2007,6 +2133,10 @@ def render_terminal(lens: str = "trade"):
 
     _style(theme)
     _restore_context()
+    st.button("Daily Brief", key=f"pc_daily_top_{lens}", on_click=_daily_nav, args=(lens,))
+    if st.session_state.get(f"pc_terminal_nav_{lens}") == "Daily Brief":
+        _render_daily_brief(lens)
+        return
 
     st.markdown("<div class='pc-command'><div class='pc-k'>GLOBAL COMMAND BAR</div>", unsafe_allow_html=True)
     q = st.text_input(
@@ -2049,3 +2179,4 @@ def render_terminal(lens: str = "trade"):
     with st.expander("Developer / raw canonical record"):
         st.caption("Internal diagnostic view. Normal analyst workflow should not require raw IDs or JSON.")
         st.json(rec)
+
