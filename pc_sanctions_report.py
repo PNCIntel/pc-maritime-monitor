@@ -5,6 +5,7 @@ Built on the shared terminal read model (migration 059) plus sanctions/screening
 from __future__ import annotations
 
 import html
+import os
 import re
 from datetime import date
 from typing import Any
@@ -48,6 +49,18 @@ def _clean(v: Any) -> str:
     if isinstance(v,(dict,list)):
         return str(v)
     return str(v).strip()
+
+
+def _api_key() -> str:
+    try:
+        return (
+            st.secrets.get("OPENAI_API_KEY")
+            or st.secrets.get("OPENAI_KEY")
+            or os.getenv("OPENAI_API_KEY")
+            or ""
+        )
+    except Exception:
+        return os.getenv("OPENAI_API_KEY") or ""
 
 
 def _rpc_search(sb, q: str, limit: int=80) -> list[dict]:
@@ -442,7 +455,8 @@ def render_sanctions_report_area(sb, context=None):
                 st.markdown("- "+u)
 
     auto_key=f"pc_sanctions_auto_{report_type}"
-    if st.button("Build report from query",type="primary",disabled=not bool(selected),key="pc_sanctions_build"):
+    b1,b2=st.columns(2)
+    if b1.button("Populate facts from query",disabled=not bool(selected),key="pc_sanctions_build",use_container_width=True):
         vals=_auto_sections(report_type,q,bundle)
         for k,v in vals.items():
             if v:
@@ -451,6 +465,67 @@ def render_sanctions_report_area(sb, context=None):
             names=[_clean(x.get("display_name")) for x in selected if x.get("display_name")]
             st.session_state["pc_sanctions_report_title"]=f"{report_type}: " + (", ".join(names[:3]) or q)
         st.rerun()
+
+    if b2.button("AI draft from connected data",type="primary",disabled=not bool(selected),
+                 key="pc_sanctions_ai_draft",use_container_width=True):
+        try:
+            from pc_report_ai import draft_report
+            context_bundle={
+                "query":q,
+                "selected_objects":[{
+                    "object_type":_clean(x.get("object_type")),
+                    "object_id":_clean(x.get("object_id")),
+                    "display_name":_clean(x.get("display_name")),
+                    "subtype":_clean(x.get("subtype")),
+                    "country":_clean(x.get("country")),
+                } for x in selected],
+                "designations":bundle["designations"][:100],
+                "relationships":[{
+                    "source":_clean(x.get("source_name") or x.get("source_id")),
+                    "source_type":_clean(x.get("source_type")),
+                    "relationship":_clean(x.get("relation_type")),
+                    "family":_clean(x.get("relation_family")),
+                    "target":_clean(x.get("target_name") or x.get("target_id")),
+                    "target_type":_clean(x.get("target_type")),
+                    "confidence":_clean(x.get("confidence")),
+                    "evidence_url":_clean(x.get("evidence_url")),
+                } for x in bundle["links"][:400]],
+                "linked_events":[{
+                    "event_id":_clean(x.get("event_id")),
+                    "date":_clean(x.get("start_date")),
+                    "title":_clean(x.get("title")),
+                    "type":_clean(x.get("event_type") or x.get("event_nature")),
+                    "location":x.get("location"),
+                    "description":_clean(x.get("description")),
+                    "operational_impact":_clean(x.get("operational_impact")),
+                    "commercial_impact":_clean(x.get("commercial_impact")),
+                    "sources":_urls(x),
+                } for x in bundle["events"][:80]],
+                "screening_cases":bundle["cases"][:100],
+                "screening_matches":bundle["matches"][:150],
+                "evidence_urls":bundle["evidence"][:150],
+            }
+            result=draft_report(
+                _api_key(),"sanctions",report_type,REPORT_TYPES[report_type],q,context_bundle,
+                title_hint=st.session_state.get("pc_sanctions_report_title","")
+            )
+            if result.get("title"):
+                st.session_state["pc_sanctions_report_title"]=result["title"]
+            if result.get("executive_line"):
+                st.session_state["pc_sanctions_report_summary"]=result["executive_line"]
+            for k,v in (result.get("sections") or {}).items():
+                if k in REPORT_TYPES[report_type] and _clean(v):
+                    st.session_state[f"pc_sanctions_field_{report_type}_{k}"]=_clean(v)
+            st.session_state["pc_sanctions_ai_gaps"]=result.get("gaps") or []
+            st.rerun()
+        except Exception as exc:
+            st.error(f"AI drafting failed: {exc}")
+
+    gaps=st.session_state.get("pc_sanctions_ai_gaps") or []
+    if gaps:
+        with st.expander("AI-identified gaps / unconfirmed points"):
+            for g in gaps:
+                st.markdown("- "+_clean(g))
 
     st.divider()
     st.markdown("### Report")
