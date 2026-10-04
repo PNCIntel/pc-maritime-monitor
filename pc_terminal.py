@@ -1188,10 +1188,8 @@ def _render_search_results(results: list[dict], lens: str):
             more=results[len(shown):30]
             for j,x in enumerate(more):
                 c1,c2=st.columns([5,1])
-                c1.markdown(
-                    f"**{x['name']}**  \n"
-                    + " · ".join(v for v in [x.get("kind"),x.get("subtype"),x.get("country")] if v)
-                )
+                label_bits=[v for v in [x.get("kind"),x.get("subtype"),x.get("country")] if v]
+                c1.markdown("**" + x["name"] + "** — " + " · ".join(label_bits))
                 with c2:
                     st.button(
                         "Open",
