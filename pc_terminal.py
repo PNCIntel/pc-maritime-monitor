@@ -140,6 +140,63 @@ def _filtered_rows(table: str, column: str, value: str, limit: int = 500) -> lis
         return []
 
 
+@st.cache_data(ttl=45, show_spinner=False)
+def _terminal_index_ready() -> bool:
+    sb=_sb()
+    if sb is None:
+        return False
+    try:
+        sb.table("pc_terminal_object_index").select("object_type").limit(1).execute()
+        return True
+    except Exception:
+        return False
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _indexed_search(q: str, limit: int=60) -> list[dict]:
+    sb=_sb()
+    if sb is None or not q.strip():
+        return []
+    try:
+        rows=sb.rpc("pc_terminal_search",{"p_query":q.strip(),"p_limit":limit}).execute().data or []
+    except Exception:
+        return []
+    out=[]
+    for r in rows:
+        typ=_clean(r.get("object_type"))
+        oid=_clean(r.get("object_id"))
+        if not typ or not oid:
+            continue
+        out.append({
+            "type":typ,
+            "id":oid,
+            "name":_clean(r.get("display_name")) or oid,
+            "kind":OBJECTS.get(typ,(None,None,None,typ.replace("_"," ").title()))[3] if typ in OBJECTS else typ.replace("_"," ").title(),
+            "country":_clean(r.get("country")),
+            "subtype":_clean(r.get("subtype")),
+            "score":float(r.get("rank_score") or 0),
+            "match_reason":"terminal index",
+        })
+    return out
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _indexed_links(typ: str, oid: str, limit: int=1000) -> list[dict]:
+    sb=_sb()
+    if sb is None:
+        return []
+    try:
+        a=(sb.table("pc_v_terminal_links").select("*")
+           .eq("source_type",typ).eq("source_id",str(oid)).limit(limit).execute().data or [])
+        b=(sb.table("pc_v_terminal_links").select("*")
+           .eq("target_type",typ).eq("target_id",str(oid)).limit(limit).execute().data or [])
+    except Exception:
+        return []
+    seen=set(); out=[]
+    for r in a+b:
+        k=_clean(r.get("link_key")) or repr(r)
+        if k in seen: continue
+        seen.add(k); out.append(r)
+    return out
+
 def _record_text(row: dict) -> str:
     return " ".join(_clean(v) for v in row.values())
 
@@ -171,6 +228,16 @@ def _token_match(query_tokens: list[str], text: str) -> bool:
     return all(t in tokens for t in query_tokens)
 
 def _search_objects(q: str, lens: str, limit: int = 80) -> list[dict]:
+    indexed=_indexed_search(q,limit)
+    if indexed:
+        # Lens weighting without destroying shared index ranking.
+        for x in indexed:
+            blob=" ".join([x.get("name",""),x.get("subtype",""),x.get("country","")])
+            if lens=="strategic" and STRATEGIC_RX.search(blob): x["score"]+=35
+            elif lens=="sanctions" and SANCTIONS_RX.search(blob): x["score"]+=35
+            elif lens=="trade" and TRADE_RX.search(blob): x["score"]+=20
+        indexed.sort(key=lambda x:(x.get("score",0),x.get("name","")),reverse=True)
+        return indexed[:limit]
     qn=_norm(q)
     if len(qn)<2:
         return []
@@ -400,6 +467,28 @@ def _events_for_object(typ: str, oid: str) -> list[dict]:
 
 
 def _relationships(typ: str, oid: str) -> list[dict]:
+    indexed=_indexed_links(typ,str(oid),1000)
+    if indexed:
+        out=[]
+        for r in indexed:
+            is_src=_clean(r.get("source_type"))==typ and _clean(r.get("source_id"))==str(oid)
+            out.append({
+                "relationship_id":_clean(r.get("link_key")),
+                "source_type":_clean(r.get("source_type")),
+                "source_id":_clean(r.get("source_id")),
+                "target_type":_clean(r.get("target_type")),
+                "target_id":_clean(r.get("target_id")),
+                "relationship_type":_clean(r.get("relation_type")),
+                "relation_family":_clean(r.get("relation_family")),
+                "source_name":_clean(r.get("source_name")),
+                "target_name":_clean(r.get("target_name")),
+                "confidence":_clean(r.get("confidence")),
+                "source_table":_clean(r.get("source_table")),
+                "event_id":_clean(r.get("event_id")),
+                "metadata":r.get("metadata") or {},
+            })
+        return out
+
     out = []
     ids=_entity_identity_bundle(str(oid)).get("ids") if typ=="entity" else [str(oid)]
     for side in ("source", "target"):
@@ -414,102 +503,6 @@ def _relationships(typ: str, oid: str) -> list[dict]:
         seen.add(k)
         final.append(r)
     return final
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _entity_identity_bundle(entity_id: str) -> dict:
-    """Resolve strongly equivalent company identities/aliases into one dossier bundle."""
-    base=object_record("entity",entity_id) or {}
-    base_name=_clean(base.get("name"))
-    base_country=_clean(base.get("hq_country") or base.get("country")).casefold()
-
-    def core(v):
-        words=_norm(v).split()
-        drop={"group","holding","holdings","company","co","corporation","corp",
-              "limited","ltd","llc","plc","pjsc","sak","sa","inc"}
-        while words and words[-1] in drop:
-            words.pop()
-        return " ".join(words)
-
-    alias_rows=_rows("pc_identity_aliases_v2",10000)
-    aliases_by_id={}
-    for a in alias_rows:
-        typ=_clean(a.get("object_type")).casefold()
-        if typ not in {"entity","company","organisation","organization"}:
-            continue
-        cid=_clean(a.get("canonical_id"))
-        nm=_clean(a.get("alias_name"))
-        if cid and nm:
-            aliases_by_id.setdefault(cid,set()).add(nm)
-
-    seed_names={base_name} | aliases_by_id.get(str(entity_id),set())
-    seed_norm={_norm(x) for x in seed_names if _norm(x)}
-    seed_core={core(x) for x in seed_names if core(x)}
-
-    candidates=[]
-    for r in _rows("pc_entities",10000):
-        rid=_clean(r.get("entity_id"))
-        if not rid:
-            continue
-        rcountry=_clean(r.get("hq_country") or r.get("country")).casefold()
-        if base_country and rcountry and base_country!=rcountry:
-            continue
-        names={_clean(r.get("name"))} | aliases_by_id.get(rid,set())
-        norms={_norm(x) for x in names if _norm(x)}
-        cores={core(x) for x in names if core(x)}
-
-        strong=bool(seed_norm & norms or seed_core & cores)
-        if not strong:
-            # Legal-name variants often contain the shorter trading name verbatim,
-            # e.g. "Abu Dhabi Ports Company PJSC (AD Ports Group)".
-            for a in seed_norm:
-                for b in norms:
-                    if len(a)>=7 and len(b)>=7 and (a in b or b in a):
-                        strong=True; break
-                if strong: break
-        if strong:
-            candidates.append(r)
-
-    if not any(_clean(x.get("entity_id"))==str(entity_id) for x in candidates) and base:
-        candidates.append(base)
-
-    # Prefer the richest established canonical identity. preferred_entity_id already
-    # knows about profile/assets/corridors/events; add a stable COMP_* preference.
-    ranked=[]
-    for r in candidates:
-        rid=_clean(r.get("entity_id"))
-        score=0
-        if rid.startswith("COMP_"): score+=80
-        if not any(x in rid.upper() for x in ("AUTO","_AI_")): score+=30
-        score+=len(_filtered_rows("pc_company_asset_roles","entity_id",rid,60))*8
-        score+=len(_filtered_rows("pc_company_corridor_roles","entity_id",rid,40))*6
-        score+=len(_filtered_rows("pc_event_links","linked_id",rid,80))*3
-        score+=len(_filtered_rows("pc_company_profiles","entity_id",rid,3))*30
-        ranked.append((score,rid,r))
-    ranked.sort(reverse=True)
-    preferred_id=ranked[0][1] if ranked else str(entity_id)
-    preferred_rec=ranked[0][2] if ranked else base
-
-    ids=[]
-    names=[]
-    for _,rid,r in ranked:
-        if rid not in ids: ids.append(rid)
-        nm=_clean(r.get("name"))
-        if nm and nm not in names: names.append(nm)
-        for a in sorted(aliases_by_id.get(rid,set())):
-            if a not in names: names.append(a)
-
-    return {"preferred_id":preferred_id,"preferred_record":preferred_rec,"ids":ids or [str(entity_id)],"names":names or [base_name]}
-
-
-def _multi_filtered_rows(table: str, column: str, values: list[str], limit_each: int=500) -> list[dict]:
-    out=[]; seen=set()
-    for v in values:
-        for r in _filtered_rows(table,column,str(v),limit_each):
-            key=json.dumps(r,sort_keys=True,default=str)
-            if key in seen: continue
-            seen.add(key); out.append(r)
-    return out
 
 
 def _company_asset_roles(entity_id: str) -> list[dict]:
@@ -589,52 +582,22 @@ def _linked_objects_from_relationships(typ: str, oid: str) -> list[dict]:
         oi = _clean(r.get("target_id") if is_src else r.get("source_id"))
         if ot == "vessel":
             ot = "mobile_asset"
-        if ot not in OBJECTS:
+        if not ot or not oi:
             continue
+        nm=_clean(r.get("target_name") if is_src else r.get("source_name"))
+        if not nm and ot in OBJECTS:
+            nm=_object_name(ot,oi)
+        if not nm:
+            nm=oi
         out.append({
             "type": ot,
             "id": oi,
-            "name": _object_name(ot, oi),
-            "relationship": _clean(r.get("relationship_type")).replace("_", " "),
+            "name": nm,
+            "relationship": _clean(r.get("relationship_type") or r.get("relation_type")).replace("_", " "),
+            "family": _clean(r.get("relation_family")),
         })
     return out
 
-
-def _local_infrastructure(asset: dict, limit: int = 80) -> list[dict]:
-    """Return nearby/same-system canonical infrastructure using stored geography.
-
-    This is a discovery lens, not an inferred ownership relationship.
-    """
-    aid=_clean(asset.get("asset_id"))
-    country=_clean(asset.get("country")).casefold()
-    region=_clean(asset.get("region_city")).casefold()
-    name=_clean(asset.get("name")).casefold()
-    out=[]
-    seen={aid}
-    for r in _rows("pc_assets",5000):
-        rid=_clean(r.get("asset_id"))
-        if not rid or rid in seen:
-            continue
-        rc=_clean(r.get("country")).casefold()
-        rr=_clean(r.get("region_city")).casefold()
-        rn=_clean(r.get("name")).casefold()
-        score=0
-        if country and rc==country: score+=10
-        if region and rr:
-            if rr==region: score+=40
-            elif region in rr or rr in region: score+=25
-        if name and rn and (name in rn or rn in name): score+=15
-        if score>=25:
-            seen.add(rid)
-            out.append((score,{
-                "type":"asset","id":rid,"name":_clean(r.get("name")),
-                "relationship":"same local infrastructure system",
-                "asset_type":_clean(r.get("asset_type")),
-                "region":_clean(r.get("region_city")),
-                "country":_clean(r.get("country")),
-            }))
-    out.sort(key=lambda x:(x[0],x[1]["name"]),reverse=True)
-    return [x[1] for x in out[:limit]]
 
 def _asset_companies(asset: dict) -> list[dict]:
     aid = _clean(asset.get("asset_id"))
@@ -1810,6 +1773,7 @@ def render_terminal(lens: str = "trade"):
         if st.button("Refresh database", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
+        st.caption("Terminal index: " + ("active" if _terminal_index_ready() else "legacy fallback"))
 
     _style(theme)
     _restore_context()
