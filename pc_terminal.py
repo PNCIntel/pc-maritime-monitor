@@ -885,6 +885,50 @@ def _render_home(lens: str):
     _render_event_cards(filtered, f"home_{lens}", 12)
 
 
+def _open_search_result(lens: str, typ: str, oid: str, name: str):
+    _set_context(typ, oid, name)
+    # Callback executes before the rerun, so it is safe to clear the search widget.
+    st.session_state[f"pc_terminal_search_{lens}"] = ""
+
+def _render_search_results(results: list[dict], lens: str):
+    st.markdown("#### Best matches")
+    shown=results[:8]
+    cols=st.columns(2, gap="medium")
+    for i,x in enumerate(shown):
+        with cols[i % 2]:
+            with st.container(border=True):
+                st.markdown(f"**{x['name']}**")
+                meta=[x.get("kind"),x.get("subtype"),x.get("country")]
+                st.caption(" · ".join(v for v in meta if v))
+                if x.get("match_reason"):
+                    st.caption("Matched by: "+x["match_reason"])
+                st.button(
+                    "Open",
+                    key=f"pc_terminal_result_{lens}_{i}_{x['type']}_{x['id']}",
+                    use_container_width=True,
+                    type="primary" if i==0 else "secondary",
+                    on_click=_open_search_result,
+                    args=(lens,x["type"],x["id"],x["name"]),
+                )
+    if len(results)>len(shown):
+        with st.expander(f"More results ({len(results)-len(shown)})"):
+            more=results[len(shown):30]
+            for j,x in enumerate(more):
+                c1,c2=st.columns([5,1])
+                c1.markdown(
+                    f"**{x['name']}**  
+"
+                    + " · ".join(v for v in [x.get("kind"),x.get("subtype"),x.get("country")] if v)
+                )
+                with c2:
+                    st.button(
+                        "Open",
+                        key=f"pc_terminal_more_{lens}_{j}_{x['type']}_{x['id']}",
+                        use_container_width=True,
+                        on_click=_open_search_result,
+                        args=(lens,x["type"],x["id"],x["name"]),
+                    )
+
 def render_terminal(lens: str = "trade"):
     lens = lens if lens in LENS else "trade"
     cfg = LENS[lens]
@@ -922,20 +966,7 @@ def render_terminal(lens: str = "trade"):
     if q.strip():
         results = _search_objects(q, lens, 80)
         if results:
-            pick = st.selectbox(
-                "Search results",
-                range(len(results)),
-                format_func=lambda i: f"{results[i]['name']} · {results[i]['kind']}"
-                                      + (f" · {results[i]['subtype']}" if results[i]['subtype'] else "")
-                                      + (f" · {results[i]['country']}" if results[i]['country'] else "")
-                                      + (f" · {results[i]['match_reason']}" if results[i].get('match_reason') else ""),
-                key=f"pc_terminal_search_pick_{lens}",
-            )
-            x = results[pick]
-            if st.button("Open selected object", type="primary", use_container_width=True,
-                         key=f"pc_terminal_search_open_{lens}"):
-                _set_context(x["type"], x["id"], x["name"])
-                st.rerun()
+            _render_search_results(results, lens)
         else:
             st.info("No canonical object matched that search.")
 
