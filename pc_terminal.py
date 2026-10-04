@@ -311,6 +311,14 @@ def _context_record():
         table, pk, _, _ = OBJECTS[typ]
         rows = _filtered_rows(table, pk, str(oid), 3)
         return typ, oid, rows[0] if rows else None
+    if typ=="entity":
+        bundle=_entity_identity_bundle(str(oid))
+        pid=bundle.get("preferred_id") or str(oid)
+        prec=bundle.get("preferred_record") or object_record("entity",pid)
+        if pid!=str(oid):
+            st.session_state["pc_terminal_id"]=pid
+            st.session_state["pc_terminal_name"]=_clean((prec or {}).get("name"))
+        return typ,pid,prec
     return typ, oid, object_record(typ, oid)
 
 
@@ -363,7 +371,17 @@ def _events_for_object(typ: str, oid: str) -> list[dict]:
     if typ == "event":
         rec = object_record("event", oid)
         return [rec] if rec else []
-    links = _event_links(typ, oid)
+    if typ=="entity":
+        bundle=_entity_identity_bundle(str(oid))
+        links=[]
+        seen_links=set()
+        for eid in bundle.get("ids") or [str(oid)]:
+            for l in _event_links("entity",eid):
+                lk=_clean(l.get("event_link_id")) or repr((l.get("event_id"),l.get("linked_id"),l.get("relationship")))
+                if lk not in seen_links:
+                    seen_links.add(lk); links.append(l)
+    else:
+        links = _event_links(typ, oid)
     out = []
     seen = set()
     for l in links:
@@ -383,8 +401,10 @@ def _events_for_object(typ: str, oid: str) -> list[dict]:
 
 def _relationships(typ: str, oid: str) -> list[dict]:
     out = []
+    ids=_entity_identity_bundle(str(oid)).get("ids") if typ=="entity" else [str(oid)]
     for side in ("source", "target"):
-        out.extend(_filtered_rows("pc_relationships", f"{side}_id", str(oid), 500))
+        for identity_id in (ids or [str(oid)]):
+            out.extend(_filtered_rows("pc_relationships", f"{side}_id", str(identity_id), 500))
     seen = set()
     final = []
     for r in out:
@@ -396,20 +416,120 @@ def _relationships(typ: str, oid: str) -> list[dict]:
     return final
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _entity_identity_bundle(entity_id: str) -> dict:
+    """Resolve strongly equivalent company identities/aliases into one dossier bundle."""
+    base=object_record("entity",entity_id) or {}
+    base_name=_clean(base.get("name"))
+    base_country=_clean(base.get("hq_country") or base.get("country")).casefold()
+
+    def core(v):
+        words=_norm(v).split()
+        drop={"group","holding","holdings","company","co","corporation","corp",
+              "limited","ltd","llc","plc","pjsc","sak","sa","inc"}
+        while words and words[-1] in drop:
+            words.pop()
+        return " ".join(words)
+
+    alias_rows=_rows("pc_identity_aliases_v2",10000)
+    aliases_by_id={}
+    for a in alias_rows:
+        typ=_clean(a.get("object_type")).casefold()
+        if typ not in {"entity","company","organisation","organization"}:
+            continue
+        cid=_clean(a.get("canonical_id"))
+        nm=_clean(a.get("alias_name"))
+        if cid and nm:
+            aliases_by_id.setdefault(cid,set()).add(nm)
+
+    seed_names={base_name} | aliases_by_id.get(str(entity_id),set())
+    seed_norm={_norm(x) for x in seed_names if _norm(x)}
+    seed_core={core(x) for x in seed_names if core(x)}
+
+    candidates=[]
+    for r in _rows("pc_entities",10000):
+        rid=_clean(r.get("entity_id"))
+        if not rid:
+            continue
+        rcountry=_clean(r.get("hq_country") or r.get("country")).casefold()
+        if base_country and rcountry and base_country!=rcountry:
+            continue
+        names={_clean(r.get("name"))} | aliases_by_id.get(rid,set())
+        norms={_norm(x) for x in names if _norm(x)}
+        cores={core(x) for x in names if core(x)}
+
+        strong=bool(seed_norm & norms or seed_core & cores)
+        if not strong:
+            # Legal-name variants often contain the shorter trading name verbatim,
+            # e.g. "Abu Dhabi Ports Company PJSC (AD Ports Group)".
+            for a in seed_norm:
+                for b in norms:
+                    if len(a)>=7 and len(b)>=7 and (a in b or b in a):
+                        strong=True; break
+                if strong: break
+        if strong:
+            candidates.append(r)
+
+    if not any(_clean(x.get("entity_id"))==str(entity_id) for x in candidates) and base:
+        candidates.append(base)
+
+    # Prefer the richest established canonical identity. preferred_entity_id already
+    # knows about profile/assets/corridors/events; add a stable COMP_* preference.
+    ranked=[]
+    for r in candidates:
+        rid=_clean(r.get("entity_id"))
+        score=0
+        if rid.startswith("COMP_"): score+=80
+        if not any(x in rid.upper() for x in ("AUTO","_AI_")): score+=30
+        score+=len(_filtered_rows("pc_company_asset_roles","entity_id",rid,60))*8
+        score+=len(_filtered_rows("pc_company_corridor_roles","entity_id",rid,40))*6
+        score+=len(_filtered_rows("pc_event_links","linked_id",rid,80))*3
+        score+=len(_filtered_rows("pc_company_profiles","entity_id",rid,3))*30
+        ranked.append((score,rid,r))
+    ranked.sort(reverse=True)
+    preferred_id=ranked[0][1] if ranked else str(entity_id)
+    preferred_rec=ranked[0][2] if ranked else base
+
+    ids=[]
+    names=[]
+    for _,rid,r in ranked:
+        if rid not in ids: ids.append(rid)
+        nm=_clean(r.get("name"))
+        if nm and nm not in names: names.append(nm)
+        for a in sorted(aliases_by_id.get(rid,set())):
+            if a not in names: names.append(a)
+
+    return {"preferred_id":preferred_id,"preferred_record":preferred_rec,"ids":ids or [str(entity_id)],"names":names or [base_name]}
+
+
+def _multi_filtered_rows(table: str, column: str, values: list[str], limit_each: int=500) -> list[dict]:
+    out=[]; seen=set()
+    for v in values:
+        for r in _filtered_rows(table,column,str(v),limit_each):
+            key=json.dumps(r,sort_keys=True,default=str)
+            if key in seen: continue
+            seen.add(key); out.append(r)
+    return out
+
+
 def _company_asset_roles(entity_id: str) -> list[dict]:
-    return _filtered_rows("pc_company_asset_roles", "entity_id", str(entity_id), 500)
+    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
+    return _multi_filtered_rows("pc_company_asset_roles","entity_id",ids,500)
 
 
 def _company_corridors(entity_id: str) -> list[dict]:
-    return _filtered_rows("pc_company_corridor_roles", "entity_id", str(entity_id), 500)
+    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
+    return _multi_filtered_rows("pc_company_corridor_roles","entity_id",ids,500)
 
 
 def _portfolio(entity_id: str) -> list[dict]:
-    return _filtered_rows("pc_company_portfolio_positions", "holder_entity_id", str(entity_id), 500)
+    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
+    return _multi_filtered_rows("pc_company_portfolio_positions","holder_entity_id",ids,500)
 
 
 def _documents_for_entity(entity_id: str) -> list[dict]:
-    links = _filtered_rows("pc_document_entity_links", "entity_id", str(entity_id), 500)
+    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
+    links=_multi_filtered_rows("pc_document_entity_links","entity_id",ids,500)
     docs = []
     seen = set()
     for l in links:
