@@ -290,8 +290,7 @@ def render_operating_picture(mode="trade"):
         st.subheader("Forward watch")
         if future:
             for r in sorted(future,key=lambda x:str(x.get("start_date") or ""))[:8]:
-                st.markdown(f"**{_clean(r.get('start_date'))[:10]}**  
-{_clean(r.get('title'))}")
+                st.markdown(f"**{_clean(r.get('start_date'))[:10]}**  \\n{_clean(r.get('title'))}")
         else:
             st.caption("No relevant dated items in the next 14 days.")
 
