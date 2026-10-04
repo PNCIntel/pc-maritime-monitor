@@ -77,7 +77,7 @@ def normalize_rows(records):
  return out
 
 
-def enqueue(sb, records, title='P&C universal bulk intake', ai_research=True, intake_report=None):
+def enqueue(sb, records, title='P&C universal bulk intake', ai_research=True, intake_report=None, force_new=False):
  from pc_source_graph import prepare_batch_records
  records=prepare_batch_records(sb,records)
  intake_sources={}
@@ -89,13 +89,15 @@ def enqueue(sb, records, title='P&C universal bulk intake', ai_research=True, in
  rows=normalize_rows(records)
  if not rows: raise ValueError('Empty package')
  fingerprint=hashlib.sha256(canonical_json(['connected_research_v2',[(r['target_table'],r['natural_key'],r['payload']) for r in rows]]).encode()).hexdigest()
- existing=(sb.table('pc_ingestion_jobs').select('ingestion_job_id').contains('source_scope',{'v07_sha256':fingerprint}).limit(2).execute().data or [])
- if len(existing)>1: raise RuntimeError('Duplicate ingestion jobs detected; investigate')
+ existing=[]
+ if not force_new:
+  existing=(sb.table('pc_ingestion_jobs').select('ingestion_job_id').contains('source_scope',{'v07_sha256':fingerprint}).limit(2).execute().data or [])
+  if len(existing)>1: raise RuntimeError('Duplicate ingestion jobs detected; investigate')
  if existing: job_id=existing[0]['ingestion_job_id']; reused=True
  else:
   inserted=sb.table('pc_ingestion_jobs').insert({
    'job_type':'UNIVERSAL_BATCH_V07','title':title[:180],'status':'queued',
-   'source_scope':{'v07_sha256':fingerprint,'workflow':'connected_research_v2','ai_research':bool(ai_research),'connected_deep_research':bool(ai_research),'input_sources':list(intake_sources.values()),'intake_report':intake_report or {}},
+   'source_scope':{'v07_sha256':fingerprint,'workflow':'connected_research_v2','ai_research':bool(ai_research),'connected_deep_research':bool(ai_research),'fresh_reload':bool(force_new),'input_sources':list(intake_sources.values()),'intake_report':intake_report or {}},
    'stats':{'expected_records':len(rows)}
   }).execute().data
   if not inserted: raise RuntimeError('Could not create ingestion job')
