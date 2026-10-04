@@ -1,0 +1,878 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import streamlit as st
+
+ROOT = Path(__file__).resolve().parent
+SHARED = ROOT / "shared"
+if str(ROOT) not in os.sys.path:
+    os.sys.path.insert(0, str(ROOT))
+if str(SHARED) not in os.sys.path:
+    os.sys.path.insert(0, str(SHARED))
+
+try:
+    from shared.pc_db import client as pc_db_client
+except Exception:
+    from pc_db import client as pc_db_client
+
+from pc_drilldown import object_record, object_label, preferred_entity_id
+
+LENS = {
+    "trade": {
+        "brand": "P&C Trade",
+        "title": "Trade Intelligence Terminal",
+        "deck": "Infrastructure, operators, corridors, capital, capacity and commercial change.",
+        "layer2": "Operations & Infrastructure",
+        "layer3": "Corporate, Assets & Capital",
+        "layer4": "Intelligence & Evidence",
+    },
+    "intelligence": {
+        "brand": "P&C Intelligence",
+        "title": "Intelligence Operating Terminal",
+        "deck": "Events, actors, infrastructure exposure, monitoring and evidence in one connected workspace.",
+        "layer2": "Operating Environment",
+        "layer3": "Actors, Assets & Exposure",
+        "layer4": "Intelligence & Evidence",
+    },
+    "sanctions": {
+        "brand": "P&C Sanctions",
+        "title": "Sanctions & Exposure Terminal",
+        "deck": "Identity, ownership, vessels, designations, activity and evidence against the canonical graph.",
+        "layer2": "Assets & Activity",
+        "layer3": "Ownership & Exposure",
+        "layer4": "Designations & Evidence",
+    },
+    "strategic": {
+        "brand": "P&C Strategic Industries",
+        "title": "Strategic Industries Terminal",
+        "deck": "Defence, coast guard, shipyards, programmes, fleets, contracts and industrial capacity.",
+        "layer2": "Facilities & Fleets",
+        "layer3": "Programmes & Industrial Capacity",
+        "layer4": "Strategic Intelligence & Evidence",
+    },
+}
+
+OBJECTS = {
+    "entity": ("pc_entities", "entity_id", "name", "Company / Organisation"),
+    "asset": ("pc_assets", "asset_id", "name", "Infrastructure Node"),
+    "mobile_asset": ("pc_mobile_assets", "mobile_asset_id", "name", "Mobile Asset"),
+    "event": ("pc_events", "event_id", "title", "Development"),
+    "corridor": ("pc_trade_corridors", "corridor_key", "corridor_name", "Corridor"),
+}
+
+STRATEGIC_RX = re.compile(
+    r"defen|defence|military|navy|naval|coast guard|shipbuild|shipyard|aerospace|"
+    r"patrol|frigate|corvette|submarine|icebreaker|security cutter|government programme",
+    re.I,
+)
+SANCTIONS_RX = re.compile(
+    r"sanction|ofac|sdn|designation|blocked|dark fleet|shadow fleet|evasion|"
+    r"export control|embargo|seizure|intercept",
+    re.I,
+)
+TRADE_RX = re.compile(
+    r"port|terminal|rail|airport|cargo|freight|logistics|shipping|container|tanker|"
+    r"corridor|capacity|acquisition|investment|berth|service|route|warehouse|dry port",
+    re.I,
+)
+
+
+def _sb():
+    try:
+        return pc_db_client(service=True)
+    except Exception:
+        return None
+
+
+def _clean(v: Any) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, (dict, list)):
+        try:
+            return json.dumps(v, ensure_ascii=False)
+        except Exception:
+            return str(v)
+    return str(v)
+
+
+def _norm(v: Any) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", _clean(v).casefold()))
+
+
+def _meta(row: dict) -> dict:
+    m = row.get("metadata")
+    if isinstance(m, dict):
+        return m
+    if isinstance(m, str):
+        try:
+            x = json.loads(m)
+            return x if isinstance(x, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _rows(table: str, limit: int = 3000) -> list[dict]:
+    sb = _sb()
+    if sb is None:
+        return []
+    try:
+        return sb.table(table).select("*").limit(limit).execute().data or []
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _filtered_rows(table: str, column: str, value: str, limit: int = 500) -> list[dict]:
+    sb = _sb()
+    if sb is None:
+        return []
+    try:
+        return sb.table(table).select("*").eq(column, value).limit(limit).execute().data or []
+    except Exception:
+        return []
+
+
+def _record_text(row: dict) -> str:
+    return " ".join(_clean(v) for v in row.values())
+
+
+def _search_objects(q: str, lens: str, limit: int = 80) -> list[dict]:
+    qn = _norm(q)
+    if len(qn) < 2:
+        return []
+    terms = qn.split()
+    out = []
+    for typ, (table, pk, name_col, label) in OBJECTS.items():
+        rows = _rows(table, 5000 if typ in {"entity", "asset", "mobile_asset"} else 2500)
+        for r in rows:
+            blob = _record_text(r).casefold()
+            if not all(t in blob for t in terms):
+                continue
+            if lens == "strategic" and typ in {"entity", "asset", "mobile_asset", "event"}:
+                # Search remains broad, but strategic matches rank higher.
+                bonus = 30 if STRATEGIC_RX.search(blob) else 0
+            elif lens == "sanctions":
+                bonus = 30 if SANCTIONS_RX.search(blob) else 0
+            elif lens == "trade":
+                bonus = 20 if TRADE_RX.search(blob) else 0
+            else:
+                bonus = 0
+            name = _clean(r.get(name_col)) or _clean(r.get(pk))
+            score = bonus
+            nk = _norm(name)
+            if nk == qn:
+                score += 100
+            elif nk.startswith(qn):
+                score += 70
+            elif qn in nk:
+                score += 50
+            else:
+                score += 10
+            out.append({
+                "type": typ,
+                "id": _clean(r.get(pk)),
+                "name": name,
+                "kind": label,
+                "country": _clean(r.get("hq_country") or r.get("country") or r.get("flag")),
+                "subtype": _clean(r.get("entity_type") or r.get("asset_type") or r.get("event_type") or r.get("corridor_type")),
+                "score": score,
+            })
+    out.sort(key=lambda x: (x["score"], x["name"]), reverse=True)
+    seen = set()
+    final = []
+    for x in out:
+        k = (x["type"], x["id"])
+        if not x["id"] or k in seen:
+            continue
+        seen.add(k)
+        final.append(x)
+        if len(final) >= limit:
+            break
+    return final
+
+
+def _set_context(typ: str, oid: str, name: str = ""):
+    if typ == "entity":
+        try:
+            oid2, rec = preferred_entity_id(oid)
+            if oid2:
+                oid = oid2
+                if rec:
+                    name = _clean(rec.get("name")) or name
+        except Exception:
+            pass
+    st.session_state["pc_terminal_type"] = typ
+    st.session_state["pc_terminal_id"] = str(oid)
+    st.session_state["pc_terminal_name"] = name or object_label(typ, oid)
+    try:
+        st.query_params["pc_terminal_type"] = typ
+        st.query_params["pc_terminal_id"] = str(oid)
+    except Exception:
+        pass
+
+
+def _restore_context():
+    if st.session_state.get("pc_terminal_id"):
+        return
+    try:
+        typ = st.query_params.get("pc_terminal_type")
+        oid = st.query_params.get("pc_terminal_id")
+        if typ and oid:
+            _set_context(str(typ), str(oid))
+    except Exception:
+        pass
+
+
+def _clear_context():
+    for k in ("pc_terminal_type", "pc_terminal_id", "pc_terminal_name"):
+        st.session_state.pop(k, None)
+    try:
+        for k in ("pc_terminal_type", "pc_terminal_id"):
+            if k in st.query_params:
+                del st.query_params[k]
+    except Exception:
+        pass
+
+
+def _context_record():
+    typ = st.session_state.get("pc_terminal_type")
+    oid = st.session_state.get("pc_terminal_id")
+    if not typ or not oid:
+        return None, None, None
+    if typ == "corridor":
+        table, pk, _, _ = OBJECTS[typ]
+        rows = _filtered_rows(table, pk, str(oid), 3)
+        return typ, oid, rows[0] if rows else None
+    return typ, oid, object_record(typ, oid)
+
+
+def _display_location(row: dict) -> str:
+    for k in ("region_city", "hq_city", "location", "country", "hq_country", "flag"):
+        v = row.get(k)
+        if isinstance(v, dict):
+            v = v.get("name") or v.get("country") or v.get("region")
+        if v:
+            return _clean(v)
+    return ""
+
+
+def _style(theme: str):
+    if theme == "Light":
+        p = "--bg:#f5f7fa;--panel:#fff;--panel2:#f8fafc;--line:#d7dee8;--text:#182230;--muted:#667383;--gold:#977421;--blue:#315e9c;--red:#b2564d;--green:#427d61"
+    else:
+        p = "--bg:#09111d;--panel:#101927;--panel2:#0d1623;--line:#26364a;--text:#edf2f7;--muted:#9facbd;--gold:#d1ad59;--blue:#6699e8;--red:#d37a72;--green:#72a78c"
+    st.markdown(f"""
+    <style>
+    :root{{{p}}}
+    .stApp{{background:var(--bg);color:var(--text)}}
+    [data-testid="stSidebar"]{{background:var(--panel2)!important;border-right:1px solid var(--line)}}
+    [data-testid="stSidebar"] *{{color:var(--text)!important}}
+    .block-container{{max-width:1780px;padding-top:1rem;padding-bottom:3rem}}
+    h1,h2,h3,h4,p,label,span,li{{color:var(--text)!important}}
+    .pc-k{{color:var(--gold);font-size:.68rem;font-weight:750;letter-spacing:.14em;text-transform:uppercase}}
+    .pc-sub{{color:var(--muted);font-size:.9rem}}
+    .pc-command{{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.5rem 0 1rem}}
+    .pc-context{{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:9px;padding:.9rem 1rem;margin:.4rem 0 1rem}}
+    .pc-card{{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:.85rem 1rem;min-height:115px}}
+    .pc-muted{{color:var(--muted);font-size:.82rem}}
+    [data-testid="stMetric"]{{background:var(--panel);border:1px solid var(--line);border-top:2px solid var(--gold);padding:.55rem .7rem;border-radius:7px}}
+    [data-testid="stDataFrame"]{{border:1px solid var(--line);border-radius:7px}}
+    [data-testid="stExpander"]{{background:var(--panel);border:1px solid var(--line);border-radius:7px}}
+    div.stButton>button{{border:1px solid #806b38;color:var(--gold);background:var(--panel);border-radius:7px}}
+    [data-baseweb="input"]>div,[data-baseweb="select"]>div,input{{background:var(--panel)!important;color:var(--text)!important}}
+    </style>
+    """, unsafe_allow_html=True)
+
+
+def _event_links(typ: str, oid: str) -> list[dict]:
+    linked_type = "mobile_asset" if typ == "mobile_asset" else typ
+    if typ == "event":
+        return _filtered_rows("pc_event_links", "event_id", str(oid), 500)
+    return _filtered_rows("pc_event_links", "linked_id", str(oid), 500)
+
+
+def _events_for_object(typ: str, oid: str) -> list[dict]:
+    if typ == "event":
+        rec = object_record("event", oid)
+        return [rec] if rec else []
+    links = _event_links(typ, oid)
+    out = []
+    seen = set()
+    for l in links:
+        if _norm(l.get("linked_type")) not in {_norm(typ), "vessel" if typ == "mobile_asset" else _norm(typ)}:
+            continue
+        eid = _clean(l.get("event_id"))
+        if not eid or eid in seen:
+            continue
+        seen.add(eid)
+        ev = object_record("event", eid)
+        if ev:
+            e = dict(ev)
+            e["_relationship"] = l.get("relationship")
+            out.append(e)
+    return sorted(out, key=lambda x: _clean(x.get("start_date")), reverse=True)
+
+
+def _relationships(typ: str, oid: str) -> list[dict]:
+    out = []
+    for side in ("source", "target"):
+        out.extend(_filtered_rows("pc_relationships", f"{side}_id", str(oid), 500))
+    seen = set()
+    final = []
+    for r in out:
+        k = _clean(r.get("relationship_id")) or repr((r.get("source_id"), r.get("relationship_type"), r.get("target_id")))
+        if k in seen:
+            continue
+        seen.add(k)
+        final.append(r)
+    return final
+
+
+def _company_asset_roles(entity_id: str) -> list[dict]:
+    return _filtered_rows("pc_company_asset_roles", "entity_id", str(entity_id), 500)
+
+
+def _company_corridors(entity_id: str) -> list[dict]:
+    return _filtered_rows("pc_company_corridor_roles", "entity_id", str(entity_id), 500)
+
+
+def _portfolio(entity_id: str) -> list[dict]:
+    return _filtered_rows("pc_company_portfolio_positions", "holder_entity_id", str(entity_id), 500)
+
+
+def _documents_for_entity(entity_id: str) -> list[dict]:
+    links = _filtered_rows("pc_document_entity_links", "entity_id", str(entity_id), 500)
+    docs = []
+    seen = set()
+    for l in links:
+        did = _clean(l.get("document_id"))
+        if not did or did in seen:
+            continue
+        seen.add(did)
+        rows = _filtered_rows("pc_documents", "document_id", did, 2)
+        if rows:
+            d = dict(rows[0])
+            d["_relationship"] = l.get("relationship")
+            docs.append(d)
+    return docs
+
+
+def _documents_by_name(name: str, limit: int = 30) -> list[dict]:
+    if not name:
+        return []
+    n = name.casefold()
+    docs = []
+    for d in _rows("pc_documents", 1500):
+        blob = _record_text(d).casefold()
+        if n in blob:
+            docs.append(d)
+            if len(docs) >= limit:
+                break
+    return docs
+
+
+def _related_table(table: str, oid: str, name: str = "", limit: int = 120) -> list[dict]:
+    rows = _rows(table, 2500)
+    o = str(oid).casefold()
+    n = name.casefold().strip()
+    out = []
+    for r in rows:
+        blob = _record_text(r).casefold()
+        if o and o in blob or (n and len(n) >= 5 and n in blob):
+            out.append(r)
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _object_name(typ: str, oid: str) -> str:
+    if typ == "corridor":
+        rows = _filtered_rows("pc_trade_corridors", "corridor_key", str(oid), 2)
+        return _clean(rows[0].get("corridor_name")) if rows else str(oid)
+    return object_label(typ, oid)
+
+
+def _linked_objects_from_relationships(typ: str, oid: str) -> list[dict]:
+    out = []
+    for r in _relationships(typ, oid):
+        src = _clean(r.get("source_id"))
+        is_src = src == str(oid)
+        ot = _clean(r.get("target_type") if is_src else r.get("source_type")).casefold()
+        oi = _clean(r.get("target_id") if is_src else r.get("source_id"))
+        if ot == "vessel":
+            ot = "mobile_asset"
+        if ot not in OBJECTS:
+            continue
+        out.append({
+            "type": ot,
+            "id": oi,
+            "name": _object_name(ot, oi),
+            "relationship": _clean(r.get("relationship_type")).replace("_", " "),
+        })
+    return out
+
+
+def _asset_companies(asset: dict) -> list[dict]:
+    aid = _clean(asset.get("asset_id"))
+    seen = set()
+    out = []
+    for col, role in (("owner_entity_id", "owner"), ("operator_entity_id", "operator")):
+        eid = _clean(asset.get(col))
+        if eid and eid not in seen:
+            seen.add(eid)
+            out.append({"id": eid, "name": _object_name("entity", eid), "role": role})
+    for r in _filtered_rows("pc_company_asset_roles", "asset_id", aid, 500):
+        eid = _clean(r.get("entity_id"))
+        if eid and eid not in seen:
+            seen.add(eid)
+            out.append({"id": eid, "name": _object_name("entity", eid), "role": _clean(r.get("asset_role"))})
+    return out
+
+
+def _mobile_companies(rec: dict) -> list[dict]:
+    seen = set()
+    out = []
+    for col, role in (("owner_entity_id", "owner"), ("operator_entity_id", "operator"), ("manager_entity_id", "manager")):
+        eid = _clean(rec.get(col))
+        if eid and eid not in seen:
+            seen.add(eid)
+            out.append({"id": eid, "name": _object_name("entity", eid), "role": role})
+    return out
+
+
+def _render_map_for_asset(rec: dict):
+    pts = []
+    def add(r, label):
+        try:
+            lat = float(r.get("latitude"))
+            lon = float(r.get("longitude"))
+            if -90 <= lat <= 90 and -180 <= lon <= 180:
+                pts.append({"lat": lat, "lon": lon, "name": label})
+        except Exception:
+            pass
+    add(rec, _clean(rec.get("name")))
+    country = _clean(rec.get("country"))
+    region = _clean(rec.get("region_city"))
+    for r in _rows("pc_assets", 4000):
+        if _clean(r.get("asset_id")) == _clean(rec.get("asset_id")):
+            continue
+        if country and _clean(r.get("country")).casefold() != country.casefold():
+            continue
+        if region and _clean(r.get("region_city")) and _clean(r.get("region_city")).casefold() != region.casefold():
+            continue
+        add(r, _clean(r.get("name")))
+        if len(pts) >= 40:
+            break
+    if pts:
+        st.map(pd.DataFrame(pts), latitude="lat", longitude="lon", size=40, zoom=None)
+    else:
+        st.caption("No canonical coordinates are currently stored for this node or its local connected assets.")
+
+
+def _render_context_header(typ: str, oid: str, rec: dict, lens: str):
+    cfg = LENS[lens]
+    name = _object_name(typ, oid)
+    subtype = _clean(rec.get("entity_type") or rec.get("asset_type") or rec.get("event_type") or rec.get("corridor_type"))
+    loc = _display_location(rec)
+    st.markdown(
+        f"<div class='pc-context'><div class='pc-k'>{cfg['brand']} · selected canonical context</div>"
+        f"<h2 style='margin:.15rem 0'>{name}</h2>"
+        f"<div class='pc-muted'>{OBJECTS[typ][3]}{(' · '+subtype) if subtype else ''}{(' · '+loc) if loc else ''}</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _open_selector(rows: list[dict], key: str, label: str = "Open connected object"):
+    if not rows:
+        return
+    choices = [x for x in rows if x.get("type") in OBJECTS and x.get("id")]
+    if not choices:
+        return
+    pick = st.selectbox(
+        label,
+        range(len(choices)),
+        format_func=lambda i: f"{choices[i].get('name')} · {choices[i].get('relationship') or choices[i].get('type')}",
+        key=key,
+    )
+    if st.button("Open in terminal", key=key + "_open", use_container_width=True):
+        x = choices[pick]
+        _set_context(x["type"], x["id"], x.get("name"))
+        st.rerun()
+
+
+def _render_layer2(typ: str, oid: str, rec: dict, lens: str):
+    st.markdown(f"### {LENS[lens]['layer2']}")
+    if typ == "asset":
+        _render_map_for_asset(rec)
+        st.markdown("#### Node profile")
+        facts = []
+        for k in ("asset_type", "subtype", "country", "region_city", "latitude", "longitude", "status", "confidence"):
+            if rec.get(k) not in (None, "", [], {}):
+                facts.append({"Field": k.replace("_", " ").title(), "Value": _clean(rec.get(k))})
+        if facts:
+            st.dataframe(pd.DataFrame(facts), hide_index=True, use_container_width=True)
+        companies = _asset_companies(rec)
+        if companies:
+            st.markdown("#### Operators / owners / companies")
+            st.dataframe(pd.DataFrame(companies), hide_index=True, use_container_width=True)
+            _open_selector([{"type":"entity","id":x["id"],"name":x["name"],"relationship":x["role"]} for x in companies],
+                           f"l2_asset_companies_{oid}")
+        connected = _linked_objects_from_relationships("asset", oid)
+        if connected:
+            st.markdown("#### Connected infrastructure / network")
+            st.dataframe(pd.DataFrame(connected), hide_index=True, use_container_width=True)
+            _open_selector(connected, f"l2_asset_links_{oid}")
+    elif typ == "entity":
+        roles = _company_asset_roles(oid)
+        rows = []
+        for r in roles:
+            at = "mobile_asset" if r.get("mobile_asset_id") else "asset"
+            aid = _clean(r.get("mobile_asset_id") or r.get("asset_id"))
+            if aid:
+                rows.append({"type":at,"id":aid,"name":_object_name(at,aid),"relationship":_clean(r.get("asset_role"))})
+        if rows:
+            st.markdown("#### Operating footprint / assets")
+            st.dataframe(pd.DataFrame([{k:v for k,v in x.items() if k not in ("type","id")} for x in rows]),
+                         hide_index=True, use_container_width=True)
+            _open_selector(rows, f"l2_entity_assets_{oid}")
+        corridors = _company_corridors(oid)
+        if corridors:
+            st.markdown("#### Corridors / systems")
+            display = []
+            opens = []
+            for r in corridors:
+                ck = _clean(r.get("corridor_key"))
+                display.append({"Corridor":_object_name("corridor",ck),"Role":_clean(r.get("corridor_role")),"Status":_clean(r.get("role_status"))})
+                opens.append({"type":"corridor","id":ck,"name":_object_name("corridor",ck),"relationship":_clean(r.get("corridor_role"))})
+            st.dataframe(pd.DataFrame(display), hide_index=True, use_container_width=True)
+            _open_selector(opens, f"l2_entity_corridors_{oid}")
+    elif typ == "mobile_asset":
+        facts = []
+        for k in ("imo","mmsi","registration","call_sign","flag","year_built","dwt","gross_tonnage","length_m","beam_m","asset_type","subtype"):
+            if rec.get(k) not in (None,"",[],{}):
+                facts.append({"Field":k.replace("_"," ").upper() if k in {"imo","mmsi"} else k.replace("_"," ").title(),"Value":_clean(rec.get(k))})
+        if facts:
+            st.dataframe(pd.DataFrame(facts), hide_index=True, use_container_width=True)
+        companies = _mobile_companies(rec)
+        if companies:
+            st.markdown("#### Owner / operator / manager")
+            st.dataframe(pd.DataFrame(companies), hide_index=True, use_container_width=True)
+            _open_selector([{"type":"entity","id":x["id"],"name":x["name"],"relationship":x["role"]} for x in companies],
+                           f"l2_mobile_companies_{oid}")
+    elif typ == "corridor":
+        st.markdown("#### Corridor definition")
+        st.dataframe(pd.DataFrame([{
+            "Name": rec.get("corridor_name"), "Type": rec.get("corridor_type"),
+            "Origin": rec.get("origin_region"), "Destination": rec.get("destination_region"),
+            "Geography": _clean(rec.get("geography"))
+        }]), hide_index=True, use_container_width=True)
+        roles = _filtered_rows("pc_company_corridor_roles", "corridor_key", str(oid), 500)
+        if roles:
+            rows = []
+            for r in roles:
+                eid = _clean(r.get("entity_id"))
+                rows.append({"type":"entity","id":eid,"name":_object_name("entity",eid),"relationship":_clean(r.get("corridor_role"))})
+            st.markdown("#### Companies / operators")
+            st.dataframe(pd.DataFrame([{k:v for k,v in x.items() if k not in ("type","id")} for x in rows]), hide_index=True, use_container_width=True)
+            _open_selector(rows, f"l2_corridor_companies_{oid}")
+    elif typ == "event":
+        links = _event_links("event", oid)
+        rows = []
+        for l in links:
+            lt = _clean(l.get("linked_type")).casefold()
+            if lt == "vessel":
+                lt = "mobile_asset"
+            lid = _clean(l.get("linked_id"))
+            if lt in OBJECTS and lid:
+                rows.append({"type":lt,"id":lid,"name":_object_name(lt,lid),"relationship":_clean(l.get("relationship"))})
+        if rows:
+            st.markdown("#### Affected / involved objects")
+            st.dataframe(pd.DataFrame([{k:v for k,v in x.items() if k not in ("type","id")} for x in rows]), hide_index=True, use_container_width=True)
+            _open_selector(rows, f"l2_event_links_{oid}")
+        else:
+            st.caption("No canonical object links are recorded for this event yet.")
+
+
+def _render_layer3(typ: str, oid: str, rec: dict, lens: str):
+    st.markdown(f"### {LENS[lens]['layer3']}")
+    if typ == "entity":
+        profiles = _filtered_rows("pc_company_profiles", "entity_id", str(oid), 5)
+        if profiles:
+            p = profiles[0]
+            st.markdown("#### Company profile")
+            if p.get("business_description"):
+                st.write(p.get("business_description"))
+            fields = []
+            for k in ("sector","website_url","products_services","operating_countries"):
+                if p.get(k) not in (None,"",[],{}):
+                    fields.append({"Field":k.replace("_"," ").title(),"Value":_clean(p.get(k))})
+            if fields:
+                st.dataframe(pd.DataFrame(fields), hide_index=True, use_container_width=True)
+        port = _portfolio(oid)
+        if port:
+            st.markdown("#### Portfolio / investments / concessions")
+            st.dataframe(pd.DataFrame(port), hide_index=True, use_container_width=True, height=min(420, 100+28*len(port)))
+        for title, table in (
+            ("Transactions", "pc_transactions"),
+            ("Projects", "pc_project_details"),
+            ("Contracts", "pc_contracts"),
+            ("Shipbuilding / platform orders", "pc_shipbuilding_orders"),
+        ):
+            x = _related_table(table, oid, _clean(rec.get("name")), 80)
+            if x:
+                st.markdown("#### " + title)
+                st.dataframe(pd.DataFrame(x), hide_index=True, use_container_width=True, height=min(380,100+28*len(x)))
+    elif typ == "asset":
+        companies = _asset_companies(rec)
+        if companies:
+            st.markdown("#### Commercial / institutional control")
+            st.dataframe(pd.DataFrame(companies), hide_index=True, use_container_width=True)
+        for title, table in (("Projects / expansion", "pc_project_details"), ("Contracts", "pc_contracts")):
+            x = _related_table(table, oid, _clean(rec.get("name")), 80)
+            if x:
+                st.markdown("#### " + title)
+                st.dataframe(pd.DataFrame(x), hide_index=True, use_container_width=True)
+    elif typ == "mobile_asset":
+        for title, table in (("Shipbuilding / orderbook", "pc_shipbuilding_orders"), ("Contracts / programmes", "pc_contracts")):
+            x = _related_table(table, oid, _clean(rec.get("name")), 80)
+            if x:
+                st.markdown("#### " + title)
+                st.dataframe(pd.DataFrame(x), hide_index=True, use_container_width=True)
+    elif typ == "corridor":
+        routes = _related_table("pc_transport_routes", oid, _clean(rec.get("corridor_name")), 100)
+        if routes:
+            st.markdown("#### Services / routes")
+            st.dataframe(pd.DataFrame(routes), hide_index=True, use_container_width=True)
+        rates = _related_table("pc_freight_rate_observations", oid, _clean(rec.get("corridor_name")), 100)
+        if rates:
+            st.markdown("#### Freight / market observations")
+            st.dataframe(pd.DataFrame(rates), hide_index=True, use_container_width=True)
+    elif typ == "event":
+        st.markdown("#### Event assessment")
+        rows = []
+        for k in ("description","operational_impact","commercial_impact","what_it_means","pc_assessment"):
+            if rec.get(k):
+                rows.append({"Field":k.replace("_"," ").title(),"Value":_clean(rec.get(k))})
+        if rows:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    if lens == "sanctions":
+        st.markdown("#### Sanctions / exposure")
+        sanctions = _related_table("pc_sanctions_designations", oid, _object_name(typ, oid), 100)
+        links = _related_table("pc_sanctions_links", oid, _object_name(typ, oid), 100)
+        screening = _related_table("pc_screening_results", oid, _object_name(typ, oid), 100)
+        if sanctions:
+            st.dataframe(pd.DataFrame(sanctions), hide_index=True, use_container_width=True)
+        if links:
+            st.markdown("**Ownership / designation network**")
+            st.dataframe(pd.DataFrame(links), hide_index=True, use_container_width=True)
+        if screening:
+            st.markdown("**Screening / review**")
+            st.dataframe(pd.DataFrame(screening), hide_index=True, use_container_width=True)
+        if not (sanctions or links or screening):
+            st.caption("No sanctions/designation record is currently linked to this canonical context.")
+
+    if lens == "strategic":
+        st.markdown("#### Strategic programmes / capacity")
+        found = False
+        for title, table in (("Programmes / projects","pc_project_details"),("Contracts","pc_contracts"),("Shipbuilding orders","pc_shipbuilding_orders")):
+            x = _related_table(table, oid, _object_name(typ, oid), 120)
+            if x:
+                found = True
+                st.markdown("**" + title + "**")
+                st.dataframe(pd.DataFrame(x), hide_index=True, use_container_width=True)
+        if not found:
+            st.caption("No strategic programme, contract or order is currently linked to this context.")
+
+
+def _render_event_cards(events: list[dict], key_prefix: str, limit: int = 15):
+    if not events:
+        st.caption("No linked canonical developments.")
+        return
+    for i, e in enumerate(events[:limit]):
+        title = _clean(e.get("title")) or "Untitled development"
+        date = _clean(e.get("start_date"))[:10]
+        with st.expander(f"{date} · {title}" if date else title):
+            if e.get("description"):
+                st.write(e.get("description"))
+            impact = e.get("operational_impact") or e.get("commercial_impact")
+            if impact:
+                st.markdown("**Impact**")
+                st.write(impact)
+            eid = _clean(e.get("event_id"))
+            if eid and st.button("Open development in terminal", key=f"{key_prefix}_{i}_{eid}", use_container_width=True):
+                _set_context("event", eid, title)
+                st.rerun()
+
+
+def _render_layer4(typ: str, oid: str, rec: dict, lens: str):
+    st.markdown(f"### {LENS[lens]['layer4']}")
+    events = _events_for_object(typ, oid)
+    if lens == "strategic":
+        events = [e for e in events if STRATEGIC_RX.search(_record_text(e))] or events
+    elif lens == "sanctions":
+        events = [e for e in events if SANCTIONS_RX.search(_record_text(e))] or events
+    st.markdown("#### Developments")
+    _render_event_cards(events, f"l4_{lens}_{typ}_{oid}", 12)
+
+    docs = _documents_for_entity(oid) if typ == "entity" else _documents_by_name(_object_name(typ, oid), 25)
+    if docs:
+        st.markdown("#### Documents / filings / research")
+        drows = []
+        for d in docs[:40]:
+            drows.append({
+                "Date": _clean(d.get("published_date")),
+                "Title": _clean(d.get("title")),
+                "Type": _clean(d.get("document_type")),
+                "Source": _clean(d.get("source_name")),
+                "Relationship": _clean(d.get("_relationship")),
+                "URL": _clean(d.get("source_url")),
+            })
+        st.dataframe(pd.DataFrame(drows), hide_index=True, use_container_width=True)
+
+    sources = []
+    meta = _meta(rec)
+    for x in meta.get("research_sources") or []:
+        if isinstance(x, dict):
+            u = x.get("url")
+        else:
+            u = x
+        if isinstance(u, str) and u.startswith(("http://","https://")):
+            sources.append(u)
+    if sources:
+        st.markdown("#### Source evidence")
+        for u in list(dict.fromkeys(sources))[:20]:
+            st.markdown(f"- {u}")
+
+
+def _render_home(lens: str):
+    cfg = LENS[lens]
+    st.markdown(f"<div class='pc-k'>{cfg['brand']} · terminal</div>", unsafe_allow_html=True)
+    st.title(cfg["title"])
+    st.markdown(f"<div class='pc-sub'>{cfg['deck']}</div>", unsafe_allow_html=True)
+
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Companies / organisations", len(_rows("pc_entities", 10000)))
+    c2.metric("Infrastructure nodes", len(_rows("pc_assets", 10000)))
+    c3.metric("Mobile assets", len(_rows("pc_mobile_assets", 10000)))
+    c4.metric("Corridors", len(_rows("pc_trade_corridors", 5000)))
+
+    st.markdown("### Recent developments")
+    events = _rows("pc_events", 1200)
+    if lens == "trade":
+        filtered = [e for e in events if TRADE_RX.search(_record_text(e))]
+    elif lens == "sanctions":
+        filtered = [e for e in events if SANCTIONS_RX.search(_record_text(e))]
+    elif lens == "strategic":
+        filtered = [e for e in events if STRATEGIC_RX.search(_record_text(e))]
+    else:
+        filtered = events
+    filtered = sorted(filtered, key=lambda x: _clean(x.get("start_date")), reverse=True)
+    _render_event_cards(filtered, f"home_{lens}", 12)
+
+
+def render_terminal(lens: str = "trade"):
+    lens = lens if lens in LENS else "trade"
+    cfg = LENS[lens]
+    sb = _sb()
+    if sb is None:
+        st.error("P&C database connection is not configured.")
+        st.stop()
+
+    with st.sidebar:
+        st.markdown("<div class='pc-k'>POWER & CORRIDORS INTELLIGENCE</div>", unsafe_allow_html=True)
+        st.markdown("### " + cfg["brand"])
+        st.caption("Shared canonical terminal · " + cfg["deck"])
+        theme = st.radio("Appearance", ["Light", "Dark"], horizontal=True,
+                         index=0 if st.session_state.get("pc_terminal_theme","Light")=="Light" else 1,
+                         key="pc_terminal_theme")
+        st.divider()
+        if st.button("Home / clear selection", use_container_width=True):
+            _clear_context()
+            st.rerun()
+        if st.button("Refresh database", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
+    _style(theme)
+    _restore_context()
+
+    st.markdown("<div class='pc-command'><div class='pc-k'>GLOBAL COMMAND BAR</div>", unsafe_allow_html=True)
+    q = st.text_input(
+        "Search company, vessel / IMO, port, terminal, airport, dry port, rail node, corridor, event or sanction",
+        placeholder="AD Ports, Rotterdam, Jebel Ali, IMO 9251822, Tbilisi Dry Port, Hormuz…",
+        key=f"pc_terminal_search_{lens}",
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if q.strip():
+        results = _search_objects(q, lens, 80)
+        if results:
+            pick = st.selectbox(
+                "Search results",
+                range(len(results)),
+                format_func=lambda i: f"{results[i]['name']} · {results[i]['kind']}"
+                                      + (f" · {results[i]['subtype']}" if results[i]['subtype'] else "")
+                                      + (f" · {results[i]['country']}" if results[i]['country'] else ""),
+                key=f"pc_terminal_search_pick_{lens}",
+            )
+            x = results[pick]
+            if st.button("Open selected object", type="primary", use_container_width=True,
+                         key=f"pc_terminal_search_open_{lens}"):
+                _set_context(x["type"], x["id"], x["name"])
+                st.rerun()
+        else:
+            st.info("No canonical object matched that search.")
+
+    typ, oid, rec = _context_record()
+    if not typ or not oid or not rec:
+        _render_home(lens)
+        return
+
+    _render_context_header(typ, oid, rec, lens)
+
+    # Three-engine screen: each panel reads the same selected canonical context.
+    c2, c3, c4 = st.columns([1.15, 1.0, 1.0], gap="large")
+    with c2:
+        with st.container(border=True):
+            _render_layer2(typ, oid, rec, lens)
+    with c3:
+        with st.container(border=True):
+            _render_layer3(typ, oid, rec, lens)
+    with c4:
+        with st.container(border=True):
+            _render_layer4(typ, oid, rec, lens)
+
+    st.divider()
+    tabs = st.tabs([
+        "Canonical record",
+        "Network",
+        "All linked developments",
+        "Documents & evidence",
+    ])
+    with tabs[0]:
+        st.json(rec)
+    with tabs[1]:
+        rels = _relationships(typ, oid) if typ != "corridor" else []
+        if rels:
+            st.dataframe(pd.DataFrame(rels), hide_index=True, use_container_width=True)
+            objs = _linked_objects_from_relationships(typ, oid)
+            _open_selector(objs, f"terminal_network_{lens}_{typ}_{oid}")
+        else:
+            st.caption("No generic graph relationships recorded. Specialist role tables above may still contain connections.")
+    with tabs[2]:
+        _render_event_cards(_events_for_object(typ, oid), f"terminal_events_{lens}_{typ}_{oid}", 50)
+    with tabs[3]:
+        docs = _documents_for_entity(oid) if typ == "entity" else _documents_by_name(_object_name(typ, oid), 60)
+        if docs:
+            st.dataframe(pd.DataFrame(docs), hide_index=True, use_container_width=True)
+        else:
+            st.caption("No linked document records found for this context.")
