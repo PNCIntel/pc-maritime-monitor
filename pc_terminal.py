@@ -2696,6 +2696,273 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
                 st.dataframe(pd.DataFrame(tx),hide_index=True,use_container_width=True)
 
 
+def _is_port_operator_entity(rec: dict) -> bool:
+    blob=" ".join([
+        _clean(rec.get("entity_type")),_clean(rec.get("sector")),_clean(rec.get("subtype")),
+        _clean(rec.get("name")),_clean(rec.get("description")),
+        _clean((_meta(rec) or {}).get("business_segments")),
+    ]).casefold()
+    commercial=(
+        "port operator","terminal operator","terminal concession","concessionaire",
+        "ports group","port services","stevedoring","marine terminal",
+        "gateway terminal","inland terminal operator"
+    )
+    institutional=(
+        "port authority","maritime authority","transport authority","ministry",
+        "administration","agency","regulator","commission"
+    )
+    return any(t in blob for t in commercial) and not any(t in blob for t in institutional)
+
+
+def _mobile_identity_facts(rec: dict) -> list[tuple[str,str]]:
+    fields=[
+        ("Asset class",_company_display_value(rec.get("asset_type"),rec.get("subtype"))),
+        ("IMO",rec.get("imo")),("MMSI",rec.get("mmsi")),
+        ("Call sign / registration",_company_display_value(rec.get("call_sign"),rec.get("call_sign_or_registration"),rec.get("registration"))),
+        ("Flag",rec.get("flag")),("Build year",_company_display_value(rec.get("build_year"),rec.get("year_built"))),
+        ("Builder / shipyard",_company_display_value(rec.get("builder"),rec.get("shipyard"))),
+        ("DWT",rec.get("dwt")),("GT",_company_display_value(rec.get("gross_tonnage"),rec.get("gt"))),
+        ("TEU",_company_display_value(rec.get("teu_capacity"),rec.get("teu"))),
+        ("Length",_company_display_value(rec.get("length_m"),rec.get("length"))),
+        ("Beam",_company_display_value(rec.get("beam_m"),rec.get("beam"))),
+        ("Status",rec.get("status")),
+    ]
+    return [(k,_clean(v)) for k,v in fields if v not in (None,"",[],{})]
+
+
+def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
+    name=_object_name("mobile_asset",oid)
+    companies=_mobile_companies(rec)
+    linked=_linked_objects_from_relationships("mobile_asset",oid)
+    events=_events_for_object("mobile_asset",oid)
+    sanctions=_filtered_rows("pc_sanctions_designations","mobile_asset_id",str(oid),200)
+    docs=[]
+    try:
+        from pc_document_vessels import documents_for_vessel
+        for did in documents_for_vessel(_sb(),oid)[:30]:
+            rows=_filtered_rows("pc_documents","document_id",str(did),2)
+            if rows: docs.append(rows[0])
+    except Exception:
+        pass
+    if not docs:
+        docs=_documents_by_name(name,20)
+
+    infra=[x for x in linked if x.get("type")=="asset"]
+    corridors=[x for x in linked if x.get("type")=="corridor"]
+    related_entities=[x for x in linked if x.get("type")=="entity"]
+
+    m=st.columns(6)
+    m[0].metric("Owners / managers",len(companies) or len(related_entities))
+    m[1].metric("Linked locations",len(infra))
+    m[2].metric("Corridors",len(corridors))
+    m[3].metric("Developments",len(events))
+    m[4].metric("Sanctions records",len(sanctions))
+    m[5].metric("Source documents",len(docs))
+
+    left,right=st.columns([1.0,1.4],gap="large")
+    with left:
+        with st.container(border=True):
+            st.markdown("### Asset Identity")
+            st.markdown(f"#### {name}")
+            subtype=_company_display_value(rec.get("subtype"),rec.get("asset_type"))
+            if subtype: st.caption(subtype.replace("_"," ").title())
+            for label,value in _mobile_identity_facts(rec):
+                st.markdown(
+                    f"<div class='pc-row'><span class='pc-row-label'>{label}</span>"
+                    f"<span class='pc-row-meta' style='white-space:normal;text-align:right'>{value}</span></div>",
+                    unsafe_allow_html=True
+                )
+
+        with st.container(border=True):
+            st.markdown("### Ownership, Operation & Management")
+            combined=[]; seen=set()
+            for x in companies:
+                k=x.get("id")
+                if k and k not in seen:
+                    seen.add(k); combined.append({"type":"entity","id":k,"name":x.get("name"),"relationship":x.get("role")})
+            for x in related_entities:
+                if x.get("id") and x.get("id") not in seen:
+                    seen.add(x.get("id")); combined.append(x)
+            _render_company_relationship_cards(combined,f"mobile_comp_{_norm(oid)}",15)
+
+        if sanctions:
+            with st.container(border=True):
+                st.markdown("### Sanctions / Restrictions")
+                for s in sanctions[:12]:
+                    title=_company_display_value(s.get("designated_name"),s.get("subject_name"),s.get("name"),"Designation")
+                    regime=_company_display_value(s.get("program"),s.get("regime"),s.get("authority"))
+                    status=_company_display_value(s.get("status"),s.get("designation_status"))
+                    st.markdown(f"**{title}**")
+                    st.caption(" · ".join(x for x in [regime,status,_clean(s.get("designation_date"))] if x))
+
+    with right:
+        with st.container(border=True):
+            st.markdown("### Operational / Geographic Context")
+            points=[]
+            xy=_coords_from_record(rec)
+            if xy: points.append({"lat":xy[0],"lon":xy[1],"name":name,"type":"mobile asset"})
+            for x in infra[:30]:
+                p=_asset_point(x.get("id"))
+                if p: points.append(p)
+            if points:
+                st.map(pd.DataFrame(points),latitude="lat",longitude="lon",size=46,zoom=None,use_container_width=True)
+            else:
+                st.caption("No current coordinate or linked mapped infrastructure is stored yet. Live AIS/ADS-B can be layered here later.")
+            if infra:
+                st.markdown("#### Linked ports / terminals / infrastructure")
+                _render_company_asset_cards(infra,f"mobile_infra_{_norm(oid)}",12)
+
+        if corridors:
+            with st.container(border=True):
+                st.markdown("### Corridor / Route Exposure")
+                for i,x in enumerate(corridors[:12]):
+                    cols=st.columns([3.2,1.4,1.0])
+                    cols[0].markdown(f"**{x.get('name')}**")
+                    cols[1].caption((_clean(x.get("relationship")) or "connected").replace("_"," ").title())
+                    cols[2].button("Open",key=f"mobile_corr_{_norm(oid)}_{i}",use_container_width=True,
+                                   on_click=_set_context,args=("corridor",x.get("id"),x.get("name") or ""))
+
+    low1,low2=st.columns([1.0,1.25],gap="large")
+    with low1:
+        with st.container(border=True):
+            st.markdown("### Source Evidence")
+            if docs:
+                for i,d in enumerate(docs[:12]):
+                    title=_clean(d.get("title")) or "Source document"
+                    st.markdown(f"**{title}**")
+                    src=_company_display_value(d.get("source_name"),d.get("publisher"),d.get("document_type"))
+                    if src: st.caption(src)
+                    urls=_event_source_urls(d)
+                    if urls: st.link_button("Open source",urls[0],key=f"mobile_doc_{_norm(oid)}_{i}")
+            else:
+                st.caption("No linked source documents recorded yet.")
+    with low2:
+        with st.container(border=True):
+            st.markdown("### Recent Activity & Intelligence")
+            _render_event_rows(events,"mobile_events_"+_norm(oid),12)
+
+    st.markdown("### Asset Timeline")
+    _render_event_rows(events,"mobile_timeline_"+_norm(oid),18)
+
+    with st.expander("Identity history / structured data"):
+        history=[]
+        for table in ("pc_mobile_asset_name_history","pc_mobile_asset_identity_history","pc_vessel_identifiers"):
+            history.extend(_related_table(table,oid,name,100))
+        if history:
+            st.dataframe(pd.DataFrame(history),hide_index=True,use_container_width=True)
+        st.json(rec)
+
+
+def _render_port_operator_terminal(oid: str, rec: dict, lens: str):
+    name=_object_name("entity",oid)
+    profiles=_company_profile_rows(oid)
+    p=profiles[0] if profiles else {}
+    roles=_company_asset_roles(oid)
+    footprint=[]
+    for r in roles:
+        aid=_clean(r.get("asset_id"))
+        if not aid: continue
+        arec=object_record("asset",aid) or {}
+        blob=" ".join([_clean(arec.get("asset_type")),_clean(arec.get("subtype")),_clean(arec.get("name"))]).casefold()
+        if any(t in blob for t in ("port","terminal","berth","dry port","container","harbour","harbor","jetty","wharf")):
+            footprint.append({
+                "type":"asset","id":aid,"name":_asset_chip(aid),
+                "relationship":_clean(r.get("asset_role")),
+                "country":_clean(arec.get("country")),"region":_clean(arec.get("region_city")),
+            })
+    corporate=[x for x in _linked_objects_from_relationships("entity",oid) if x.get("type")=="entity"]
+    corridors=_company_corridors(oid)
+    portfolio=_portfolio(oid)
+    tx=_related_table("pc_transactions",oid,name,150)
+    events=_events_for_object("entity",oid)
+    docs=_documents_for_entity(oid) or _documents_by_name(name,25)
+    countries=sorted(set(x.get("country") for x in footprint if x.get("country")))
+
+    m=st.columns(6)
+    m[0].metric("Ports / terminals",len(footprint))
+    m[1].metric("Countries",len(countries))
+    m[2].metric("Corridors",len(corridors))
+    m[3].metric("Portfolio positions",len(portfolio))
+    m[4].metric("Capital actions",len(tx))
+    m[5].metric("Developments",len(events))
+
+    left,right=st.columns([1.0,1.45],gap="large")
+    with left:
+        with st.container(border=True):
+            st.markdown("### Operator Profile")
+            desc=_company_display_value(p.get("business_description"),rec.get("description"))
+            if desc: st.write(desc)
+            facts=[
+                ("Sector / role",_company_display_value(p.get("sector"),rec.get("sector"),rec.get("entity_type"))),
+                ("Headquarters",", ".join(x for x in [_clean(rec.get("hq_city")),_clean(rec.get("hq_country"))] if x)),
+                ("Countries in mapped footprint",", ".join(countries[:12])),
+                ("Website",_company_display_value(p.get("website_url"),rec.get("website_url"))),
+            ]
+            for label,value in facts:
+                if value:
+                    st.markdown(
+                        f"<div class='pc-row'><span class='pc-row-label'>{label}</span>"
+                        f"<span class='pc-row-meta' style='white-space:normal;text-align:right'>{value}</span></div>",
+                        unsafe_allow_html=True
+                    )
+        with st.container(border=True):
+            st.markdown("### Corporate / Concession Network")
+            _render_company_relationship_cards(corporate,f"portop_network_{_norm(oid)}",12)
+
+    with right:
+        with st.container(border=True):
+            st.markdown("### Port & Terminal Footprint")
+            mapped=[]
+            for x in footprint:
+                pnt=_asset_point(x.get("id"))
+                if pnt: mapped.append(pnt)
+            if mapped:
+                st.map(pd.DataFrame(mapped),latitude="lat",longitude="lon",size=44,zoom=None,use_container_width=True)
+            _render_company_asset_cards(footprint,f"portop_assets_{_norm(oid)}",14)
+
+        if corridors:
+            with st.container(border=True):
+                st.markdown("### Corridor Exposure")
+                for i,r in enumerate(corridors[:12]):
+                    ck=_clean(r.get("corridor_key")); nm=_object_name("corridor",ck)
+                    cols=st.columns([3.2,1.4,1.0])
+                    cols[0].markdown(f"**{nm}**")
+                    cols[1].caption((_clean(r.get("corridor_role")) or "connected").replace("_"," ").title())
+                    cols[2].button("Open",key=f"portop_corr_{_norm(oid)}_{i}",use_container_width=True,
+                                   on_click=_set_context,args=("corridor",ck,nm))
+
+    low1,low2=st.columns([1.0,1.25],gap="large")
+    with low1:
+        with st.container(border=True):
+            st.markdown("### Investment, Transactions & Portfolio")
+            _render_company_transaction_cards(tx,10)
+            if portfolio:
+                with st.expander(f"Portfolio positions ({len(portfolio)})"):
+                    st.dataframe(pd.DataFrame(portfolio),hide_index=True,use_container_width=True)
+    with low2:
+        with st.container(border=True):
+            st.markdown("### Current Developments")
+            _render_event_rows(events,"portop_events_"+_norm(oid),10)
+
+    with st.container(border=True):
+        st.markdown("### Filings, Concessions & Evidence")
+        if docs:
+            for i,d in enumerate(docs[:15]):
+                st.markdown(f"**{_clean(d.get('title')) or 'Untitled document'}**")
+                src=_company_display_value(d.get("source_name"),d.get("document_type"),d.get("_relationship"))
+                if src: st.caption(src)
+                urls=_event_source_urls(d)
+                if urls: st.link_button("Open source",urls[0],key=f"portop_doc_{_norm(oid)}_{i}")
+        else:
+            st.caption("No linked documents recorded yet.")
+
+    st.markdown("### Operator Development Timeline")
+    _render_event_rows(events,"portop_timeline_"+_norm(oid),15)
+
+    with st.expander("Structured data / developer view"):
+        st.json(rec)
+
+
 def _is_institutional_entity(rec: dict) -> bool:
     blob=" ".join([
         _clean(rec.get("entity_type")),
@@ -3178,14 +3445,19 @@ def render_terminal(lens: str = "trade"):
     if typ=="entity":
         if _is_institutional_entity(rec):
             _render_institution_terminal(oid,rec,lens)
+        elif _is_port_operator_entity(rec):
+            _render_port_operator_terminal(oid,rec,lens)
         else:
             _render_company_terminal(oid,rec,lens)
         return
     if typ=="asset":
         _render_infrastructure_terminal(oid,rec,lens)
         return
+    if typ=="mobile_asset":
+        _render_mobile_asset_terminal(oid,rec,lens)
+        return
 
-    # Persistent tactical workspace for vessels, corridors and events.
+    # Persistent tactical workspace for corridors and events.
     left, center, right = st.columns([1.0, 1.25, 1.0], gap="large")
     with left:
         with st.container(border=True):
