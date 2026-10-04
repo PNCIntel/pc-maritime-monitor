@@ -2347,6 +2347,17 @@ def _render_publication_workspace(sb, lens: str, mode: str):
     context=(typ,oid,rec) if typ and oid and rec else None
     render_report_studio(sb,context=context,mode=mode)
 
+def _render_sanctions_query_report(sb):
+    try:
+        from pc_sanctions_report import render_sanctions_report_area
+    except Exception as exc:
+        st.error(f"Sanctions report workspace could not load: {exc}")
+        return
+    typ,oid,rec=_context_record()
+    context=(typ,oid,rec) if typ and oid and rec else None
+    render_sanctions_report_area(sb,context=context)
+
+
 def render_terminal(lens: str = "trade"):
     lens = lens if lens in LENS else "trade"
     cfg = LENS[lens]
@@ -2386,7 +2397,9 @@ def render_terminal(lens: str = "trade"):
             "sanctions":[
                 ("Exposure Picture",""),("Designations","sanction"),("Screening","screening"),
                 ("Ownership & Control","ownership"),("Vessels","vessel"),
-                ("Jurisdictions / Regimes","OFAC"),("Events","sanction"),("Evidence","document")
+                ("Jurisdictions / Regimes","OFAC"),("Events","sanction"),
+                ("Query & Report Studio","__sanctions_report__"),
+                ("Report Library","__report_library__"),("Evidence","document")
             ],
             "strategic":[
                 ("Industrial Picture",""),("Organisations","coast guard"),("Shipyards","shipyard"),
@@ -2445,6 +2458,8 @@ def render_terminal(lens: str = "trade"):
             _render_publication_workspace(sb,lens,"brief")
         elif workspace=="__report_library__":
             _render_publication_workspace(sb,lens,"library")
+        elif workspace=="__sanctions_report__":
+            _render_sanctions_query_report(sb)
         return
 
     st.markdown("<div class='pc-command'><div class='pc-k'>GLOBAL COMMAND BAR</div>", unsafe_allow_html=True)
