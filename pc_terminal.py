@@ -1252,11 +1252,112 @@ def _render_layer4(typ: str, oid: str, rec: dict, lens: str):
             st.markdown(f"- {u}")
 
 
+def _event_theme(e: dict) -> str:
+    blob=_record_text(e).casefold()
+    if any(x in blob for x in ("attack","strike","missile","drone","piracy","boarding","intercept","seizure","military","naval","security","war risk")):
+        return "Security / conflict"
+    if any(x in blob for x in ("sanction","ofac","sdn","export control","embargo","dark fleet","shadow fleet","evasion")):
+        return "Sanctions / compliance"
+    if any(x in blob for x in ("strike action","labour","labor","collision","grounding","fire","outage","closure","disruption","congestion","drought","low water")):
+        return "Operational disruption"
+    if any(x in blob for x in ("acquisition","investment","capex","expansion","terminal","berth","rail","airport","shipyard","orderbook")):
+        return "Infrastructure / capacity"
+    if any(x in blob for x in ("election","government","policy","agreement","diplomatic","state","corridor","trade route")):
+        return "Statecraft / policy"
+    return "Other intelligence"
+
+def _event_priority(e: dict) -> int:
+    score=0
+    sev=_clean(e.get("severity")).casefold()
+    if sev in {"critical","severe","high"}: score+=40
+    if str(e.get("alert_worthy") or "").casefold() in {"true","1","yes"}: score+=30
+    if str(e.get("intelligence_relevance") or "").casefold() in {"high","critical","true","1","yes"}: score+=20
+    theme=_event_theme(e)
+    if theme in {"Security / conflict","Sanctions / compliance","Operational disruption"}: score+=20
+    blob=_record_text(e).casefold()
+    if any(x in blob for x in ("hormuz","red sea","suez","black sea","panama canal","bab el mandeb","gulf of aden")):
+        score+=15
+    if e.get("operational_impact") or e.get("commercial_impact"): score+=10
+    return score
+
+def _event_region_label(e: dict) -> str:
+    for k in ("region","country","countries","location"):
+        v=e.get(k)
+        if isinstance(v,dict):
+            v=v.get("name") or v.get("country") or v.get("region")
+        if isinstance(v,list):
+            v=", ".join(str(x) for x in v[:2])
+        if v:
+            s=_clean(v)
+            if len(s)>55: s=s[:52]+"…"
+            return s
+    return "Global / unspecified"
+
+def _render_intelligence_home():
+    events=_rows("pc_events",2500)
+    events=sorted(events,key=lambda x:_clean(x.get("start_date")),reverse=True)
+
+    priority=sorted(events,key=lambda x:(_event_priority(x),_clean(x.get("start_date"))),reverse=True)
+    security=[e for e in events if _event_theme(e)=="Security / conflict"]
+    sanctions=[e for e in events if _event_theme(e)=="Sanctions / compliance"]
+    disruptions=[e for e in events if _event_theme(e)=="Operational disruption"]
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Priority intelligence",sum(1 for e in events if _event_priority(e)>=40))
+    c2.metric("Security / conflict",len(security))
+    c3.metric("Operational disruptions",len(disruptions))
+    c4.metric("Corridors monitored",len(_rows("pc_trade_corridors",5000)))
+
+    left,right=st.columns([1.8,1.0],gap="large")
+    with left:
+        st.markdown("### Priority intelligence")
+        st.caption("Highest-value developments first: security, disruption, sanctions and strategic chokepoints.")
+        _render_event_cards(priority,f"intel_priority",12)
+    with right:
+        st.markdown("### Monitoring desk")
+        theme_counts={}
+        region_counts={}
+        for e in events[:500]:
+            theme=_event_theme(e)
+            theme_counts[theme]=theme_counts.get(theme,0)+1
+            region=_event_region_label(e)
+            region_counts[region]=region_counts.get(region,0)+1
+
+        st.markdown("#### Active themes")
+        if theme_counts:
+            theme_df=pd.DataFrame(
+                sorted(({"Theme":k,"Records":v} for k,v in theme_counts.items()),key=lambda x:x["Records"],reverse=True)
+            )
+            st.dataframe(theme_df,hide_index=True,use_container_width=True,height=min(300,80+28*len(theme_df)))
+
+        st.markdown("#### Geographic concentration")
+        regions=sorted(({"Region / location":k,"Records":v} for k,v in region_counts.items()),key=lambda x:x["Records"],reverse=True)[:10]
+        if regions:
+            st.dataframe(pd.DataFrame(regions),hide_index=True,use_container_width=True,height=min(360,80+28*len(regions)))
+
+    st.divider()
+    st.markdown("### Intelligence streams")
+    t1,t2,t3,t4=st.tabs(["Security & Maritime","Disruptions","Sanctions & Compliance","Statecraft / Capacity"])
+    with t1:
+        _render_event_cards(security,"intel_security",20)
+    with t2:
+        _render_event_cards(disruptions,"intel_disruptions",20)
+    with t3:
+        _render_event_cards(sanctions,"intel_sanctions",20)
+    with t4:
+        strategic=[e for e in events if _event_theme(e) in {"Statecraft / policy","Infrastructure / capacity"}]
+        _render_event_cards(strategic,"intel_statecraft",20)
+
+
 def _render_home(lens: str):
     cfg = LENS[lens]
     st.markdown(f"<div class='pc-k'>{cfg['brand']} · terminal</div>", unsafe_allow_html=True)
     st.title(cfg["title"])
     st.markdown(f"<div class='pc-sub'>{cfg['deck']}</div>", unsafe_allow_html=True)
+
+    if lens=="intelligence":
+        _render_intelligence_home()
+        return
 
     c1,c2,c3,c4 = st.columns(4)
     c1.metric("Companies / organisations", len(_rows("pc_entities", 10000)))
