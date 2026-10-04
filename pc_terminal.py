@@ -2241,7 +2241,12 @@ def _home_nav(lens: str):
     st.session_state['pc_uae_ofac_overlap'] = False
     st.session_state[f"pc_terminal_workspace_{lens}"]=""
     st.session_state[f"pc_terminal_search_{lens}"]=""
-    st.session_state[f"pc_terminal_nav_{lens}"]="Home"
+    st.session_state[f"pc_terminal_nav_{lens}"]=(
+        "Home" if lens=="trade" else
+        "Operating Picture" if lens=="intelligence" else
+        "Exposure Picture" if lens=="sanctions" else
+        "Industrial Picture"
+    )
 
 def _render_publication_workspace(sb, lens: str, mode: str):
     try:
@@ -3271,6 +3276,10 @@ def render_terminal(lens: str = "trade"):
         st.error("P&C database connection is not configured.")
         st.stop()
 
+    # Restore deep-link context before drawing navigation so Home is never shown
+    # as active while an object dossier is open.
+    _restore_context()
+
     with st.sidebar:
         st.markdown("<div class='pc-k'>POWER & CORRIDORS INTELLIGENCE</div>", unsafe_allow_html=True)
         st.markdown("### " + cfg["brand"])
@@ -3312,10 +3321,22 @@ def render_terminal(lens: str = "trade"):
                 ("Security Operations","security operation"),("Documents","document")
             ],
         }
-        current=st.session_state.get(f"pc_terminal_nav_{lens}",
-                                     "Home" if lens=="trade" else
-                                     "Operating Picture" if lens=="intelligence" else
-                                     "Exposure Picture" if lens=="sanctions" else "Industrial Picture")
+        default_nav=("Home" if lens=="trade" else
+                     "Operating Picture" if lens=="intelligence" else
+                     "Exposure Picture" if lens=="sanctions" else "Industrial Picture")
+        has_context=bool(st.session_state.get("pc_terminal_id") and st.session_state.get("pc_terminal_type"))
+        current="__selected_object__" if has_context else st.session_state.get(f"pc_terminal_nav_{lens}",default_nav)
+
+        if has_context:
+            selected_name=st.session_state.get("pc_terminal_name") or object_label(
+                st.session_state.get("pc_terminal_type"),
+                st.session_state.get("pc_terminal_id"),
+            )
+            st.markdown("<div class='pc-k'>VIEWING DOSSIER</div>",unsafe_allow_html=True)
+            st.markdown("**"+_clean(selected_name)+"**")
+            st.caption((_clean(st.session_state.get("pc_terminal_type")) or "object").replace("_"," ").title())
+            st.divider()
+
         for i,(label,query) in enumerate(navs.get(lens,[])):
             if query.startswith("__"):
                 def _set_workspace(_lens=lens,_label=label,_mode=query):
@@ -3347,9 +3368,7 @@ def render_terminal(lens: str = "trade"):
             st.session_state['pc_document_browser'] = True
             st.rerun()
         if st.button("Home / clear selection", use_container_width=True):
-            st.session_state['pc_document_browser'] = False
-            st.session_state['pc_uae_ofac_overlap'] = False
-            _clear_context()
+            _home_nav(lens)
             st.rerun()
         if st.button("Refresh database", use_container_width=True):
             st.cache_data.clear()
@@ -3357,7 +3376,6 @@ def render_terminal(lens: str = "trade"):
         st.caption("Terminal index: " + ("active" if _terminal_index_ready() else "legacy fallback"))
 
     _style(theme)
-    _restore_context()
     if st.session_state.get('pc_uae_ofac_overlap'):
         st.markdown('### UAE / OFAC vessel overlap')
         st.caption('Shared hulls matched by IMO. UAE entry restrictions and OFAC designations retain separate authorities, dates and source records.')
