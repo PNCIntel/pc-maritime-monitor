@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit
 import pandas as pd
 import streamlit as st
-from pc_drilldown import drilldown_button, render_active_drilldown, render_sidebar_search
+from pc_drilldown import drilldown_button, render_active_drilldown, render_sidebar_search, _event_links_with_fallback
 
 try:
     from shared.pc_auth import service_client, require_login
@@ -124,26 +124,34 @@ def _events(_sb):
 
 @st.cache_data(ttl=60,show_spinner=False)
 def _links(_sb,event_id):
-    """Merge canonical and published graph edges for one event.
-
-    A successful empty query is not evidence that no published links exist, so
-    both graph surfaces are read and de-duplicated.
-    """
+    """Merge direct, published and sibling-canonical graph edges for one event."""
     found=[]
     seen=set()
-    for table in ("pc_event_links","pc_v12_published_links"):
-        try:
-            rows=(_sb.table(table)
-                  .select("linked_type,linked_id,linked_name,relationship")
-                  .eq("event_id",event_id).limit(100).execute().data or [])
-        except Exception:
-            rows=[]
-        for r in rows:
+
+    def add(rows):
+        for r in rows or []:
             key=(str(r.get("linked_type") or ""),str(r.get("linked_id") or ""),
                  str(r.get("relationship") or ""))
             if key in seen:
                 continue
             seen.add(key); found.append(r)
+
+    for table in ("pc_event_links","pc_v12_published_links"):
+        try:
+            add((_sb.table(table)
+                 .select("linked_type,linked_id,linked_name,relationship")
+                 .eq("event_id",event_id).limit(100).execute().data or []))
+        except Exception:
+            pass
+
+    # Existing canonical drill-down contains duplicate/sibling-event recovery.
+    # Use it here too so an older/duplicate event ID cannot hide vessel/company links.
+    try:
+        sibling_rows,_,_=_event_links_with_fallback(event_id)
+        add(sibling_rows)
+    except Exception:
+        pass
+
     return found
 
 def _count(sb,table):
