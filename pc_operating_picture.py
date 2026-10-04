@@ -177,51 +177,93 @@ def _style(theme="Dark"):
     .pc-status{{display:inline-block;padding:.12rem .38rem;border:1px solid var(--line);border-radius:3px;font-size:.66rem;color:var(--muted);margin-right:.3rem}}
     </style>""",unsafe_allow_html=True)
 
+def _display_location(v):
+    if isinstance(v,dict):
+        return _clean(v.get("name") or v.get("location") or v.get("country") or v.get("region"))
+    if isinstance(v,str):
+        s=v.strip()
+        if s.startswith("{") and s.endswith("}"):
+            try:
+                obj=json.loads(s)
+                if isinstance(obj,dict):
+                    return _clean(obj.get("name") or obj.get("location") or obj.get("country") or obj.get("region"))
+            except Exception:
+                pass
+    return _clean(v)
+
 def _event_expander(sb,r,mode,key_prefix="evt"):
     title=_clean(r.get("title")) or "Untitled development"
     date=_clean(r.get("start_date"))[:10]
     typ=_clean(r.get("event_type") or r.get("event_domain") or "Development")
-    loc=_clean(r.get("location") or r.get("country"))
+    loc=_display_location(r.get("location") or r.get("country"))
     m=_meta(r)
     eid=_clean(r.get("event_id"))
     label=f"{date} · {title}" if date else title
     with st.expander(label,expanded=False):
         st.markdown(f'<div class="pc-meta">{typ}{" · "+loc if loc else ""}</div>',unsafe_allow_html=True)
+
         desc=_clean(m.get("what_happened") or r.get("description"))
         why=_clean(m.get("why_it_matters") or m.get("what_it_means") or r.get("what_it_means"))
         op=_clean(r.get("operational_impact") or m.get("operational_impact"))
         commercial=_clean(r.get("commercial_impact") or r.get("commercial_implications") or m.get("commercial_implications") or m.get("business_implications"))
+        capacity=_clean(m.get("capacity_impact") or m.get("infrastructure_impact") or m.get("capacity_change"))
         assess=_clean(m.get("assessment") or m.get("pc_assessment") or r.get("pc_assessment"))
-        if desc: st.markdown("**What happened**"); st.write(desc)
-        if why: st.markdown("**Why it matters**"); st.write(why)
-        if op:
-            st.markdown('<div class="pc-impact"><b>Operational impact</b><br>'+op+'</div>',unsafe_allow_html=True)
-        if commercial and mode=="trade":
-            st.markdown('<div class="pc-impact"><b>Trade / commercial impact</b><br>'+commercial+'</div>',unsafe_allow_html=True)
-        if assess and mode=="intelligence":
-            st.markdown("**Assessment**"); st.write(assess)
-        if eid:
-            links=_links(sb,eid)
+
+        links=_links(sb,eid) if eid else []
+
+        if mode=="trade":
+            if desc:
+                st.markdown("**Development**")
+                st.write(desc)
+            if op:
+                st.markdown('<div class="pc-impact"><b>Operational change</b><br>'+op+'</div>',unsafe_allow_html=True)
+            if commercial:
+                st.markdown('<div class="pc-impact"><b>Trade / commercial effect</b><br>'+commercial+'</div>',unsafe_allow_html=True)
+            if capacity:
+                st.markdown("**Capacity / infrastructure effect**")
+                st.write(capacity)
             if links:
-                st.markdown("**Linked actors / assets / vessels**")
-                chips=[]
+                st.markdown("**Companies / assets / corridors affected**")
                 for x in links[:15]:
                     nm=_clean(x.get("linked_name")) or _clean(x.get("linked_id"))
                     rel=_clean(x.get("relationship")).replace("_"," ")
-                    if nm: chips.append(f"{nm} — {rel}" if rel else nm)
-                st.write(" · ".join(chips))
+                    if nm:
+                        st.markdown("- "+nm+(f" — {rel}" if rel else ""))
+        else:
+            if desc:
+                st.markdown("**What happened**")
+                st.write(desc)
+            if why:
+                st.markdown("**Why it matters**")
+                st.write(why)
+            if op:
+                st.markdown('<div class="pc-impact"><b>Operational impact</b><br>'+op+'</div>',unsafe_allow_html=True)
+            if assess:
+                st.markdown("**Assessment**")
+                st.write(assess)
+            if links:
+                st.markdown("**Linked actors / assets / vessels**")
+                for x in links[:15]:
+                    nm=_clean(x.get("linked_name")) or _clean(x.get("linked_id"))
+                    rel=_clean(x.get("relationship")).replace("_"," ")
+                    if nm:
+                        st.markdown("- "+nm+(f" — {rel}" if rel else ""))
+
         inds=m.get("monitoring_indicators") or r.get("monitoring_indicators")
         if inds:
-            st.markdown("**Monitoring / next indicators**")
+            st.markdown("**What to watch operationally**" if mode=="trade" else "**Monitoring / next indicators**")
             if isinstance(inds,list):
                 for x in inds[:8]:
                     v=x.get("indicator") or x.get("text") if isinstance(x,dict) else str(x)
                     if v: st.markdown("- "+_clean(v))
-            else: st.write(_clean(inds))
+            else:
+                st.write(_clean(inds))
+
         src=_sources(r)
         if src:
             st.markdown("**Sources**")
-            for u,lbl in src[:8]: st.markdown(f"- [{_clean(lbl) or urlsplit(u).netloc}]({u})")
+            for u,lbl in src[:8]:
+                st.markdown(f"- [{_clean(lbl) or urlsplit(u).netloc}]({u})")
 
 def _priority_feed(sb,rows,mode,n=10):
     ranked=sorted([r for r in rows if _relevant(r,mode)],key=lambda r:_score(r,mode),reverse=True)[:n]
