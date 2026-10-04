@@ -193,7 +193,7 @@ if _requested_workspace:
 
 mode = st.sidebar.radio(
     'Workspace',
-    ['Load intelligence', 'Analyst workbench', 'Database hygiene', 'Research company', 'Load documents', 'Review exceptions', 'Jobs & history', 'Search / database'],
+    ['Load intelligence', 'Analyst workbench', 'Database hygiene', 'Research company', 'Load documents', 'Port notices', 'Review exceptions', 'Jobs & history', 'Search / database'],
     index=0,
     key='pc_workspace_simple_v18',
 )
@@ -213,6 +213,10 @@ if mode == 'Research company':
 if mode == 'Load documents':
     from pc_document_loader import render_document_loader
     render_document_loader(sb)
+    st.stop()
+if mode == 'Port notices':
+    from pc_port_notice_monitor import render_port_notice_monitor
+    render_port_notice_monitor(sb)
     st.stop()
 if mode == 'Review exceptions':
     from pc_v15_bulk_replay import render_bulk_replay
