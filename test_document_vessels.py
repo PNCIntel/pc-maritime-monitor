@@ -37,7 +37,7 @@ class DocumentEvidenceTests(unittest.TestCase):
         data = pdf.tobytes()
         pdf.close()
         calls = []
-        def fake_http(endpoint, key, payload):
+        def fake_http(endpoint, key, payload, **kwargs):
             calls.append(payload)
             page = {'complete': True, 'text': 'Page transcription', 'has_vessel_table': len(calls)==2,
                     'vessel_row_count': 0 if len(calls)==1 else 1,
@@ -53,7 +53,7 @@ class DocumentEvidenceTests(unittest.TestCase):
         for _ in range(11): pdf.new_page()
         data = pdf.tobytes(); pdf.close()
         call = 0; serial = 0
-        def fake_http(*args):
+        def fake_http(*args, **kwargs):
             nonlocal call, serial
             call += 1
             n = 0 if call <= 2 else 52 if call == 3 else 49 if call == 11 else 53
@@ -67,10 +67,25 @@ class DocumentEvidenceTests(unittest.TestCase):
         self.assertEqual(result['pages'][-1]['vessel_row_count'], 49)
         self.assertEqual(result['vessels'][-1]['row_number'], 472)
 
+    def test_timeout_retry_and_completed_page_resume(self):
+        pdf = fitz.open(); pdf.new_page(); pdf.new_page()
+        data = pdf.tobytes(); pdf.close()
+        response = {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(
+            {'complete': True, 'text': 'cover', 'has_vessel_table': False, 'vessel_row_count': 0, 'vessels': []})}}]}
+        cache = {}
+        calls = Mock(side_effect=[response, TimeoutError('slow'), TimeoutError('slow')])
+        with self.assertRaisesRegex(RuntimeError, 'Page 2/2 timed out twice'):
+            extract_pdf(data, 'key', calls, checkpoints=cache)
+        resumed = Mock(return_value=response)
+        result = extract_pdf(data, 'key', resumed, checkpoints=cache)
+        self.assertEqual(result['page_count'], 2)
+        self.assertEqual(resumed.call_count, 1)
+        self.assertEqual(resumed.call_args.kwargs['timeout'], 420)
+
     def test_truncated_model_response_never_counts_as_complete(self):
         pdf = fitz.open(); pdf.new_page(); data = pdf.tobytes(); pdf.close()
         with self.assertRaisesRegex(ValueError, 'truncated'):
-            extract_pdf(data, 'test-key', lambda *args: {'choices': [{'finish_reason': 'length'}]})
+            extract_pdf(data, 'test-key', lambda *args, **kwargs: {'choices': [{'finish_reason': 'length'}]})
 
     def test_original_retention_verifies_digest_and_reuses_existing_bytes(self):
         f = io.BytesIO(b'%PDF original'); f.name = 'source.pdf'; f.getvalue = lambda: b'%PDF original'
