@@ -679,35 +679,149 @@ def process_next_job_subject(sb,job,api_key,model=MODEL):
 
 
 def _publish_dossier_event_links(sb,job):
-    """Connect explicitly identified involvement after both endpoints resolve."""
-    from pc_source_graph import is_dossier, valid_imo, normalize_identifiers
-    stages=(sb.table('pc_staged_records').select('staged_record_id,target_table,payload')
+    """Publish source-backed event -> company/asset/vessel edges after endpoints resolve.
+
+    The dossier already contains explicit event_links. Earlier code only materialised
+    IMO vessel involvement and silently skipped entity/asset identifiers, which left
+    published events disconnected from ports, terminals and companies.
+    """
+    from pc_source_graph import is_dossier, valid_imo, normalize_identifiers, norm
+    stages=(sb.table('pc_staged_records')
+            .select('staged_record_id,target_table,natural_key,payload')
             .eq('ingestion_job_id',job).limit(5000).execute().data or [])
     pubs=_publications_for_stages(sb,stages)
-    pub={str(r['staged_record_id']):r for r in pubs}; holds=[]; count=0
+    pub={str(r['staged_record_id']):r for r in pubs}
+    holds=[]; count=0
+
+    # Prefer endpoints resolved by this very job. This avoids a second identity
+    # decision and preserves the analyst-reviewed canonical binding.
+    staged_endpoints={}
     for row in stages:
-        if row.get('target_table')!='pc_events' or not is_dossier(row): continue
+        table=row.get('target_table')
+        if table not in {'pc_entities','pc_assets','pc_mobile_assets'}:
+            continue
+        pr=pub.get(str(row.get('staged_record_id')))
+        if not pr:
+            continue
+        p=row.get('payload') or {}
+        name=str(p.get('name') or row.get('natural_key') or '').strip()
+        if not name:
+            continue
+        typ={'pc_entities':'entity','pc_assets':'asset','pc_mobile_assets':'mobile_asset'}[table]
+        staged_endpoints.setdefault((typ,norm(name)),[]).append({
+            'id':pr.get('canonical_id'),'name':name,'row':row
+        })
+
+    def resolve_named(linked_type, linked_name, event_row):
+        typ='mobile_asset' if linked_type in {'vessel','mobile_asset'} else linked_type
+        if typ not in {'entity','asset','mobile_asset'}:
+            return None,'unsupported linked_type'
+
+        name=str(linked_name or '').strip()
+        if not name:
+            return None,'missing linked_name'
+
+        same_job=[x for x in staged_endpoints.get((typ,norm(name)),[]) if x.get('id')]
+        ids={str(x['id']) for x in same_job}
+        if len(ids)==1:
+            return next(iter(ids)),None
+        if len(ids)>1:
+            return None,'multiple published endpoints in this load'
+
+        table={'entity':'pc_entities','asset':'pc_assets','mobile_asset':'pc_mobile_assets'}[typ]
+        pk={'entity':'entity_id','asset':'asset_id','mobile_asset':'mobile_asset_id'}[typ]
+        try:
+            rows=(sb.table(table).select(pk+',name')
+                  .ilike('name',name).limit(10).execute().data or [])
+        except Exception as exc:
+            return None,'canonical endpoint query failed: '+str(exc)
+        exact=[r for r in rows if norm(r.get('name'))==norm(name) and r.get(pk)]
+        unique={str(r[pk]) for r in exact}
+        if len(unique)==1:
+            return next(iter(unique)),None
+        if len(unique)>1:
+            return None,'multiple exact canonical endpoints'
+        return None,'canonical endpoint missing or differently named'
+
+    def write_link(eid,typ,oid,relationship,row,source_urls,source_finding=None):
+        nonlocal count
+        rel=str(relationship or '').strip() or (
+            'involved vessel' if typ=='mobile_asset'
+            else 'affected asset' if typ=='asset'
+            else 'involved entity'
+        )
+        linkid=_hash_id('EVLINK',eid,typ,oid,rel)
+        sb.table('pc_event_links').upsert({
+            'event_link_id':linkid,
+            'event_id':eid,
+            'linked_type':typ,
+            'linked_id':oid,
+            'relationship':rel,
+            'metadata':{
+                'research_sources':source_urls or _stage_source_urls(row),
+                'connected_research_job':str(job),
+                'source_finding':source_finding or {},
+                'verification_status':(source_finding or {}).get('verification_status') or 'reported',
+            }},
+            on_conflict='event_link_id').execute()
+        count+=1
+
+    for row in stages:
+        if row.get('target_table')!='pc_events' or not is_dossier(row):
+            continue
         ep=pub.get(str(row['staged_record_id']))
         if not ep:
-            holds.append({'type':'event_link','reason':'Event not yet canonically published'}); continue
+            holds.append({'type':'event_link','event':row.get('natural_key'),
+                          'reason':'Event not yet canonically published'})
+            continue
+        eid=ep['canonical_id']
         p=row.get('payload') or {}; m=p.get('metadata') or {}
-        for ident in normalize_identifiers(m.get('involved_identifiers') or []):
-            if ident.startswith(('entity:','asset:')):continue
-            if ident.startswith('name:'): continue
-            text=str(ident).strip(); imo=text.split(':',1)[-1] if text.lower().startswith('imo:') else text
-            if not valid_imo(imo):
-                holds.append({'type':'event_link','identifier':text,'reason':'Unsupported or invalid involvement identifier'}); continue
-            matches=(sb.table('pc_mobile_assets').select('mobile_asset_id,name').eq('imo',imo).limit(2).execute().data or [])
-            if len(matches)!=1:
-                holds.append({'type':'event_link','identifier':text,'reason':'Vessel endpoint missing or ambiguous'}); continue
-            vid=matches[0]['mobile_asset_id']; eid=ep['canonical_id']
-            linkid=_hash_id('EVLINK',eid,vid,'involved vessel')
-            sb.table('pc_event_links').upsert({'event_link_id':linkid,'event_id':eid,
-                'linked_type':'mobile_asset','linked_id':vid,'relationship':'involved vessel',
-                'metadata':{'research_sources':_stage_source_urls(row),'connected_research_job':str(job)}},
-                on_conflict='event_link_id').execute(); count+=1
-    return {'linked':count,'holds':holds}
 
+        # 1. Explicit dossier event_links: companies, infrastructure and vessels.
+        for link in m.get('event_links') or []:
+            if not isinstance(link,dict):
+                continue
+            raw_type=str(link.get('linked_type') or '').strip().casefold()
+            typ='mobile_asset' if raw_type in {'vessel','ship','mobile_asset'} else raw_type
+            name=str(link.get('linked_name') or '').strip()
+            oid,problem=resolve_named(typ,name,row)
+            if problem:
+                holds.append({
+                    'type':'event_link',
+                    'event':row.get('natural_key'),
+                    'linked_type':typ,
+                    'linked_name':name,
+                    'relationship':link.get('relationship'),
+                    'reason':problem,
+                    'source_urls':link.get('source_urls') or _stage_source_urls(row),
+                })
+                continue
+            write_link(eid,typ,oid,link.get('relationship'),row,
+                       link.get('source_urls') or _stage_source_urls(row),link)
+
+        # 2. Strong vessel identity fallback by IMO remains supported.
+        for ident in normalize_identifiers(m.get('involved_identifiers') or []):
+            if ident.startswith(('entity:','asset:','name:')):
+                # Name-only / abstract identifiers must be resolved through the
+                # explicit event_links path above, never guessed here.
+                continue
+            text=str(ident).strip()
+            imo=text.split(':',1)[-1] if text.lower().startswith('imo:') else text
+            if not valid_imo(imo):
+                holds.append({'type':'event_link','event':row.get('natural_key'),
+                              'identifier':text,'reason':'Unsupported or invalid involvement identifier'})
+                continue
+            matches=(sb.table('pc_mobile_assets').select('mobile_asset_id,name')
+                     .eq('imo',imo).limit(2).execute().data or [])
+            if len(matches)!=1:
+                holds.append({'type':'event_link','event':row.get('natural_key'),
+                              'identifier':text,'reason':'Vessel endpoint missing or ambiguous'})
+                continue
+            write_link(eid,'mobile_asset',matches[0]['mobile_asset_id'],'involved vessel',
+                       row,_stage_source_urls(row),
+                       {'identifier':'imo:'+imo,'verification_status':'reported'})
+
+    return {'linked':count,'holds':holds}
 
 def publish_job_connected(sb,job):
     scope=_load_scope(sb,job); state=scope.get('connected_research') or {}
