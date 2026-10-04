@@ -481,11 +481,217 @@ def _render_events(typ,oid,key_prefix="top"):
             set_drilldown("event",ev.get("event_id"),ev.get("title"))
 
 
+def _company_profile(entity_id):
+    rows=_rows("pc_company_profiles",{"entity_id":str(entity_id)},5)
+    return rows[0] if rows else {}
+
+def _company_offices(entity_id):
+    return _rows("pc_company_offices",{"entity_id":str(entity_id)},200)
+
+def _company_people(entity_id):
+    roles=_rows("pc_company_people_roles",{"entity_id":str(entity_id)},200)
+    out=[]
+    for r in roles:
+        person=_one("pc_people","person_id",r.get("person_id")) if r.get("person_id") else None
+        out.append({**r,"person_name":_clean((person or {}).get("display_name"))})
+    return out
+
+def _company_asset_roles(entity_id):
+    return _rows("pc_company_asset_roles",{"entity_id":str(entity_id)},500)
+
+def _company_portfolio(entity_id):
+    return _rows("pc_company_portfolio_positions",{"holder_entity_id":str(entity_id)},500)
+
+def _company_corridors(entity_id):
+    return _rows("pc_company_corridor_roles",{"entity_id":str(entity_id)},300)
+
+def _company_milestones(entity_id):
+    rows=_rows("pc_company_milestones",{"entity_id":str(entity_id)},300)
+    return sorted(rows,key=lambda x:str(x.get("milestone_date") or ""),reverse=True)
+
+def _render_company_overview(rec,entity_id):
+    _render_overview(rec,"entity")
+    profile=_company_profile(entity_id)
+    if profile:
+        st.markdown("#### Company profile")
+        desc=_clean(profile.get("business_description"))
+        if desc: st.write(desc)
+        facts=[]
+        for label,key in [
+            ("Sector","sector"),("Website","website_url"),("Products / services","products_services"),
+            ("Operating countries","operating_countries")
+        ]:
+            v=profile.get(key)
+            if v not in (None,"",[],{}):
+                facts.append({"Field":label,"Value":_clean(v)})
+        if facts:
+            st.dataframe(pd.DataFrame(facts),use_container_width=True,hide_index=True)
+
+    offices=_company_offices(entity_id)
+    people=_company_people(entity_id)
+    c1,c2,c3=st.columns(3)
+    c1.metric("Offices / locations",len(offices))
+    c2.metric("Leadership records",len(people))
+    c3.metric("Related events",len(_event_rows_for_object("entity",entity_id)))
+
+    if offices:
+        st.markdown("#### Offices & operating locations")
+        rows=[]
+        for o in offices[:100]:
+            rows.append({
+                "Office":_clean(o.get("office_name")),
+                "Type":_clean(o.get("office_type")).replace("_"," ").title(),
+                "City":_clean(o.get("city")),
+                "Country":_clean(o.get("country")),
+                "Status":_clean(o.get("office_status")).title(),
+                "As of":_clean(o.get("as_of")),
+            })
+        st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+
+    if people:
+        st.markdown("#### Leadership / management")
+        rows=[]
+        for p in people[:100]:
+            rows.append({
+                "Person":p.get("person_name"),
+                "Position":_clean(p.get("position_title")),
+                "Role":_clean(p.get("role_family")).title(),
+                "Status":_clean(p.get("appointment_status")).title(),
+                "From":_clean(p.get("valid_from")),
+                "To":_clean(p.get("valid_to")),
+            })
+        st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+
+def _render_company_network(entity_id,key_prefix="company"):
+    st.markdown("#### Corporate relationships")
+    _render_relationships("entity",entity_id,key_prefix=key_prefix+"_corp")
+
+    positions=_company_portfolio(entity_id)
+    if positions:
+        st.markdown("#### Portfolio / investments / concessions")
+        rows=[]
+        for p in positions:
+            target_type="entity" if p.get("investee_entity_id") else "asset"
+            target_id=p.get("investee_entity_id") or p.get("investee_asset_id")
+            rows.append({
+                "Position":_clean(p.get("position_type")).replace("_"," ").title(),
+                "Investee":object_label(target_type,target_id) if target_id else "",
+                "Ownership %":p.get("ownership_percent"),
+                "Status":_clean(p.get("position_status")).title(),
+                "From":_clean(p.get("valid_from")),
+                "To":_clean(p.get("valid_to")),
+                "Type":target_type,
+                "ID":target_id,
+            })
+        st.dataframe(pd.DataFrame([{k:v for k,v in r.items() if k not in ("Type","ID")} for r in rows]),
+                     use_container_width=True,hide_index=True)
+        choices=[r for r in rows if r["ID"]]
+        if choices:
+            pick=st.selectbox("Open portfolio company / asset",range(len(choices)),
+                format_func=lambda i:choices[i]["Investee"]+" · "+choices[i]["Position"],
+                key=key_prefix+"_portfolio_pick_"+str(entity_id))
+            x=choices[pick]
+            if st.button("Open "+x["Investee"],key=key_prefix+"_portfolio_open_"+str(entity_id)+"_"+str(pick),
+                         use_container_width=True):
+                set_drilldown(x["Type"],x["ID"],x["Investee"])
+
+def _render_company_assets(entity_id,key_prefix="company"):
+    roles=_company_asset_roles(entity_id)
+    if roles:
+        st.markdown("#### Assets, terminals, vessels & operating roles")
+        rows=[]
+        for r in roles:
+            typ="mobile_asset" if r.get("mobile_asset_id") else "asset"
+            oid=r.get("mobile_asset_id") or r.get("asset_id")
+            rows.append({
+                "Name":object_label(typ,oid) if oid else "",
+                "Type":OBJECTS.get(typ,{}).get("label",typ),
+                "Role":_clean(r.get("asset_role")).replace("_"," ").title(),
+                "Status":_clean(r.get("role_status")).title(),
+                "From":_clean(r.get("valid_from")),
+                "To":_clean(r.get("valid_to")),
+                "Object type":typ,
+                "Object ID":oid,
+            })
+        st.dataframe(pd.DataFrame([{k:v for k,v in r.items() if k not in ("Object type","Object ID")} for r in rows]),
+                     use_container_width=True,hide_index=True,height=min(620,100+35*min(len(rows),15)))
+        choices=[r for r in rows if r["Object ID"]]
+        if choices:
+            pick=st.selectbox("Open asset / vessel",range(len(choices)),
+                format_func=lambda i:choices[i]["Name"]+" · "+choices[i]["Role"],
+                key=key_prefix+"_asset_pick_"+str(entity_id))
+            x=choices[pick]
+            if st.button("Open "+x["Name"],key=key_prefix+"_asset_open_"+str(entity_id)+"_"+str(pick),
+                         use_container_width=True):
+                set_drilldown(x["Object type"],x["Object ID"],x["Name"])
+    else:
+        st.caption("No company-to-asset operating roles recorded.")
+
+    corridors=_company_corridors(entity_id)
+    if corridors:
+        st.markdown("#### Corridors & systems")
+        rows=[]
+        for r in corridors:
+            ck=r.get("corridor_key")
+            corridor=_one("pc_trade_corridors","corridor_key",ck) if ck else None
+            rows.append({
+                "Corridor":_clean((corridor or {}).get("corridor_name")) or _clean(ck),
+                "Role":_clean(r.get("corridor_role")).replace("_"," ").title(),
+                "Status":_clean(r.get("role_status")).title(),
+                "From":_clean(r.get("valid_from")),
+                "To":_clean(r.get("valid_to")),
+            })
+        st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+
+def _render_company_history(entity_id):
+    milestones=_company_milestones(entity_id)
+    if milestones:
+        st.markdown("#### Corporate milestones")
+        rows=[]
+        for m in milestones:
+            rows.append({
+                "Date":_clean(m.get("milestone_date")),
+                "Type":_clean(m.get("milestone_type")).replace("_"," ").title(),
+                "Title":_clean(m.get("title")),
+                "Summary":_clean(m.get("summary")),
+                "Status":_clean(m.get("milestone_status")).title(),
+            })
+        st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True,height=min(620,100+35*min(len(rows),15)))
+
+    try:
+        from pc_trade_live import render_live_company_agreements
+        render_live_company_agreements(_sb(),str(entity_id))
+    except Exception as exc:
+        st.caption("Agreements registry unavailable: "+str(exc))
+
 def render_drilldown(object_type,object_id,key_prefix="top"):
     typ=_type(object_type)
     rec=object_record(typ,object_id)
     if not rec:
         st.warning(f"No canonical {typ} record found for {object_id}.")
+        return
+
+    if typ=="entity":
+        tabs=st.tabs([
+            "Company profile",
+            "Corporate network",
+            "Assets & footprint",
+            "Events & Intelligence",
+            "Milestones & agreements",
+            "Raw / Provenance",
+        ])
+        with tabs[0]:
+            _render_company_overview(rec,object_id)
+        with tabs[1]:
+            _render_company_network(object_id,key_prefix=key_prefix)
+        with tabs[2]:
+            _render_company_assets(object_id,key_prefix=key_prefix)
+        with tabs[3]:
+            _render_events("entity",object_id,key_prefix=key_prefix)
+        with tabs[4]:
+            _render_company_history(object_id)
+        with tabs[5]:
+            st.json(rec)
         return
 
     third_label="Linked Vessels & Objects" if typ=="event" else "Events & Intelligence"
