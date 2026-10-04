@@ -90,6 +90,45 @@ def _identity_aliases(value):
                 names.add(name[:-len(suffix)].strip())
     return {v for v in names if v}
 
+def _is_auto_canonical_id(value):
+    s=str(value or '').upper()
+    return '_AUTO_' in s or s.startswith('AUTO_') or s.startswith('ENTITY_AUTO') or s.startswith('ASSET_AUTO')
+
+def _preferred_exact_candidate(table,candidates,payload):
+    if len(candidates)<2:
+        return candidates[0] if candidates else None
+    tcol='entity_type' if table=='pc_entities' else 'asset_type' if table=='pc_assets' else None
+    ccol='hq_country' if table=='pc_entities' else 'country' if table=='pc_assets' else None
+    compatible=[]
+    for hit in candidates:
+        if tcol and _type_conflict(table,payload.get(tcol),hit.get(tcol)):
+            continue
+        if ccol and payload.get(ccol) and hit.get(ccol) and _norm(payload.get(ccol))!=_norm(hit.get(ccol)):
+            continue
+        compatible.append(hit)
+    pk=ID_TABLES[table]
+    established=[x for x in compatible if not _is_auto_canonical_id(x.get(pk))]
+    return established[0] if len(established)==1 else None
+
+def _generic_asset_label(name,payload):
+    n=_norm(name)
+    words=n.split()
+    fam=_type_family('pc_assets',payload.get('asset_type'))
+    return bool(fam in {'port','terminal'} and len(words)<=3 and any(w in {'port','terminal','harbour','harbor','berth','quay'} for w in words))
+
+def _geographic_asset_candidates(payload,registry):
+    fam=_type_family('pc_assets',payload.get('asset_type'))
+    country=_norm(payload.get('country'))
+    out=[]
+    for hit in registry.get('pc_assets',[]):
+        if _type_family('pc_assets',hit.get('asset_type'))!=fam:
+            continue
+        if country and hit.get('country') and _norm(hit.get('country'))!=country:
+            continue
+        out.append(hit)
+    return out[:25]
+
+
 
 def _type_family(table,value):
     val=_norm(value)
