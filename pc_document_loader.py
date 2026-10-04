@@ -230,7 +230,9 @@ def render_document_loader(sb):
             extraction = (existing.get('metadata') or {}).get('page_extraction')
             if Path(f.name).suffix.lower() == '.pdf' and not extraction:
                 with st.status('Read every page: ' + f.name):
-                    extraction = extract_pdf(f.getvalue(), key, _http_json)
+                    extraction = extract_pdf(f.getvalue(), key, _http_json,
+                        checkpoints=st.session_state.setdefault('pc_pdf_page_checkpoints', {}),
+                        progress=lambda page, total, label: st.write(f'{label}: {page}/{total}'))
             analysis=((existing.get('metadata') or {}).get('ai_extraction') if existing else None)
             if not analysis or (extraction and not (existing.get('metadata') or {}).get('vessel_extraction_version')):
                 text=extraction['text'] if extraction else _text_from_file(f, key)
