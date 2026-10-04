@@ -81,6 +81,109 @@ def object_label(object_type,object_id):
         return _clean(rec.get(cfg["name"])) or str(object_id)
     return str(object_id)
 
+def _company_name_key(name):
+    s=str(name or "").casefold()
+    s=re.sub(r"[^a-z0-9]+"," ",s).strip()
+    # Corporate suffixes frequently vary between source articles and canonical rows.
+    suffixes={"group","holding","holdings","plc","limited","ltd","llc","pjsc","sa","sak","inc","corp","corporation","company","co"}
+    parts=[p for p in s.split() if p not in suffixes]
+    return " ".join(parts)
+
+def _entity_richness(entity_id):
+    eid=str(entity_id)
+    score=0
+    if not eid.upper().startswith(("ENTITY_AUTO_","AUTO_")):
+        score+=25
+    checks=[
+        ("pc_company_profiles","entity_id",40,3),
+        ("pc_company_offices","entity_id",4,8),
+        ("pc_company_people_roles","entity_id",3,8),
+        ("pc_company_asset_roles","entity_id",6,15),
+        ("pc_company_corridor_roles","entity_id",4,10),
+        ("pc_company_milestones","entity_id",3,10),
+        ("pc_company_portfolio_positions","holder_entity_id",5,12),
+        ("pc_event_links","linked_id",2,12),
+    ]
+    for table,col,weight,cap in checks:
+        try:
+            rows=_rows(table,{col:eid},cap)
+            if rows:
+                score+=weight*min(len(rows),cap)
+        except Exception:
+            pass
+    try:
+        score+=8*min(len(_relationship_rows("entity",eid)),20)
+    except Exception:
+        pass
+    return score
+
+def preferred_entity_id(entity_id):
+    """Resolve duplicate company nodes to the richer established canonical identity.
+
+    Only strong same-name/company-name-key candidates are considered. This repairs
+    event links that landed on a thin auto-created duplicate without deleting data.
+    """
+    rec=object_record("entity",entity_id)
+    if not rec:
+        return str(entity_id),None
+    name=_clean(rec.get("name"))
+    key=_company_name_key(name)
+    if not key:
+        return str(entity_id),rec
+    sb=_sb()
+    if not sb:
+        return str(entity_id),rec
+
+    candidates=[]
+    seen=set()
+    def add_rows(rows):
+        for r in rows or []:
+            rid=str(r.get("entity_id") or "")
+            if not rid or rid in seen:
+                continue
+            rkey=_company_name_key(r.get("name"))
+            if rkey!=key:
+                continue
+            seen.add(rid); candidates.append(r)
+
+    # Exact name first.
+    try:
+        add_rows(sb.table("pc_entities").select("*").ilike("name",name).limit(30).execute().data or [])
+    except Exception:
+        pass
+
+    # Broader phrase search catches e.g. AD Ports vs AD Ports Group.
+    token=" ".join(key.split()[:2]).strip()
+    if token:
+        try:
+            add_rows(sb.table("pc_entities").select("*").ilike("name","%"+token+"%").limit(80).execute().data or [])
+        except Exception:
+            pass
+
+    if not candidates:
+        return str(entity_id),rec
+
+    # If countries are known on both sides, do not cross jurisdictions.
+    base_country=_clean(rec.get("hq_country") or rec.get("country")).casefold()
+    filtered=[]
+    for r in candidates:
+        rc=_clean(r.get("hq_country") or r.get("country")).casefold()
+        if base_country and rc and base_country!=rc:
+            continue
+        filtered.append(r)
+    candidates=filtered or [rec]
+
+    ranked=sorted(
+        [( _entity_richness(r.get("entity_id")), str(r.get("entity_id")), r) for r in candidates],
+        reverse=True
+    )
+    best_score,best_id,best_rec=ranked[0]
+    current_score=_entity_richness(entity_id)
+    # Redirect only when the alternative is materially richer.
+    if best_id!=str(entity_id) and best_score>=current_score+20:
+        return best_id,best_rec
+    return str(entity_id),rec
+
 def _relationship_rows(object_type,object_id):
     typ=_type(object_type); oid=str(object_id)
     rels=[]
@@ -670,12 +773,26 @@ def _render_company_history(entity_id):
 
 def render_drilldown(object_type,object_id,key_prefix="top"):
     typ=_type(object_type)
-    rec=object_record(typ,object_id)
+    original_id=str(object_id)
+    redirected_from=None
+    if typ=="entity":
+        resolved_id,resolved_rec=preferred_entity_id(object_id)
+        if resolved_id!=original_id:
+            redirected_from=original_id
+            object_id=resolved_id
+            rec=resolved_rec
+        else:
+            rec=resolved_rec
+    else:
+        rec=object_record(typ,object_id)
+
     if not rec:
         st.warning(f"No canonical {typ} record found for {object_id}.")
         return
 
     if typ=="entity":
+        if redirected_from:
+            st.caption("Showing the established canonical company profile; this development was linked to a thinner duplicate company record.")
         tabs=st.tabs([
             "Company profile",
             "Corporate network",
