@@ -89,7 +89,7 @@ BEGIN
   IF imo_value ~ '^[0-9]{7}$' THEN
    FOR k IN 1..6 LOOP checksum:=checksum+substring(imo_value,k,1)::integer*(8-k); END LOOP;
   END IF;
-  IF CASE WHEN imo_value ~ '^[0-9]{7}$' THEN checksum%10<>right(imo_value,1)::integer ELSE true END THEN
+  IF (CASE WHEN imo_value ~ '^[0-9]{7}$' THEN checksum%10<>right(imo_value,1)::integer ELSE true END) THEN
    state:='held_invalid_imo'; held:=held+1;
   ELSE
    -- Prevent two simultaneous imports creating the same new IMO.

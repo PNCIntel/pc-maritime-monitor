@@ -336,6 +336,8 @@ def _set_context(typ: str, oid: str, name: str = ""):
                     name = _clean(rec.get("name")) or name
         except Exception:
             pass
+    st.session_state["pc_document_browser"] = False
+    st.session_state["pc_uae_ofac_overlap"] = False
     st.session_state["pc_terminal_type"] = typ
     st.session_state["pc_terminal_id"] = str(oid)
     st.session_state["pc_terminal_name"] = name or object_label(typ, oid)
@@ -369,105 +371,14 @@ def _clear_context():
         pass
 
 
-@st.cache_data(ttl=60, show_spinner=False)
-def _entity_identity_bundle(entity_id: str) -> dict:
-    """Resolve equivalent legal/trading company identities into one terminal dossier."""
-    base=object_record("entity",entity_id) or {}
-    base_name=_clean(base.get("name"))
-    base_country=_clean(base.get("hq_country") or base.get("country")).casefold()
-
-    def core(v):
-        words=_norm(v).split()
-        suffixes={"group","holding","holdings","company","co","corporation","corp",
-                  "limited","ltd","llc","plc","pjsc","sak","sa","inc"}
-        while words and words[-1] in suffixes:
-            words.pop()
-        return " ".join(words)
-
-    aliases_by_id={}
-    for a in _rows("pc_identity_aliases_v2",10000):
-        typ=_clean(a.get("object_type")).casefold()
-        if typ not in {"entity","company","organisation","organization"}:
-            continue
-        cid=_clean(a.get("canonical_id"))
-        nm=_clean(a.get("alias_name"))
-        if cid and nm:
-            aliases_by_id.setdefault(cid,set()).add(nm)
-
-    seed_names={base_name} | aliases_by_id.get(str(entity_id),set())
-    seed_norm={_norm(x) for x in seed_names if _norm(x)}
-    seed_core={core(x) for x in seed_names if core(x)}
-    candidates=[]
-
-    for r in _rows("pc_entities",10000):
-        rid=_clean(r.get("entity_id"))
-        if not rid:
-            continue
-        rcountry=_clean(r.get("hq_country") or r.get("country")).casefold()
-        if base_country and rcountry and base_country!=rcountry:
-            continue
-        names={_clean(r.get("name"))} | aliases_by_id.get(rid,set())
-        norms={_norm(x) for x in names if _norm(x)}
-        cores={core(x) for x in names if core(x)}
-        strong=bool(seed_norm & norms or seed_core & cores)
-        if not strong:
-            for a in seed_norm:
-                for b in norms:
-                    if len(a)>=7 and len(b)>=7 and (a in b or b in a):
-                        strong=True
-                        break
-                if strong:
-                    break
-        if strong:
-            candidates.append(r)
-
-    if base and not any(_clean(x.get("entity_id"))==str(entity_id) for x in candidates):
-        candidates.append(base)
-
-    ranked=[]
-    for r in candidates:
-        rid=_clean(r.get("entity_id"))
-        score=0
-        if rid.startswith("COMP_"): score+=80
-        if not any(x in rid.upper() for x in ("AUTO","_AI_")): score+=30
-        score+=len(_filtered_rows("pc_company_profiles","entity_id",rid,3))*30
-        score+=len(_filtered_rows("pc_company_asset_roles","entity_id",rid,60))*8
-        score+=len(_filtered_rows("pc_company_corridor_roles","entity_id",rid,40))*6
-        score+=len(_filtered_rows("pc_event_links","linked_id",rid,80))*3
-        ranked.append((score,rid,r))
-    ranked.sort(key=lambda x:(x[0],x[1]),reverse=True)
-
-    preferred_id=ranked[0][1] if ranked else str(entity_id)
-    preferred_record=ranked[0][2] if ranked else base
-    ids=[]; names=[]
-    for _,rid,r in ranked:
-        if rid not in ids: ids.append(rid)
-        nm=_clean(r.get("name"))
-        if nm and nm not in names: names.append(nm)
-        for a in sorted(aliases_by_id.get(rid,set())):
-            if a not in names: names.append(a)
-    return {
-        "preferred_id":preferred_id,
-        "preferred_record":preferred_record,
-        "ids":ids or [str(entity_id)],
-        "names":names or ([base_name] if base_name else []),
-    }
-
-def _multi_filtered_rows(table: str, column: str, values: list[str], limit_each: int=500) -> list[dict]:
-    out=[]; seen=set()
-    for v in values:
-        for r in _filtered_rows(table,column,str(v),limit_each):
-            key=json.dumps(r,sort_keys=True,default=str)
-            if key in seen: continue
-            seen.add(key); out.append(r)
-    return out
-
-
 def _context_record():
     typ = st.session_state.get("pc_terminal_type")
     oid = st.session_state.get("pc_terminal_id")
     if not typ or not oid:
         return None, None, None
+    if typ == "document":
+        rows = _filtered_rows("pc_documents", "document_id", str(oid), 1)
+        return typ, oid, rows[0] if rows else None
     if typ == "corridor":
         table, pk, _, _ = OBJECTS[typ]
         rows = _filtered_rows(table, pk, str(oid), 3)
@@ -1159,6 +1070,42 @@ def _render_evidence_pane(typ: str, oid: str, rec: dict, lens: str):
     st.markdown("### Intelligence / Evidence")
     st.caption("Developments, documents, filings, sanctions and source provenance.")
 
+    if typ == 'mobile_asset':
+        from pc_document_vessels import documents_for_vessel
+        try:
+            linked_documents = documents_for_vessel(_sb(), oid)
+            observations = _sb().table('pc_v_document_vessel_access').select('*').eq('mobile_asset_id', oid).execute().data or []
+            for observation in observations:
+                raw = observation['raw_record']
+                if observation.get('scope_text'):
+                    st.markdown('**Documented access restriction:** ' + observation['scope_text'])
+                    st.caption(str(observation.get('authority_name') or '') + ' · ' + str(observation.get('circular_reference') or ''))
+                st.caption('Source page ' + str(observation['page_number']) + ' · Listed name: ' + str(raw.get('name') or '') +
+                           ' · Listed flag: ' + str(raw.get('flag') or 'unknown'))
+                with st.expander('Source row and ownership research gaps', expanded=False):
+                    st.write({k: v for k, v in raw.items() if k not in ('identity_status', 'page_number') and v})
+            for did in linked_documents:
+                docs = _filtered_rows('pc_documents', 'document_id', did, 1)
+                if docs:
+                    st.button('Open source: ' + str(docs[0]['title']), key=f'vessel_doc_{oid}_{did}',
+                              on_click=_set_context, args=('document', did, docs[0]['title']))
+        except Exception as exc:
+            st.caption('Linked document evidence unavailable: ' + str(exc)[:140])
+
+    if typ in ('mobile_asset', 'entity'):
+        try:
+            direct_links = _sb().table('pc_sanctions_links').select('sanctions_designation_id').eq('linked_type', typ).eq('linked_id', oid).execute().data or []
+            ids = list(dict.fromkeys(r['sanctions_designation_id'] for r in direct_links))
+            if ids:
+                designations = _sb().table('pc_sanctions_designations').select('primary_name,designation_date,status,metadata,source_url').in_('sanctions_designation_id', ids).execute().data or []
+                st.markdown('##### Linked sanctions designations')
+                for designation in designations:
+                    st.markdown('**' + designation['primary_name'] + '**')
+                    st.caption(' · '.join(str(v) for v in [designation.get('designation_date'),designation.get('status'),
+                        ', '.join((designation.get('metadata') or {}).get('all_programme_codes') or [])] if v))
+        except Exception as exc:
+            st.caption('Sanctions links unavailable: ' + str(exc)[:140])
+
     events=_events_for_object(typ,oid)
     if lens=="strategic":
         events=[e for e in events if STRATEGIC_RX.search(_record_text(e))] or events
@@ -1440,47 +1387,6 @@ def _render_layer3(typ: str, oid: str, rec: dict, lens: str):
             st.caption("No strategic programme, contract, production or security-operation record is currently linked to this context.")
 
 
-def _event_source_urls(event: dict) -> list[str]:
-    urls=[]
-    for k in ("source_url","url","article_url","reference_url"):
-        v=event.get(k)
-        if isinstance(v,str) and v.startswith(("http://","https://")):
-            urls.append(v)
-    m=_meta(event)
-    for k in ("source_url","url","article_url"):
-        v=m.get(k)
-        if isinstance(v,str) and v.startswith(("http://","https://")):
-            urls.append(v)
-    for x in m.get("research_sources") or []:
-        u=x.get("url") if isinstance(x,dict) else x
-        if isinstance(u,str) and u.startswith(("http://","https://")):
-            urls.append(u)
-    return list(dict.fromkeys(urls))
-
-def _render_event_rows(events: list[dict], key_prefix: str, limit: int=8):
-    if not events:
-        st.caption("No developments available.")
-        return
-    for i,e in enumerate(events[:limit]):
-        eid=_clean(e.get("event_id"))
-        title=_clean(e.get("title")) or "Untitled development"
-        dt=_clean(e.get("start_date"))[:10]
-        cols=st.columns([1.0,6.2,1.0,1.0])
-        cols[0].caption(dt or "—")
-        cols[1].markdown("**"+title+"**")
-        if eid:
-            cols[2].button(
-                "Open",
-                key=f"{key_prefix}_open_{i}_{eid}",
-                use_container_width=True,
-                on_click=_set_context,
-                args=("event",eid,title),
-            )
-        urls=_event_source_urls(e)
-        if urls:
-            cols[3].link_button("Source",urls[0],use_container_width=True)
-        st.markdown("<div style='height:1px;background:var(--line);margin:.15rem 0 .35rem'></div>",unsafe_allow_html=True)
-
 def _render_event_cards(events: list[dict], key_prefix: str, limit: int = 15):
     if not events:
         st.caption("No linked canonical developments.")
@@ -1496,13 +1402,9 @@ def _render_event_cards(events: list[dict], key_prefix: str, limit: int = 15):
                 st.markdown("**Impact**")
                 st.write(impact)
             eid = _clean(e.get("event_id"))
-            urls=_event_source_urls(e)
-            a,b=st.columns(2)
-            if eid and a.button("Open development in terminal", key=f"{key_prefix}_{i}_{eid}", use_container_width=True):
+            if eid and st.button("Open development in terminal", key=f"{key_prefix}_{i}_{eid}", use_container_width=True):
                 _set_context("event", eid, title)
                 st.rerun()
-            if urls:
-                b.link_button("Open source article",urls[0],use_container_width=True)
 
 
 def _render_layer4(typ: str, oid: str, rec: dict, lens: str):
@@ -1614,7 +1516,7 @@ def _render_intelligence_home():
     with mid:
         with st.container(border=True):
             _panel_header("Priority Intelligence","Highest-value developments first.")
-            _render_event_rows(priority,"intel_priority_rows",8)
+            _html_rows(_recent_event_rows(priority,8),8)
     with right:
         with st.container(border=True):
             _panel_header("Monitoring Desk","Active themes, disruptions and sanctions exposure.")
@@ -1630,15 +1532,15 @@ def _render_intelligence_home():
     with c1:
         with st.container(border=True):
             _panel_header("Security & Maritime","Conflict, attacks, boardings, naval activity and maritime security.")
-            _render_event_rows(security,"intel_security_rows",7)
+            _html_rows(_recent_event_rows(security,7),7)
     with c2:
         with st.container(border=True):
             _panel_header("Disruptions & Chokepoints","Operational disruption affecting ports, corridors and trade.")
-            _render_event_rows(disruptions,"intel_disruption_rows",7)
+            _html_rows(_recent_event_rows(disruptions,7),7)
     with c3:
         with st.container(border=True):
             _panel_header("Recent Intelligence","Latest developments across the monitoring picture.")
-            _render_event_rows(priority,"intel_recent_rows",7)
+            _html_rows(_recent_event_rows(priority,7),7)
 
     st.markdown("### Featured Intelligence Objects")
     _featured_search_cards([
@@ -1819,7 +1721,7 @@ def _render_trade_home():
         with st.container(border=True):
             _panel_header("Recent Developments","Latest high-value trade, infrastructure and strategic-industry developments.")
             priority=sorted(trade_events,key=lambda x:(_event_priority(x),_clean(x.get("start_date"))),reverse=True)
-            _render_event_rows(priority,"trade_recent_rows",7)
+            _html_rows(_recent_event_rows(priority,7),7)
 
     st.markdown("### Featured Objects")
     st.caption("Quick pivots into companies, infrastructure, corridors and strategic industry.")
@@ -1899,7 +1801,7 @@ def _render_sanctions_home():
     with c3:
         with st.container(border=True):
             _panel_header("Recent Sanctions Activity","Latest sanctions, enforcement and evasion-related developments.")
-            _render_event_rows(events,"specialist_recent_rows",7)
+            _html_rows(_recent_event_rows(events,7),7)
 
     st.markdown("### Featured Sanctions Objects")
     _featured_search_cards([
@@ -1981,7 +1883,7 @@ def _render_strategic_home():
     with c3:
         with st.container(border=True):
             _panel_header("Recent Strategic Developments","Latest defence, shipbuilding, coast guard and industrial-capacity developments.")
-            _render_event_rows(events,"recent_event_rows",7)
+            _html_rows(_recent_event_rows(events,7),7)
 
     st.markdown("### Featured Strategic Objects")
     _featured_search_cards([
@@ -2077,6 +1979,8 @@ def _render_search_results(results: list[dict], lens: str):
 
 def _daily_nav(lens: str):
     _clear_context()
+    st.session_state['pc_document_browser'] = False
+    st.session_state['pc_uae_ofac_overlap'] = False
     st.session_state[f"pc_terminal_search_{lens}"] = ""
     st.session_state[f"pc_terminal_nav_{lens}"] = "Daily Brief"
 
@@ -2327,12 +2231,16 @@ def _render_daily_brief(lens: str):
 
 def _sidebar_nav(lens: str, label: str, query: str=""):
     _clear_context()
+    st.session_state['pc_document_browser'] = False
+    st.session_state['pc_uae_ofac_overlap'] = False
     st.session_state[f"pc_terminal_workspace_{lens}"]=""
     st.session_state[f"pc_terminal_search_{lens}"]=query
     st.session_state[f"pc_terminal_nav_{lens}"]=label
 
 def _home_nav(lens: str):
     _clear_context()
+    st.session_state['pc_document_browser'] = False
+    st.session_state['pc_uae_ofac_overlap'] = False
     st.session_state[f"pc_terminal_workspace_{lens}"]=""
     st.session_state[f"pc_terminal_search_{lens}"]=""
     st.session_state[f"pc_terminal_nav_{lens}"]="Home"
@@ -2431,13 +2339,21 @@ def render_terminal(lens: str = "trade"):
                 args=args,
             )
         st.divider()
-        st.button(
-            "Home / clear selection",
-            use_container_width=True,
-            on_click=_home_nav,
-            args=(lens,),
-            key=f"pc_home_clear_{lens}",
-        )
+        if lens in ('sanctions','trade','intelligence') and st.button('UAE / OFAC vessel overlap', use_container_width=True):
+            _clear_context()
+            st.session_state['pc_document_browser'] = False
+            st.session_state['pc_uae_ofac_overlap'] = True
+            st.rerun()
+        if st.button("Documents & vessel restrictions", use_container_width=True):
+            _clear_context()
+            st.session_state['pc_uae_ofac_overlap'] = False
+            st.session_state['pc_document_browser'] = True
+            st.rerun()
+        if st.button("Home / clear selection", use_container_width=True):
+            st.session_state['pc_document_browser'] = False
+            st.session_state['pc_uae_ofac_overlap'] = False
+            _clear_context()
+            st.rerun()
         if st.button("Refresh database", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
@@ -2445,6 +2361,46 @@ def render_terminal(lens: str = "trade"):
 
     _style(theme)
     _restore_context()
+    if st.session_state.get('pc_uae_ofac_overlap'):
+        st.markdown('### UAE / OFAC vessel overlap')
+        st.caption('Shared hulls matched by IMO. UAE entry restrictions and OFAC designations retain separate authorities, dates and source records.')
+        try:
+            rows=[]; offset=0
+            while True:
+                page=sb.table('pc_v_uae_ofac_vessel_overlap').select('*').order('imo').range(offset,offset+499).execute().data or []
+                rows.extend(page)
+                if len(page)<500: break
+                offset+=500
+            if rows:
+                st.dataframe([{'Vessel':r['name'],'IMO':r['imo'],'UAE listed flag':r['uae_listed_flag'],
+                    'UAE circular':r['circular_reference'],'OFAC listed name':r['ofac_name'],
+                    'OFAC designation date':r['designation_date'],'OFAC programmes':', '.join(r.get('ofac_programmes') or [])} for r in rows],
+                    hide_index=True,use_container_width=True)
+                _open_selector([{'type':'mobile_asset','id':r['mobile_asset_id'],'name':r['name'],'relationship':'UAE / OFAC source overlap'} for r in rows],
+                    'pc_overlap_vessels','Open vessel evidence')
+            else:
+                st.info('No overlap stored yet. Import both source files and resolve their vessel identifiers.')
+        except Exception as exc:
+            st.warning('UAE / OFAC overlap unavailable: '+str(exc)[:200])
+        return
+    if st.session_state.get('pc_document_browser'):
+        from pc_document_vessels import render_document_evidence
+        st.markdown('### Documents & vessel restrictions')
+        query = st.text_input('Find a document by title', key='pc_doc_title_search')
+        request = sb.table('pc_documents').select('document_id,title').order('created_at', desc=True).limit(100)
+        if query.strip():
+            request = request.ilike('title', '%' + query.strip() + '%')
+        docs = request.execute().data or []
+        if docs:
+            choices = {d['document_id']: d for d in docs}
+            selected = st.selectbox('Source document', list(choices), format_func=lambda k: choices[k]['title'])
+            try:
+                render_document_evidence(sb, selected, _set_context)
+            except Exception as exc:
+                st.warning('Document evidence unavailable: ' + str(exc)[:180])
+        else:
+            st.info('No matching documents.')
+        return
     st.button("Daily Brief", key=f"pc_daily_top_{lens}", on_click=_daily_nav, args=(lens,))
     if st.session_state.get(f"pc_terminal_nav_{lens}") == "Daily Brief":
         _render_daily_brief(lens)
@@ -2482,6 +2438,10 @@ def render_terminal(lens: str = "trade"):
         _render_home(lens)
         return
 
+    if typ == 'document':
+        from pc_document_vessels import render_document_evidence
+        render_document_evidence(sb, oid, _set_context)
+        return
     _render_context_header(typ, oid, rec, lens)
 
     # Persistent tactical workspace: dossier left, spatial/system center, evidence right.

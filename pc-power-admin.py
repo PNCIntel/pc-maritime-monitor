@@ -654,6 +654,10 @@ def _parse_uploaded(uploaded) -> tuple[list, list]:
         except ImportError as exc:
             raise RuntimeError("PDF support requires pypdf in requirements.txt") from exc
         try:
+            # A readable cover must not conceal scanned annex pages.
+            probe = PdfReader(BytesIO(data))
+            if any(len((page.extract_text() or '').strip()) < 120 and page.images for page in probe.pages):
+                raise ValueError('This PDF contains scanned pages. Use Load documents to retain the original and extract every annex row into shared vessel evidence.')
             from pc_newsletter_pdf import extract_pdf
             text, embedded_links, image_b64 = extract_pdf(data)
         except ModuleNotFoundError as exc:
@@ -1448,3 +1452,4 @@ if st.session_state.get("deduped_package"):
                 st.success(f"Staged {count} review proposals in job {job_id}. Canonical tables unchanged.")
         except Exception as exc:
             st.error(f"Review staging failed: {exc}. Check the ingestion job before retrying.")
+
