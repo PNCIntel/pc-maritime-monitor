@@ -77,16 +77,26 @@ def sync_plan_exceptions(sb, job, exceptions):
         else:
             sb.table("pc_analyst_exceptions").insert(record).execute()
 
-    open_rows=(sb.table("pc_analyst_exceptions").select("exception_id,exception_key,status")
-               .eq("ingestion_job_id",job).eq("status","open").limit(5000).execute().data or [])
-    for row in open_rows:
+    active_rows=(sb.table("pc_analyst_exceptions")
+                 .select("exception_id,exception_key,status,assigned_to,assigned_name,version")
+                 .eq("ingestion_job_id",job)
+                 .in_("status",["open","claimed"]).limit(5000).execute().data or [])
+    for row in active_rows:
         if row.get("exception_key") not in current:
+            # The canonical planner is authoritative for whether this exception
+            # still exists. Once reconciliation clears it, close both open and
+            # claimed workbench tickets so analysts do not see stale work.
             sb.table("pc_analyst_exceptions").update({
                 "status":"resolved",
                 "resolved_at":datetime.now(timezone.utc).isoformat(),
                 "updated_at":datetime.now(timezone.utc).isoformat(),
-                "resolution":{"method":"auto_cleared","reason":"Planner no longer reports this exception"},
-                "version":1,
+                "resolution":{
+                    "method":"auto_cleared_after_reconciliation",
+                    "reason":"Canonical planner no longer reports this exception",
+                    "previous_status":row.get("status"),
+                    "previous_assignee":row.get("assigned_to"),
+                },
+                "version":int(row.get("version") or 1)+1,
             }).eq("exception_id",row["exception_id"]).execute()
 
 
