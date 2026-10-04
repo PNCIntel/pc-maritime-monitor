@@ -2284,6 +2284,164 @@ def _style(theme: str):
 
 
 
+def _display_location(row: dict) -> str:
+    for k in ("region_city", "hq_city", "location", "country", "hq_country", "flag"):
+        v = row.get(k)
+        if isinstance(v, dict):
+            v = v.get("name") or v.get("country") or v.get("region")
+        if v:
+            return _clean(v)
+    return ""
+
+def _event_links(typ: str, oid: str) -> list[dict]:
+    linked_type = "mobile_asset" if typ == "mobile_asset" else typ
+    if typ == "event":
+        return _filtered_rows("pc_event_links", "event_id", str(oid), 500)
+    return _filtered_rows("pc_event_links", "linked_id", str(oid), 500)
+
+def _events_for_object(typ: str, oid: str) -> list[dict]:
+    if typ == "event":
+        rec = object_record("event", oid)
+        return [rec] if rec else []
+    if typ=="entity":
+        bundle=_entity_identity_bundle(str(oid))
+        links=[]
+        seen_links=set()
+        for eid in bundle.get("ids") or [str(oid)]:
+            for l in _event_links("entity",eid):
+                lk=_clean(l.get("event_link_id")) or repr((l.get("event_id"),l.get("linked_id"),l.get("relationship")))
+                if lk not in seen_links:
+                    seen_links.add(lk); links.append(l)
+    else:
+        links = _event_links(typ, oid)
+    out = []
+    seen = set()
+    for l in links:
+        if _norm(l.get("linked_type")) not in {_norm(typ), "vessel" if typ == "mobile_asset" else _norm(typ)}:
+            continue
+        eid = _clean(l.get("event_id"))
+        if not eid or eid in seen:
+            continue
+        seen.add(eid)
+        ev = object_record("event", eid)
+        if ev:
+            e = dict(ev)
+            e["_relationship"] = l.get("relationship")
+            out.append(e)
+    return sorted(out, key=lambda x: _clean(x.get("start_date")), reverse=True)
+
+def _relationships(typ: str, oid: str) -> list[dict]:
+    indexed=_indexed_links(typ,str(oid),1000)
+    if indexed:
+        out=[]
+        for r in indexed:
+            is_src=_clean(r.get("source_type"))==typ and _clean(r.get("source_id"))==str(oid)
+            out.append({
+                "relationship_id":_clean(r.get("link_key")),
+                "source_type":_clean(r.get("source_type")),
+                "source_id":_clean(r.get("source_id")),
+                "target_type":_clean(r.get("target_type")),
+                "target_id":_clean(r.get("target_id")),
+                "relationship_type":_clean(r.get("relation_type")),
+                "relation_family":_clean(r.get("relation_family")),
+                "source_name":_clean(r.get("source_name")),
+                "target_name":_clean(r.get("target_name")),
+                "confidence":_clean(r.get("confidence")),
+                "source_table":_clean(r.get("source_table")),
+                "event_id":_clean(r.get("event_id")),
+                "metadata":r.get("metadata") or {},
+            })
+        return out
+
+    out = []
+    ids=_entity_identity_bundle(str(oid)).get("ids") if typ=="entity" else [str(oid)]
+    for side in ("source", "target"):
+        for identity_id in (ids or [str(oid)]):
+            out.extend(_filtered_rows("pc_relationships", f"{side}_id", str(identity_id), 500))
+    seen = set()
+    final = []
+    for r in out:
+        k = _clean(r.get("relationship_id")) or repr((r.get("source_id"), r.get("relationship_type"), r.get("target_id")))
+        if k in seen:
+            continue
+        seen.add(k)
+        final.append(r)
+    return final
+
+def _company_asset_roles(entity_id: str) -> list[dict]:
+    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
+    return _multi_filtered_rows("pc_company_asset_roles","entity_id",ids,500)
+
+def _company_corridors(entity_id: str) -> list[dict]:
+    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
+    return _multi_filtered_rows("pc_company_corridor_roles","entity_id",ids,500)
+
+def _portfolio(entity_id: str) -> list[dict]:
+    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
+    return _multi_filtered_rows("pc_company_portfolio_positions","holder_entity_id",ids,500)
+
+def _documents_for_entity(entity_id: str) -> list[dict]:
+    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
+    links=_multi_filtered_rows("pc_document_entity_links","entity_id",ids,500)
+    docs = []
+    seen = set()
+    for l in links:
+        did = _clean(l.get("document_id"))
+        if not did or did in seen:
+            continue
+        seen.add(did)
+        rows = _filtered_rows("pc_documents", "document_id", did, 2)
+        if rows:
+            d = dict(rows[0])
+            d["_relationship"] = l.get("relationship")
+            docs.append(d)
+    return docs
+
+def _documents_by_name(name: str, limit: int = 30) -> list[dict]:
+    if not name:
+        return []
+    n = name.casefold()
+    docs = []
+    for d in _rows("pc_documents", 1500):
+        blob = _record_text(d).casefold()
+        if n in blob:
+            docs.append(d)
+            if len(docs) >= limit:
+                break
+    return docs
+
+def _related_table(table: str, oid: str, name: str = "", limit: int = 120) -> list[dict]:
+    rows = _rows(table, 2500)
+    o = str(oid).casefold()
+    n = name.casefold().strip()
+    out = []
+    for r in rows:
+        blob = _record_text(r).casefold()
+        if o and o in blob or (n and len(n) >= 5 and n in blob):
+            out.append(r)
+            if len(out) >= limit:
+                break
+    return out
+
+def _get_context():
+    return st.session_state.get("pc_terminal_type"), st.session_state.get("pc_terminal_id")
+
+
+def _local_infrastructure(rec: dict):
+    """Explicitly connected infrastructure; do not infer links from proximity."""
+    oid = str(rec.get("asset_id") or "")
+    if not oid:
+        return []
+    out = []
+    for item in _linked_objects_from_relationships("asset", oid):
+        if item.get("type") != "asset":
+            continue
+        row = object_record("asset", item["id"]) or {}
+        out.append({**item, "asset_type": row.get("asset_type"),
+                    "region": row.get("region_city"), "country": row.get("country")})
+    return out
+
+
 def render_terminal(lens: str = "trade"):
     lens = lens if lens in LENS else "trade"
     cfg = LENS[lens]
@@ -2481,4 +2639,5 @@ def render_terminal(lens: str = "trade"):
     with st.expander("Developer / raw canonical record"):
         st.caption("Internal diagnostic view. Normal analyst workflow should not require raw IDs or JSON.")
         st.json(rec)
+
 
