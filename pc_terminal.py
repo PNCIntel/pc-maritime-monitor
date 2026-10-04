@@ -736,6 +736,146 @@ def _mobile_companies(rec: dict) -> list[dict]:
     return out
 
 
+def _coords_from_record(rec: dict) -> tuple[float,float] | None:
+    candidates=[rec,_meta(rec)]
+    for src in candidates:
+        if not isinstance(src,dict):
+            continue
+        pairs=[
+            ("latitude","longitude"),("lat","lon"),("lat","lng"),
+            ("event_latitude","event_longitude"),("location_latitude","location_longitude"),
+        ]
+        for a,b in pairs:
+            try:
+                lat=float(src.get(a)); lon=float(src.get(b))
+                if -90<=lat<=90 and -180<=lon<=180:
+                    return lat,lon
+            except Exception:
+                pass
+        loc=src.get("location")
+        if isinstance(loc,dict):
+            try:
+                lat=float(loc.get("latitude") or loc.get("lat"))
+                lon=float(loc.get("longitude") or loc.get("lon") or loc.get("lng"))
+                if -90<=lat<=90 and -180<=lon<=180:
+                    return lat,lon
+            except Exception:
+                pass
+    return None
+
+def _asset_point(asset_id: str) -> dict | None:
+    rec=object_record("asset",asset_id) or {}
+    xy=_coords_from_record(rec)
+    if not xy:
+        return None
+    return {
+        "lat":xy[0],"lon":xy[1],
+        "name":_clean(rec.get("name")) or asset_id,
+        "type":_clean(rec.get("asset_type")),
+        "id":asset_id,
+    }
+
+def _event_spatial_context(rec: dict, oid: str) -> tuple[list[dict],list[dict]]:
+    """Resolve an event into mapped points and connected spatial objects."""
+    pts=[]; objs=[]; seen=set()
+
+    xy=_coords_from_record(rec)
+    if xy:
+        pts.append({"lat":xy[0],"lon":xy[1],"name":_clean(rec.get("title")) or "Event location","type":"event"})
+
+    # First: explicit 059/event links.
+    for l in _indexed_links("event",str(oid),500) or []:
+        is_src=_clean(l.get("source_type"))=="event" and _clean(l.get("source_id"))==str(oid)
+        typ=_clean(l.get("target_type") if is_src else l.get("source_type")).casefold()
+        lid=_clean(l.get("target_id") if is_src else l.get("source_id"))
+        name=_clean(l.get("target_name") if is_src else l.get("source_name"))
+        if not typ or not lid:
+            continue
+        k=(typ,lid)
+        if k not in seen:
+            seen.add(k)
+            objs.append({"type":typ,"id":lid,"name":name or lid,"relationship":_clean(l.get("relation_type"))})
+        if typ=="asset":
+            p=_asset_point(lid)
+            if p: pts.append(p)
+        elif typ=="corridor":
+            # Pull mapped assets connected to the corridor through the shared link index.
+            for cl in _indexed_links("corridor",lid,300):
+                cs=_clean(cl.get("source_type"))=="corridor" and _clean(cl.get("source_id"))==lid
+                ct=_clean(cl.get("target_type") if cs else cl.get("source_type")).casefold()
+                ci=_clean(cl.get("target_id") if cs else cl.get("source_id"))
+                if ct=="asset" and ci:
+                    p=_asset_point(ci)
+                    if p: pts.append(p)
+
+    # Second: event location/title terms against terminal index.
+    loc=_display_location(rec)
+    title=_clean(rec.get("title"))
+    searches=[]
+    if loc: searches.append(loc)
+    # Useful geographic fragments; avoid treating the whole article headline as a place.
+    for textv in (loc,title):
+        if not textv: continue
+        for token in re.split(r"[,;/]|\bat\b|\bin\b|\bnear\b|\boff\b",textv,flags=re.I):
+            token=token.strip()
+            if 4<=len(token)<=80 and token.casefold() not in {"germany","united states","united arab emirates"}:
+                searches.append(token)
+    checked=set()
+    for q in searches[:8]:
+        nq=_norm(q)
+        if not nq or nq in checked: continue
+        checked.add(nq)
+        for x in _indexed_search(q,12):
+            if x.get("type") not in {"asset","corridor"}:
+                continue
+            k=(x.get("type"),x.get("id"))
+            if k in seen: continue
+            seen.add(k); objs.append({**x,"relationship":"location/system match"})
+            if x.get("type")=="asset":
+                p=_asset_point(x.get("id"))
+                if p: pts.append(p)
+            elif x.get("type")=="corridor":
+                for cl in _indexed_links("corridor",x.get("id"),200):
+                    cs=_clean(cl.get("source_type"))=="corridor" and _clean(cl.get("source_id"))==x.get("id")
+                    ct=_clean(cl.get("target_type") if cs else cl.get("source_type")).casefold()
+                    ci=_clean(cl.get("target_id") if cs else cl.get("source_id"))
+                    if ct=="asset" and ci:
+                        p=_asset_point(ci)
+                        if p: pts.append(p)
+
+    # De-dupe coordinates/ids.
+    final=[]; pseen=set()
+    for p in pts:
+        key=(round(float(p["lat"]),5),round(float(p["lon"]),5),p.get("name"))
+        if key in pseen: continue
+        pseen.add(key); final.append(p)
+    return final,objs
+
+def _render_event_system_map(rec: dict, oid: str):
+    pts,objs=_event_spatial_context(rec,oid)
+    loc=_display_location(rec)
+    if pts:
+        st.map(pd.DataFrame(pts),latitude="lat",longitude="lon",size=48,zoom=None,use_container_width=True)
+        if loc:
+            st.caption("Location: "+loc)
+    elif loc:
+        st.markdown("##### Geographic context")
+        st.write(loc)
+        st.caption("The event has a named location, but no mapped coordinate or connected mapped node is stored yet.")
+    else:
+        st.caption("No geographic context has been resolved for this event yet.")
+
+    spatial=[x for x in objs if x.get("type") in {"asset","corridor"}]
+    if spatial:
+        st.markdown("##### Connected geography / infrastructure")
+        view=pd.DataFrame([{
+            "Object":x.get("name"),
+            "Type":x.get("type"),
+            "Relationship":x.get("relationship") or x.get("match_reason"),
+        } for x in spatial[:20]])
+        st.dataframe(view,hide_index=True,use_container_width=True,height=min(360,100+28*len(view)))
+        _open_selector(spatial[:30],f"event_spatial_{oid}","Open mapped / connected object")
+
 def _render_map_for_asset(rec: dict):
     pts = []
     def add(r, label):
@@ -959,6 +1099,13 @@ def _render_spatial_pane(typ: str, oid: str, rec: dict, lens: str):
             elif mid:
                 nodes.append({"type":"mobile_asset","id":mid,"name":_object_name("mobile_asset",mid),"relationship":_clean(r.get("asset_role"))})
         if nodes:
+            mapped=[]
+            for n in nodes:
+                if n.get("type")=="asset":
+                    p=_asset_point(n.get("id"))
+                    if p: mapped.append(p)
+            if mapped:
+                st.map(pd.DataFrame(mapped),latitude="lat",longitude="lon",size=44,zoom=None,use_container_width=True)
             st.markdown("##### Operating footprint")
             st.dataframe(pd.DataFrame([{"Asset":x["name"],"Role":x["relationship"]} for x in nodes]),
                          hide_index=True,use_container_width=True,height=min(420,100+28*min(len(nodes),12)))
@@ -997,18 +1144,15 @@ def _render_spatial_pane(typ: str, oid: str, rec: dict, lens: str):
             st.dataframe(pd.DataFrame(routes),hide_index=True,use_container_width=True)
 
     elif typ=="event":
-        links=_event_links("event",oid)
-        objs=[]
-        for l in links:
-            lt=_clean(l.get("linked_type")).casefold()
-            if lt=="vessel": lt="mobile_asset"
-            lid=_clean(l.get("linked_id"))
-            if lt in OBJECTS and lid:
-                objs.append({"type":lt,"id":lid,"name":_object_name(lt,lid),"relationship":_clean(l.get("relationship"))})
-        if objs:
-            st.dataframe(pd.DataFrame([{"Object":x["name"],"Relationship":x["relationship"]} for x in objs]),
-                         hide_index=True,use_container_width=True)
-            _open_selector(objs,f"spatial_event_{oid}")
+        _render_event_system_map(rec,oid)
+        # Non-spatial linked actors/assets remain available below the map.
+        links=_linked_objects_from_relationships("event",oid)
+        nonspatial=[x for x in links if x.get("type") not in {"asset","corridor"}]
+        if nonspatial:
+            st.markdown("##### Connected actors / assets")
+            st.dataframe(pd.DataFrame([{"Object":x["name"],"Type":x["type"],"Relationship":x["relationship"]} for x in nonspatial[:25]]),
+                         hide_index=True,use_container_width=True,height=min(360,100+28*len(nonspatial[:25])))
+            _open_selector(nonspatial[:30],f"spatial_event_actor_{oid}")
 
 
 def _render_evidence_pane(typ: str, oid: str, rec: dict, lens: str):
