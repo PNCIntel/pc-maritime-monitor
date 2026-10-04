@@ -16,7 +16,7 @@ import pandas as pd
 
 ID_TABLES={'pc_entities':'entity_id','pc_assets':'asset_id','pc_mobile_assets':'mobile_asset_id','pc_events':'event_id'}
 NAME_COL={'pc_entities':'name','pc_assets':'name','pc_mobile_assets':'name','pc_events':'title'}
-PUBLISHER_VERSION='3.6.2-reviewed-saved-job-repair'
+PUBLISHER_VERSION='3.7.0-reuse-first-canonical-dedupe'
 from pc_source_graph import event_day
 
 
@@ -71,7 +71,9 @@ def _canon_registry(sb, needed):
 # Alias discovery is confined to unambiguous names actually present in the shared
 # canonical registry. These are match candidates, never evidence of ownership.
 _LEGAL_SUFFIXES = (' sa de cv', ' s a de c v', ' s a', ' sa', ' llc', ' ltd',
-                   ' limited', ' inc', ' plc', ' corporation')
+                   ' limited', ' inc', ' plc', ' corporation', ' corp', ' company',
+                   ' co', ' group', ' holdings', ' holding', ' holding company',
+                   ' pjsc', ' p j s c', ' sak', ' s a k')
 
 def _identity_aliases(value):
     raw=str(value or '').strip()
