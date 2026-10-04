@@ -5,10 +5,16 @@ import sys, json, html
 import pandas as pd
 import streamlit as st
 
-SHARED_DIR = Path(__file__).resolve().parent
+ROOT_DIR = Path(__file__).resolve().parent
+SHARED_DIR = ROOT_DIR / "shared"
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 if str(SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(SHARED_DIR))
-from pc_db import client as pc_db_client
+try:
+    from shared.pc_db import client as pc_db_client
+except Exception:
+    from pc_db import client as pc_db_client
 
 OBJECTS = {
     "entity": {"table":"pc_entities","id":"entity_id","name":"name","label":"Entity / Company"},
