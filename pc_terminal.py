@@ -1165,31 +1165,46 @@ def _render_layer3(typ: str, oid: str, rec: dict, lens: str):
 
     if lens == "sanctions":
         st.markdown("#### Sanctions / exposure")
-        sanctions = _related_table("pc_sanctions_designations", oid, _object_name(typ, oid), 100)
-        links = _related_table("pc_sanctions_links", oid, _object_name(typ, oid), 100)
-        screening = _related_table("pc_screening_results", oid, _object_name(typ, oid), 100)
+        sanctions=_related_table("pc_sanctions_designations",oid,_object_name(typ,oid),120)
+        links=_related_table("pc_sanctions_links",oid,_object_name(typ,oid),120)
+        cases=_related_table("pc_screening_cases",oid,_object_name(typ,oid),120)
+        matches=_related_table("pc_screening_matches",oid,_object_name(typ,oid),120)
         if sanctions:
-            st.dataframe(pd.DataFrame(sanctions), hide_index=True, use_container_width=True)
+            st.markdown("**Legal designations**")
+            st.dataframe(pd.DataFrame(sanctions),hide_index=True,use_container_width=True)
         if links:
-            st.markdown("**Ownership / designation network**")
-            st.dataframe(pd.DataFrame(links), hide_index=True, use_container_width=True)
-        if screening:
-            st.markdown("**Screening / review**")
-            st.dataframe(pd.DataFrame(screening), hide_index=True, use_container_width=True)
-        if not (sanctions or links or screening):
-            st.caption("No sanctions/designation record is currently linked to this canonical context.")
+            st.markdown("**Ownership / control / designation network**")
+            st.dataframe(pd.DataFrame(links),hide_index=True,use_container_width=True)
+        if cases:
+            st.markdown("**Screening cases**")
+            st.dataframe(pd.DataFrame(cases),hide_index=True,use_container_width=True)
+        if matches:
+            st.markdown("**Candidate / confirmed matches**")
+            st.dataframe(pd.DataFrame(matches),hide_index=True,use_container_width=True)
+        if not (sanctions or links or cases or matches):
+            st.caption("No sanctions/designation or screening record is currently linked to this canonical context.")
 
     if lens == "strategic":
         st.markdown("#### Strategic programmes / capacity")
-        found = False
-        for title, table in (("Programmes / projects","pc_project_details"),("Contracts","pc_contracts"),("Shipbuilding orders","pc_shipbuilding_orders")):
-            x = _related_table(table, oid, _object_name(typ, oid), 120)
+        found=False
+        for title,table in (
+            ("Defence programmes","pc_defence_programmes"),
+            ("Programme participation","pc_defence_programme_participants"),
+            ("Shipbuilding / production tasks","pc_shipbuilding_production_tasks"),
+            ("Programme milestones","pc_defence_programme_milestones"),
+            ("Shipyard capacity history","pc_shipyard_capacity_history"),
+            ("Security operations","pc_security_operations"),
+            ("Shipbuilding orders","pc_shipbuilding_orders"),
+            ("Contracts","pc_contracts"),
+            ("Projects","pc_project_details"),
+        ):
+            x=_related_table(table,oid,_object_name(typ,oid),120)
             if x:
-                found = True
-                st.markdown("**" + title + "**")
-                st.dataframe(pd.DataFrame(x), hide_index=True, use_container_width=True)
+                found=True
+                st.markdown("**"+title+"**")
+                st.dataframe(pd.DataFrame(x),hide_index=True,use_container_width=True,height=min(400,110+28*min(len(x),10)))
         if not found:
-            st.caption("No strategic programme, contract or order is currently linked to this context.")
+            st.caption("No strategic programme, contract, production or security-operation record is currently linked to this context.")
 
 
 def _render_event_cards(events: list[dict], key_prefix: str, limit: int = 15):
@@ -1349,6 +1364,159 @@ def _render_intelligence_home():
         _render_event_cards(strategic,"intel_statecraft",20)
 
 
+def _safe_df(rows: list[dict], preferred: list[str] | None = None, max_rows: int = 100):
+    if not rows:
+        return None
+    df=pd.DataFrame(rows[:max_rows])
+    if preferred:
+        cols=[x for x in preferred if x in df.columns]
+        if cols:
+            df=df[cols]
+    return df
+
+def _render_sanctions_home():
+    designations=_rows("pc_sanctions_designations",5000)
+    cases=_rows("pc_screening_cases",3000)
+    matches=_rows("pc_screening_matches",5000)
+    links=_rows("pc_sanctions_links",5000)
+
+    confirmed=[x for x in matches if _clean(x.get("match_status")).casefold()=="confirmed"]
+    review=[x for x in matches if _clean(x.get("match_status")).casefold() in {"candidate","needs_review","inconclusive"}]
+    open_cases=[x for x in cases if _clean(x.get("case_status")).casefold() not in {"closed","cleared"}]
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Designations",len(designations))
+    c2.metric("Confirmed matches",len(confirmed))
+    c3.metric("Needs review",len(review))
+    c4.metric("Open screening cases",len(open_cases))
+
+    left,right=st.columns([1.25,1.0],gap="large")
+    with left:
+        st.markdown("### Designation & exposure network")
+        st.caption("Legal designations, linked entities/vessels, ownership/control and screening exposure.")
+        if designations:
+            df=_safe_df(
+                designations,
+                ["name","designated_name","subject_name","program","regime","authority","jurisdiction",
+                 "designation_date","status","subject_type","entity_id","mobile_asset_id","sanctions_designation_id"],
+                80
+            )
+            st.dataframe(df,hide_index=True,use_container_width=True,height=460)
+        else:
+            st.caption("No designation rows returned from the sanctions table.")
+
+    with right:
+        st.markdown("### Screening desk")
+        if open_cases:
+            df=_safe_df(open_cases,["case_reference","submitted_name","subject_type","screening_purpose",
+                                    "jurisdiction_codes","case_status","opened_at"],60)
+            st.dataframe(df,hide_index=True,use_container_width=True,height=300)
+        if review:
+            st.markdown("#### Candidate / unresolved matches")
+            df=_safe_df(review,["match_status","match_score","analyst_reason","reviewed_at",
+                                "screening_case_id","sanctions_designation_id"],60)
+            st.dataframe(df,hide_index=True,use_container_width=True,height=300)
+
+    st.divider()
+    n1,n2=st.columns(2,gap="large")
+    with n1:
+        st.markdown("### Ownership / control / sanctions links")
+        if links:
+            df=_safe_df(links,None,100)
+            st.dataframe(df,hide_index=True,use_container_width=True,height=430)
+        else:
+            st.caption("No sanctions-network link rows returned.")
+    with n2:
+        st.markdown("### Recent sanctions-related activity")
+        events=_rows("pc_events",2500)
+        events=[e for e in events if SANCTIONS_RX.search(_record_text(e))]
+        events=sorted(events,key=lambda x:_clean(x.get("start_date")),reverse=True)
+        _render_event_cards(events,"sanctions_home_events",15)
+
+
+def _render_strategic_home():
+    orgs=_rows("pc_defence_organisations",3000)
+    programmes=_rows("pc_defence_programmes",3000)
+    participants=_rows("pc_defence_programme_participants",5000)
+    tasks=_rows("pc_shipbuilding_production_tasks",5000)
+    milestones=_rows("pc_defence_programme_milestones",5000)
+    capacity=_rows("pc_shipyard_capacity_history",5000)
+    operations=_rows("pc_security_operations",3000)
+
+    coast=[x for x in orgs if _clean(x.get("organisation_type")).casefold()=="coast_guard"]
+    naval=[x for x in orgs if _clean(x.get("organisation_type")).casefold()=="navy"]
+    active_programmes=[x for x in programmes if _clean(x.get("programme_status")).casefold() not in {"completed","cancelled","closed"}]
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Defence / security organisations",len(orgs))
+    c2.metric("Active programmes",len(active_programmes))
+    c3.metric("Production tasks",len(tasks))
+    c4.metric("Security operations",len(operations))
+
+    a,b=st.columns([1.1,1.0],gap="large")
+    with a:
+        st.markdown("### Programmes & industrial capacity")
+        if programmes:
+            df=_safe_df(
+                programmes,
+                ["programme_name","programme_type","programme_status","firm_quantity","option_quantity",
+                 "announced_value","currency","announced_date","expected_completion_date",
+                 "customer_entity_id","lead_contractor_entity_id"],
+                100
+            )
+            st.dataframe(df,hide_index=True,use_container_width=True,height=460)
+
+        if capacity:
+            st.markdown("#### Shipyard capacity / backlog")
+            df=_safe_df(capacity,["observed_date","metric_name","metric_value","metric_unit",
+                                  "reported_backlog_quantity","planned_or_actual","shipyard_asset_id","operator_entity_id"],80)
+            st.dataframe(df,hide_index=True,use_container_width=True,height=300)
+
+    with b:
+        st.markdown("### Defence, coast guard & security organisations")
+        if orgs:
+            display=[]
+            for r in orgs[:100]:
+                eid=_clean(r.get("entity_id"))
+                display.append({
+                    "Organisation":_object_name("entity",eid) if eid else "",
+                    "Type":_clean(r.get("organisation_type")),
+                    "Jurisdiction":_clean(r.get("jurisdiction")),
+                    "Status":_clean(r.get("organisation_status")),
+                    "Verification":_clean(r.get("verification_status")),
+                })
+            st.dataframe(pd.DataFrame(display),hide_index=True,use_container_width=True,height=360)
+
+        if operations:
+            st.markdown("#### Security / coast guard operations")
+            df=_safe_df(operations,["operation_name","operation_type","operation_status",
+                                    "publicly_reported_start","publicly_reported_end","lead_entity_id","operating_area"],80)
+            st.dataframe(df,hide_index=True,use_container_width=True,height=300)
+
+    st.divider()
+    p1,p2=st.columns(2,gap="large")
+    with p1:
+        st.markdown("### Production & delivery pipeline")
+        if tasks:
+            df=_safe_df(tasks,["task_type","task_status","planned_start","actual_start","planned_finish",
+                                "actual_finish","workshare_percent","shipyard_asset_id","builder_entity_id",
+                                "shipbuilding_order_id","shipbuilding_order_unit_id"],100)
+            st.dataframe(df,hide_index=True,use_container_width=True,height=430)
+        elif milestones:
+            df=_safe_df(milestones,["milestone_type","planned_date","actual_date","milestone_status",
+                                     "public_description","defence_programme_id","shipbuilding_order_unit_id"],100)
+            st.dataframe(df,hide_index=True,use_container_width=True,height=430)
+        else:
+            st.caption("No production-task or programme-milestone rows returned.")
+
+    with p2:
+        st.markdown("### Strategic developments")
+        events=_rows("pc_events",2500)
+        events=[e for e in events if STRATEGIC_RX.search(_record_text(e))]
+        events=sorted(events,key=lambda x:_clean(x.get("start_date")),reverse=True)
+        _render_event_cards(events,"strategic_home_events",15)
+
+
 def _render_home(lens: str):
     cfg = LENS[lens]
     st.markdown(f"<div class='pc-k'>{cfg['brand']} · terminal</div>", unsafe_allow_html=True)
@@ -1357,6 +1525,12 @@ def _render_home(lens: str):
 
     if lens=="intelligence":
         _render_intelligence_home()
+        return
+    if lens=="sanctions":
+        _render_sanctions_home()
+        return
+    if lens=="strategic":
+        _render_strategic_home()
         return
 
     c1,c2,c3,c4 = st.columns(4)
