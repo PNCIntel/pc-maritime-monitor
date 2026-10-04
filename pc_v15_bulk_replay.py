@@ -92,7 +92,9 @@ def _identity_aliases(value):
 
 def _is_auto_canonical_id(value):
     s=str(value or '').upper()
-    return '_AUTO_' in s or s.startswith('AUTO_') or s.startswith('ENTITY_AUTO') or s.startswith('ASSET_AUTO')
+    return ('_AUTO_' in s or s.startswith('AUTO_') or s.startswith('ENTITY_AUTO') or
+            s.startswith('ASSET_AUTO') or s.startswith('MOBILE_AUTO') or
+            s.startswith('ENTITY_AI_') or s.startswith('ASSET_AI_') or s.startswith('MOBILE_AI_'))
 
 def _preferred_exact_candidate(table,candidates,payload):
     if len(candidates)<2:
@@ -119,14 +121,29 @@ def _generic_asset_label(name,payload):
 def _geographic_asset_candidates(payload,registry):
     fam=_type_family('pc_assets',payload.get('asset_type'))
     country=_norm(payload.get('country'))
-    out=[]
+    region=_norm(payload.get('region_city'))
+    if not country and not region:
+        return []
+    scored=[]
     for hit in registry.get('pc_assets',[]):
         if _type_family('pc_assets',hit.get('asset_type'))!=fam:
             continue
-        if country and hit.get('country') and _norm(hit.get('country'))!=country:
+        hc=_norm(hit.get('country')); hr=_norm(hit.get('region_city') or hit.get('city') or '')
+        if country and hc and hc!=country:
             continue
-        out.append(hit)
-    return out[:25]
+        score=0
+        if country and hc==country: score+=20
+        if region and hr:
+            if region==hr: score+=40
+            elif region in hr or hr in region: score+=25
+        elif region:
+            hname=_norm(hit.get('name'))
+            if region in hname or any(t in hname.split() for t in region.split() if len(t)>3):
+                score+=15
+        if score:
+            scored.append((score,hit))
+    scored.sort(key=lambda x:x[0],reverse=True)
+    return [x[1] for x in scored[:25]]
 
 
 
@@ -207,7 +224,12 @@ def _identity_candidates(table,name,payload,index,registry):
         meaningful_subset=bool(len(shared)>=2 and short<=shared)
         acronym=bool(len(_tokens(key))==1 and next(iter(_tokens(key))).isalpha()
                      and len(next(iter(_tokens(key))))==3 and shared)
-        if SequenceMatcher(None,key,other).ratio() >= 0.77 or meaningful_subset or acronym:
+        generic={'line','group','company','co','corp','corporation','shipping','logistics',
+                 'port','ports','terminal','terminals','marine','maritime','international'}
+        significant_shared={t for t in shared if t not in generic and len(t)>=2}
+        ratio=SequenceMatcher(None,key,other).ratio()
+        ratio_ok=ratio>=0.77 and bool(significant_shared)
+        if ratio_ok or meaningful_subset or acronym:
             fuzzy.append(item)
     # Cross-table exact names are a classification problem, NOT permission to
     # relabel the existing port as a government authority or vice versa.
@@ -535,10 +557,12 @@ def _plan(sb,job,staged):
             continue
         if cross:
             other='pc_assets' if table=='pc_entities' else 'pc_entities'
-            exceptions.append({'Table':table,'Name':name,'Reason':'same-name object exists in another canonical domain — classify before creating',
-              'Candidates':', '.join(f"{x.get(NAME_COL[other])} [{x[ID_TABLES[other]]}]" for x in cross[:5]),
-              'Staged record ID':leader['staged_record_id']})
-            continue
+            source_family=_type_family(table,p.get('entity_type') if table=='pc_entities' else p.get('asset_type'))
+            if not (table=='pc_entities' and source_family=='public_body'):
+                exceptions.append({'Table':table,'Name':name,'Reason':'same-name object exists in another canonical domain — classify before creating',
+                  'Candidates':', '.join(f"{x.get(NAME_COL[other])} [{x[ID_TABLES[other]]}]" for x in cross[:5]),
+                  'Staged record ID':leader['staged_record_id']})
+                continue
         if table=='pc_entities' and re.fullmatch(r'[A-Za-z]{2,4}',name.strip()):
             # Short names/acronyms (QSL, etc.) have too many possible legal
             # identities for a name-only absence claim to be sufficient.
