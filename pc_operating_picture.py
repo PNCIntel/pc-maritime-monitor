@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit
 import pandas as pd
 import streamlit as st
+from pc_drilldown import drilldown_button, render_active_drilldown, render_sidebar_search
 
 try:
     from shared.pc_auth import service_client, require_login
@@ -151,6 +152,57 @@ def _count(sb,table):
         return int(res.count or 0)
     except Exception:return None
 
+@st.cache_data(ttl=300,show_spinner=False)
+def _canonical_named_objects(_sb):
+    """Small cached name index used only for exact text mentions, never fuzzy identity merging."""
+    specs=[
+        ("entity","pc_entities","entity_id","name","entity_type,hq_country"),
+        ("asset","pc_assets","asset_id","name","asset_type,country"),
+        ("mobile_asset","pc_mobile_assets","mobile_asset_id","name","asset_type,imo,flag"),
+    ]
+    out=[]
+    for typ,table,pk,name_col,extra in specs:
+        cols=pk+","+name_col+","+extra
+        for start in range(0,3000,500):
+            try:
+                rows=(_sb.table(table).select(cols).range(start,start+499).execute().data or [])
+            except Exception:
+                rows=[]
+            for r in rows:
+                nm=_clean(r.get(name_col))
+                if nm:
+                    out.append({"type":typ,"id":r.get(pk),"name":nm,"record":r})
+            if len(rows)<500:
+                break
+    return out
+
+def _exact_mentions(sb,row,exclude_ids=None):
+    text=_event_text(row)
+    if not text:
+        return []
+    low=text.casefold()
+    exclude=set(str(x) for x in (exclude_ids or []) if x)
+    found=[]
+    seen=set()
+    for obj in _canonical_named_objects(sb):
+        oid=str(obj.get("id") or "")
+        nm=_clean(obj.get("name"))
+        if not oid or oid in exclude or len(nm)<4:
+            continue
+        nlow=nm.casefold()
+        # Exact canonical-name phrase only. Short all-caps names still require word boundaries.
+        if nlow not in low:
+            continue
+        if len(nm)<=5:
+            if not re.search(r"(?<![A-Za-z0-9])"+re.escape(nm)+r"(?![A-Za-z0-9])",text,re.I):
+                continue
+        key=(obj["type"],oid)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(obj)
+    return found[:20]
+
 def _style(theme="Dark"):
     if theme=="Light":
         palette="--bg:#f4f6f8;--panel:#ffffff;--panel2:#f8fafc;--line:#cbd5df;--text:#17202a;--muted:#5f6b78;--gold:#9a7626;--red:#a45149;--green:#4f7d67"
@@ -210,6 +262,8 @@ def _event_expander(sb,r,mode,key_prefix="evt"):
         assess=_clean(m.get("assessment") or m.get("pc_assessment") or r.get("pc_assessment"))
 
         links=_links(sb,eid) if eid else []
+        linked_ids=[x.get("linked_id") for x in links]
+        mentions=_exact_mentions(sb,r,linked_ids)
 
         if mode=="trade":
             if desc:
@@ -222,13 +276,6 @@ def _event_expander(sb,r,mode,key_prefix="evt"):
             if capacity:
                 st.markdown("**Capacity / infrastructure effect**")
                 st.write(capacity)
-            if links:
-                st.markdown("**Companies / assets / corridors affected**")
-                for x in links[:15]:
-                    nm=_clean(x.get("linked_name")) or _clean(x.get("linked_id"))
-                    rel=_clean(x.get("relationship")).replace("_"," ")
-                    if nm:
-                        st.markdown("- "+nm+(f" — {rel}" if rel else ""))
         else:
             if desc:
                 st.markdown("**What happened**")
@@ -241,13 +288,37 @@ def _event_expander(sb,r,mode,key_prefix="evt"):
             if assess:
                 st.markdown("**Assessment**")
                 st.write(assess)
-            if links:
-                st.markdown("**Linked actors / assets / vessels**")
-                for x in links[:15]:
-                    nm=_clean(x.get("linked_name")) or _clean(x.get("linked_id"))
-                    rel=_clean(x.get("relationship")).replace("_"," ")
-                    if nm:
-                        st.markdown("- "+nm+(f" — {rel}" if rel else ""))
+
+        if links or mentions:
+            st.markdown("### Connected model")
+            st.caption("Open canonical companies, assets and vessels directly from this development.")
+            for n,x in enumerate(links[:20]):
+                typ=_clean(x.get("linked_type"))
+                if typ=="vessel": typ="mobile_asset"
+                if typ not in {"entity","asset","mobile_asset"}:
+                    continue
+                oid=_clean(x.get("linked_id"))
+                nm=_clean(x.get("linked_name")) or oid
+                rel=_clean(x.get("relationship")).replace("_"," ")
+                c1,c2=st.columns([5,1.5])
+                c1.markdown("**"+nm+"**"+(f" · {rel}" if rel else ""))
+                with c2:
+                    drilldown_button(typ,oid,"Open profile",
+                        key=f"{key_prefix}_linked_{eid}_{n}_{oid}",
+                        use_container_width=True)
+
+            if mentions:
+                st.markdown("**Canonical records mentioned in this development**")
+                st.caption("Exact name mentions only; this does not infer ownership or another relationship.")
+                for n,obj in enumerate(mentions[:12]):
+                    c1,c2=st.columns([5,1.5])
+                    rec=obj.get("record") or {}
+                    extra=_clean(rec.get("hq_country") or rec.get("country") or rec.get("imo"))
+                    c1.markdown("**"+obj["name"]+"**"+(f" · {extra}" if extra else ""))
+                    with c2:
+                        drilldown_button(obj["type"],obj["id"],"Open profile",
+                            key=f"{key_prefix}_mention_{eid}_{n}_{obj['id']}",
+                            use_container_width=True)
 
         inds=m.get("monitoring_indicators") or r.get("monitoring_indicators")
         if inds:
@@ -302,12 +373,14 @@ def render_operating_picture(mode="trade"):
         st.divider()
         if st.button("Refresh database",use_container_width=True):
             st.cache_data.clear(); st.rerun()
+        render_sidebar_search()
 
     _style(theme)
     rows=_events(sb)
     st.markdown('<div class="pc-k">POWER & CORRIDORS / OPERATING PICTURE</div>',unsafe_allow_html=True)
     st.title(title)
     st.markdown(f'<div class="pc-sub">{deck}</div>',unsafe_allow_html=True)
+    render_active_drilldown(location="top",expanded=True)
 
     q=st.text_input("Find a development, company, vessel, port, corridor or place",
                     placeholder="Hormuz, AD Ports, Navi Mumbai, CLI, KEZAD, rail, tanker…")
