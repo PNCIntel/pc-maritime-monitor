@@ -911,7 +911,13 @@ if st.session_state.get("active_package"):
     with st.form("pc_v071_direct_queue"):
         queue_title = st.text_input("Job name", "P&C multi-source intelligence intake")
         queue_research = True
-        st.caption('Background research is enabled for every unpublished core object. No database knowledge needed.')
+        fresh_reload = st.checkbox(
+            "Start a fresh reload job",
+            value=True,
+            help="Creates a new ingestion job even if these sources were loaded before. "
+                 "Canonical matching still reuses existing companies, assets, vessels and events."
+        )
+        st.caption('Background research is enabled for every unpublished core object. Existing canonical records are reused when identities match.')
         submit_queue = st.form_submit_button("Run production ingestion", type="primary")
     if submit_queue:
         try:
@@ -923,6 +929,7 @@ if st.session_state.get("active_package"):
                 ai_research=True,
                 intake_report={'sources':st.session_state.get('source_stats') or [],
                                'errors':st.session_state.get('source_errors') or []},
+                force_new=bool(fresh_reload),
             )
             st.session_state["pc_active_intelligence_job"] = job_id
             st.success(f"{'Previously queued' if reused else 'Queued'} {count:,} records "
