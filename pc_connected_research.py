@@ -453,7 +453,13 @@ def job_subjects(sb,job,max_subjects=30):
             et=str((s.get('payload') or {}).get('entity_type') or '').casefold()
             if et and not any(x in et for x in ('company','business','operator','carrier','logistics','shipping','group','corporation')): continue
         elif s['target_table']=='pc_mobile_assets':
-            name=(s.get('payload') or {}).get('name') or s.get('natural_key'); typ='vessel'
+            mp=s.get('payload') or {}
+            name=mp.get('name') or s.get('natural_key')
+            at=str(mp.get('asset_type') or '').casefold()
+            imo=str(mp.get('imo') or '').strip()
+            if not (_valid_imo(imo) or any(x in at for x in ('vessel','ship','tanker','carrier','ferry','barge','tug','yacht'))):
+                continue
+            typ='vessel'
         else: continue
         key=(typ,_norm(name))
         if not name or key in seen: continue
@@ -713,7 +719,15 @@ def _publish_dossier_event_links(sb,job):
         })
 
     def resolve_named(linked_type, linked_name, event_row):
-        typ='mobile_asset' if linked_type in {'vessel','mobile_asset'} else linked_type
+        raw=str(linked_type or '').strip().casefold().replace('-','_').replace(' ','_')
+        type_map={
+            'company':'entity','entity':'entity','organisation':'entity','organization':'entity',
+            'operator':'entity','authority':'entity',
+            'physical_asset':'asset','infrastructure':'asset','port':'asset','terminal':'asset',
+            'airport':'asset','rail_asset':'asset','asset':'asset',
+            'vessel':'mobile_asset','ship':'mobile_asset','mobile_asset':'mobile_asset'
+        }
+        typ=type_map.get(raw,raw)
         if typ not in {'entity','asset','mobile_asset'}:
             return None,'unsupported linked_type'
 
@@ -763,7 +777,7 @@ def _publish_dossier_event_links(sb,job):
                 'source_finding':source_finding or {},
                 'verification_status':(source_finding or {}).get('verification_status') or 'reported',
             }},
-            on_conflict='event_link_id').execute()
+            on_conflict='event_id,linked_type,linked_id,relationship').execute()
         count+=1
 
     for row in stages:
@@ -782,9 +796,12 @@ def _publish_dossier_event_links(sb,job):
             if not isinstance(link,dict):
                 continue
             raw_type=str(link.get('linked_type') or '').strip().casefold()
-            typ='mobile_asset' if raw_type in {'vessel','ship','mobile_asset'} else raw_type
             name=str(link.get('linked_name') or '').strip()
-            oid,problem=resolve_named(typ,name,row)
+            oid,problem=resolve_named(raw_type,name,row)
+            type_map={'company':'entity','entity':'entity','organisation':'entity','organization':'entity',
+                      'physical_asset':'asset','infrastructure':'asset','asset':'asset',
+                      'vessel':'mobile_asset','ship':'mobile_asset','mobile_asset':'mobile_asset'}
+            typ=type_map.get(raw_type.replace('-','_').replace(' ','_'),raw_type)
             if problem:
                 holds.append({
                     'type':'event_link',
