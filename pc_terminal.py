@@ -1319,6 +1319,39 @@ def _render_event_cards(events: list[dict], key_prefix: str, limit: int = 15):
                 st.rerun()
 
 
+def _render_event_rows(events: list[dict], key_prefix: str, limit: int=10):
+    """Readable event list with direct drill-down and source access."""
+    if not events:
+        st.caption("No linked canonical developments.")
+        return
+    for i,e in enumerate(events[:limit]):
+        title=_clean(e.get("title")) or "Untitled development"
+        dt=_clean(e.get("start_date"))[:10]
+        etype=_clean(e.get("event_type") or e.get("event_nature")).replace("_"," ").title()
+        loc=_event_region_label(e)
+        cols=st.columns([4.0,1.0,1.0])
+        with cols[0]:
+            st.markdown(f"**{title}**")
+            meta=" · ".join(x for x in [dt,etype,loc if loc!="Global / unspecified" else ""] if x)
+            if meta: st.caption(meta)
+        eid=_clean(e.get("event_id"))
+        if eid:
+            cols[1].button(
+                "Open",
+                key=f"{key_prefix}_open_{i}_{eid}",
+                use_container_width=True,
+                on_click=_set_context,
+                args=("event",eid,title),
+            )
+        urls=_event_source_urls(e)
+        if urls:
+            cols[2].link_button("Source",urls[0],use_container_width=True)
+        impact=_clean(e.get("commercial_impact") or e.get("operational_impact") or e.get("pc_assessment"))
+        if impact:
+            st.write(impact[:700])
+        st.markdown("<div style='height:1px;background:var(--line);margin:.1rem 0 .45rem'></div>",unsafe_allow_html=True)
+
+
 def _render_layer4(typ: str, oid: str, rec: dict, lens: str):
     st.markdown(f"### {LENS[lens]['layer4']}")
     events = _events_for_object(typ, oid)
