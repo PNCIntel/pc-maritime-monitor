@@ -2534,6 +2534,198 @@ def _render_company_transaction_cards(tx: list[dict], limit: int=10):
         st.markdown("<div style='height:1px;background:var(--line);margin:.15rem 0 .5rem'></div>",unsafe_allow_html=True)
 
 
+def _strategic_company_bundle(oid: str, name: str) -> dict:
+    """Collect specialist defence/shipbuilding records that may bypass generic company links."""
+    bundle=_entity_identity_bundle(str(oid))
+    ids=bundle.get("ids") or [str(oid)]
+
+    def by_cols(table: str, cols: list[str], limit: int=250) -> list[dict]:
+        out=[]; seen=set()
+        for col in cols:
+            for eid in ids:
+                try:
+                    rows=_filtered_rows(table,col,str(eid),limit)
+                except Exception:
+                    rows=[]
+                for r in rows:
+                    k=json.dumps(r,sort_keys=True,default=str)
+                    if k not in seen:
+                        seen.add(k); out.append(r)
+        if not out:
+            try:
+                out=_related_table(table,oid,name,limit)
+            except Exception:
+                out=[]
+        return out
+
+    programmes=by_cols(
+        "pc_defence_programmes",
+        ["lead_contractor_entity_id","customer_entity_id"],
+        250,
+    )
+    participants=by_cols(
+        "pc_defence_programme_participants",
+        ["entity_id"],
+        400,
+    )
+    production=by_cols(
+        "pc_shipbuilding_production_tasks",
+        ["builder_entity_id"],
+        500,
+    )
+    capacity=by_cols(
+        "pc_shipyard_capacity_history",
+        ["operator_entity_id"],
+        300,
+    )
+    operations=by_cols(
+        "pc_security_operations",
+        ["lead_entity_id"],
+        250,
+    )
+    operation_participants=by_cols(
+        "pc_security_operation_participants",
+        ["entity_id"],
+        300,
+    )
+    orders=_related_table("pc_shipbuilding_orders",oid,name,300)
+    contracts=_related_table("pc_contracts",oid,name,300)
+
+    # Resolve programme ids represented only through participant rows.
+    programme_ids=set()
+    for r in programmes+participants+production:
+        pid=_clean(r.get("defence_programme_id"))
+        if pid: programme_ids.add(pid)
+    for pid in list(programme_ids):
+        try:
+            rows=_filtered_rows("pc_defence_programmes","defence_programme_id",pid,2)
+        except Exception:
+            rows=[]
+        for r in rows:
+            if not any(_clean(x.get("defence_programme_id"))==pid for x in programmes):
+                programmes.append(r)
+
+    # Shipyard assets can be attached through participants, production or capacity.
+    shipyards=[]
+    seen_assets=set()
+    for r in participants+production+capacity:
+        aid=_clean(r.get("shipyard_asset_id"))
+        if not aid or aid in seen_assets:
+            continue
+        seen_assets.add(aid)
+        arec=object_record("asset",aid) or {}
+        shipyards.append({
+            "type":"asset",
+            "id":aid,
+            "name":_clean(arec.get("name")) or _asset_chip(aid),
+            "relationship":_clean(r.get("participant_role") or r.get("task_type") or "shipyard"),
+        })
+
+    # Orders may point to units/vessels elsewhere; keep them as structured industrial activity.
+    return {
+        "programmes":programmes,
+        "participants":participants,
+        "production":production,
+        "capacity":capacity,
+        "orders":orders,
+        "contracts":contracts,
+        "operations":operations,
+        "operation_participants":operation_participants,
+        "shipyards":shipyards,
+    }
+
+
+def _render_strategic_company_activity(data: dict, oid: str):
+    programmes=data.get("programmes") or []
+    production=data.get("production") or []
+    orders=data.get("orders") or []
+    contracts=data.get("contracts") or []
+    capacity=data.get("capacity") or []
+    operations=data.get("operations") or []
+
+    if not any((programmes,production,orders,contracts,capacity,operations)):
+        return
+
+    st.markdown("### Strategic Industrial Activity")
+    st.caption("Defence, coast-guard, shipbuilding, production and industrial-capacity records tied to this company.")
+
+    a,b=st.columns([1.1,1.0],gap="large")
+    with a:
+        with st.container(border=True):
+            st.markdown("#### Programmes & Contracts")
+            if programmes:
+                for i,r in enumerate(programmes[:15]):
+                    title=_company_display_value(r.get("programme_name"),"Unnamed programme")
+                    ptype=_company_display_value(r.get("programme_type"))
+                    status=_company_display_value(r.get("programme_status"),r.get("verification_status"))
+                    qty=[]
+                    if r.get("firm_quantity") not in (None,""): qty.append(f"{r.get('firm_quantity')} firm")
+                    if r.get("option_quantity") not in (None,""): qty.append(f"{r.get('option_quantity')} options")
+                    value=""
+                    if r.get("announced_value") not in (None,""):
+                        value=(str(r.get("currency") or "")+" "+str(r.get("announced_value"))).strip()
+                    st.markdown(f"**{title}**")
+                    st.caption(" · ".join(x for x in [ptype.replace("_"," ").title() if ptype else "",status,", ".join(qty),value] if x))
+                    st.markdown("<div style='height:1px;background:var(--line);margin:.12rem 0 .45rem'></div>",unsafe_allow_html=True)
+            elif contracts:
+                for r in contracts[:12]:
+                    title=_company_display_value(r.get("contract_name"),r.get("title"),r.get("description"),"Contract")
+                    st.markdown(f"**{title}**")
+                    st.caption(" · ".join(x for x in [_clean(r.get("status")),_clean(r.get("signed_date"))] if x))
+            else:
+                st.caption("No programme or contract records resolved.")
+
+    with b:
+        with st.container(border=True):
+            st.markdown("#### Production & Capacity")
+            if production:
+                for r in production[:15]:
+                    task=_company_display_value(r.get("task_type"),"production task").replace("_"," ").title()
+                    yard=_asset_chip(_clean(r.get("shipyard_asset_id"))) if r.get("shipyard_asset_id") else ""
+                    status=_company_display_value(r.get("task_status"))
+                    dates=" → ".join(x for x in [
+                        _clean(r.get("planned_start") or r.get("actual_start")),
+                        _clean(r.get("planned_finish") or r.get("actual_finish"))
+                    ] if x)
+                    st.markdown(f"**{task}**")
+                    st.caption(" · ".join(x for x in [yard,status,dates] if x))
+                    st.markdown("<div style='height:1px;background:var(--line);margin:.12rem 0 .45rem'></div>",unsafe_allow_html=True)
+            if capacity:
+                with st.expander(f"Capacity observations ({len(capacity)})",expanded=not bool(production)):
+                    for r in capacity[:20]:
+                        metric=_company_display_value(r.get("metric_name"),"Capacity")
+                        value=" ".join(x for x in [str(r.get("metric_value") or ""),_clean(r.get("metric_unit"))] if x).strip()
+                        yard=_asset_chip(_clean(r.get("shipyard_asset_id"))) if r.get("shipyard_asset_id") else ""
+                        st.markdown(f"**{metric}**")
+                        st.caption(" · ".join(x for x in [yard,value,_clean(r.get("observed_date"))] if x))
+            if not production and not capacity:
+                st.caption("No production or capacity records resolved.")
+
+    if orders:
+        with st.container(border=True):
+            st.markdown("#### Shipbuilding Orders / Industrial Pipeline")
+            for r in orders[:15]:
+                title=_company_display_value(
+                    r.get("order_name"),r.get("programme_name"),r.get("vessel_class"),
+                    r.get("description"),r.get("shipbuilding_order_id"),"Shipbuilding order"
+                )
+                status=_company_display_value(r.get("status"),r.get("order_status"))
+                qty=_company_display_value(r.get("quantity"),r.get("firm_quantity"))
+                delivery=_company_display_value(r.get("delivery_date"),r.get("expected_delivery"),r.get("delivery_year"))
+                st.markdown(f"**{title}**")
+                st.caption(" · ".join(x for x in [status,("Qty "+qty) if qty else "",delivery] if x))
+
+    if operations:
+        with st.container(border=True):
+            st.markdown("#### Security / Operational Activity")
+            for r in operations[:12]:
+                title=_company_display_value(r.get("operation_name"),"Operation")
+                typ=_company_display_value(r.get("operation_type")).replace("_"," ").title()
+                status=_company_display_value(r.get("operation_status"))
+                st.markdown(f"**{title}**")
+                st.caption(" · ".join(x for x in [typ,status] if x))
+
+
 def _render_company_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("entity",oid)
     bundle=_entity_identity_bundle(str(oid))
@@ -2557,6 +2749,17 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     portfolio=_portfolio(oid)
     tx=_related_table("pc_transactions",oid,name,150)
     events=_events_for_object("entity",oid)
+    # Some specialist-domain records were loaded before event/company link fan-out.
+    # Use exact company name/id fallback so strategic firms do not appear empty.
+    if not events:
+        events=_related_table("pc_events",oid,name,150)
+    strategic_data=_strategic_company_bundle(oid,name)
+    strategic_assets=strategic_data.get("shipyards") or []
+    existing_asset_ids={x.get("id") for x in assets}
+    for x in strategic_assets:
+        if x.get("id") not in existing_asset_ids:
+            assets.append(x)
+            existing_asset_ids.add(x.get("id"))
     docs=_documents_for_entity(oid)
     if not docs:
         docs=_documents_by_name(name,20)
@@ -2573,8 +2776,12 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     m[0].metric("Linked companies",len(corporate))
     m[1].metric("Operating assets",len(assets))
     m[2].metric("Corridors",len(corridors))
-    m[3].metric("Portfolio positions",len(portfolio))
-    m[4].metric("Capital actions",len(tx))
+    if any(strategic_data.get(k) for k in ("programmes","production","orders")):
+        m[3].metric("Programmes / orders",len(strategic_data.get("programmes") or [])+len(strategic_data.get("orders") or []))
+        m[4].metric("Production tasks",len(strategic_data.get("production") or []))
+    else:
+        m[3].metric("Portfolio positions",len(portfolio))
+        m[4].metric("Capital actions",len(tx))
     m[5].metric("Developments",len(events))
 
     top_left,top_right=st.columns([1.55,1.0],gap="large")
@@ -2651,6 +2858,8 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
                     cols[1].caption(role or "Connected")
                     cols[2].button("Open",key=f"company_corr_{_norm(oid)}_{i}",use_container_width=True,
                                    on_click=_set_context,args=("corridor",ck,nm))
+
+    _render_strategic_company_activity(strategic_data,oid)
 
     low_left,low_right=st.columns([1.0,1.15],gap="large")
     with low_left:
