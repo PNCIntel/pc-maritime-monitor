@@ -187,6 +187,10 @@ if st.session_state.pop('pc_resumed_job_notice',None):
 # dataframe construction and old full-page rerenders for large imports.
 # Keep the familiar multi-URL and multi-file loader as the HOME page. The
 # v0.7 bulk worker and Trade preview are additional pages, not replacements.
+_requested_workspace = st.session_state.pop('pc_requested_workspace', None)
+if _requested_workspace:
+    st.session_state['pc_workspace_simple_v18'] = _requested_workspace
+
 mode = st.sidebar.radio(
     'Workspace',
     ['Load intelligence', 'Analyst workbench', 'Research company', 'Load documents', 'Review exceptions', 'Jobs & history', 'Search / database'],
