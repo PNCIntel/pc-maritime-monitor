@@ -401,28 +401,43 @@ def _display_location(row: dict) -> str:
 
 def _style(theme: str):
     if theme == "Light":
-        p = "--bg:#f5f7fa;--panel:#fff;--panel2:#f8fafc;--line:#d7dee8;--text:#182230;--muted:#667383;--gold:#977421;--blue:#315e9c;--red:#b2564d;--green:#427d61"
+        p = "--bg:#f4f7fb;--panel:#ffffff;--panel2:#f7f9fc;--line:#dfe6ef;--text:#10213a;--muted:#718096;--gold:#9b7a2c;--blue:#2563eb;--red:#d94841;--green:#149563;--orange:#e58a16;--purple:#7057d9"
     else:
-        p = "--bg:#09111d;--panel:#101927;--panel2:#0d1623;--line:#26364a;--text:#edf2f7;--muted:#9facbd;--gold:#d1ad59;--blue:#6699e8;--red:#d37a72;--green:#72a78c"
+        p = "--bg:#08111e;--panel:#101a29;--panel2:#0c1522;--line:#26364a;--text:#eef4fb;--muted:#9aabc0;--gold:#d0ad59;--blue:#6ea0ff;--red:#df7770;--green:#66b98c;--orange:#eba34b;--purple:#a994ff"
     st.markdown(f"""
     <style>
     :root{{{p}}}
     .stApp{{background:var(--bg);color:var(--text)}}
-    [data-testid="stSidebar"]{{background:var(--panel2)!important;border-right:1px solid var(--line)}}
+    [data-testid="stSidebar"]{{background:var(--panel2)!important;border-right:1px solid var(--line);min-width:225px!important}}
     [data-testid="stSidebar"] *{{color:var(--text)!important}}
-    .block-container{{max-width:1780px;padding-top:1rem;padding-bottom:3rem}}
+    .block-container{{max-width:1540px;padding-top:.65rem;padding-bottom:2.5rem}}
+    h1{{font-size:2.15rem!important;letter-spacing:-.035em;margin-bottom:.15rem!important}}
+    h2{{font-size:1.35rem!important;letter-spacing:-.02em}}
+    h3{{font-size:1.05rem!important}}
     h1,h2,h3,h4,p,label,span,li{{color:var(--text)!important}}
-    .pc-k{{color:var(--gold);font-size:.68rem;font-weight:750;letter-spacing:.14em;text-transform:uppercase}}
-    .pc-sub{{color:var(--muted);font-size:.9rem}}
-    .pc-command{{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem;margin:.5rem 0 1rem}}
-    .pc-context{{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:9px;padding:.9rem 1rem;margin:.4rem 0 1rem}}
-    .pc-card{{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:.85rem 1rem;min-height:115px}}
-    .pc-muted{{color:var(--muted);font-size:.82rem}}
-    [data-testid="stMetric"]{{background:var(--panel);border:1px solid var(--line);border-top:2px solid var(--gold);padding:.55rem .7rem;border-radius:7px}}
-    [data-testid="stDataFrame"]{{border:1px solid var(--line);border-radius:7px}}
-    [data-testid="stExpander"]{{background:var(--panel);border:1px solid var(--line);border-radius:7px}}
-    div.stButton>button{{border:1px solid #806b38;color:var(--gold);background:var(--panel);border-radius:7px}}
+    .pc-k{{color:var(--gold);font-size:.66rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase}}
+    .pc-sub{{color:var(--muted);font-size:.91rem;margin-bottom:.45rem}}
+    .pc-command{{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:.55rem .8rem;margin:.15rem 0 .8rem;box-shadow:0 1px 3px rgba(18,38,63,.03)}}
+    .pc-context{{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:9px;padding:.85rem 1rem;margin:.4rem 0 .8rem}}
+    .pc-card{{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:.8rem .9rem;min-height:110px;box-shadow:0 1px 4px rgba(18,38,63,.035)}}
+    .pc-panel-title{{font-size:1.03rem;font-weight:750;margin-bottom:.05rem}}
+    .pc-panel-sub{{color:var(--muted);font-size:.76rem;margin-bottom:.45rem}}
+    .pc-row{{display:flex;justify-content:space-between;gap:.8rem;padding:.48rem .1rem;border-bottom:1px solid var(--line);font-size:.84rem}}
+    .pc-row:last-child{{border-bottom:none}}
+    .pc-row-label{{font-weight:650}}
+    .pc-row-meta{{color:var(--muted);white-space:nowrap}}
+    .pc-tag{{display:inline-block;border-radius:999px;padding:.18rem .46rem;font-size:.68rem;font-weight:700;background:var(--panel2);border:1px solid var(--line);margin-right:.25rem}}
+    .pc-muted{{color:var(--muted);font-size:.8rem}}
+    [data-testid="stMetric"]{{background:var(--panel);border:1px solid var(--line);padding:.7rem .8rem;border-radius:9px;box-shadow:0 1px 4px rgba(18,38,63,.035);min-height:92px}}
+    [data-testid="stMetric"] label{{font-size:.75rem!important;color:var(--muted)!important}}
+    [data-testid="stMetricValue"]{{font-size:1.65rem!important;font-weight:760!important}}
+    [data-testid="stDataFrame"]{{border:1px solid var(--line);border-radius:8px;overflow:hidden}}
+    [data-testid="stExpander"]{{background:var(--panel);border:1px solid var(--line);border-radius:8px}}
+    [data-testid="stVerticalBlockBorderWrapper"]{{background:var(--panel);border-color:var(--line)!important;border-radius:9px!important;box-shadow:0 1px 4px rgba(18,38,63,.03)}}
+    div.stButton>button{{border:1px solid #b8a16b;color:var(--text);background:var(--panel);border-radius:7px;min-height:2.25rem}}
+    div.stButton>button:hover{{border-color:var(--blue);color:var(--blue)}}
     [data-baseweb="input"]>div,[data-baseweb="select"]>div,input{{background:var(--panel)!important;color:var(--text)!important}}
+    hr{{border-color:var(--line)!important}}
     </style>
     """, unsafe_allow_html=True)
 
@@ -1289,59 +1304,68 @@ def _event_region_label(e: dict) -> str:
     return "Global / unspecified"
 
 def _render_intelligence_home():
-    events=_rows("pc_events",2500)
-    events=sorted(events,key=lambda x:_clean(x.get("start_date")),reverse=True)
-
+    events=sorted(_rows("pc_events",2500),key=lambda x:_clean(x.get("start_date")),reverse=True)
     priority=sorted(events,key=lambda x:(_event_priority(x),_clean(x.get("start_date"))),reverse=True)
     security=[e for e in events if _event_theme(e)=="Security / conflict"]
     sanctions=[e for e in events if _event_theme(e)=="Sanctions / compliance"]
     disruptions=[e for e in events if _event_theme(e)=="Operational disruption"]
+    corridors=_rows("pc_trade_corridors",5000)
 
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("Priority intelligence",sum(1 for e in events if _event_priority(e)>=40))
-    c2.metric("Security / conflict",len(security))
-    c3.metric("Operational disruptions",len(disruptions))
-    c4.metric("Corridors monitored",len(_rows("pc_trade_corridors",5000)))
+    _dashboard_header("P&C INTELLIGENCE · OPERATING PICTURE",
+                      "Intelligence Operating Terminal",
+                      "Events, actors, infrastructure exposure, security, statecraft, monitoring and evidence in one connected workspace.")
 
-    left,right=st.columns([1.8,1.0],gap="large")
+    m=st.columns(6)
+    m[0].metric("Priority intelligence",sum(1 for e in events if _event_priority(e)>=40))
+    m[1].metric("Security / conflict",len(security))
+    m[2].metric("Operational disruptions",len(disruptions))
+    m[3].metric("Sanctions / compliance",len(sanctions))
+    m[4].metric("Corridors monitored",len(corridors))
+    m[5].metric("Events indexed",_index_count("event"))
+
+    left,mid,right=st.columns([1.6,1.0,1.0],gap="medium")
     with left:
-        st.markdown("### Priority intelligence")
-        st.caption("Highest-value developments first: security, disruption, sanctions and strategic chokepoints.")
-        _render_event_cards(priority,f"intel_priority",12)
+        with st.container(border=True):
+            _panel_header("Global Intelligence Picture","Infrastructure and geographic context for current developments.")
+            _dashboard_map_assets("trade")
+    with mid:
+        with st.container(border=True):
+            _panel_header("Priority Intelligence","Highest-value developments first.")
+            _html_rows(_recent_event_rows(priority,8),8)
     with right:
-        st.markdown("### Monitoring desk")
-        theme_counts={}
-        region_counts={}
-        for e in events[:500]:
-            theme=_event_theme(e)
-            theme_counts[theme]=theme_counts.get(theme,0)+1
-            region=_event_region_label(e)
-            region_counts[region]=region_counts.get(region,0)+1
+        with st.container(border=True):
+            _panel_header("Monitoring Desk","Active themes, disruptions and sanctions exposure.")
+            _html_rows([
+                ("Security / conflict",str(len(security))),
+                ("Operational disruption",str(len(disruptions))),
+                ("Sanctions / compliance",str(len(sanctions))),
+                ("Statecraft / policy",str(sum(1 for e in events if _event_theme(e)=="Statecraft / policy"))),
+                ("Infrastructure / capacity",str(sum(1 for e in events if _event_theme(e)=="Infrastructure / capacity"))),
+            ],7)
 
-        st.markdown("#### Active themes")
-        if theme_counts:
-            theme_df=pd.DataFrame(
-                sorted(({"Theme":k,"Records":v} for k,v in theme_counts.items()),key=lambda x:x["Records"],reverse=True)
-            )
-            st.dataframe(theme_df,hide_index=True,use_container_width=True,height=min(300,80+28*len(theme_df)))
+    c1,c2,c3=st.columns([1.0,1.0,1.2],gap="medium")
+    with c1:
+        with st.container(border=True):
+            _panel_header("Security & Maritime","Conflict, attacks, boardings, naval activity and maritime security.")
+            _html_rows(_recent_event_rows(security,7),7)
+    with c2:
+        with st.container(border=True):
+            _panel_header("Disruptions & Chokepoints","Operational disruption affecting ports, corridors and trade.")
+            _html_rows(_recent_event_rows(disruptions,7),7)
+    with c3:
+        with st.container(border=True):
+            _panel_header("Recent Intelligence","Latest developments across the monitoring picture.")
+            _html_rows(_recent_event_rows(priority,7),7)
 
-        st.markdown("#### Geographic concentration")
-        regions=sorted(({"Region / location":k,"Records":v} for k,v in region_counts.items()),key=lambda x:x["Records"],reverse=True)[:10]
-        if regions:
-            st.dataframe(pd.DataFrame(regions),hide_index=True,use_container_width=True,height=min(360,80+28*len(regions)))
-
-    st.divider()
-    st.markdown("### Intelligence streams")
-    t1,t2,t3,t4=st.tabs(["Security & Maritime","Disruptions","Sanctions & Compliance","Statecraft / Capacity"])
-    with t1:
-        _render_event_cards(security,"intel_security",20)
-    with t2:
-        _render_event_cards(disruptions,"intel_disruptions",20)
-    with t3:
-        _render_event_cards(sanctions,"intel_sanctions",20)
-    with t4:
-        strategic=[e for e in events if _event_theme(e) in {"Statecraft / policy","Infrastructure / capacity"}]
-        _render_event_cards(strategic,"intel_statecraft",20)
+    st.markdown("### Featured Intelligence Objects")
+    _featured_search_cards([
+        ("Strait of Hormuz","Hormuz"),
+        ("Red Sea","Red Sea"),
+        ("Black Sea","Black Sea"),
+        ("Panama Canal","Panama Canal"),
+        ("Middle Corridor","Middle Corridor"),
+        ("Dark Fleet","dark fleet"),
+    ],"intelligence")
 
 
 def _safe_df(rows: list[dict], preferred: list[str] | None = None, max_rows: int = 100):
@@ -1354,178 +1378,176 @@ def _safe_df(rows: list[dict], preferred: list[str] | None = None, max_rows: int
             df=df[cols]
     return df
 
+def _dashboard_header(kicker: str, title: str, subtitle: str):
+    st.markdown(f"<div class='pc-k'>{kicker}</div>",unsafe_allow_html=True)
+    st.title(title)
+    st.markdown(f"<div class='pc-sub'>{subtitle}</div>",unsafe_allow_html=True)
+
+def _panel_header(title: str, subtitle: str=""):
+    st.markdown(f"<div class='pc-panel-title'>{title}</div>",unsafe_allow_html=True)
+    if subtitle:
+        st.markdown(f"<div class='pc-panel-sub'>{subtitle}</div>",unsafe_allow_html=True)
+
+def _html_rows(rows: list[tuple[str,str]], limit: int=8):
+    if not rows:
+        st.caption("No records available.")
+        return
+    html=""
+    for a,b in rows[:limit]:
+        html += f"<div class='pc-row'><span class='pc-row-label'>{a}</span><span class='pc-row-meta'>{b}</span></div>"
+    st.markdown(html,unsafe_allow_html=True)
+
+def _recent_event_rows(events: list[dict], limit: int=7) -> list[tuple[str,str]]:
+    out=[]
+    for e in events[:limit]:
+        title=_clean(e.get("title")) or "Untitled development"
+        dt=_clean(e.get("start_date"))[:10]
+        out.append((title,dt))
+    return out
+
+def _dashboard_map_assets(lens: str, limit: int=300):
+    rows=[]
+    for a in _rows("pc_assets",5000):
+        try:
+            lat=float(a.get("latitude")); lon=float(a.get("longitude"))
+        except Exception:
+            continue
+        if not (-90<=lat<=90 and -180<=lon<=180):
+            continue
+        blob=_record_text(a)
+        if lens=="strategic" and not STRATEGIC_RX.search(blob):
+            continue
+        rows.append({"lat":lat,"lon":lon,"name":_clean(a.get("name")),"type":_clean(a.get("asset_type"))})
+        if len(rows)>=limit: break
+    if rows:
+        st.map(pd.DataFrame(rows),latitude="lat",longitude="lon",size=24,zoom=None,use_container_width=True)
+    else:
+        st.info("Mapped canonical coordinates will appear here as infrastructure nodes are enriched.")
+
+def _index_count(object_type: str) -> int:
+    if _terminal_index_ready():
+        sb=_sb()
+        try:
+            data=(sb.table("pc_terminal_object_index").select("object_id",count="exact")
+                  .eq("object_type",object_type).limit(1).execute())
+            if data.count is not None:
+                return int(data.count)
+        except Exception:
+            pass
+    fallback={
+        "entity":("pc_entities",10000),"asset":("pc_assets",10000),
+        "mobile_asset":("pc_mobile_assets",10000),"event":("pc_events",5000),
+        "corridor":("pc_trade_corridors",5000),"sanction":("pc_sanctions_designations",5000),
+        "programme":("pc_defence_programmes",5000),"document":("pc_documents",5000),
+    }
+    t=fallback.get(object_type)
+    return len(_rows(t[0],t[1])) if t else 0
+
+def _featured_search_cards(items: list[tuple[str,str]], lens: str):
+    cols=st.columns(min(len(items),6))
+    for i,(label,query) in enumerate(items[:6]):
+        with cols[i]:
+            with st.container(border=True):
+                st.markdown(f"**{label}**")
+                st.caption("Open in terminal")
+                if st.button("Open",key=f"featured_{lens}_{i}_{_norm(query)}",use_container_width=True):
+                    results=_search_objects(query,lens,10)
+                    if results:
+                        x=results[0]
+                        _set_context(x["type"],x["id"],x["name"])
+                        st.rerun()
+
 def _render_trade_home():
-    events=_rows("pc_events",2500)
-    events=sorted(events,key=lambda x:_clean(x.get("start_date")),reverse=True)
-    trade_events=[e for e in events if TRADE_RX.search(_record_text(e))]
-    disruptions=[e for e in events if _event_theme(e)=="Operational disruption"]
-    strategic=[e for e in events if STRATEGIC_RX.search(_record_text(e))]
-
-    assets=_rows("pc_assets",10000)
-    entities=_rows("pc_entities",10000)
+    events=sorted(_rows("pc_events",2500),key=lambda x:_clean(x.get("start_date")),reverse=True)
+    trade_events=[x for x in events if TRADE_RX.search(_record_text(x))]
+    disruptions=[x for x in events if _event_theme(x)=="Operational disruption"]
+    strategic=[x for x in events if STRATEGIC_RX.search(_record_text(x))]
+    sanctions=[x for x in events if SANCTIONS_RX.search(_record_text(x))]
     corridors=_rows("pc_trade_corridors",5000)
+    projects=_rows("pc_project_details",3000)
+    rates=_rows("pc_freight_rate_observations",3000)
+    tx=_rows("pc_transactions",3000)
 
-    def is_shipyard(a):
-        b=_record_text(a)
-        return bool(re.search(r"shipyard|dockyard|yard|naval base|repair yard",b,re.I))
+    _dashboard_header("P&C TRADE · GLOBAL OPERATING TERMINAL",
+                      "Global Trade & Infrastructure Terminal",
+                      "Infrastructure, operators, corridors, markets, capital, sanctions and strategic industrial capacity in one connected workspace.")
 
-    def is_port(a):
-        b=_record_text(a)
-        return bool(re.search(r"port|terminal|harbour|harbor|dry port|container depot|intermodal",b,re.I))
+    m=st.columns(6)
+    m[0].metric("Companies",_index_count("entity"))
+    m[1].metric("Infrastructure nodes",_index_count("asset"))
+    m[2].metric("Corridors",_index_count("corridor"))
+    m[3].metric("Vessels / mobile assets",_index_count("mobile_asset"))
+    m[4].metric("Active projects",len(projects))
+    m[5].metric("Sanctions records",_index_count("sanction"))
 
-    def is_air(a):
-        b=_record_text(a)
-        return bool(re.search(r"airport|air cargo|cargo terminal|airfreight|air freight",b,re.I))
-
-    def is_rail(a):
-        b=_record_text(a)
-        return bool(re.search(r"rail|railway|intermodal|freight terminal|dry port",b,re.I))
-
-    ports=[a for a in assets if is_port(a)]
-    shipyards=[a for a in assets if is_shipyard(a)]
-    airports=[a for a in assets if is_air(a)]
-    rail=[a for a in assets if is_rail(a)]
-
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("Infrastructure nodes",len(assets))
-    c2.metric("Companies / organisations",len(entities))
-    c3.metric("Trade corridors",len(corridors))
-    c4.metric("Strategic industrial nodes",len(shipyards))
-
-    st.markdown("### Trade operating picture")
-    left,right=st.columns([1.7,1.0],gap="large")
+    left,mid,right=st.columns([1.65,1.05,1.08],gap="medium")
     with left:
-        st.markdown("#### Priority trade developments")
-        st.caption("Commercial change, infrastructure, capacity, corridors and disruptions.")
-        priority=sorted(
-            trade_events,
-            key=lambda e:(
-                1 if _event_theme(e)=="Operational disruption" else 0,
-                1 if STRATEGIC_RX.search(_record_text(e)) else 0,
-                _clean(e.get("start_date"))
-            ),
-            reverse=True
-        )
-        _render_event_cards(priority,"trade_priority",12)
-
+        with st.container(border=True):
+            _panel_header("Global Trade Infrastructure","Ports, terminals, dry ports, rail nodes, airports, shipyards and logistics infrastructure.")
+            _dashboard_map_assets("trade")
+    with mid:
+        with st.container(border=True):
+            _panel_header("Key Corridors","Major trade systems and monitored route structures.")
+            rows=[]
+            for x in corridors[:8]:
+                nm=_clean(x.get("corridor_name")) or _clean(x.get("corridor_key"))
+                typ=_clean(x.get("corridor_type"))
+                rows.append((nm,typ or "corridor"))
+            _html_rows(rows,8)
+        with st.container(border=True):
+            _panel_header("Sanctions & Compliance","Trade exposure to designations, screening and restricted counterparties.")
+            _html_rows([
+                ("Designation records",str(_index_count("sanction"))),
+                ("Sanctions-related events",str(len(sanctions))),
+                ("Screening cases",str(len(_rows("pc_screening_cases",3000)))),
+                ("Candidate matches",str(len(_rows("pc_screening_matches",5000)))),
+            ],6)
     with right:
-        st.markdown("#### Network snapshot")
-        snapshot=pd.DataFrame([
-            {"Domain":"Ports / terminals / dry ports","Count":len(ports)},
-            {"Domain":"Rail / intermodal nodes","Count":len(rail)},
-            {"Domain":"Air cargo / airports","Count":len(airports)},
-            {"Domain":"Shipyards / industrial nodes","Count":len(shipyards)},
-            {"Domain":"Trade corridors","Count":len(corridors)},
-        ])
-        st.dataframe(snapshot,hide_index=True,use_container_width=True,height=250)
+        with st.container(border=True):
+            _panel_header("Strategic Industrial Capacity","Shipyards, defence/coast guard programmes and security-linked industrial capacity.")
+            _html_rows([
+                ("Strategic programmes",str(_index_count("programme"))),
+                ("Shipbuilding orders",str(len(_rows("pc_shipbuilding_orders",3000)))),
+                ("Production tasks",str(len(_rows("pc_shipbuilding_production_tasks",5000)))),
+                ("Security operations",str(len(_rows("pc_security_operations",3000)))),
+                ("Strategic developments",str(len(strategic))),
+            ],7)
 
-        st.markdown("#### Operational disruptions")
-        _render_event_cards(disruptions,"trade_disruptions_side",6)
+    c1,c2,c3=st.columns([1.05,1.05,1.25],gap="medium")
+    with c1:
+        with st.container(border=True):
+            _panel_header("Companies & Capital","Operators, investment, transactions, projects and portfolio change.")
+            _html_rows([
+                ("Recent transactions",str(len(tx))),
+                ("Active projects",str(len(projects))),
+                ("Portfolio positions",str(len(_rows("pc_company_portfolio_positions",4000)))),
+                ("Company–asset roles",str(len(_rows("pc_company_asset_roles",5000)))),
+            ],6)
+    with c2:
+        with st.container(border=True):
+            _panel_header("Markets & Freight","Freight observations, routes, corridors and operating disruption.")
+            _html_rows([
+                ("Freight observations",str(len(rates))),
+                ("Transport routes",str(len(_rows("pc_transport_routes",3000)))),
+                ("Corridors",str(len(corridors))),
+                ("Operational disruptions",str(len(disruptions))),
+            ],6)
+    with c3:
+        with st.container(border=True):
+            _panel_header("Recent Developments","Latest high-value trade, infrastructure and strategic-industry developments.")
+            priority=sorted(trade_events,key=lambda x:(_event_priority(x),_clean(x.get("start_date"))),reverse=True)
+            _html_rows(_recent_event_rows(priority,7),7)
 
-    st.divider()
-    t1,t2,t3,t4=st.tabs([
-        "Infrastructure & Nodes",
-        "Companies & Capital",
-        "Corridors & Markets",
-        "Strategic Industrial Capacity",
-    ])
-
-    with t1:
-        a,b=st.columns(2,gap="large")
-        with a:
-            st.markdown("##### Ports / terminals / dry ports")
-            rows=[]
-            for x in ports[:120]:
-                rows.append({
-                    "Node":_clean(x.get("name")),
-                    "Type":_clean(x.get("asset_type")),
-                    "Country":_clean(x.get("country")),
-                    "Region":_clean(x.get("region_city")),
-                    "Status":_clean(x.get("status")),
-                })
-            if rows:
-                st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True,height=420)
-        with b:
-            st.markdown("##### Rail / intermodal / air cargo")
-            rows=[]
-            seen=set()
-            for x in (rail+airports):
-                aid=_clean(x.get("asset_id"))
-                if aid in seen: continue
-                seen.add(aid)
-                rows.append({
-                    "Node":_clean(x.get("name")),
-                    "Type":_clean(x.get("asset_type")),
-                    "Country":_clean(x.get("country")),
-                    "Region":_clean(x.get("region_city")),
-                })
-            if rows:
-                st.dataframe(pd.DataFrame(rows[:120]),hide_index=True,use_container_width=True,height=420)
-
-    with t2:
-        st.markdown("##### Recent transactions / investment / projects")
-        tx=_rows("pc_transactions",2000)
-        pr=_rows("pc_project_details",2000)
-        col1,col2=st.columns(2,gap="large")
-        with col1:
-            if tx:
-                df=_safe_df(tx,["announced_date","effective_date","transaction_type","title","description","deal_value","value","currency","status","buyer_name","seller_name","target_name"],100)
-                st.dataframe(df,hide_index=True,use_container_width=True,height=420)
-            else:
-                st.caption("No transaction rows returned.")
-        with col2:
-            if pr:
-                df=_safe_df(pr,["project_name","title","project_type","status","country","region","announced_date","completion_date","capex","value","currency"],100)
-                st.dataframe(df,hide_index=True,use_container_width=True,height=420)
-            else:
-                st.caption("No project rows returned.")
-
-    with t3:
-        cA,cB=st.columns(2,gap="large")
-        with cA:
-            st.markdown("##### Corridors")
-            if corridors:
-                rows=[]
-                for r in corridors[:120]:
-                    rows.append({
-                        "Corridor":_clean(r.get("corridor_name")),
-                        "Type":_clean(r.get("corridor_type")),
-                        "Origin":_clean(r.get("origin_region")),
-                        "Destination":_clean(r.get("destination_region")),
-                    })
-                st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True,height=420)
-        with cB:
-            st.markdown("##### Freight / market observations")
-            rates=_rows("pc_freight_rate_observations",2000)
-            if rates:
-                df=_safe_df(rates,["observed_date","route_name","corridor_key","rate_value","value","currency","unit","source_name"],120)
-                st.dataframe(df,hide_index=True,use_container_width=True,height=420)
-            else:
-                st.caption("No freight-rate observations returned.")
-
-    with t4:
-        st.markdown("##### Shipyards, defence/coast guard programmes and industrial capacity")
-        left2,right2=st.columns([1.0,1.2],gap="large")
-        with left2:
-            if shipyards:
-                rows=[]
-                for x in shipyards[:120]:
-                    rows.append({
-                        "Shipyard / industrial node":_clean(x.get("name")),
-                        "Country":_clean(x.get("country")),
-                        "Region":_clean(x.get("region_city")),
-                        "Status":_clean(x.get("status")),
-                    })
-                st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True,height=420)
-            else:
-                st.caption("No shipyard-tagged canonical assets returned.")
-        with right2:
-            programmes=_rows("pc_defence_programmes",2000)
-            if programmes:
-                df=_safe_df(programmes,["programme_name","programme_type","programme_status","firm_quantity","option_quantity","announced_value","currency","announced_date","expected_completion_date"],100)
-                st.dataframe(df,hide_index=True,use_container_width=True,height=300)
-            st.markdown("###### Strategic developments affecting trade / capacity")
-            _render_event_cards(strategic,"trade_strategic",10)
+    st.markdown("### Featured Objects")
+    st.caption("Quick pivots into companies, infrastructure, corridors and strategic industry.")
+    _featured_search_cards([
+        ("AD Ports Group","AD Ports Group"),
+        ("Port of Rotterdam","Rotterdam"),
+        ("Tbilisi Dry Port","Tbilisi Dry Port"),
+        ("Middle Corridor","Middle Corridor"),
+        ("Irving Shipbuilding","Irving"),
+        ("Canadian Coast Guard","Canadian Coast Guard"),
+    ],"trade")
 
 
 def _render_sanctions_home():
@@ -1533,142 +1555,160 @@ def _render_sanctions_home():
     cases=_rows("pc_screening_cases",3000)
     matches=_rows("pc_screening_matches",5000)
     links=_rows("pc_sanctions_links",5000)
-
+    events=sorted([e for e in _rows("pc_events",2500) if SANCTIONS_RX.search(_record_text(e))],
+                  key=lambda x:_clean(x.get("start_date")),reverse=True)
     confirmed=[x for x in matches if _clean(x.get("match_status")).casefold()=="confirmed"]
     review=[x for x in matches if _clean(x.get("match_status")).casefold() in {"candidate","needs_review","inconclusive"}]
-    open_cases=[x for x in cases if _clean(x.get("case_status")).casefold() not in {"closed","cleared"}]
 
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("Designations",len(designations))
-    c2.metric("Confirmed matches",len(confirmed))
-    c3.metric("Needs review",len(review))
-    c4.metric("Open screening cases",len(open_cases))
+    _dashboard_header("P&C SANCTIONS · EXPOSURE TERMINAL",
+                      "Sanctions & Exposure Terminal",
+                      "Designations, ownership/control, vessels, screening, jurisdictions and linked trade exposure.")
 
-    left,right=st.columns([1.25,1.0],gap="large")
+    m=st.columns(6)
+    m[0].metric("Designations",len(designations))
+    m[1].metric("Confirmed matches",len(confirmed))
+    m[2].metric("Needs review",len(review))
+    m[3].metric("Screening cases",len(cases))
+    m[4].metric("Network links",len(links))
+    m[5].metric("Sanctions events",len(events))
+
+    left,mid,right=st.columns([1.6,1.0,1.0],gap="medium")
     with left:
-        st.markdown("### Designation & exposure network")
-        st.caption("Legal designations, linked entities/vessels, ownership/control and screening exposure.")
-        if designations:
-            df=_safe_df(
-                designations,
-                ["name","designated_name","subject_name","program","regime","authority","jurisdiction",
-                 "designation_date","status","subject_type","entity_id","mobile_asset_id","sanctions_designation_id"],
-                80
-            )
-            st.dataframe(df,hide_index=True,use_container_width=True,height=460)
-        else:
-            st.caption("No designation rows returned from the sanctions table.")
-
+        with st.container(border=True):
+            _panel_header("Exposure Map","Canonical infrastructure and assets associated with sanctions/compliance context.")
+            _dashboard_map_assets("trade")
+    with mid:
+        with st.container(border=True):
+            _panel_header("Designation Regimes","Authorities, programmes and jurisdictions represented in the database.")
+            regimes={}
+            for d in designations:
+                k=_clean(d.get("program") or d.get("regime") or d.get("authority") or "Unspecified")
+                regimes[k]=regimes.get(k,0)+1
+            _html_rows(sorted(regimes.items(),key=lambda x:x[1],reverse=True),8)
     with right:
-        st.markdown("### Screening desk")
-        if open_cases:
-            df=_safe_df(open_cases,["case_reference","submitted_name","subject_type","screening_purpose",
-                                    "jurisdiction_codes","case_status","opened_at"],60)
-            st.dataframe(df,hide_index=True,use_container_width=True,height=300)
-        if review:
-            st.markdown("#### Candidate / unresolved matches")
-            df=_safe_df(review,["match_status","match_score","analyst_reason","reviewed_at",
-                                "screening_case_id","sanctions_designation_id"],60)
-            st.dataframe(df,hide_index=True,use_container_width=True,height=300)
+        with st.container(border=True):
+            _panel_header("Screening Desk","Candidate and confirmed identity matches requiring analyst attention.")
+            _html_rows([
+                ("Confirmed",str(len(confirmed))),
+                ("Candidate / review",str(len(review))),
+                ("Open cases",str(sum(1 for x in cases if _clean(x.get("case_status")).casefold() not in {"closed","cleared"}))),
+                ("Ownership/control links",str(len(links))),
+            ],7)
 
-    st.divider()
-    n1,n2=st.columns(2,gap="large")
-    with n1:
-        st.markdown("### Ownership / control / sanctions links")
-        if links:
-            df=_safe_df(links,None,100)
-            st.dataframe(df,hide_index=True,use_container_width=True,height=430)
-        else:
-            st.caption("No sanctions-network link rows returned.")
-    with n2:
-        st.markdown("### Recent sanctions-related activity")
-        events=_rows("pc_events",2500)
-        events=[e for e in events if SANCTIONS_RX.search(_record_text(e))]
-        events=sorted(events,key=lambda x:_clean(x.get("start_date")),reverse=True)
-        _render_event_cards(events,"sanctions_home_events",15)
+    c1,c2,c3=st.columns([1.0,1.0,1.2],gap="medium")
+    with c1:
+        with st.container(border=True):
+            _panel_header("Ownership & Control","Sanctions-network relationships and beneficial-control exposure.")
+            _html_rows([
+                ("Sanctions links",str(len(links))),
+                ("Entity designations",str(sum(1 for d in designations if d.get("entity_id")))),
+                ("Vessel designations",str(sum(1 for d in designations if d.get("mobile_asset_id")))),
+            ],6)
+    with c2:
+        with st.container(border=True):
+            _panel_header("Trade Exposure","Sanctions as a commercial constraint across vessels, counterparties and routes.")
+            _html_rows([
+                ("Sanctions-linked events",str(len(events))),
+                ("Corridors monitored",str(_index_count("corridor"))),
+                ("Vessels indexed",str(_index_count("mobile_asset"))),
+                ("Companies indexed",str(_index_count("entity"))),
+            ],6)
+    with c3:
+        with st.container(border=True):
+            _panel_header("Recent Sanctions Activity","Latest sanctions, enforcement and evasion-related developments.")
+            _html_rows(_recent_event_rows(events,7),7)
+
+    st.markdown("### Featured Sanctions Objects")
+    _featured_search_cards([
+        ("Dark Fleet","dark fleet"),
+        ("Shadow Fleet","shadow fleet"),
+        ("OFAC","OFAC"),
+        ("Iran","Iran"),
+        ("Russia","Russia"),
+        ("Vessel / IMO","IMO"),
+    ],"sanctions")
 
 
 def _render_strategic_home():
     orgs=_rows("pc_defence_organisations",3000)
     programmes=_rows("pc_defence_programmes",3000)
-    participants=_rows("pc_defence_programme_participants",5000)
     tasks=_rows("pc_shipbuilding_production_tasks",5000)
     milestones=_rows("pc_defence_programme_milestones",5000)
     capacity=_rows("pc_shipyard_capacity_history",5000)
     operations=_rows("pc_security_operations",3000)
+    orders=_rows("pc_shipbuilding_orders",3000)
+    events=sorted([e for e in _rows("pc_events",2500) if STRATEGIC_RX.search(_record_text(e))],
+                  key=lambda x:_clean(x.get("start_date")),reverse=True)
+    active=[x for x in programmes if _clean(x.get("programme_status")).casefold() not in {"completed","cancelled","closed"}]
 
-    coast=[x for x in orgs if _clean(x.get("organisation_type")).casefold()=="coast_guard"]
-    naval=[x for x in orgs if _clean(x.get("organisation_type")).casefold()=="navy"]
-    active_programmes=[x for x in programmes if _clean(x.get("programme_status")).casefold() not in {"completed","cancelled","closed"}]
+    _dashboard_header("P&C STRATEGIC INDUSTRIES · INDUSTRIAL CAPACITY TERMINAL",
+                      "Strategic Industries Terminal",
+                      "Defence, coast guard, shipyards, programmes, fleets, contracts, production and industrial capacity.")
 
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric("Defence / security organisations",len(orgs))
-    c2.metric("Active programmes",len(active_programmes))
-    c3.metric("Production tasks",len(tasks))
-    c4.metric("Security operations",len(operations))
+    m=st.columns(6)
+    m[0].metric("Defence / security orgs",len(orgs))
+    m[1].metric("Active programmes",len(active))
+    m[2].metric("Shipbuilding orders",len(orders))
+    m[3].metric("Production tasks",len(tasks))
+    m[4].metric("Security operations",len(operations))
+    m[5].metric("Industrial nodes",len(capacity))
 
-    a,b=st.columns([1.1,1.0],gap="large")
-    with a:
-        st.markdown("### Programmes & industrial capacity")
-        if programmes:
-            df=_safe_df(
-                programmes,
-                ["programme_name","programme_type","programme_status","firm_quantity","option_quantity",
-                 "announced_value","currency","announced_date","expected_completion_date",
-                 "customer_entity_id","lead_contractor_entity_id"],
-                100
-            )
-            st.dataframe(df,hide_index=True,use_container_width=True,height=460)
+    left,mid,right=st.columns([1.6,1.0,1.0],gap="medium")
+    with left:
+        with st.container(border=True):
+            _panel_header("Strategic Industrial Footprint","Shipyards, naval/coast guard facilities and related industrial infrastructure.")
+            _dashboard_map_assets("strategic")
+    with mid:
+        with st.container(border=True):
+            _panel_header("Active Programmes","Defence and coast guard procurement / fleet programmes.")
+            rows=[]
+            for p in active[:8]:
+                rows.append((_clean(p.get("programme_name")) or "Unnamed programme",
+                             _clean(p.get("programme_status")) or _clean(p.get("programme_type"))))
+            _html_rows(rows,8)
+    with right:
+        with st.container(border=True):
+            _panel_header("Industrial Capacity","Orders, production tasks, milestones and yard capacity.")
+            _html_rows([
+                ("Shipbuilding orders",str(len(orders))),
+                ("Production tasks",str(len(tasks))),
+                ("Programme milestones",str(len(milestones))),
+                ("Capacity observations",str(len(capacity))),
+                ("Security operations",str(len(operations))),
+            ],7)
 
-        if capacity:
-            st.markdown("#### Shipyard capacity / backlog")
-            df=_safe_df(capacity,["observed_date","metric_name","metric_value","metric_unit",
-                                  "reported_backlog_quantity","planned_or_actual","shipyard_asset_id","operator_entity_id"],80)
-            st.dataframe(df,hide_index=True,use_container_width=True,height=300)
+    c1,c2,c3=st.columns([1.0,1.0,1.2],gap="medium")
+    with c1:
+        with st.container(border=True):
+            _panel_header("Defence & Coast Guard","Organisations, customers and security operators.")
+            types={}
+            for o in orgs:
+                k=_clean(o.get("organisation_type") or "Other")
+                types[k]=types.get(k,0)+1
+            _html_rows(sorted(types.items(),key=lambda x:x[1],reverse=True),8)
+    with c2:
+        with st.container(border=True):
+            _panel_header("Production & Delivery","Current build pipeline and delivery milestones.")
+            _html_rows([
+                ("Active programmes",str(len(active))),
+                ("Orders",str(len(orders))),
+                ("Production tasks",str(len(tasks))),
+                ("Milestones",str(len(milestones))),
+            ],6)
+    with c3:
+        with st.container(border=True):
+            _panel_header("Recent Strategic Developments","Latest defence, shipbuilding, coast guard and industrial-capacity developments.")
+            _html_rows(_recent_event_rows(events,7),7)
 
-    with b:
-        st.markdown("### Defence, coast guard & security organisations")
-        if orgs:
-            display=[]
-            for r in orgs[:100]:
-                eid=_clean(r.get("entity_id"))
-                display.append({
-                    "Organisation":_object_name("entity",eid) if eid else "",
-                    "Type":_clean(r.get("organisation_type")),
-                    "Jurisdiction":_clean(r.get("jurisdiction")),
-                    "Status":_clean(r.get("organisation_status")),
-                    "Verification":_clean(r.get("verification_status")),
-                })
-            st.dataframe(pd.DataFrame(display),hide_index=True,use_container_width=True,height=360)
-
-        if operations:
-            st.markdown("#### Security / coast guard operations")
-            df=_safe_df(operations,["operation_name","operation_type","operation_status",
-                                    "publicly_reported_start","publicly_reported_end","lead_entity_id","operating_area"],80)
-            st.dataframe(df,hide_index=True,use_container_width=True,height=300)
-
-    st.divider()
-    p1,p2=st.columns(2,gap="large")
-    with p1:
-        st.markdown("### Production & delivery pipeline")
-        if tasks:
-            df=_safe_df(tasks,["task_type","task_status","planned_start","actual_start","planned_finish",
-                                "actual_finish","workshare_percent","shipyard_asset_id","builder_entity_id",
-                                "shipbuilding_order_id","shipbuilding_order_unit_id"],100)
-            st.dataframe(df,hide_index=True,use_container_width=True,height=430)
-        elif milestones:
-            df=_safe_df(milestones,["milestone_type","planned_date","actual_date","milestone_status",
-                                     "public_description","defence_programme_id","shipbuilding_order_unit_id"],100)
-            st.dataframe(df,hide_index=True,use_container_width=True,height=430)
-        else:
-            st.caption("No production-task or programme-milestone rows returned.")
-
-    with p2:
-        st.markdown("### Strategic developments")
-        events=_rows("pc_events",2500)
-        events=[e for e in events if STRATEGIC_RX.search(_record_text(e))]
-        events=sorted(events,key=lambda x:_clean(x.get("start_date")),reverse=True)
-        _render_event_cards(events,"strategic_home_events",15)
+    st.markdown("### Featured Strategic Objects")
+    _featured_search_cards([
+        ("Irving Shipbuilding","Irving"),
+        ("Seaspan","Seaspan"),
+        ("Fincantieri","Fincantieri"),
+        ("Bollinger Shipyards","Bollinger"),
+        ("Canadian Coast Guard","Canadian Coast Guard"),
+        ("US Coast Guard","US Coast Guard"),
+    ],"strategic")
 
 
 def _render_home(lens: str):
@@ -1766,6 +1806,16 @@ def render_terminal(lens: str = "trade"):
         theme = st.radio("Appearance", ["Light", "Dark"], horizontal=True,
                          index=0 if st.session_state.get("pc_terminal_theme","Light")=="Light" else 1,
                          key="pc_terminal_theme")
+        st.divider()
+        st.markdown("**Home**")
+        navs={
+            "trade":["Companies","Infrastructure","Vessels","Corridors","Markets","Sanctions & Compliance","Strategic Industries","Events","Documents"],
+            "intelligence":["Operating Picture","Priority Intelligence","Regional / Chokepoints","Security & Maritime","Disruptions","Sanctions","Monitoring & Indicators","Documents"],
+            "sanctions":["Exposure Picture","Designations","Screening","Ownership & Control","Vessels","Jurisdictions / Regimes","Events","Evidence"],
+            "strategic":["Industrial Picture","Organisations","Shipyards","Programmes","Production","Fleets / Platforms","Security Operations","Documents"],
+        }
+        for item in navs.get(lens,[]):
+            st.markdown("<div style='padding:.22rem .15rem;color:var(--muted);font-size:.84rem'>"+item+"</div>",unsafe_allow_html=True)
         st.divider()
         if st.button("Home / clear selection", use_container_width=True):
             _clear_context()
