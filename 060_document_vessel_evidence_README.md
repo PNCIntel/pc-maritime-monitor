@@ -1,0 +1,17 @@
+Scanned vessel circulars previously saved only summary metadata: the readable cover concealed image-only annexes, the original PDF was not retained, and no vessels or vessel/document links were created.
+
+This change retains and verifies the original in a private Supabase bucket, transcribes every PDF page using the configured OpenAI vision API, validates page/row coverage and IMO checksums, and atomically saves vessel observations, exact-IMO canonical links, documented access restrictions and ownership research queues. Source rows retain Arabic originals, English display fields, listed flags, ports and undated coordinates. Existing canonical names, flags and ownership remain intact. Listed names and flags are appended as reported identity-history observations when that table is installed. Invalid or ambiguous IMOs remain visible as held observations. The shared terminal provides original downloads and linked vessel evidence in Trade, Sanctions and Intelligence.
+
+Deployment:
+
+1. Apply `060_document_vessel_evidence.sql` in Supabase after `028_document_ingestion.sql` and `10_SUPABASE_V18_DOCUMENTS_PATCHED.sql`. The SQL is additive, creates a private `pc-source-documents` bucket and restricts the new tables/function to the existing service-role application boundary.
+2. Deploy the updated Python files and requirements to the admin and three terminal apps.
+3. In Power Admin → Load documents, upload the circular. Leave Trade, Sanctions and Intelligence selected. The original is retained before extraction; any incomplete page, truncated response or serial-number gap prevents vessel publication. View row totals and identity holds after saving.
+4. In each terminal, use Documents & vessel restrictions. Open the circular, download its original, inspect source rows and open a vessel. A vessel's evidence pane links back to the original circular and regulatory scope.
+5. Ownership is absent from this annex. Use the ownership/history research panel to research the next five queued vessels by exact IMO. Source-cited findings are persisted to connected-research jobs; populate them through the existing connected graph publisher. Failed research remains queued; unresolved publication remains under review. Circular claims and researched ownership remain separate evidence.
+
+The supplied RAK notice is dated 30 September 2026, references FMA Circular No. 5 dated 20 September 2026 and contains 472 numbered vessel entries on pages 3–11. Compare the ingestion result to that source total. Do not infer the ban's effective date, current coordinates, beneficial ownership, or OFAC/EU/UK designation from the annex.
+
+Validation: eight offline regression tests cover every-page extraction (including a readable cover followed by a scanned page), count mismatch, unreadable tables, model truncation, preserved bad IMOs, duplicate names/different IMOs, original-upload verification and reuse. Python modules compile. The migration and live OpenAI/Supabase ingestion have not been executed in this workspace: no database session or configured API credential is available here. The live 472-row result must be verified after deployment; offline tests do not establish extraction accuracy.
+
+The universal news intake explicitly rejects mixed/scanned annexes with a route to Load documents, preventing its newsletter path from silently saving only the cover. Ordinary text-bearing newsletter intake remains unchanged.

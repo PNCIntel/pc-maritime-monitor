@@ -6,7 +6,7 @@ from difflib import SequenceMatcher
 import streamlit as st
 
 PRODUCTS = [
-    'Trade', 'Security', 'Maritime', 'Aviation', 'Rail', 'Road / Trucking',
+    'Trade', 'Sanctions', 'Intelligence', 'Security', 'Maritime', 'Aviation', 'Rail', 'Road / Trucking',
     'Energy', 'Ports & Infrastructure', 'Foresight', 'Daily Brief', 'Weekly Intelligence'
 ]
 
@@ -22,12 +22,19 @@ def _http_json(endpoint, api_key, payload, timeout=140):
         return json.loads(r.read().decode('utf-8'))
 
 
-def _text_from_file(uploaded):
+def _text_from_file(uploaded, api_key=None):
     data = uploaded.getvalue(); ext = Path(uploaded.name).suffix.lower()
     if ext == '.pdf':
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(data))
-        return '\n'.join((p.extract_text() or '') for p in reader.pages)[:180000]
+        # Check every page, not just whether the cover has enough text.
+        native = [(p.extract_text() or '') for p in reader.pages]
+        if any(len(t.strip()) < 120 and p.images for p, t in zip(reader.pages, native)):
+            if not api_key:
+                raise ValueError('Scanned or mixed PDF: use Load documents for complete page extraction and original retention')
+            from pc_document_vessels import extract_pdf
+            return extract_pdf(data, api_key, _http_json)['text']
+        return '\n'.join(f'[PAGE {i+1}]\n{t}' for i, t in enumerate(native))
     if ext == '.docx':
         from docx import Document
         doc = Document(io.BytesIO(data))
@@ -58,7 +65,14 @@ source_organization {{name, organization_type, website, confidence}},
 authors [strings], summary (100-180 words), analytical_abstract (250-500 words),
 key_findings [strings], topics [strings], geographies [strings],
 mentioned_entities [{{name, entity_type, role, confidence}}],
-why_it_matters, source_notes, research_gaps [strings].
+why_it_matters, source_notes, research_gaps [strings],
+access_restriction (null unless an explicit regulatory restriction is stated; otherwise object with
+ authority_name, circular_reference, jurisdiction, restriction_type, issue_date, effective_from,
+ effective_to, scope_text, legal_basis, evidence_excerpt).
+Dates must be YYYY-MM-DD or null. Distinguish notice publication, circular issue and effective dates.
+Do not use a circular issue date as the effective date without explicit supporting language.
+A port/EEZ entry ban is an access restriction; do not infer OFAC/EU/UK designation.
+The page extraction already contains full vessel rows; do not summarise or recreate them here.
 
 Distinguish issuer/source organisation from organisations merely mentioned.
 Corporate, government, regulator and think-tank issuers should be identified when supported.
@@ -148,14 +162,21 @@ def _ensure_source_entity(sb, org, research, entities):
 
 def render_document_loader(sb):
     st.header('Load documents')
+    st.caption('Original files, all pages, vessel identifiers and restrictions are shared across Trade, Sanctions and Intelligence.')
     st.caption('Reports, annual reports, filings, white papers, think-tank papers and presentations. Documents become searchable evidence linked to canonical entities.')
     key=(st.secrets.get('OPENAI_API_KEY') or st.secrets.get('OPENAI_KEY') or os.getenv('OPENAI_API_KEY') or '')
-    products=st.multiselect('Products', PRODUCTS, default=['Trade'])
+    products=st.multiselect('Products', PRODUCTS, default=['Trade', 'Sanctions', 'Intelligence'])
     connected_research=st.checkbox('Research issuing company and connected operations after saving', value=True,
         help='Uses the same company/vessel research engine as Power Admin; unresolved identities are held rather than guessed.')
     uploads=st.file_uploader('Documents', type=['pdf','docx','pptx','txt','md'], accept_multiple_files=True)
     urls=st.text_area('Source URL(s) — optional, one per document in upload order', height=90)
     st.caption('The issuing company, government body, regulator or think tank is matched to the shared canonical entity registry; a source-backed missing organisation can be created automatically.')
+    from pc_document_vessels import render_document_research
+    with st.expander('Research vessel ownership and history'):
+        try:
+            render_document_research(sb, key)
+        except Exception as exc:
+            st.caption('Vessel research queue unavailable: ' + str(exc)[:160])
     if not st.button('Analyse & save documents', type='primary', disabled=not uploads): return
     if not key:
         st.error('OPENAI_API_KEY is not configured.'); return
@@ -167,14 +188,34 @@ def render_document_loader(sb):
     results=[]
     for i,f in enumerate(uploads):
         source_url=url_list[i] if i<len(url_list) else ''
+        doc_id = None
         try:
-            digest=hashlib.sha256(f.getvalue()).hexdigest()
-            prior=(sb.table('pc_documents').select('*').contains('metadata',{'document_sha256':digest}).limit(2).execute().data or [])
+            from pc_document_vessels import retain_original, extract_pdf, save_vessel_evidence
+            stored_file = retain_original(sb, f)
+            digest = stored_file['file_sha256']
+            hash_matches = sb.table('pc_documents').select('*').eq('file_sha256', digest).limit(2).execute().data or []
+            legacy_matches = sb.table('pc_documents').select('*').contains('metadata', {'document_sha256': digest}).limit(2).execute().data or []
+            prior = list({r['document_id']: r for r in hash_matches + legacy_matches}.values())
             if len(prior)>1: raise ValueError('Duplicate stored document fingerprints require review')
             existing=prior[0] if prior else None
+            # Save the verified original first; extraction failure leaves a recoverable source record.
+            if existing:
+                doc_id = existing['document_id']
+                sb.table('pc_documents').update(stored_file).eq('document_id', doc_id).execute()
+            else:
+                initial = sb.table('pc_documents').insert({**stored_file, 'title': Path(f.name).stem,
+                    'document_type': 'research_document', 'products': products,
+                    'extraction_status': 'pending', 'metadata': {'document_sha256': digest}}).execute().data or []
+                if not initial: raise RuntimeError('Document insert returned no row')
+                existing = initial[0]
+                doc_id = existing['document_id']
+            extraction = (existing.get('metadata') or {}).get('page_extraction')
+            if Path(f.name).suffix.lower() == '.pdf' and not extraction:
+                with st.status('Read every page: ' + f.name):
+                    extraction = extract_pdf(f.getvalue(), key, _http_json)
             analysis=((existing.get('metadata') or {}).get('ai_extraction') if existing else None)
-            if not analysis:
-                text=_text_from_file(f)
+            if not analysis or (extraction and not (existing.get('metadata') or {}).get('vessel_extraction_version')):
+                text=extraction['text'] if extraction else _text_from_file(f, key)
                 if len(text.strip())<80: raise ValueError('No usable document text extracted; scanned PDF needs OCR')
                 analysis=_analyse_document(text,key,products,source_url)
             org=analysis.get('source_organization') or {}
@@ -189,10 +230,12 @@ def render_document_loader(sb):
             summary=str(analysis.get('summary') or '').strip()
             abstract=str(analysis.get('analytical_abstract') or '').strip()
             findings=analysis.get('key_findings') or []
-            search='\n'.join([title,summary,abstract,' '.join(authors),' '.join(topics),' '.join(geos),str(org.get('name') or '')])
-            meta={'document_sha256':digest,'filename':f.name,'why_it_matters':analysis.get('why_it_matters'),'source_notes':analysis.get('source_notes'),
+            search='\n'.join([title,summary,abstract,' '.join(authors),' '.join(topics),' '.join(geos),str(org.get('name') or ''),
+                              ' '.join(str(r.get('name') or '') + ' ' + str(r.get('imo') or '') for r in (extraction or {}).get('vessels', []))])
+            meta={'page_extraction': extraction, 'document_sha256':digest,'filename':f.name,'why_it_matters':analysis.get('why_it_matters'),'source_notes':analysis.get('source_notes'),
                   'research_gaps':analysis.get('research_gaps') or [],'source_org_research':research,'ai_extraction':analysis}
-            row={'title':title,'document_type':analysis.get('document_type'),'published_date':pubdate,
+            row={**stored_file, 'extracted_text': extraction['text'] if extraction else _text_from_file(f, key),
+                 'extraction_status': 'metadata_saved', 'title':title,'document_type':analysis.get('document_type') or 'research_document','published_date':pubdate,
                  'source_entity_id':source_entity_id,'source_name':org.get('name'),'source_url':source_url or None,
                  'authors':authors,'products':products,'summary':summary,'analytical_abstract':abstract,
                  'key_findings':findings,'topics':topics,'geographies':geos,'search_text':search,'metadata':meta,
@@ -206,10 +249,7 @@ def render_document_loader(sb):
                 if not source_url: row['source_url']=existing.get('source_url')
                 if not source_entity_id: row['source_entity_id']=existing.get('source_entity_id')
                 sb.table('pc_documents').update(row).eq('document_id',doc_id).execute()
-            else:
-                inserted=sb.table('pc_documents').insert(row).execute().data or []
-                if not inserted: raise RuntimeError('Document insert returned no row')
-                doc_id=inserted[0]['document_id']
+            vessel_stats = save_vessel_evidence(sb, doc_id, extraction, analysis) if extraction else None
             connected_job=None
             is_company=any(t in str(org.get('organization_type') or '').casefold()
                            for t in ('company','corporation','business','carrier','operator','commercial'))
@@ -256,10 +296,16 @@ def render_document_loader(sb):
                 sb.table('pc_document_entity_links').upsert({'document_id':doc_id,'entity_id':eid,'relationship':rel,
                     'confidence':conf,'evidence':{'document_title':title,'source_url':source_url or None}},
                     on_conflict='document_id,entity_id,relationship').execute()
-            results.append({'Document':title,'Source organisation':org.get('name'),'Canonical source':source_entity_id or 'HELD','Status':msg,'Links':len(seen),'Connected research':connected_job or ('issuer identity only' if connected_research and not is_company else 'not requested'), 'Reused document':bool(existing)})
+            results.append({'Document':title,'Source organisation':org.get('name'),'Canonical source':source_entity_id or 'HELD','Status':msg,'Links':len(seen),'Connected research':connected_job or ('issuer identity only' if connected_research and not is_company else 'not requested'), 'Vessel records': vessel_stats, 'Reused document': bool(prior)})
         except Exception as exc:
+            if doc_id:
+                try:
+                    sb.table('pc_documents').update({'extraction_status': 'failed'}).eq('document_id', doc_id).execute()
+                except Exception:
+                    pass
             results.append({'Document':f.name,'Status':'ERROR: '+str(exc)[:300]})
     failed=sum(1 for r in results if str(r.get('Status') or '').startswith('ERROR:'))
     if failed: st.warning(f'Saved {len(results)-failed} document(s); {failed} failed. See details below.')
     else: st.success(f'Saved {len(results)} document(s).')
     st.dataframe(results,use_container_width=True,hide_index=True)
+
