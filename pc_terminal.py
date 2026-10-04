@@ -1189,8 +1189,7 @@ def _render_search_results(results: list[dict], lens: str):
             for j,x in enumerate(more):
                 c1,c2=st.columns([5,1])
                 c1.markdown(
-                    f"**{x['name']}**  
-"
+                    f"**{x['name']}**  \n"
                     + " · ".join(v for v in [x.get("kind"),x.get("subtype"),x.get("country")] if v)
                 )
                 with c2:
