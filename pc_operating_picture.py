@@ -274,32 +274,38 @@ def _display_location(v):
                 pass
     return _clean(v)
 
-def _inline_open_button(object_type,object_id,label,key,display_name=None):
-    """Open a canonical profile immediately beneath the clicked row."""
-    state_key="pc_inline_drilldown_"+str(key)
-    if st.button(label,key="open_"+state_key,use_container_width=True):
-        st.session_state[state_key]={
+def _inline_slot_key(event_key):
+    return "pc_inline_event_"+re.sub(r"[^A-Za-z0-9_.-]+","_",str(event_key))
+
+def _inline_open_button(object_type,object_id,label,event_key,row_key,display_name=None):
+    """Select one canonical object for this development; render immediately below its row."""
+    slot=_inline_slot_key(event_key)
+    if st.button(label,key="open_"+str(row_key),use_container_width=True):
+        st.session_state[slot]={
             "type":str(object_type),
             "id":str(object_id),
             "label":str(display_name or object_id),
         }
-    return state_key
+        st.rerun()
+    return slot
 
-def _render_inline_profile(state_key,key_prefix):
-    selected=st.session_state.get(state_key)
+def _render_inline_profile_if_selected(slot,object_type,object_id,key_prefix):
+    selected=st.session_state.get(slot)
     if not selected:
+        return
+    if str(selected.get("type"))!=str(object_type) or str(selected.get("id"))!=str(object_id):
         return
     with st.container(border=True):
         h1,h2=st.columns([6,1])
         h1.markdown("### "+_clean(selected.get("label")))
-        h1.caption("Canonical profile · opens in context")
-        if h2.button("✕ Close",key="close_"+state_key,use_container_width=True):
-            st.session_state.pop(state_key,None)
+        h1.caption("Canonical profile · opened from this relationship")
+        if h2.button("✕ Close",key="close_"+slot,use_container_width=True):
+            st.session_state.pop(slot,None)
             st.rerun()
         render_drilldown(
             selected.get("type"),
             selected.get("id"),
-            key_prefix=str(key_prefix)+"_inline"
+            key_prefix=str(key_prefix)+"_inline_"+str(object_id)
         )
 
 def _event_expander(sb,r,mode,key_prefix="evt"):
@@ -350,8 +356,9 @@ def _event_expander(sb,r,mode,key_prefix="evt"):
 
         if links or mentions:
             st.markdown("### Connected model")
-            st.caption("Open a company, asset or vessel here without leaving this development.")
-            inline_key="event_"+str(eid or key_prefix)
+            st.caption("Open a company, asset or vessel directly beneath the relationship you are reading.")
+            event_key=str(eid or key_prefix)
+            slot=_inline_slot_key(event_key)
 
             for n,x in enumerate(links[:20]):
                 typ=_clean(x.get("linked_type"))
@@ -364,11 +371,16 @@ def _event_expander(sb,r,mode,key_prefix="evt"):
                 c1,c2=st.columns([5,1.5])
                 c1.markdown("**"+nm+"**"+(f" · {rel}" if rel else ""))
                 with c2:
-                    state_key=_inline_open_button(
-                        typ,oid,"Open profile",
-                        key=f"{inline_key}_linked_{n}_{oid}",
+                    _inline_open_button(
+                        typ,oid,"Open",
+                        event_key=event_key,
+                        row_key=f"{event_key}_linked_{n}_{oid}",
                         display_name=nm
                     )
+                _render_inline_profile_if_selected(
+                    slot,typ,oid,
+                    key_prefix=f"{event_key}_linked_{n}"
+                )
 
             if mentions:
                 st.markdown("**Canonical records mentioned in this development**")
@@ -379,22 +391,16 @@ def _event_expander(sb,r,mode,key_prefix="evt"):
                     extra=_clean(rec.get("hq_country") or rec.get("country") or rec.get("imo"))
                     c1.markdown("**"+obj["name"]+"**"+(f" · {extra}" if extra else ""))
                     with c2:
-                        state_key=_inline_open_button(
-                            obj["type"],obj["id"],"Open profile",
-                            key=f"{inline_key}_mention_{n}_{obj['id']}",
+                        _inline_open_button(
+                            obj["type"],obj["id"],"Open",
+                            event_key=event_key,
+                            row_key=f"{event_key}_mention_{n}_{obj['id']}",
                             display_name=obj["name"]
                         )
-
-            # Render whichever object was selected for this development immediately
-            # below its connected-object list, not at the top of the page.
-            prefix="pc_inline_drilldown_"+str(inline_key)+"_"
-            active=[k for k in list(st.session_state.keys()) if str(k).startswith(prefix)]
-            if active:
-                # newest click wins; clear stale selections for this development
-                chosen=active[-1]
-                for stale in active[:-1]:
-                    st.session_state.pop(stale,None)
-                _render_inline_profile(chosen,inline_key)
+                    _render_inline_profile_if_selected(
+                        slot,obj["type"],obj["id"],
+                        key_prefix=f"{event_key}_mention_{n}"
+                    )
 
         inds=m.get("monitoring_indicators") or r.get("monitoring_indicators")
         if inds:
