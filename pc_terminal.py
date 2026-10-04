@@ -144,60 +144,120 @@ def _record_text(row: dict) -> str:
     return " ".join(_clean(v) for v in row.values())
 
 
+def _company_core_name(value: Any) -> str:
+    words=_norm(value).split()
+    suffixes={
+        "group","holding","holdings","company","co","corporation","corp",
+        "limited","ltd","llc","plc","pjsc","sak","sa","inc"
+    }
+    while words and words[-1] in suffixes:
+        words.pop()
+    return " ".join(words)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _identity_alias_index() -> dict:
+    out={}
+    for r in _rows("pc_identity_aliases_v2",10000):
+        typ=_clean(r.get("object_type")).casefold()
+        if typ=="vessel": typ="mobile_asset"
+        cid=_clean(r.get("canonical_id"))
+        alias=_clean(r.get("alias_name"))
+        if typ in OBJECTS and cid and alias:
+            out.setdefault((typ,cid),[]).append(alias)
+    return out
+
+def _token_match(query_tokens: list[str], text: str) -> bool:
+    tokens=set(_norm(text).split())
+    return all(t in tokens for t in query_tokens)
+
 def _search_objects(q: str, lens: str, limit: int = 80) -> list[dict]:
-    qn = _norm(q)
-    if len(qn) < 2:
+    qn=_norm(q)
+    if len(qn)<2:
         return []
-    terms = qn.split()
-    out = []
-    for typ, (table, pk, name_col, label) in OBJECTS.items():
-        rows = _rows(table, 5000 if typ in {"entity", "asset", "mobile_asset"} else 2500)
+    qtokens=qn.split()
+    qcore=_company_core_name(q)
+    aliases=_identity_alias_index()
+    out=[]
+
+    for typ,(table,pk,name_col,label) in OBJECTS.items():
+        rows=_rows(table,5000 if typ in {"entity","asset","mobile_asset"} else 2500)
         for r in rows:
-            blob = _record_text(r).casefold()
-            if not all(t in blob for t in terms):
+            oid=_clean(r.get(pk))
+            if not oid:
                 continue
-            if lens == "strategic" and typ in {"entity", "asset", "mobile_asset", "event"}:
-                # Search remains broad, but strategic matches rank higher.
-                bonus = 30 if STRATEGIC_RX.search(blob) else 0
-            elif lens == "sanctions":
-                bonus = 30 if SANCTIONS_RX.search(blob) else 0
-            elif lens == "trade":
-                bonus = 20 if TRADE_RX.search(blob) else 0
-            else:
-                bonus = 0
-            name = _clean(r.get(name_col)) or _clean(r.get(pk))
-            score = bonus
-            nk = _norm(name)
-            if nk == qn:
-                score += 100
+            name=_clean(r.get(name_col)) or oid
+            nk=_norm(name)
+            core=_company_core_name(name) if typ=="entity" else nk
+            alias_list=aliases.get((typ,oid),[])
+            alias_norm=[_norm(a) for a in alias_list]
+
+            score=0
+            match_reason=""
+
+            # 1) Canonical identity/name matching always wins.
+            if nk==qn:
+                score=500; match_reason="exact canonical name"
+            elif typ=="entity" and qcore and core==qcore:
+                score=460; match_reason="same canonical company name"
+            elif qn in alias_norm:
+                score=440; match_reason="exact canonical alias"
             elif nk.startswith(qn):
-                score += 70
-            elif qn in nk:
-                score += 50
+                score=400; match_reason="canonical name prefix"
+            elif any(a.startswith(qn) for a in alias_norm):
+                score=380; match_reason="alias prefix"
+            elif _token_match(qtokens,name):
+                score=340; match_reason="canonical name terms"
+            elif any(_token_match(qtokens,a) for a in alias_list):
+                score=320; match_reason="alias terms"
             else:
-                score += 10
+                # 2) Only then search the wider record. Use token matching rather
+                # than substring matching so a query such as 'AD Ports Group'
+                # cannot match arbitrary letters inside unrelated metadata.
+                blob=_record_text(r)
+                if not _token_match(qtokens,blob):
+                    continue
+                score=80; match_reason="record content"
+
+            blob=_record_text(r)
+            if lens=="strategic" and STRATEGIC_RX.search(blob):
+                score+=30
+            elif lens=="sanctions" and SANCTIONS_RX.search(blob):
+                score+=30
+            elif lens=="trade" and TRADE_RX.search(blob):
+                score+=20
+
+            # Established canonical IDs beat auto/AI shells at equal identity score.
+            upper=oid.upper()
+            if not any(x in upper for x in ("_AUTO_","ENTITY_AUTO","ASSET_AUTO","MOBILE_AUTO","_AI_")):
+                score+=15
+
             out.append({
-                "type": typ,
-                "id": _clean(r.get(pk)),
-                "name": name,
-                "kind": label,
-                "country": _clean(r.get("hq_country") or r.get("country") or r.get("flag")),
-                "subtype": _clean(r.get("entity_type") or r.get("asset_type") or r.get("event_type") or r.get("corridor_type")),
-                "score": score,
+                "type":typ,
+                "id":oid,
+                "name":name,
+                "kind":label,
+                "country":_clean(r.get("hq_country") or r.get("country") or r.get("flag")),
+                "subtype":_clean(r.get("entity_type") or r.get("asset_type") or r.get("event_type") or r.get("corridor_type")),
+                "score":score,
+                "match_reason":match_reason,
             })
-    out.sort(key=lambda x: (x["score"], x["name"]), reverse=True)
-    seen = set()
-    final = []
+
+    out.sort(key=lambda x:(x["score"],x["name"]),reverse=True)
+    seen=set(); final=[]
+    # Hide duplicate company shells with the same normalized/core display identity.
+    seen_display=set()
     for x in out:
-        k = (x["type"], x["id"])
-        if not x["id"] or k in seen:
+        k=(x["type"],x["id"])
+        if k in seen:
             continue
-        seen.add(k)
+        display_key=(x["type"],_company_core_name(x["name"]) if x["type"]=="entity" else _norm(x["name"]),x["country"].casefold())
+        if display_key in seen_display:
+            continue
+        seen.add(k); seen_display.add(display_key)
         final.append(x)
-        if len(final) >= limit:
+        if len(final)>=limit:
             break
     return final
-
 
 def _set_context(typ: str, oid: str, name: str = ""):
     if typ == "entity":
@@ -867,7 +927,8 @@ def render_terminal(lens: str = "trade"):
                 range(len(results)),
                 format_func=lambda i: f"{results[i]['name']} · {results[i]['kind']}"
                                       + (f" · {results[i]['subtype']}" if results[i]['subtype'] else "")
-                                      + (f" · {results[i]['country']}" if results[i]['country'] else ""),
+                                      + (f" · {results[i]['country']}" if results[i]['country'] else "")
+                                      + (f" · {results[i]['match_reason']}" if results[i].get('match_reason') else ""),
                 key=f"pc_terminal_search_pick_{lens}",
             )
             x = results[pick]
