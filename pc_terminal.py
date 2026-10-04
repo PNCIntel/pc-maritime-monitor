@@ -1476,7 +1476,10 @@ def _event_priority(e: dict) -> int:
     return score
 
 def _event_region_label(e: dict) -> str:
-    for k in ("region","country","countries","location"):
+    loc=_display_location(e)
+    if loc:
+        return loc[:55] + ("…" if len(loc)>55 else "")
+    for k in ("region","country","countries"):
         v=e.get(k)
         if isinstance(v,dict):
             v=v.get("name") or v.get("country") or v.get("region")
@@ -2083,6 +2086,55 @@ def _daily_candidates(lens):
     return out, failures
 
 
+def _event_source_urls(row: dict) -> list[str]:
+    """Collect stored evidence URLs from events, sources, report stories and generic records."""
+    if not isinstance(row,dict):
+        return []
+    urls=[]
+    def add(v):
+        if isinstance(v,str):
+            v=v.strip()
+            if v.startswith(("http://","https://")) and v not in urls:
+                urls.append(v)
+
+    for key in (
+        "source_url","url","article_url","reference_url","original_url",
+        "publication_url","document_url","evidence_url","source_link"
+    ):
+        add(row.get(key))
+
+    meta=_meta(row)
+    for key in (
+        "source_url","url","article_url","reference_url","original_url",
+        "publication_url","document_url","evidence_url","source_link"
+    ):
+        add(meta.get(key))
+
+    # Common structured source containers used by the loader/research pipeline.
+    for container_key in ("research_sources","sources","source_urls","evidence","references"):
+        value=meta.get(container_key)
+        if value in (None,"",[],{}):
+            value=row.get(container_key)
+        if isinstance(value,str):
+            add(value)
+        elif isinstance(value,list):
+            for item in value:
+                if isinstance(item,str):
+                    add(item)
+                elif isinstance(item,dict):
+                    for key in ("url","source_url","article_url","reference_url","evidence_url","link"):
+                        add(item.get(key))
+        elif isinstance(value,dict):
+            for item in value.values():
+                if isinstance(item,str):
+                    add(item)
+                elif isinstance(item,dict):
+                    for key in ("url","source_url","article_url","reference_url","evidence_url","link"):
+                        add(item.get(key))
+
+    return urls
+
+
 def _daily_details(row, lens):
     eid = str(row.get('event_id') or '')
     merged = dict(row)
@@ -2200,7 +2252,8 @@ def _render_daily_brief(lens: str):
         for i,(d,r) in enumerate(picked,1):
             with st.container(border=True):
                 st.markdown(f"### {i:02d} — {r['title']}")
-                st.caption(f"{d} · {r['_brief_kind']} · {_event_region_label(r)}")
+                region_label=_display_location(r) or _event_region_label(r)
+                st.caption(f"{d} · {r['_brief_kind']} · {region_label}")
                 sections, urls = _daily_details(r,lens)
                 export.extend([f"### {i:02d} — {r['title']}",f"{d} · {r['_brief_kind']}"])
                 for label,text in sections:
