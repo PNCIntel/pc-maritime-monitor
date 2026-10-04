@@ -337,6 +337,7 @@ def _set_context(typ: str, oid: str, name: str = ""):
         except Exception:
             pass
     st.session_state["pc_document_browser"] = False
+    st.session_state["pc_uae_ofac_overlap"] = False
     st.session_state["pc_terminal_type"] = typ
     st.session_state["pc_terminal_id"] = str(oid)
     st.session_state["pc_terminal_name"] = name or object_label(typ, oid)
@@ -646,6 +647,146 @@ def _mobile_companies(rec: dict) -> list[dict]:
     return out
 
 
+def _coords_from_record(rec: dict) -> tuple[float,float] | None:
+    candidates=[rec,_meta(rec)]
+    for src in candidates:
+        if not isinstance(src,dict):
+            continue
+        pairs=[
+            ("latitude","longitude"),("lat","lon"),("lat","lng"),
+            ("event_latitude","event_longitude"),("location_latitude","location_longitude"),
+        ]
+        for a,b in pairs:
+            try:
+                lat=float(src.get(a)); lon=float(src.get(b))
+                if -90<=lat<=90 and -180<=lon<=180:
+                    return lat,lon
+            except Exception:
+                pass
+        loc=src.get("location")
+        if isinstance(loc,dict):
+            try:
+                lat=float(loc.get("latitude") or loc.get("lat"))
+                lon=float(loc.get("longitude") or loc.get("lon") or loc.get("lng"))
+                if -90<=lat<=90 and -180<=lon<=180:
+                    return lat,lon
+            except Exception:
+                pass
+    return None
+
+def _asset_point(asset_id: str) -> dict | None:
+    rec=object_record("asset",asset_id) or {}
+    xy=_coords_from_record(rec)
+    if not xy:
+        return None
+    return {
+        "lat":xy[0],"lon":xy[1],
+        "name":_clean(rec.get("name")) or asset_id,
+        "type":_clean(rec.get("asset_type")),
+        "id":asset_id,
+    }
+
+def _event_spatial_context(rec: dict, oid: str) -> tuple[list[dict],list[dict]]:
+    """Resolve an event into mapped points and connected spatial objects."""
+    pts=[]; objs=[]; seen=set()
+
+    xy=_coords_from_record(rec)
+    if xy:
+        pts.append({"lat":xy[0],"lon":xy[1],"name":_clean(rec.get("title")) or "Event location","type":"event"})
+
+    # First: explicit 059/event links.
+    for l in _indexed_links("event",str(oid),500) or []:
+        is_src=_clean(l.get("source_type"))=="event" and _clean(l.get("source_id"))==str(oid)
+        typ=_clean(l.get("target_type") if is_src else l.get("source_type")).casefold()
+        lid=_clean(l.get("target_id") if is_src else l.get("source_id"))
+        name=_clean(l.get("target_name") if is_src else l.get("source_name"))
+        if not typ or not lid:
+            continue
+        k=(typ,lid)
+        if k not in seen:
+            seen.add(k)
+            objs.append({"type":typ,"id":lid,"name":name or lid,"relationship":_clean(l.get("relation_type"))})
+        if typ=="asset":
+            p=_asset_point(lid)
+            if p: pts.append(p)
+        elif typ=="corridor":
+            # Pull mapped assets connected to the corridor through the shared link index.
+            for cl in _indexed_links("corridor",lid,300):
+                cs=_clean(cl.get("source_type"))=="corridor" and _clean(cl.get("source_id"))==lid
+                ct=_clean(cl.get("target_type") if cs else cl.get("source_type")).casefold()
+                ci=_clean(cl.get("target_id") if cs else cl.get("source_id"))
+                if ct=="asset" and ci:
+                    p=_asset_point(ci)
+                    if p: pts.append(p)
+
+    # Second: event location/title terms against terminal index.
+    loc=_display_location(rec)
+    title=_clean(rec.get("title"))
+    searches=[]
+    if loc: searches.append(loc)
+    # Useful geographic fragments; avoid treating the whole article headline as a place.
+    for textv in (loc,title):
+        if not textv: continue
+        for token in re.split(r"[,;/]|\bat\b|\bin\b|\bnear\b|\boff\b",textv,flags=re.I):
+            token=token.strip()
+            if 4<=len(token)<=80 and token.casefold() not in {"germany","united states","united arab emirates"}:
+                searches.append(token)
+    checked=set()
+    for q in searches[:8]:
+        nq=_norm(q)
+        if not nq or nq in checked: continue
+        checked.add(nq)
+        for x in _indexed_search(q,12):
+            if x.get("type") not in {"asset","corridor"}:
+                continue
+            k=(x.get("type"),x.get("id"))
+            if k in seen: continue
+            seen.add(k); objs.append({**x,"relationship":"location/system match"})
+            if x.get("type")=="asset":
+                p=_asset_point(x.get("id"))
+                if p: pts.append(p)
+            elif x.get("type")=="corridor":
+                for cl in _indexed_links("corridor",x.get("id"),200):
+                    cs=_clean(cl.get("source_type"))=="corridor" and _clean(cl.get("source_id"))==x.get("id")
+                    ct=_clean(cl.get("target_type") if cs else cl.get("source_type")).casefold()
+                    ci=_clean(cl.get("target_id") if cs else cl.get("source_id"))
+                    if ct=="asset" and ci:
+                        p=_asset_point(ci)
+                        if p: pts.append(p)
+
+    # De-dupe coordinates/ids.
+    final=[]; pseen=set()
+    for p in pts:
+        key=(round(float(p["lat"]),5),round(float(p["lon"]),5),p.get("name"))
+        if key in pseen: continue
+        pseen.add(key); final.append(p)
+    return final,objs
+
+def _render_event_system_map(rec: dict, oid: str):
+    pts,objs=_event_spatial_context(rec,oid)
+    loc=_display_location(rec)
+    if pts:
+        st.map(pd.DataFrame(pts),latitude="lat",longitude="lon",size=48,zoom=None,use_container_width=True)
+        if loc:
+            st.caption("Location: "+loc)
+    elif loc:
+        st.markdown("##### Geographic context")
+        st.write(loc)
+        st.caption("The event has a named location, but no mapped coordinate or connected mapped node is stored yet.")
+    else:
+        st.caption("No geographic context has been resolved for this event yet.")
+
+    spatial=[x for x in objs if x.get("type") in {"asset","corridor"}]
+    if spatial:
+        st.markdown("##### Connected geography / infrastructure")
+        view=pd.DataFrame([{
+            "Object":x.get("name"),
+            "Type":x.get("type"),
+            "Relationship":x.get("relationship") or x.get("match_reason"),
+        } for x in spatial[:20]])
+        st.dataframe(view,hide_index=True,use_container_width=True,height=min(360,100+28*len(view)))
+        _open_selector(spatial[:30],f"event_spatial_{oid}","Open mapped / connected object")
+
 def _render_map_for_asset(rec: dict):
     pts = []
     def add(r, label):
@@ -869,6 +1010,13 @@ def _render_spatial_pane(typ: str, oid: str, rec: dict, lens: str):
             elif mid:
                 nodes.append({"type":"mobile_asset","id":mid,"name":_object_name("mobile_asset",mid),"relationship":_clean(r.get("asset_role"))})
         if nodes:
+            mapped=[]
+            for n in nodes:
+                if n.get("type")=="asset":
+                    p=_asset_point(n.get("id"))
+                    if p: mapped.append(p)
+            if mapped:
+                st.map(pd.DataFrame(mapped),latitude="lat",longitude="lon",size=44,zoom=None,use_container_width=True)
             st.markdown("##### Operating footprint")
             st.dataframe(pd.DataFrame([{"Asset":x["name"],"Role":x["relationship"]} for x in nodes]),
                          hide_index=True,use_container_width=True,height=min(420,100+28*min(len(nodes),12)))
@@ -907,18 +1055,15 @@ def _render_spatial_pane(typ: str, oid: str, rec: dict, lens: str):
             st.dataframe(pd.DataFrame(routes),hide_index=True,use_container_width=True)
 
     elif typ=="event":
-        links=_event_links("event",oid)
-        objs=[]
-        for l in links:
-            lt=_clean(l.get("linked_type")).casefold()
-            if lt=="vessel": lt="mobile_asset"
-            lid=_clean(l.get("linked_id"))
-            if lt in OBJECTS and lid:
-                objs.append({"type":lt,"id":lid,"name":_object_name(lt,lid),"relationship":_clean(l.get("relationship"))})
-        if objs:
-            st.dataframe(pd.DataFrame([{"Object":x["name"],"Relationship":x["relationship"]} for x in objs]),
-                         hide_index=True,use_container_width=True)
-            _open_selector(objs,f"spatial_event_{oid}")
+        _render_event_system_map(rec,oid)
+        # Non-spatial linked actors/assets remain available below the map.
+        links=_linked_objects_from_relationships("event",oid)
+        nonspatial=[x for x in links if x.get("type") not in {"asset","corridor"}]
+        if nonspatial:
+            st.markdown("##### Connected actors / assets")
+            st.dataframe(pd.DataFrame([{"Object":x["name"],"Type":x["type"],"Relationship":x["relationship"]} for x in nonspatial[:25]]),
+                         hide_index=True,use_container_width=True,height=min(360,100+28*len(nonspatial[:25])))
+            _open_selector(nonspatial[:30],f"spatial_event_actor_{oid}")
 
 
 def _render_evidence_pane(typ: str, oid: str, rec: dict, lens: str):
@@ -946,6 +1091,20 @@ def _render_evidence_pane(typ: str, oid: str, rec: dict, lens: str):
                               on_click=_set_context, args=('document', did, docs[0]['title']))
         except Exception as exc:
             st.caption('Linked document evidence unavailable: ' + str(exc)[:140])
+
+    if typ in ('mobile_asset', 'entity'):
+        try:
+            direct_links = _sb().table('pc_sanctions_links').select('sanctions_designation_id').eq('linked_type', typ).eq('linked_id', oid).execute().data or []
+            ids = list(dict.fromkeys(r['sanctions_designation_id'] for r in direct_links))
+            if ids:
+                designations = _sb().table('pc_sanctions_designations').select('primary_name,designation_date,status,metadata,source_url').in_('sanctions_designation_id', ids).execute().data or []
+                st.markdown('##### Linked sanctions designations')
+                for designation in designations:
+                    st.markdown('**' + designation['primary_name'] + '**')
+                    st.caption(' · '.join(str(v) for v in [designation.get('designation_date'),designation.get('status'),
+                        ', '.join((designation.get('metadata') or {}).get('all_programme_codes') or [])] if v))
+        except Exception as exc:
+            st.caption('Sanctions links unavailable: ' + str(exc)[:140])
 
     events=_events_for_object(typ,oid)
     if lens=="strategic":
@@ -1817,6 +1976,296 @@ def _render_search_results(results: list[dict], lens: str):
                         args=(lens,x["type"],x["id"],x["name"]),
                     )
 
+
+def _daily_nav(lens: str):
+    _clear_context()
+    st.session_state['pc_document_browser'] = False
+    st.session_state['pc_uae_ofac_overlap'] = False
+    st.session_state[f"pc_terminal_search_{lens}"] = ""
+    st.session_state[f"pc_terminal_nav_{lens}"] = "Daily Brief"
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _daily_events() -> list[dict]:
+    # Page the canonical event table; do not silently accept PostgREST's row cap.
+    sb = _sb()
+    if sb is None:
+        raise RuntimeError("Database connection unavailable")
+    rows = []
+    offset = 0
+    while True:
+        page = (sb.table("pc_events").select("*").order("event_id")
+                .range(offset, offset + 499).execute().data or [])
+        rows.extend(page)
+        if len(page) < 500:
+            return rows
+        offset += len(page)
+
+
+def _daily_open(lens: str, event_id: str, title: str):
+    st.session_state[f"pc_terminal_nav_{lens}"] = "Development"
+    _set_context("event", event_id, title)
+
+
+def _daily_value(row, *keys):
+    containers = [row, _meta(row)]
+    for name in ('fields', 'analysis', 'assessment', 'extracted_data'):
+        value = _meta(row).get(name)
+        if isinstance(value, dict): containers.append(value)
+    values = []
+    for container in containers:
+        for key in keys:
+            value = container.get(key)
+            if value not in (None, '', [], {}):
+                text = _daily_text(value)
+                if text and text not in values: values.append(text)
+    return '\n\n'.join(values)
+
+
+def _daily_text(value):
+    if isinstance(value, list):
+        return '\n'.join('• ' + _daily_text(v) for v in value)
+    if isinstance(value, dict):
+        return '\n'.join(f"{str(k).replace('_', ' ').title()}: {_daily_text(v)}" for k, v in value.items()
+                        if v not in (None, '', [], {}))
+    return str(value) if value is not None else ''
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _daily_table(table, key):
+    sb = _sb()
+    if sb is None: raise RuntimeError('Database connection unavailable')
+    out = []; offset = 0
+    while True:
+        page = sb.table(table).select('*').order(key).range(offset, offset + 499).execute().data or []
+        out.extend(page)
+        if len(page) < 500: return out
+        offset += len(page)
+
+
+def _daily_horizon(row):
+    value = ' '.join(str(row.get(k) or _meta(row).get(k) or '').lower()
+                     for k in ('event_temporality', 'event_phase', 'status'))
+    return bool(re.search(r'\b(scheduled|forecast|recurring|seasonal|upcoming|planned|proposed)\b', value))
+
+
+def _daily_relevant(row, lens):
+    def truth(key):
+        return str(row.get(key) or _meta(row).get(key) or '').lower() in {'true', '1', 'yes', 'high', 'critical', 'medium'}
+    blob = _record_text(row)
+    if lens == 'trade': return truth('trade_relevance') or bool(TRADE_RX.search(blob)) or bool(row.get('commercial_impact') or row.get('operational_impact'))
+    if lens == 'sanctions': return bool(SANCTIONS_RX.search(blob)) or row.get('_brief_kind') == 'Designation'
+    if lens == 'strategic': return bool(STRATEGIC_RX.search(blob))
+    return truth('intelligence_relevance') or truth('alert_worthy') or row.get('_brief_kind', 'Development') == 'Development' or bool(re.search(r'conflict|security|policy|regulat|sanction|disrupt|energy|strategic', blob, re.I))
+
+
+def _daily_candidates(lens):
+    specs = [('pc_events', 'event_id', ('start_date',), 'Development')]
+    if lens in {'trade', 'strategic'}:
+        specs += [('pc_transactions', 'transaction_id', ('announced_date', 'effective_date'), 'Transaction'),
+                  ('pc_contracts', 'contract_id', ('announced_date', 'signed_date'), 'Contract')]
+    if lens == 'trade':
+        specs += [('pc_trade_market_observations', 'market_observation_id', ('observation_date',), 'Market observation')]
+    if lens == 'sanctions':
+        specs += [('pc_sanctions_designations', 'sanctions_designation_id', ('last_updated_date', 'designation_date'), 'Designation')]
+    out = []; failures = []
+    for table, key, datekeys, kind in specs:
+        try: rows = _daily_table(table, key)
+        except Exception:
+            failures.append(table); continue
+        for original in rows:
+            row = dict(original)
+            if str(row.get('record_status') or row.get('review_status') or '').lower() in {'rejected', 'draft', 'staged', 'pending_review'}: continue
+            row['_brief_kind'] = kind; row['_brief_table'] = table; row['_brief_id'] = row.get(key)
+            row['_brief_date'] = next((row.get(k) for k in datekeys if row.get(k)), None)
+            row['title'] = row.get('title') or row.get('contract_name') or row.get('target_name') or row.get('primary_name') or ' · '.join(str(row.get(k) or '') for k in ('route_code', 'metric_name')).strip(' ·') or kind
+            if _daily_relevant(row, lens): out.append(row)
+    return out, failures
+
+
+def _daily_details(row, lens):
+    eid = str(row.get('event_id') or '')
+    merged = dict(row)
+    links = _filtered_rows('pc_event_links', 'event_id', eid, 500) if eid else []
+    impacts = _filtered_rows('pc_event_impacts', 'event_id', eid, 100) if eid else []
+    updates = _filtered_rows('pc_event_updates', 'event_id', eid, 100) if eid else []
+    stories = _filtered_rows('pc_report_stories', 'event_id', eid, 50) if eid else []
+    # Latest substantive updates lead; preserve the underlying event description.
+    updates.sort(key=lambda x: str(x.get('occurred_at') or x.get('reported_at') or x.get('published_at') or ''), reverse=True)
+    sections = [('What changed', _daily_value(row, 'description', 'summary', 'situation_update', 'scope_summary', 'notes', 'remarks'))]
+    if updates:
+        sections.append(('Latest recorded updates', '\n\n'.join(_daily_value(u, 'summary', 'new_claims') for u in updates[:3])))
+    lenskeys = {
+        'trade': ('commercial_impact', 'operational_impact', 'business_implications', 'what_it_means', 'pc_assessment', 'pc_driver', 'pc_market_signal'),
+        'intelligence': ('pc_assessment', 'intelligence_assessment', 'assessment_impact', 'what_it_means', 'operational_impact', 'commercial_impact'),
+        'sanctions': ('sanctions_impact', 'compliance_impact', 'designation_summary', 'remarks', 'what_it_means', 'pc_assessment', 'commercial_impact'),
+        'strategic': ('strategic_impact', 'industrial_impact', 'capacity_impact', 'pc_assessment', 'what_it_means', 'commercial_impact', 'operational_impact')}
+    assessment = _daily_value(row, *lenskeys[lens])
+    for story in stories:
+        text = _daily_value(story, *lenskeys[lens])
+        if text and text not in assessment: assessment += '\n\n' + text
+    if assessment.strip(): sections.append(({'trade':'Trade implications', 'intelligence':'Intelligence assessment', 'sanctions':'Sanctions / compliance implications', 'strategic':'Industrial / programme implications'}[lens], assessment.strip()))
+    impact_text = '\n\n'.join(' · '.join(filter(None, [str(x.get('impact_domain') or ''), str(x.get('impact_level') or ''), _daily_value(x, 'description'), 'Expected' if x.get('expected') else 'Recorded'])) for x in impacts)
+    if impact_text: sections.append(('Recorded cross-domain impacts', impact_text))
+    indicators = _daily_value(row, 'monitoring_indicators', 'indicators', 'monitoring', 'trigger_threshold', 'baseline_condition', 'expected_disruption', 'impact_probability', 'impact_horizon')
+    if indicators: sections.append(('Monitoring, triggers & outlook', indicators))
+    facts = []
+    for key in ('transaction_type','transaction_stage','regulatory_status','reported_value','currency','equity_percent','operating_control','quantity','quantity_unit','duration_years','route_code','route_description','commodity','value_numeric','value_text','unit','change_wow','change_yoy','pc_direction','designation_date','last_updated_date','delisted_date','source_list','listed_entity_type','status','confidence','verification_status'):
+        if row.get(key) not in (None, '', [], {}): facts.append(f"{key.replace('_',' ').title()}: {_daily_text(row[key])}")
+    if facts: sections.append(('Key recorded facts', '\n'.join(facts)))
+    exposure = []; urls = _event_source_urls(row)
+    for link in links:
+        typ = str(link.get('linked_type') or ''); oid = str(link.get('linked_id') or '')
+        if typ == 'vessel': typ = 'mobile_asset'
+        if typ not in OBJECTS or not oid: continue
+        record = object_record(typ, oid) or {}
+        name = record.get('name') or record.get('corridor_name') or link.get('linked_name')
+        if not name: continue
+        pieces = [str(name), str(link.get('relationship') or '').replace('_',' ')]
+        for key in ('imo', 'flag', 'asset_type', 'country', 'capacity_value', 'capacity_unit'):
+            if record.get(key) not in (None, ''): pieces.append(f"{key.replace('_',' ').title()}: {record[key]}")
+        if typ == 'mobile_asset':
+            for c in _mobile_companies(record): pieces.append(f"{c['role']}: {c['name']}")
+        elif typ == 'asset':
+            for c in _asset_companies(record): pieces.append(f"{c['role']}: {c['name']}")
+        exposure.append(' · '.join(filter(None, pieces)))
+    for key, typ in [('buyer_entity_id','entity'), ('seller_entity_id','entity'), ('target_entity_id','entity'), ('target_asset_id','asset'), ('target_mobile_asset_id','mobile_asset')]:
+        if row.get(key): exposure.append(key.replace('_id','').replace('_',' ').title() + ': ' + _object_name(typ, str(row[key])))
+    if exposure: sections.append(('Linked assets, companies & exposure', '\n\n'.join(dict.fromkeys(exposure))))
+    sources = [row] + impacts + updates + stories
+    for item in sources:
+        urls += _event_source_urls(item)
+        if item.get('source_id'):
+            for source in _filtered_rows('pc_sources', 'source_id', str(item['source_id']), 3): urls += _event_source_urls(source)
+    for story in stories:
+        if story.get('report_story_id'):
+            for source in _filtered_rows('pc_report_story_sources', 'report_story_id', str(story['report_story_id']), 30): urls += _event_source_urls(source)
+    return [(label, text) for label, text in sections if text.strip()], list(dict.fromkeys(urls))
+
+
+def _render_daily_brief(lens: str):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    titles = {'trade':'What Changed in Trade, Logistics & Markets', 'intelligence':'Developments, Assessments & Operational Exposure', 'sanctions':'Designations, Enforcement & Ownership Exposure', 'strategic':'Programmes, Contracts & Industrial Capacity'}
+    st.title(LENS[lens]['brand'] + ' — Daily Brief')
+    st.markdown('### ' + titles[lens])
+    day = st.date_input('Brief date (UAE)', datetime.now(ZoneInfo('Asia/Dubai')).date(), key=f'pc_daily_date_{lens}')
+    mode = st.radio('Coverage', ['Selected day', 'Last 7 days', 'Latest available sample'], horizontal=True, key=f'pc_daily_coverage_{lens}')
+    with st.spinner('Reading developments and supporting records…'):
+        records, failures = _daily_candidates(lens)
+    if failures: st.warning('Some record collections could not be read: ' + ', '.join(failures) + '. Coverage is incomplete.')
+    dated = []; horizon = []
+    for row in records:
+        stamp = pd.to_datetime(row.get('_brief_date'), utc=True, errors='coerce')
+        if pd.isna(stamp): continue
+        d = stamp.tz_convert('Asia/Dubai').date()
+        if _daily_horizon(row) or d > day:
+            if day <= d <= day + timedelta(days=30): horizon.append((d, row))
+            continue
+        dated.append((d, row))
+    start = day - timedelta(days=6 if mode == 'Last 7 days' else 0)
+    chosen = [(d,r) for d,r in dated if start <= d <= day]
+    if mode == 'Latest available sample':
+        # Recency first: severity cannot pull old records over recent developments.
+        chosen = sorted([(d,r) for d,r in dated if d <= day], key=lambda x:(x[0], str(x[1].get('_brief_id'))), reverse=True)[:80]
+        st.warning('Historical sample of latest available records relevant to this app; not a current-day brief.')
+    def rank(item):
+        d,r = item
+        severity = {'critical':4,'severe':4,'high':3,'medium':2,'moderate':2,'low':1}.get(str(r.get('severity') or '').lower(),0)
+        richness = bool(_daily_value(r,'commercial_impact','operational_impact','pc_assessment','what_it_means','notes','remarks'))
+        return d, severity, richness, str(r.get('_brief_id'))
+    unique = []; seen = set()
+    for item in sorted(chosen,key=rank,reverse=True):
+        d,r = item; signature = (_norm(r.get('title')), d)
+        if signature in seen: continue
+        seen.add(signature); unique.append(item)
+    # Round-robin across record families so an event-heavy table cannot suppress markets or transactions.
+    buckets = {}
+    for item in unique: buckets.setdefault(item[1]['_brief_kind'], []).append(item)
+    picked = []
+    while buckets and len(picked) < 8:
+        for kind in list(buckets):
+            picked.append(buckets[kind].pop(0))
+            if not buckets[kind]: del buckets[kind]
+            if len(picked) == 8: break
+    export = ['# ' + LENS[lens]['brand'] + ' — Daily Brief', '## ' + titles[lens], f'{day} · {mode}', '']
+    if not picked:
+        st.info('No current developments relevant to this app in the selected period. Choose Latest available sample to inspect existing records.')
+    else:
+        st.caption(f'{len(unique)} relevant records · {len(picked)} selected · dates {min(d for d,_ in chosen)} to {max(d for d,_ in chosen)}')
+        st.markdown('#### At a glance')
+        for _,r in picked[:5]:
+            takeaway = _daily_value(r,'commercial_impact' if lens=='trade' else 'pc_assessment','what_it_means','summary')
+            st.write('• ' + str(r['title']) + (' — ' + takeaway[:240] if takeaway else ''))
+        for i,(d,r) in enumerate(picked,1):
+            with st.container(border=True):
+                st.markdown(f"### {i:02d} — {r['title']}")
+                st.caption(f"{d} · {r['_brief_kind']} · {_event_region_label(r)}")
+                sections, urls = _daily_details(r,lens)
+                export.extend([f"### {i:02d} — {r['title']}",f"{d} · {r['_brief_kind']}"])
+                for label,text in sections:
+                    st.markdown('**' + label + '**'); st.write(text)
+                    export.extend(['**'+label+'**',text])
+                if not sections: st.caption('Supporting narrative is not recorded; open the source record for review.')
+                for url in urls:
+                    st.link_button('Source evidence',url); export.append(url)
+                if not urls: st.caption('Source evidence link missing from the stored record.')
+                if r.get('event_id'):
+                    st.button('Open development and evidence',key=f"pc_daily_open_{lens}_{i}_{r['event_id']}",on_click=_daily_open,args=(lens,str(r['event_id']),str(r['title'])))
+                else:
+                    with st.expander('Supporting record'):
+                        safe = {k:v for k,v in r.items() if not k.startswith('_') and not k.endswith('_id') and k not in {'raw_record','metadata'}}
+                        st.write(_daily_text(safe))
+                export.append('')
+    if horizon:
+        with st.expander('Look ahead — scheduled and expected items (next 30 days)'):
+            for d,r in sorted(horizon,key=lambda x:x[0])[:6]:
+                st.markdown(f"**{d} — {r['title']}**")
+                text = _daily_value(r,'expected_disruption','trigger_threshold','commercial_impact','operational_impact')
+                if text: st.write(text)
+        export.append('## Look ahead')
+        for d,r in sorted(horizon,key=lambda x:x[0])[:6]: export.append(f"{d} — {r['title']}")
+    if picked or horizon:
+        st.download_button('Download brief','\n'.join(export),file_name=f'PC_{lens}_Daily_{day}.md',mime='text/markdown')
+
+
+def _sidebar_nav(lens: str, label: str, query: str=""):
+    _clear_context()
+    st.session_state['pc_document_browser'] = False
+    st.session_state['pc_uae_ofac_overlap'] = False
+    st.session_state[f"pc_terminal_workspace_{lens}"]=""
+    st.session_state[f"pc_terminal_search_{lens}"]=query
+    st.session_state[f"pc_terminal_nav_{lens}"]=label
+
+def _home_nav(lens: str):
+    _clear_context()
+    st.session_state['pc_document_browser'] = False
+    st.session_state['pc_uae_ofac_overlap'] = False
+    st.session_state[f"pc_terminal_workspace_{lens}"]=""
+    st.session_state[f"pc_terminal_search_{lens}"]=""
+    st.session_state[f"pc_terminal_nav_{lens}"]="Home"
+
+def _render_publication_workspace(sb, lens: str, mode: str):
+    try:
+        from pc_report_studio import render_report_studio
+    except Exception as exc:
+        st.error(f"Report workspace could not load: {exc}")
+        return
+    typ,oid,rec=_context_record()
+    context=(typ,oid,rec) if typ and oid and rec else None
+    render_report_studio(sb,context=context,mode=mode)
+
+def _render_sanctions_query_report(sb):
+    try:
+        from pc_sanctions_report import render_sanctions_report_area
+    except Exception as exc:
+        st.error(f"Sanctions report workspace could not load: {exc}")
+        return
+    typ,oid,rec=_context_record()
+    context=(typ,oid,rec) if typ and oid and rec else None
+    render_sanctions_report_area(sb,context=context)
+
+
 def render_terminal(lens: str = "trade"):
     lens = lens if lens in LENS else "trade"
     cfg = LENS[lens]
@@ -1833,22 +2282,76 @@ def render_terminal(lens: str = "trade"):
                          index=0 if st.session_state.get("pc_terminal_theme","Light")=="Light" else 1,
                          key="pc_terminal_theme")
         st.divider()
-        st.markdown("**Home**")
+        st.button("Daily Brief", key=f"pc_daily_sidebar_{lens}", use_container_width=True,
+                  on_click=_daily_nav, args=(lens,))
         navs={
-            "trade":["Companies","Infrastructure","Vessels","Corridors","Markets","Sanctions & Compliance","Strategic Industries","Events","Documents"],
-            "intelligence":["Operating Picture","Priority Intelligence","Regional / Chokepoints","Security & Maritime","Disruptions","Sanctions","Monitoring & Indicators","Documents"],
-            "sanctions":["Exposure Picture","Designations","Screening","Ownership & Control","Vessels","Jurisdictions / Regimes","Events","Evidence"],
-            "strategic":["Industrial Picture","Organisations","Shipyards","Programmes","Production","Fleets / Platforms","Security Operations","Documents"],
+            "trade":[
+                ("Home",""),("Companies","company"),("Infrastructure","port"),
+                ("Vessels","vessel"),("Corridors","corridor"),("Markets","freight"),
+                ("Sanctions & Compliance","sanction"),("Strategic Industries","shipyard"),
+                ("Events","event"),("Brief Builder","__brief_builder__"),
+                ("Report Library","__report_library__"),("Documents","document")
+            ],
+            "intelligence":[
+                ("Operating Picture",""),("Priority Intelligence","security"),
+                ("Regional / Chokepoints","corridor"),("Security & Maritime","maritime security"),
+                ("Disruptions","disruption"),("Sanctions","sanction"),
+                ("Monitoring & Indicators","monitoring"),
+                ("Report Studio","__report_studio__"),
+                ("Brief Builder","__brief_builder__"),
+                ("Report Library","__report_library__"),
+                ("Documents","document")
+            ],
+            "sanctions":[
+                ("Exposure Picture",""),("Designations","sanction"),("Screening","screening"),
+                ("Ownership & Control","ownership"),("Vessels","vessel"),
+                ("Jurisdictions / Regimes","OFAC"),("Events","sanction"),
+                ("Query & Report Studio","__sanctions_report__"),
+                ("Report Library","__report_library__"),("Evidence","document")
+            ],
+            "strategic":[
+                ("Industrial Picture",""),("Organisations","coast guard"),("Shipyards","shipyard"),
+                ("Programmes","programme"),("Production","shipbuilding"),("Fleets / Platforms","vessel"),
+                ("Security Operations","security operation"),("Documents","document")
+            ],
         }
-        for item in navs.get(lens,[]):
-            st.markdown("<div style='padding:.22rem .15rem;color:var(--muted);font-size:.84rem'>"+item+"</div>",unsafe_allow_html=True)
+        current=st.session_state.get(f"pc_terminal_nav_{lens}",
+                                     "Home" if lens=="trade" else
+                                     "Operating Picture" if lens=="intelligence" else
+                                     "Exposure Picture" if lens=="sanctions" else "Industrial Picture")
+        for i,(label,query) in enumerate(navs.get(lens,[])):
+            if query.startswith("__"):
+                def _set_workspace(_lens=lens,_label=label,_mode=query):
+                    _clear_context()
+                    st.session_state[f"pc_terminal_nav_{_lens}"]=_label
+                    st.session_state[f"pc_terminal_workspace_{_lens}"]=_mode
+                    st.session_state[f"pc_terminal_search_{_lens}"]=""
+                cb=_set_workspace
+                args=()
+            else:
+                cb=_home_nav if not query else _sidebar_nav
+                args=(lens,) if not query else (lens,label,query)
+            st.button(
+                ("● " if label==current else "")+label,
+                key=f"pc_nav_{lens}_{i}",
+                use_container_width=True,
+                on_click=cb,
+                args=args,
+            )
         st.divider()
+        if lens in ('sanctions','trade','intelligence') and st.button('UAE / OFAC vessel overlap', use_container_width=True):
+            _clear_context()
+            st.session_state['pc_document_browser'] = False
+            st.session_state['pc_uae_ofac_overlap'] = True
+            st.rerun()
         if st.button("Documents & vessel restrictions", use_container_width=True):
             _clear_context()
+            st.session_state['pc_uae_ofac_overlap'] = False
             st.session_state['pc_document_browser'] = True
             st.rerun()
         if st.button("Home / clear selection", use_container_width=True):
             st.session_state['pc_document_browser'] = False
+            st.session_state['pc_uae_ofac_overlap'] = False
             _clear_context()
             st.rerun()
         if st.button("Refresh database", use_container_width=True):
@@ -1858,6 +2361,28 @@ def render_terminal(lens: str = "trade"):
 
     _style(theme)
     _restore_context()
+    if st.session_state.get('pc_uae_ofac_overlap'):
+        st.markdown('### UAE / OFAC vessel overlap')
+        st.caption('Shared hulls matched by IMO. UAE entry restrictions and OFAC designations retain separate authorities, dates and source records.')
+        try:
+            rows=[]; offset=0
+            while True:
+                page=sb.table('pc_v_uae_ofac_vessel_overlap').select('*').order('imo').range(offset,offset+499).execute().data or []
+                rows.extend(page)
+                if len(page)<500: break
+                offset+=500
+            if rows:
+                st.dataframe([{'Vessel':r['name'],'IMO':r['imo'],'UAE listed flag':r['uae_listed_flag'],
+                    'UAE circular':r['circular_reference'],'OFAC listed name':r['ofac_name'],
+                    'OFAC designation date':r['designation_date'],'OFAC programmes':', '.join(r.get('ofac_programmes') or [])} for r in rows],
+                    hide_index=True,use_container_width=True)
+                _open_selector([{'type':'mobile_asset','id':r['mobile_asset_id'],'name':r['name'],'relationship':'UAE / OFAC source overlap'} for r in rows],
+                    'pc_overlap_vessels','Open vessel evidence')
+            else:
+                st.info('No overlap stored yet. Import both source files and resolve their vessel identifiers.')
+        except Exception as exc:
+            st.warning('UAE / OFAC overlap unavailable: '+str(exc)[:200])
+        return
     if st.session_state.get('pc_document_browser'):
         from pc_document_vessels import render_document_evidence
         st.markdown('### Documents & vessel restrictions')
@@ -1875,6 +2400,22 @@ def render_terminal(lens: str = "trade"):
                 st.warning('Document evidence unavailable: ' + str(exc)[:180])
         else:
             st.info('No matching documents.')
+        return
+    st.button("Daily Brief", key=f"pc_daily_top_{lens}", on_click=_daily_nav, args=(lens,))
+    if st.session_state.get(f"pc_terminal_nav_{lens}") == "Daily Brief":
+        _render_daily_brief(lens)
+        return
+
+    workspace=st.session_state.get(f"pc_terminal_workspace_{lens}","")
+    if workspace:
+        if workspace=="__report_studio__":
+            _render_publication_workspace(sb,lens,"studio")
+        elif workspace=="__brief_builder__":
+            _render_publication_workspace(sb,lens,"brief")
+        elif workspace=="__report_library__":
+            _render_publication_workspace(sb,lens,"library")
+        elif workspace=="__sanctions_report__":
+            _render_sanctions_query_report(sb)
         return
 
     st.markdown("<div class='pc-command'><div class='pc-k'>GLOBAL COMMAND BAR</div>", unsafe_allow_html=True)

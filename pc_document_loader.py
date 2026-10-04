@@ -180,7 +180,13 @@ def render_document_loader(sb):
     products=st.multiselect('Products', PRODUCTS, default=['Trade', 'Sanctions', 'Intelligence'])
     connected_research=st.checkbox('Research issuing company and connected operations after saving', value=True,
         help='Uses the same company/vessel research engine as Power Admin; unresolved identities are held rather than guessed.')
-    uploads=st.file_uploader('Documents', type=['pdf','docx','pptx','txt','md'], accept_multiple_files=True)
+    uploads=st.file_uploader('Documents', type=['pdf','docx','pptx','txt','md','xml'], accept_multiple_files=True)
+    xml_uploads = [f for f in (uploads or []) if Path(f.name).suffix.lower() == '.xml']
+    if xml_uploads:
+        from pc_ofac_importer import render_ofac_loader
+        render_ofac_loader(sb, xml_uploads)
+        uploads = [f for f in uploads if Path(f.name).suffix.lower() != '.xml']
+        if not uploads: return
     urls=st.text_area('Source URL(s) — optional, one per document in upload order', height=90)
     st.caption('The issuing company, government body, regulator or think tank is matched to the shared canonical entity registry; a source-backed missing organisation can be created automatically.')
     from pc_document_vessels import render_document_research

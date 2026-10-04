@@ -90,6 +90,8 @@ def retain_original(sb, uploaded):
     digest = hashlib.sha256(data).hexdigest()
     suffix = re.sub(r'[^a-z0-9.]', '', __import__('pathlib').Path(uploaded.name).suffix.lower())
     path = digest + '/original' + suffix
+    if len(data) > 40 * 1024 * 1024:
+        return retain_large_original(sb, uploaded, digest)
     # Verify bytes on retries as well. No public bucket or long-lived public URL.
     bucket = sb.storage.from_(BUCKET)
     try:
@@ -127,7 +129,7 @@ def render_document_evidence(sb, document_id, open_object=None):
         st.write(doc['summary'])
     if doc.get('storage_path'):
         try:
-            data = sb.storage.from_(BUCKET).download(doc['storage_path'])
+            data = download_original(sb, doc)
             st.download_button('Download original document', data,
                 file_name=doc.get('file_name') or 'source.pdf', mime=doc.get('mime_type'),
                 key=f"original_{document_id}")
@@ -135,6 +137,11 @@ def render_document_evidence(sb, document_id, open_object=None):
             st.warning('Original document unavailable: ' + str(exc)[:160])
     else:
         st.caption('Original file was not retained by the earlier loader.')
+    native = (doc.get('metadata') or {}).get('native_xml')
+    if native:
+        st.caption('Native OFAC XML · data as of ' + str(native.get('data_as_of') or 'unknown'))
+        st.write(native.get('counts') or {})
+        st.caption('OFAC designations and UAE access restrictions retain their own authorities and dates; exact IMO links identify shared hulls.')
     measures = sb.table('pc_document_access_measures').select('*').eq('document_id', document_id).execute().data or []
     for measure in measures:
         st.markdown('**Access restriction:** ' + str(measure.get('scope_text') or ''))
@@ -238,3 +245,52 @@ def render_document_research(sb, api_key):
                 except Exception as exc:
                     reports.append({'IMO': finding['imo'], 'Status': 'held: ' + str(exc)[:180]})
             st.json(reports)
+
+
+def retain_large_original(sb, uploaded, digest=None):
+    data = uploaded.getvalue()
+    digest = digest or hashlib.sha256(data).hexdigest()
+    bucket = sb.storage.from_(BUCKET)
+    manifest = {'version': 1, 'file_name': uploaded.name, 'sha256': digest, 'byte_count': len(data), 'chunks': []}
+    for index, offset in enumerate(range(0, len(data), 8 * 1024 * 1024)):
+        chunk = data[offset:offset+8*1024*1024]
+        path = digest + '/chunks/' + str(index).zfill(5)
+        try:
+            retained = bucket.download(path)
+        except Exception:
+            bucket.upload(path, chunk, file_options={'content-type': 'application/octet-stream', 'upsert': 'false'})
+            retained = bucket.download(path)
+        chunk_hash = hashlib.sha256(chunk).hexdigest()
+        if hashlib.sha256(retained).hexdigest() != chunk_hash:
+            raise RuntimeError('Original document chunk failed SHA-256 verification')
+        manifest['chunks'].append({'path': path, 'sha256': chunk_hash, 'byte_count': len(chunk)})
+    path = digest + '/original.manifest.json'
+    content = json.dumps(manifest).encode()
+    bucket.upload(path, content, file_options={'content-type': 'application/json', 'upsert': 'true'})
+    if bucket.download(path) != content:
+        raise RuntimeError('Original manifest verification failed')
+    return {'file_sha256': digest, 'file_name': uploaded.name,
+            'mime_type': getattr(uploaded, 'type', None) or 'application/xml', 'storage_path': path}
+
+
+def download_original(sb, doc):
+    bucket = sb.storage.from_(BUCKET)
+    path = doc['storage_path']
+    if not path.endswith('/original.manifest.json'):
+        data = bucket.download(path)
+        if doc.get('file_sha256') and hashlib.sha256(data).hexdigest() != doc['file_sha256']:
+            raise RuntimeError('Original hash mismatch')
+        return data
+    manifest = json.loads(bucket.download(path))
+    if manifest['sha256'] != doc['file_sha256']:
+        raise RuntimeError('Original manifest hash mismatch')
+    out = io.BytesIO()
+    for chunk in manifest['chunks']:
+        data = bucket.download(chunk['path'])
+        if len(data) != chunk['byte_count'] or hashlib.sha256(data).hexdigest() != chunk['sha256']:
+            raise RuntimeError('Original chunk hash mismatch')
+        out.write(data)
+    data = out.getvalue()
+    if len(data) != manifest['byte_count'] or hashlib.sha256(data).hexdigest() != manifest['sha256']:
+        raise RuntimeError('Reconstructed original hash mismatch')
+    return data
