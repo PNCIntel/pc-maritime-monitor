@@ -2327,13 +2327,25 @@ def _render_daily_brief(lens: str):
 
 def _sidebar_nav(lens: str, label: str, query: str=""):
     _clear_context()
+    st.session_state[f"pc_terminal_workspace_{lens}"]=""
     st.session_state[f"pc_terminal_search_{lens}"]=query
     st.session_state[f"pc_terminal_nav_{lens}"]=label
 
 def _home_nav(lens: str):
     _clear_context()
+    st.session_state[f"pc_terminal_workspace_{lens}"]=""
     st.session_state[f"pc_terminal_search_{lens}"]=""
     st.session_state[f"pc_terminal_nav_{lens}"]="Home"
+
+def _render_publication_workspace(sb, lens: str, mode: str):
+    try:
+        from pc_report_studio import render_report_studio
+    except Exception as exc:
+        st.error(f"Report workspace could not load: {exc}")
+        return
+    typ,oid,rec=_context_record()
+    context=(typ,oid,rec) if typ and oid and rec else None
+    render_report_studio(sb,context=context,mode=mode)
 
 def render_terminal(lens: str = "trade"):
     lens = lens if lens in LENS else "trade"
@@ -2358,13 +2370,18 @@ def render_terminal(lens: str = "trade"):
                 ("Home",""),("Companies","company"),("Infrastructure","port"),
                 ("Vessels","vessel"),("Corridors","corridor"),("Markets","freight"),
                 ("Sanctions & Compliance","sanction"),("Strategic Industries","shipyard"),
-                ("Events","event"),("Documents","document")
+                ("Events","event"),("Brief Builder","__brief_builder__"),
+                ("Report Library","__report_library__"),("Documents","document")
             ],
             "intelligence":[
                 ("Operating Picture",""),("Priority Intelligence","security"),
                 ("Regional / Chokepoints","corridor"),("Security & Maritime","maritime security"),
                 ("Disruptions","disruption"),("Sanctions","sanction"),
-                ("Monitoring & Indicators","monitoring"),("Documents","document")
+                ("Monitoring & Indicators","monitoring"),
+                ("Report Studio","__report_studio__"),
+                ("Brief Builder","__brief_builder__"),
+                ("Report Library","__report_library__"),
+                ("Documents","document")
             ],
             "sanctions":[
                 ("Exposure Picture",""),("Designations","sanction"),("Screening","screening"),
@@ -2382,12 +2399,23 @@ def render_terminal(lens: str = "trade"):
                                      "Operating Picture" if lens=="intelligence" else
                                      "Exposure Picture" if lens=="sanctions" else "Industrial Picture")
         for i,(label,query) in enumerate(navs.get(lens,[])):
+            if query.startswith("__"):
+                def _set_workspace(_lens=lens,_label=label,_mode=query):
+                    _clear_context()
+                    st.session_state[f"pc_terminal_nav_{_lens}"]=_label
+                    st.session_state[f"pc_terminal_workspace_{_lens}"]=_mode
+                    st.session_state[f"pc_terminal_search_{_lens}"]=""
+                cb=_set_workspace
+                args=()
+            else:
+                cb=_home_nav if not query else _sidebar_nav
+                args=(lens,) if not query else (lens,label,query)
             st.button(
                 ("● " if label==current else "")+label,
                 key=f"pc_nav_{lens}_{i}",
                 use_container_width=True,
-                on_click=_home_nav if not query else _sidebar_nav,
-                args=(lens,) if not query else (lens,label,query),
+                on_click=cb,
+                args=args,
             )
         st.divider()
         st.button(
@@ -2407,6 +2435,16 @@ def render_terminal(lens: str = "trade"):
     st.button("Daily Brief", key=f"pc_daily_top_{lens}", on_click=_daily_nav, args=(lens,))
     if st.session_state.get(f"pc_terminal_nav_{lens}") == "Daily Brief":
         _render_daily_brief(lens)
+        return
+
+    workspace=st.session_state.get(f"pc_terminal_workspace_{lens}","")
+    if workspace:
+        if workspace=="__report_studio__":
+            _render_publication_workspace(sb,lens,"studio")
+        elif workspace=="__brief_builder__":
+            _render_publication_workspace(sb,lens,"brief")
+        elif workspace=="__report_library__":
+            _render_publication_workspace(sb,lens,"library")
         return
 
     st.markdown("<div class='pc-command'><div class='pc-k'>GLOBAL COMMAND BAR</div>", unsafe_allow_html=True)
