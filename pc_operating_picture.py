@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit
 import pandas as pd
 import streamlit as st
-from pc_drilldown import drilldown_button, render_active_drilldown, render_sidebar_search, _event_links_with_fallback
+from pc_drilldown import render_drilldown, render_sidebar_search, _event_links_with_fallback, object_label
 
 try:
     from shared.pc_auth import service_client, require_login
@@ -274,6 +274,34 @@ def _display_location(v):
                 pass
     return _clean(v)
 
+def _inline_open_button(object_type,object_id,label,key,display_name=None):
+    """Open a canonical profile immediately beneath the clicked row."""
+    state_key="pc_inline_drilldown_"+str(key)
+    if st.button(label,key="open_"+state_key,use_container_width=True):
+        st.session_state[state_key]={
+            "type":str(object_type),
+            "id":str(object_id),
+            "label":str(display_name or object_id),
+        }
+    return state_key
+
+def _render_inline_profile(state_key,key_prefix):
+    selected=st.session_state.get(state_key)
+    if not selected:
+        return
+    with st.container(border=True):
+        h1,h2=st.columns([6,1])
+        h1.markdown("### "+_clean(selected.get("label")))
+        h1.caption("Canonical profile · opens in context")
+        if h2.button("✕ Close",key="close_"+state_key,use_container_width=True):
+            st.session_state.pop(state_key,None)
+            st.rerun()
+        render_drilldown(
+            selected.get("type"),
+            selected.get("id"),
+            key_prefix=str(key_prefix)+"_inline"
+        )
+
 def _event_expander(sb,r,mode,key_prefix="evt"):
     title=_clean(r.get("title")) or "Untitled development"
     date=_clean(r.get("start_date"))[:10]
@@ -322,21 +350,25 @@ def _event_expander(sb,r,mode,key_prefix="evt"):
 
         if links or mentions:
             st.markdown("### Connected model")
-            st.caption("Open canonical companies, assets and vessels directly from this development.")
+            st.caption("Open a company, asset or vessel here without leaving this development.")
+            inline_key="event_"+str(eid or key_prefix)
+
             for n,x in enumerate(links[:20]):
                 typ=_clean(x.get("linked_type"))
                 if typ=="vessel": typ="mobile_asset"
                 if typ not in {"entity","asset","mobile_asset"}:
                     continue
                 oid=_clean(x.get("linked_id"))
-                nm=_clean(x.get("linked_name")) or oid
+                nm=_clean(x.get("linked_name")) or (object_label(typ,oid) if oid else "")
                 rel=_clean(x.get("relationship")).replace("_"," ")
                 c1,c2=st.columns([5,1.5])
                 c1.markdown("**"+nm+"**"+(f" · {rel}" if rel else ""))
                 with c2:
-                    drilldown_button(typ,oid,"Open profile",
-                        key=f"{key_prefix}_linked_{eid}_{n}_{oid}",
-                        use_container_width=True)
+                    state_key=_inline_open_button(
+                        typ,oid,"Open profile",
+                        key=f"{inline_key}_linked_{n}_{oid}",
+                        display_name=nm
+                    )
 
             if mentions:
                 st.markdown("**Canonical records mentioned in this development**")
@@ -347,9 +379,22 @@ def _event_expander(sb,r,mode,key_prefix="evt"):
                     extra=_clean(rec.get("hq_country") or rec.get("country") or rec.get("imo"))
                     c1.markdown("**"+obj["name"]+"**"+(f" · {extra}" if extra else ""))
                     with c2:
-                        drilldown_button(obj["type"],obj["id"],"Open profile",
-                            key=f"{key_prefix}_mention_{eid}_{n}_{obj['id']}",
-                            use_container_width=True)
+                        state_key=_inline_open_button(
+                            obj["type"],obj["id"],"Open profile",
+                            key=f"{inline_key}_mention_{n}_{obj['id']}",
+                            display_name=obj["name"]
+                        )
+
+            # Render whichever object was selected for this development immediately
+            # below its connected-object list, not at the top of the page.
+            prefix="pc_inline_drilldown_"+str(inline_key)+"_"
+            active=[k for k in list(st.session_state.keys()) if str(k).startswith(prefix)]
+            if active:
+                # newest click wins; clear stale selections for this development
+                chosen=active[-1]
+                for stale in active[:-1]:
+                    st.session_state.pop(stale,None)
+                _render_inline_profile(chosen,inline_key)
 
         inds=m.get("monitoring_indicators") or r.get("monitoring_indicators")
         if inds:
@@ -411,7 +456,6 @@ def render_operating_picture(mode="trade"):
     st.markdown('<div class="pc-k">POWER & CORRIDORS / OPERATING PICTURE</div>',unsafe_allow_html=True)
     st.title(title)
     st.markdown(f'<div class="pc-sub">{deck}</div>',unsafe_allow_html=True)
-    render_active_drilldown(location="top",expanded=True)
 
     q=st.text_input("Find a development, company, vessel, port, corridor or place",
                     placeholder="Hormuz, AD Ports, Navi Mumbai, CLI, KEZAD, rail, tanker…")
