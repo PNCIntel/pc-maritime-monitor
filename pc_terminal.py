@@ -371,219 +371,131 @@ def _clear_context():
         pass
 
 
-def _context_record():
-    typ = st.session_state.get("pc_terminal_type")
-    oid = st.session_state.get("pc_terminal_id")
-    if not typ or not oid:
-        return None, None, None
-    if typ == "document":
-        rows = _filtered_rows("pc_documents", "document_id", str(oid), 1)
-        return typ, oid, rows[0] if rows else None
-    if typ == "corridor":
-        table, pk, _, _ = OBJECTS[typ]
-        rows = _filtered_rows(table, pk, str(oid), 3)
-        return typ, oid, rows[0] if rows else None
-    if typ=="entity":
-        bundle=_entity_identity_bundle(str(oid))
-        pid=bundle.get("preferred_id") or str(oid)
-        prec=bundle.get("preferred_record") or object_record("entity",pid)
-        if pid!=str(oid):
-            st.session_state["pc_terminal_id"]=pid
-            st.session_state["pc_terminal_name"]=_clean((prec or {}).get("name"))
-        return typ,pid,prec
-    return typ, oid, object_record(typ, oid)
+@st.cache_data(ttl=60, show_spinner=False)
+def _entity_identity_bundle(entity_id: str) -> dict:
+    """Resolve equivalent company/entity identities without ever crashing the terminal."""
+    base=object_record("entity",entity_id) or {}
+    base_name=_clean(base.get("name"))
+    base_country=_clean(base.get("hq_country") or base.get("country")).casefold()
+
+    def core(v):
+        words=_norm(v).split()
+        suffixes={"group","holding","holdings","company","co","corporation","corp",
+                  "limited","ltd","llc","plc","pjsc","sak","sa","inc"}
+        while words and words[-1] in suffixes:
+            words.pop()
+        return " ".join(words)
+
+    try:
+        aliases_by_id={}
+        for a in _rows("pc_identity_aliases_v2",10000):
+            typ=_clean(a.get("object_type")).casefold()
+            if typ not in {"entity","company","organisation","organization"}:
+                continue
+            cid=_clean(a.get("canonical_id"))
+            nm=_clean(a.get("alias_name"))
+            if cid and nm:
+                aliases_by_id.setdefault(cid,set()).add(nm)
+
+        seed_names={base_name} | aliases_by_id.get(str(entity_id),set())
+        seed_norm={_norm(x) for x in seed_names if _norm(x)}
+        seed_core={core(x) for x in seed_names if core(x)}
+        candidates=[]
+
+        for r in _rows("pc_entities",10000):
+            rid=_clean(r.get("entity_id"))
+            if not rid:
+                continue
+            rcountry=_clean(r.get("hq_country") or r.get("country")).casefold()
+            if base_country and rcountry and base_country!=rcountry:
+                continue
+            names={_clean(r.get("name"))} | aliases_by_id.get(rid,set())
+            norms={_norm(x) for x in names if _norm(x)}
+            cores={core(x) for x in names if core(x)}
+            strong=bool(seed_norm & norms or seed_core & cores)
+            if not strong:
+                for a in seed_norm:
+                    if any(len(a)>=7 and len(b)>=7 and (a in b or b in a) for b in norms):
+                        strong=True
+                        break
+            if strong:
+                candidates.append(r)
+
+        if base and not any(_clean(x.get("entity_id"))==str(entity_id) for x in candidates):
+            candidates.append(base)
+
+        ranked=[]
+        for r in candidates:
+            rid=_clean(r.get("entity_id"))
+            score=0
+            if rid.startswith("COMP_"): score+=80
+            if not any(x in rid.upper() for x in ("AUTO","_AI_")): score+=30
+            for table,weight in (
+                ("pc_company_profiles",30),
+                ("pc_company_asset_roles",8),
+                ("pc_company_corridor_roles",6),
+                ("pc_event_links",3),
+            ):
+                try:
+                    col="linked_id" if table=="pc_event_links" else "entity_id"
+                    score+=len(_filtered_rows(table,col,rid,80))*weight
+                except Exception:
+                    pass
+            ranked.append((score,rid,r))
+        ranked.sort(key=lambda x:(x[0],x[1]),reverse=True)
+
+        preferred_id=ranked[0][1] if ranked else str(entity_id)
+        preferred_record=ranked[0][2] if ranked else base
+        ids=[]; names=[]
+        for _,rid,r in ranked:
+            if rid not in ids: ids.append(rid)
+            nm=_clean(r.get("name"))
+            if nm and nm not in names: names.append(nm)
+            for a in sorted(aliases_by_id.get(rid,set())):
+                if a not in names: names.append(a)
+
+        return {
+            "preferred_id":preferred_id,
+            "preferred_record":preferred_record,
+            "ids":ids or [str(entity_id)],
+            "names":names or ([base_name] if base_name else []),
+        }
+    except Exception:
+        return {
+            "preferred_id":str(entity_id),
+            "preferred_record":base,
+            "ids":[str(entity_id)],
+            "names":[base_name] if base_name else [],
+        }
 
 
-def _display_location(row: dict) -> str:
-    for k in ("region_city", "hq_city", "location", "country", "hq_country", "flag"):
-        v = row.get(k)
-        if isinstance(v, dict):
-            v = v.get("name") or v.get("country") or v.get("region")
-        if v:
-            return _clean(v)
-    return ""
-
-
-def _style(theme: str):
-    if theme == "Light":
-        p = "--bg:#f4f7fb;--panel:#ffffff;--panel2:#f7f9fc;--line:#dfe6ef;--text:#10213a;--muted:#718096;--gold:#9b7a2c;--blue:#2563eb;--red:#d94841;--green:#149563;--orange:#e58a16;--purple:#7057d9"
-    else:
-        p = "--bg:#08111e;--panel:#101a29;--panel2:#0c1522;--line:#26364a;--text:#eef4fb;--muted:#9aabc0;--gold:#d0ad59;--blue:#6ea0ff;--red:#df7770;--green:#66b98c;--orange:#eba34b;--purple:#a994ff"
-    st.markdown(f"""
-    <style>
-    :root{{{p}}}
-    .stApp{{background:var(--bg);color:var(--text)}}
-    [data-testid="stSidebar"]{{background:var(--panel2)!important;border-right:1px solid var(--line);min-width:225px!important}}
-    [data-testid="stSidebar"] *{{color:var(--text)!important}}
-    .block-container{{max-width:1540px;padding-top:.65rem;padding-bottom:2.5rem}}
-    h1{{font-size:2.15rem!important;letter-spacing:-.035em;margin-bottom:.15rem!important}}
-    h2{{font-size:1.35rem!important;letter-spacing:-.02em}}
-    h3{{font-size:1.05rem!important}}
-    h1,h2,h3,h4,p,label,span,li{{color:var(--text)!important}}
-    .pc-k{{color:var(--gold);font-size:.66rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase}}
-    .pc-sub{{color:var(--muted);font-size:.91rem;margin-bottom:.45rem}}
-    .pc-command{{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:.55rem .8rem;margin:.15rem 0 .8rem;box-shadow:0 1px 3px rgba(18,38,63,.03)}}
-    .pc-context{{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:9px;padding:.85rem 1rem;margin:.4rem 0 .8rem}}
-    .pc-card{{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:.8rem .9rem;min-height:110px;box-shadow:0 1px 4px rgba(18,38,63,.035)}}
-    .pc-panel-title{{font-size:1.03rem;font-weight:750;margin-bottom:.05rem}}
-    .pc-panel-sub{{color:var(--muted);font-size:.76rem;margin-bottom:.45rem}}
-    .pc-row{{display:flex;justify-content:space-between;gap:.8rem;padding:.48rem .1rem;border-bottom:1px solid var(--line);font-size:.84rem}}
-    .pc-row:last-child{{border-bottom:none}}
-    .pc-row-label{{font-weight:650}}
-    .pc-row-meta{{color:var(--muted);white-space:nowrap}}
-    .pc-tag{{display:inline-block;border-radius:999px;padding:.18rem .46rem;font-size:.68rem;font-weight:700;background:var(--panel2);border:1px solid var(--line);margin-right:.25rem}}
-    .pc-muted{{color:var(--muted);font-size:.8rem}}
-    [data-testid="stMetric"]{{background:var(--panel);border:1px solid var(--line);padding:.7rem .8rem;border-radius:9px;box-shadow:0 1px 4px rgba(18,38,63,.035);min-height:92px}}
-    [data-testid="stMetric"] label{{font-size:.75rem!important;color:var(--muted)!important}}
-    [data-testid="stMetricValue"]{{font-size:1.65rem!important;font-weight:760!important}}
-    [data-testid="stDataFrame"]{{border:1px solid var(--line);border-radius:8px;overflow:hidden}}
-    [data-testid="stExpander"]{{background:var(--panel);border:1px solid var(--line);border-radius:8px}}
-    [data-testid="stVerticalBlockBorderWrapper"]{{background:var(--panel);border-color:var(--line)!important;border-radius:9px!important;box-shadow:0 1px 4px rgba(18,38,63,.03)}}
-    div.stButton>button{{border:1px solid #b8a16b;color:var(--text);background:var(--panel);border-radius:7px;min-height:2.25rem}}
-    div.stButton>button:hover{{border-color:var(--blue);color:var(--blue)}}
-    [data-baseweb="input"]>div,[data-baseweb="select"]>div,input{{background:var(--panel)!important;color:var(--text)!important}}
-    hr{{border-color:var(--line)!important}}
-    </style>
-    """, unsafe_allow_html=True)
-
-
-def _event_links(typ: str, oid: str) -> list[dict]:
-    linked_type = "mobile_asset" if typ == "mobile_asset" else typ
-    if typ == "event":
-        return _filtered_rows("pc_event_links", "event_id", str(oid), 500)
-    return _filtered_rows("pc_event_links", "linked_id", str(oid), 500)
-
-
-def _events_for_object(typ: str, oid: str) -> list[dict]:
-    if typ == "event":
-        rec = object_record("event", oid)
-        return [rec] if rec else []
-    if typ=="entity":
-        bundle=_entity_identity_bundle(str(oid))
-        links=[]
-        seen_links=set()
-        for eid in bundle.get("ids") or [str(oid)]:
-            for l in _event_links("entity",eid):
-                lk=_clean(l.get("event_link_id")) or repr((l.get("event_id"),l.get("linked_id"),l.get("relationship")))
-                if lk not in seen_links:
-                    seen_links.add(lk); links.append(l)
-    else:
-        links = _event_links(typ, oid)
-    out = []
-    seen = set()
-    for l in links:
-        if _norm(l.get("linked_type")) not in {_norm(typ), "vessel" if typ == "mobile_asset" else _norm(typ)}:
-            continue
-        eid = _clean(l.get("event_id"))
-        if not eid or eid in seen:
-            continue
-        seen.add(eid)
-        ev = object_record("event", eid)
-        if ev:
-            e = dict(ev)
-            e["_relationship"] = l.get("relationship")
-            out.append(e)
-    return sorted(out, key=lambda x: _clean(x.get("start_date")), reverse=True)
-
-
-def _relationships(typ: str, oid: str) -> list[dict]:
-    indexed=_indexed_links(typ,str(oid),1000)
-    if indexed:
-        out=[]
-        for r in indexed:
-            is_src=_clean(r.get("source_type"))==typ and _clean(r.get("source_id"))==str(oid)
-            out.append({
-                "relationship_id":_clean(r.get("link_key")),
-                "source_type":_clean(r.get("source_type")),
-                "source_id":_clean(r.get("source_id")),
-                "target_type":_clean(r.get("target_type")),
-                "target_id":_clean(r.get("target_id")),
-                "relationship_type":_clean(r.get("relation_type")),
-                "relation_family":_clean(r.get("relation_family")),
-                "source_name":_clean(r.get("source_name")),
-                "target_name":_clean(r.get("target_name")),
-                "confidence":_clean(r.get("confidence")),
-                "source_table":_clean(r.get("source_table")),
-                "event_id":_clean(r.get("event_id")),
-                "metadata":r.get("metadata") or {},
-            })
-        return out
-
-    out = []
-    ids=_entity_identity_bundle(str(oid)).get("ids") if typ=="entity" else [str(oid)]
-    for side in ("source", "target"):
-        for identity_id in (ids or [str(oid)]):
-            out.extend(_filtered_rows("pc_relationships", f"{side}_id", str(identity_id), 500))
-    seen = set()
-    final = []
-    for r in out:
-        k = _clean(r.get("relationship_id")) or repr((r.get("source_id"), r.get("relationship_type"), r.get("target_id")))
-        if k in seen:
-            continue
-        seen.add(k)
-        final.append(r)
-    return final
-
-
-def _company_asset_roles(entity_id: str) -> list[dict]:
-    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
-    return _multi_filtered_rows("pc_company_asset_roles","entity_id",ids,500)
-
-
-def _company_corridors(entity_id: str) -> list[dict]:
-    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
-    return _multi_filtered_rows("pc_company_corridor_roles","entity_id",ids,500)
-
-
-def _portfolio(entity_id: str) -> list[dict]:
-    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
-    return _multi_filtered_rows("pc_company_portfolio_positions","holder_entity_id",ids,500)
-
-
-def _documents_for_entity(entity_id: str) -> list[dict]:
-    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
-    links=_multi_filtered_rows("pc_document_entity_links","entity_id",ids,500)
-    docs = []
-    seen = set()
-    for l in links:
-        did = _clean(l.get("document_id"))
-        if not did or did in seen:
-            continue
-        seen.add(did)
-        rows = _filtered_rows("pc_documents", "document_id", did, 2)
-        if rows:
-            d = dict(rows[0])
-            d["_relationship"] = l.get("relationship")
-            docs.append(d)
-    return docs
-
-
-def _documents_by_name(name: str, limit: int = 30) -> list[dict]:
-    if not name:
-        return []
-    n = name.casefold()
-    docs = []
-    for d in _rows("pc_documents", 1500):
-        blob = _record_text(d).casefold()
-        if n in blob:
-            docs.append(d)
-            if len(docs) >= limit:
-                break
-    return docs
-
-
-def _related_table(table: str, oid: str, name: str = "", limit: int = 120) -> list[dict]:
-    rows = _rows(table, 2500)
-    o = str(oid).casefold()
-    n = name.casefold().strip()
-    out = []
-    for r in rows:
-        blob = _record_text(r).casefold()
-        if o and o in blob or (n and len(n) >= 5 and n in blob):
-            out.append(r)
-            if len(out) >= limit:
-                break
+@st.cache_data(ttl=60, show_spinner=False)
+def _multi_filtered_rows(table: str, column: str, values: list[str], limit_each: int=500) -> list[dict]:
+    out=[]; seen=set()
+    for v in values or []:
+        try:
+            rows=_filtered_rows(table,column,str(v),limit_each)
+        except Exception:
+            rows=[]
+        for r in rows:
+            key=json.dumps(r,sort_keys=True,default=str)
+            if key in seen: continue
+            seen.add(key); out.append(r)
     return out
+
+
+def _context_record():
+    typ,oid=_get_context()
+    if not typ or not oid:
+        return None,None,None
+    rec=object_record(typ,oid)
+    if typ=="entity" and rec:
+        try:
+            bundle=_entity_identity_bundle(str(oid))
+            return typ,bundle.get("preferred_id") or oid,bundle.get("preferred_record") or rec
+        except Exception:
+            return typ,oid,rec
+    return typ,oid,rec
 
 
 def _object_name(typ: str, oid: str) -> str:
@@ -2317,6 +2229,14 @@ def _render_sanctions_query_report(sb):
     typ,oid,rec=_context_record()
     context=(typ,oid,rec) if typ and oid and rec else None
     render_sanctions_report_area(sb,context=context)
+
+
+def _terminal_self_check() -> list[str]:
+    missing=[]
+    for name in ("_context_record","_entity_identity_bundle","_event_source_urls"):
+        if name not in globals():
+            missing.append(name)
+    return missing
 
 
 def render_terminal(lens: str = "trade"):
