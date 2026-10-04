@@ -61,6 +61,15 @@ def _api_key():
     return (st.secrets.get('OPENAI_API_KEY') or st.secrets.get('OPENAI_KEY') or os.environ.get('OPENAI_API_KEY'))
 
 
+def _refresh_terminal_read_model(sb):
+    """Refresh derived terminal object/link indexes when migration 059 is installed."""
+    try:
+        result=sb.rpc("pc_refresh_terminal_indexes",{}).execute().data
+        return result or {"status":"ok"}
+    except Exception as exc:
+        # Backward-compatible while the optional read-model migration is not installed.
+        return {"status":"unavailable","error":str(exc)}
+
 def _release_saved_dossier_tasks(sb, job):
     """Release redundant pending research tasks for already-curated dossier rows.
 
@@ -391,6 +400,9 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                 report['connected_enrichment']=(saved_scope.get('connected_research') or {}).get('publication_report') or {}
             connected=report.get('connected_enrichment') or {}
             holds=(connected.get('holds') if isinstance(connected,dict) else 0) or 0
+            if not report.get('terminal_index_refresh'):
+                report['terminal_index_refresh']=_refresh_terminal_read_model(sb)
+                st.session_state[report_key]=report
             if report.get('remaining_exception_count') or report.get('publication_failures') or holds or report.get('retained_research_holds'):
                 st.warning('Population pass completed with held items. Published records are available; held identities/evidence remain for analyst review.')
             else:
