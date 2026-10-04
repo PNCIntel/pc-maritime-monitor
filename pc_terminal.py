@@ -2427,6 +2427,242 @@ def _get_context():
     return st.session_state.get("pc_terminal_type"), st.session_state.get("pc_terminal_id")
 
 
+def _company_profile_rows(entity_id: str) -> list[dict]:
+    ids=_entity_identity_bundle(str(entity_id)).get("ids") or [str(entity_id)]
+    return _multi_filtered_rows("pc_company_profiles","entity_id",ids,20)
+
+
+def _company_display_value(*values):
+    for v in values:
+        if v not in (None,"",[],{}):
+            return _clean(v)
+    return ""
+
+
+def _render_company_relationship_cards(rows: list[dict], key_prefix: str, limit: int=12):
+    if not rows:
+        st.caption("No linked corporate relationships recorded.")
+        return
+    for i,x in enumerate(rows[:limit]):
+        cols=st.columns([3.2,1.4,1.0])
+        cols[0].markdown(f"**{x.get('name') or 'Unnamed company'}**")
+        cols[1].caption((_clean(x.get("relationship")) or "linked company").replace("_"," ").title())
+        cols[2].button(
+            "Open",
+            key=f"{key_prefix}_{i}_{x.get('id')}",
+            use_container_width=True,
+            on_click=_set_context,
+            args=("entity",x.get("id"),x.get("name") or ""),
+        )
+        st.markdown("<div style='height:1px;background:var(--line);margin:.12rem 0 .45rem'></div>",unsafe_allow_html=True)
+
+
+def _render_company_asset_cards(rows: list[dict], key_prefix: str, limit: int=12):
+    if not rows:
+        st.caption("No linked operating assets recorded.")
+        return
+    for i,x in enumerate(rows[:limit]):
+        cols=st.columns([3.0,1.4,1.0])
+        cols[0].markdown(f"**{x.get('name') or 'Unnamed asset'}**")
+        cols[1].caption((_clean(x.get("relationship")) or x.get("type") or "asset").replace("_"," ").title())
+        cols[2].button(
+            "Open",
+            key=f"{key_prefix}_{i}_{x.get('id')}",
+            use_container_width=True,
+            on_click=_set_context,
+            args=(x.get("type") or "asset",x.get("id"),x.get("name") or ""),
+        )
+        st.markdown("<div style='height:1px;background:var(--line);margin:.12rem 0 .45rem'></div>",unsafe_allow_html=True)
+
+
+def _render_company_transaction_cards(tx: list[dict], limit: int=10):
+    if not tx:
+        st.caption("No related capital actions recorded.")
+        return
+    for r in tx[:limit]:
+        d=_company_display_value(r.get("transaction_date"),r.get("effective_date"),r.get("announcement_date"))
+        typ=_company_display_value(r.get("transaction_type"),"Capital action").replace("_"," ").title()
+        headline=_company_display_value(r.get("title"),r.get("headline"),r.get("target_name"),r.get("description"))
+        value=_company_display_value(r.get("deal_value"),r.get("value"),r.get("consideration"))
+        currency=_company_display_value(r.get("currency"))
+        status=_company_display_value(r.get("status"))
+        st.markdown(f"**{headline or typ}**")
+        bits=[x for x in [d,typ,(currency+" "+value).strip() if value else "",status] if x]
+        if bits:
+            st.caption(" · ".join(bits))
+        desc=_clean(r.get("description"))
+        if desc and desc!=headline:
+            st.write(desc[:500])
+        st.markdown("<div style='height:1px;background:var(--line);margin:.15rem 0 .5rem'></div>",unsafe_allow_html=True)
+
+
+def _render_company_terminal(oid: str, rec: dict, lens: str):
+    name=_object_name("entity",oid)
+    bundle=_entity_identity_bundle(str(oid))
+    ids=bundle.get("ids") or [str(oid)]
+    profiles=_company_profile_rows(oid)
+    p=profiles[0] if profiles else {}
+
+    rels=_linked_objects_from_relationships("entity",oid)
+    corporate=[x for x in rels if x.get("type")=="entity"]
+    roles=_company_asset_roles(oid)
+    assets=[]
+    for r in roles:
+        aid=_clean(r.get("asset_id"))
+        mid=_clean(r.get("mobile_asset_id"))
+        if aid:
+            assets.append({"type":"asset","id":aid,"name":_asset_chip(aid),"relationship":_clean(r.get("asset_role"))})
+        elif mid:
+            assets.append({"type":"mobile_asset","id":mid,"name":_object_name("mobile_asset",mid),"relationship":_clean(r.get("asset_role"))})
+
+    corridors=_company_corridors(oid)
+    portfolio=_portfolio(oid)
+    tx=_related_table("pc_transactions",oid,name,150)
+    events=_events_for_object("entity",oid)
+    docs=_documents_for_entity(oid)
+    if not docs:
+        docs=_documents_by_name(name,20)
+
+    sector=_company_display_value(p.get("sector"),rec.get("sector"),rec.get("entity_type"))
+    hq=_company_display_value(rec.get("hq_city"),rec.get("region_city"))
+    country=_company_display_value(rec.get("hq_country"),rec.get("country"))
+    location=", ".join(x for x in [hq,country] if x)
+    website=_company_display_value(p.get("website_url"),rec.get("website_url"))
+    description=_company_display_value(p.get("business_description"),rec.get("description"),rec.get("business_description"))
+
+    # Executive company strip.
+    m=st.columns(6)
+    m[0].metric("Linked companies",len(corporate))
+    m[1].metric("Operating assets",len(assets))
+    m[2].metric("Corridors",len(corridors))
+    m[3].metric("Portfolio positions",len(portfolio))
+    m[4].metric("Capital actions",len(tx))
+    m[5].metric("Developments",len(events))
+
+    top_left,top_right=st.columns([1.55,1.0],gap="large")
+    with top_left:
+        with st.container(border=True):
+            st.markdown("### Company Profile")
+            if description:
+                st.write(description)
+            facts=[]
+            if sector: facts.append(("Sector / role",sector))
+            if location: facts.append(("Headquarters",location))
+            products=_company_display_value(p.get("products_services"))
+            countries=_company_display_value(p.get("operating_countries"))
+            if products: facts.append(("Products / services",products))
+            if countries: facts.append(("Operating countries",countries))
+            if website: facts.append(("Website",website))
+            if facts:
+                for label,value in facts:
+                    st.markdown(f"<div class='pc-row'><span class='pc-row-label'>{label}</span><span class='pc-row-meta' style='white-space:normal;text-align:right'>{value}</span></div>",unsafe_allow_html=True)
+            if len(ids)>1:
+                st.caption(f"{len(ids)} canonical/legacy identity records are consolidated into this dossier.")
+    with top_right:
+        with st.container(border=True):
+            st.markdown("### Current Intelligence")
+            if events:
+                _render_event_rows(events,"company_current_"+_norm(oid),5)
+            else:
+                st.caption("No linked developments recorded yet.")
+
+    left,right=st.columns([1.0,1.35],gap="large")
+    with left:
+        with st.container(border=True):
+            st.markdown("### Corporate Network")
+            st.caption("Ownership, subsidiaries, counterparties and affiliated companies.")
+            _render_company_relationship_cards(corporate,f"company_network_{_norm(oid)}",12)
+            if len(corporate)>12:
+                with st.expander(f"Show {len(corporate)-12} more relationships"):
+                    _render_company_relationship_cards(corporate[12:],f"company_network_more_{_norm(oid)}",30)
+
+        with st.container(border=True):
+            st.markdown("### Capital & Portfolio")
+            if portfolio:
+                for i,r in enumerate(portfolio[:10]):
+                    investee=_entity_chip(_clean(r.get("investee_entity_id"))) or _asset_chip(_clean(r.get("investee_asset_id")))
+                    stake=_company_display_value(r.get("ownership_pct"),r.get("stake_pct"),r.get("position_type"),r.get("role"))
+                    status=_company_display_value(r.get("status"))
+                    effective=_company_display_value(r.get("effective_date"),r.get("valid_from"))
+                    st.markdown(f"**{investee or 'Portfolio position'}**")
+                    st.caption(" · ".join(x for x in [stake,status,effective] if x))
+                    st.markdown("<div style='height:1px;background:var(--line);margin:.12rem 0 .4rem'></div>",unsafe_allow_html=True)
+            else:
+                st.caption("No structured portfolio positions recorded.")
+    with right:
+        with st.container(border=True):
+            st.markdown("### Operating Footprint")
+            mapped=[]
+            for n in assets:
+                if n.get("type")=="asset":
+                    pnt=_asset_point(n.get("id"))
+                    if pnt: mapped.append(pnt)
+            if mapped:
+                st.map(pd.DataFrame(mapped),latitude="lat",longitude="lon",size=44,zoom=None,use_container_width=True)
+            _render_company_asset_cards(assets,f"company_assets_{_norm(oid)}",10)
+
+        if corridors:
+            with st.container(border=True):
+                st.markdown("### Corridor Exposure")
+                for i,r in enumerate(corridors[:10]):
+                    ck=_clean(r.get("corridor_key"))
+                    nm=_object_name("corridor",ck)
+                    role=_clean(r.get("corridor_role")).replace("_"," ").title()
+                    cols=st.columns([3.3,1.3,1.0])
+                    cols[0].markdown(f"**{nm}**")
+                    cols[1].caption(role or "Connected")
+                    cols[2].button("Open",key=f"company_corr_{_norm(oid)}_{i}",use_container_width=True,
+                                   on_click=_set_context,args=("corridor",ck,nm))
+
+    low_left,low_right=st.columns([1.0,1.15],gap="large")
+    with low_left:
+        with st.container(border=True):
+            st.markdown("### Capital Actions & Transactions")
+            _render_company_transaction_cards(tx,10)
+            if len(tx)>10:
+                with st.expander(f"Show {len(tx)-10} more capital actions"):
+                    _render_company_transaction_cards(tx[10:],30)
+    with low_right:
+        with st.container(border=True):
+            st.markdown("### Evidence & Documents")
+            st.caption("Primary sources, filings, documents and supporting evidence.")
+            shown=0
+            for d in docs[:12]:
+                title=_clean(d.get("title")) or "Untitled document"
+                source=_company_display_value(d.get("source_name"),d.get("document_type"),d.get("_relationship"))
+                st.markdown(f"**{title}**")
+                if source: st.caption(source)
+                urls=_event_source_urls(d)
+                if urls:
+                    st.link_button("Open source",urls[0],key=f"company_doc_link_{_norm(oid)}_{shown}")
+                shown+=1
+                st.markdown("<div style='height:1px;background:var(--line);margin:.12rem 0 .4rem'></div>",unsafe_allow_html=True)
+            if not docs:
+                st.caption("No linked documents recorded yet.")
+
+    st.markdown("### Company Development Timeline")
+    st.caption("Announcements, acquisitions, projects, operational changes and intelligence linked to this company.")
+    if events:
+        _render_event_rows(events,"company_timeline_"+_norm(oid),15)
+    else:
+        st.caption("No linked chronological developments yet.")
+
+    with st.expander("Structured data / developer view"):
+        st.caption("Secondary diagnostic view. The company dossier above is the primary analyst interface.")
+        tabs=st.tabs(["Canonical record","Relationships","Assets","Transactions"])
+        with tabs[0]:
+            st.json(rec)
+        with tabs[1]:
+            if corporate:
+                st.dataframe(pd.DataFrame([{"Company":x["name"],"Relationship":x["relationship"]} for x in corporate]),hide_index=True,use_container_width=True)
+        with tabs[2]:
+            if assets:
+                st.dataframe(pd.DataFrame([{"Asset":x["name"],"Role":x["relationship"]} for x in assets]),hide_index=True,use_container_width=True)
+        with tabs[3]:
+            if tx:
+                st.dataframe(pd.DataFrame(tx),hide_index=True,use_container_width=True)
+
+
 def _local_infrastructure(rec: dict):
     """Explicitly connected infrastructure; do not infer links from proximity."""
     oid = str(rec.get("asset_id") or "")
@@ -2620,7 +2856,12 @@ def render_terminal(lens: str = "trade"):
         return
     _render_context_header(typ, oid, rec, lens)
 
-    # Persistent tactical workspace: dossier left, spatial/system center, evidence right.
+    # Companies need an executive dossier, not the generic three-pane database-style workspace.
+    if typ=="entity":
+        _render_company_terminal(oid,rec,lens)
+        return
+
+    # Persistent tactical workspace for assets, vessels, corridors and events.
     left, center, right = st.columns([1.0, 1.25, 1.0], gap="large")
     with left:
         with st.container(border=True):
