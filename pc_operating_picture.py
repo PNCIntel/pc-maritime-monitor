@@ -25,11 +25,21 @@ INTEL_INCLUDE = re.compile(
     r"intelligence|risk|threat)", re.I)
 
 TRADE_PRIORITY = [
-    (re.compile(r"(closure|suspend|attack|strike|disruption|blocked|grounding|collision|fire|explosion)", re.I), 45),
-    (re.compile(r"(strait of hormuz|red sea|suez|panama|black sea|bab el-mandeb)", re.I), 35),
-    (re.compile(r"(port|terminal|airport|rail|freight|cargo|tanker|container|pipeline|lng)", re.I), 20),
-    (re.compile(r"(acquisition|investment|capacity|project|facility|agreement|contract)", re.I), 10),
+    (re.compile(r"(acquisition|investment|capacity|project|facility|agreement|contract|expansion|upgrade|new service|stake|sale|order|terminal|port|airport|rail|logistics)", re.I), 35),
+    (re.compile(r"(closure|suspend|strike|disruption|blocked|grounding|collision|fire|explosion)", re.I), 25),
+    (re.compile(r"(strait of hormuz|red sea|suez|panama|black sea|bab el-mandeb)", re.I), 15),
+    (re.compile(r"(freight|cargo|tanker|container|pipeline|lng)", re.I), 15),
 ]
+
+TRADE_BUSINESS = re.compile(
+    r"(acquisition|acquire|investment|invest|capacity|expansion|expand|upgrade|project|facility|agreement|"
+    r"contract|concession|stake|sale|order|crane|berth|terminal|port|airport|rail|railway|logistics|warehouse|"
+    r"service launch|new service|fleet|shipyard|dredg|construction|commission|joint venture|partnership|"
+    r"headquarters|reorganisation|reorganization|supply chain)", re.I)
+
+TRADE_DISRUPTION = re.compile(
+    r"(disruption|closure|suspend|strike|attack|projectile|missile|drone|fire|explosion|collision|grounding|"
+    r"blocked|outage|damage|port closed|service suspended)", re.I)
 INTEL_PRIORITY = [
     (re.compile(r"(attack|missile|drone|projectile|piracy|seizure|interdiction|explosion|casualt)", re.I), 50),
     (re.compile(r"(strait of hormuz|red sea|suez|black sea|gulf of aden|yanbu)", re.I), 30),
@@ -105,6 +115,19 @@ def _score(r,mode):
         score += max(0,18-age)
     if _clean(r.get("operational_impact")): score+=8
     if _clean(r.get("commercial_impact") or r.get("commercial_implications")): score+=8
+    return score
+
+def _trade_business_score(r):
+    text=_event_text(r)
+    score=0
+    if TRADE_BUSINESS.search(text): score+=60
+    if re.search(r"(acquisition|investment|capacity|expansion|upgrade|agreement|contract|stake|sale)",text,re.I): score+=25
+    if re.search(r"(port|terminal|rail|airport|logistics|warehouse|berth|crane|fleet|shipyard)",text,re.I): score+=15
+    d=_date(r.get("start_date"))
+    if d is not None and not pd.isna(d):
+        age=max(0,(pd.Timestamp.now(tz="UTC")-d).days)
+        score+=max(0,25-age)
+    if _clean(r.get("commercial_impact") or r.get("commercial_implications")): score+=10
     return score
 
 @st.cache_data(ttl=45,show_spinner=False)
@@ -410,7 +433,10 @@ def render_operating_picture(mode="trade"):
         return
 
     relevant=[r for r in rows if _relevant(r,mode)]
-    disruptions=[r for r in relevant if re.search(r"(disruption|closure|suspend|strike|attack|fire|explosion|collision|grounding|blocked)",_event_text(r),re.I)]
+    disruptions=[r for r in relevant if TRADE_DISRUPTION.search(_event_text(r))] if mode=="trade" else [
+        r for r in relevant if re.search(r"(disruption|closure|suspend|strike|attack|fire|explosion|collision|grounding|blocked)",_event_text(r),re.I)
+    ]
+    business=[r for r in relevant if TRADE_BUSINESS.search(_event_text(r))] if mode=="trade" else []
     future=[]
     now=pd.Timestamp.now(tz="UTC")
     for r in relevant:
@@ -419,16 +445,30 @@ def render_operating_picture(mode="trade"):
             future.append(r)
 
     c1,c2,c3,c4=st.columns(4)
-    c1.metric("Relevant developments",len(relevant))
-    c2.metric("Active disruption signals",len(disruptions))
+    if mode=="trade":
+        c1.metric("Business / capacity developments",len(business))
+        c2.metric("Operational disruptions",len(disruptions))
+    else:
+        c1.metric("Relevant developments",len(relevant))
+        c2.metric("Active disruption signals",len(disruptions))
     c3.metric("Canonical events",_count(sb,"pc_events") or "—")
     c4.metric("Corridors",_count(sb,"pc_trade_corridors") or "—")
 
     left,right=st.columns([3.2,1.1],gap="large")
     with left:
-        st.subheader("Priority developments")
-        st.caption("Ranked by operational / analytical significance, then recency. Expand each item in place.")
-        _priority_feed(sb,relevant,mode,10)
+        if mode=="trade":
+            st.subheader("Business, infrastructure & capacity developments")
+            st.caption("Acquisitions, investment, projects, capacity, contracts, services and network changes — newest material developments first.")
+            ranked_business=sorted(business,key=_trade_business_score,reverse=True)[:12]
+            if ranked_business:
+                for i,r in enumerate(ranked_business):
+                    _event_expander(sb,r,mode,f"business_{i}")
+            else:
+                st.info("No business or infrastructure developments match the current feed.")
+        else:
+            st.subheader("Priority developments")
+            st.caption("Ranked by analytical significance, then recency. Expand each item in place.")
+            _priority_feed(sb,relevant,mode,10)
     with right:
         st.subheader("Forward watch")
         if future:
@@ -442,12 +482,12 @@ def render_operating_picture(mode="trade"):
         newest=sorted(relevant,key=lambda r:str(r.get("published_at") or r.get("created_at") or r.get("start_date") or ""),reverse=True)[:8]
         for r in newest:
             st.markdown(f"**{_clean(r.get('title'))}**")
-            st.caption((_clean(r.get("start_date"))[:10]+" · "+_clean(r.get("location"))).strip(" ·"))
+            st.caption((_clean(r.get("start_date"))[:10]+" · "+_display_location(r.get("location"))).strip(" ·"))
 
     st.divider()
     if mode=="trade":
-        st.subheader("Active operational disruptions")
-        st.caption("Trade-relevant events with a direct movement, capacity, infrastructure or service effect.")
+        st.subheader("Operational disruptions & constraints")
+        st.caption("Closures, attacks, strikes, collisions and other events affecting movement or capacity. Kept separate from business developments.")
         for i,r in enumerate(sorted(disruptions,key=lambda x:_score(x,mode),reverse=True)[:12]):
             _event_expander(sb,r,mode,f"disrupt_{i}")
     else:
