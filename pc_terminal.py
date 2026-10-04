@@ -604,6 +604,279 @@ def _open_selector(rows: list[dict], key: str, label: str = "Open connected obje
         st.rerun()
 
 
+def _humanize_identifier(value: Any) -> str:
+    s=_clean(value)
+    if not s:
+        return ""
+    if s.startswith(("COMP_","ENTITY_","ASSET_","MOBILE_","EVT_","IDEAL_","PROJ_","CONTRACT_")):
+        return ""
+    return s.replace("_"," ")
+
+def _entity_chip(eid: str) -> str:
+    return _object_name("entity",eid) if eid else ""
+
+def _asset_chip(aid: str) -> str:
+    return _object_name("asset",aid) if aid else ""
+
+def _render_dossier_pane(typ: str, oid: str, rec: dict, lens: str):
+    st.markdown("### Dossier & Ownership")
+    st.caption("Canonical identity, control, portfolio and commercial structure.")
+
+    name=_object_name(typ,oid)
+    st.markdown(f"#### {name}")
+    kind=_clean(rec.get("entity_type") or rec.get("asset_type") or rec.get("event_type") or rec.get("corridor_type"))
+    loc=_display_location(rec)
+    if kind or loc:
+        st.caption(" · ".join(x for x in [kind,loc] if x))
+
+    if typ=="entity":
+        prof=_filtered_rows("pc_company_profiles","entity_id",str(oid),5)
+        if prof:
+            p=prof[0]
+            if p.get("business_description"):
+                st.write(p.get("business_description"))
+            facts=[]
+            for k in ("sector","website_url","products_services","operating_countries"):
+                if p.get(k) not in (None,"",[],{}):
+                    facts.append({"Field":k.replace("_"," ").title(),"Value":_clean(p.get(k))})
+            if facts:
+                st.dataframe(pd.DataFrame(facts),hide_index=True,use_container_width=True)
+
+        rels=_linked_objects_from_relationships("entity",oid)
+        corporate=[x for x in rels if x.get("type")=="entity"]
+        if corporate:
+            st.markdown("##### Corporate network")
+            st.dataframe(pd.DataFrame([{"Company":x["name"],"Relationship":x["relationship"]} for x in corporate]),
+                         hide_index=True,use_container_width=True,height=min(320,100+28*len(corporate)))
+            _open_selector(corporate,f"dossier_corp_{oid}","Open company")
+
+        portfolio=_portfolio(oid)
+        if portfolio:
+            st.markdown("##### Portfolio / equity / concessions")
+            readable=[]
+            for r in portfolio:
+                readable.append({
+                    "Investee company":_entity_chip(_clean(r.get("investee_entity_id"))),
+                    "Investee asset":_asset_chip(_clean(r.get("investee_asset_id"))),
+                    "Stake / role":_clean(r.get("position_type") or r.get("ownership_pct") or r.get("stake_pct") or r.get("role")),
+                    "Status":_clean(r.get("status")),
+                    "Effective":_clean(r.get("effective_date") or r.get("valid_from")),
+                })
+            st.dataframe(pd.DataFrame(readable),hide_index=True,use_container_width=True)
+
+        tx=_related_table("pc_transactions",oid,name,100)
+        if tx:
+            st.markdown("##### Transactions / capital actions")
+            # Prefer descriptive columns; suppress raw IDs from analyst view.
+            cols=[x for x in ("transaction_date","transaction_type","title","headline","description",
+                              "deal_value","value","currency","status","buyer_name","seller_name","target_name")
+                  if any(x in r for r in tx)]
+            view=pd.DataFrame(tx)
+            if cols:
+                view=view[[x for x in cols if x in view.columns]]
+            st.dataframe(view,hide_index=True,use_container_width=True,height=min(360,120+28*len(view)))
+
+    elif typ=="asset":
+        companies=_asset_companies(rec)
+        if companies:
+            st.markdown("##### Ownership / operation")
+            st.dataframe(pd.DataFrame(companies),hide_index=True,use_container_width=True)
+            _open_selector([{"type":"entity","id":x["id"],"name":x["name"],"relationship":x["role"]} for x in companies],
+                           f"dossier_asset_comp_{oid}","Open company")
+        facts=[]
+        for k in ("status","confidence","subtype","country","region_city","capacity","annual_capacity","teu_capacity",
+                  "land_area_ha","depth_m","berth_count"):
+            if rec.get(k) not in (None,"",[],{}):
+                facts.append({"Field":k.replace("_"," ").title(),"Value":_clean(rec.get(k))})
+        if facts:
+            st.dataframe(pd.DataFrame(facts),hide_index=True,use_container_width=True)
+
+    elif typ=="mobile_asset":
+        companies=_mobile_companies(rec)
+        if companies:
+            st.markdown("##### Ownership / management")
+            st.dataframe(pd.DataFrame(companies),hide_index=True,use_container_width=True)
+        facts=[]
+        for k in ("imo","mmsi","flag","asset_type","subtype","build_year","dwt","gross_tonnage","length_m","beam_m","status"):
+            if rec.get(k) not in (None,"",[],{}):
+                facts.append({"Field":k.replace("_"," ").upper() if k in {"imo","mmsi"} else k.replace("_"," ").title(),
+                              "Value":_clean(rec.get(k))})
+        if facts:
+            st.dataframe(pd.DataFrame(facts),hide_index=True,use_container_width=True)
+
+    elif typ=="corridor":
+        st.markdown("##### Corridor definition")
+        st.write(_clean(rec.get("description") or rec.get("geography") or rec.get("corridor_name")))
+        roles=_filtered_rows("pc_company_corridor_roles","corridor_key",str(oid),500)
+        if roles:
+            rows=[]
+            for r in roles:
+                eid=_clean(r.get("entity_id"))
+                rows.append({"Company":_entity_chip(eid),"Role":_clean(r.get("corridor_role"))})
+            st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+
+    elif typ=="event":
+        if rec.get("description"):
+            st.write(rec.get("description"))
+        for k in ("operational_impact","commercial_impact","what_it_means","pc_assessment"):
+            if rec.get(k):
+                st.markdown("**"+k.replace("_"," ").title()+"**")
+                st.write(rec.get(k))
+
+
+def _render_spatial_pane(typ: str, oid: str, rec: dict, lens: str):
+    st.markdown("### Spatial / System Context")
+    st.caption("Infrastructure, corridors, routes and connected nodes.")
+
+    if typ=="asset":
+        _render_map_for_asset(rec)
+        local=_local_infrastructure(rec)
+        if local:
+            st.markdown("##### Local infrastructure system")
+            view=pd.DataFrame([{
+                "Node":x["name"],
+                "Type":x.get("asset_type"),
+                "Region":x.get("region"),
+                "Country":x.get("country")
+            } for x in local])
+            st.dataframe(view,hide_index=True,use_container_width=True,height=min(360,100+28*min(len(view),9)))
+            _open_selector(local,f"spatial_local_{oid}","Open connected node")
+
+        connected=_linked_objects_from_relationships("asset",oid)
+        if connected:
+            st.markdown("##### Network connections")
+            st.dataframe(pd.DataFrame([{"Object":x["name"],"Relationship":x["relationship"]} for x in connected]),
+                         hide_index=True,use_container_width=True)
+            _open_selector(connected,f"spatial_links_{oid}")
+
+        # Name/location-based route & corridor discovery while graph edges are still being completed.
+        for title,table in (("Routes / services","pc_transport_routes"),("Corridors","pc_trade_corridors")):
+            rows=_related_table(table,oid,_clean(rec.get("name")),100)
+            if rows:
+                st.markdown("##### "+title)
+                st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True,height=min(360,100+28*len(rows)))
+
+    elif typ=="entity":
+        roles=_company_asset_roles(oid)
+        nodes=[]
+        for r in roles:
+            aid=_clean(r.get("asset_id"))
+            mid=_clean(r.get("mobile_asset_id"))
+            if aid:
+                nodes.append({"type":"asset","id":aid,"name":_asset_chip(aid),"relationship":_clean(r.get("asset_role"))})
+            elif mid:
+                nodes.append({"type":"mobile_asset","id":mid,"name":_object_name("mobile_asset",mid),"relationship":_clean(r.get("asset_role"))})
+        if nodes:
+            st.markdown("##### Operating footprint")
+            st.dataframe(pd.DataFrame([{"Asset":x["name"],"Role":x["relationship"]} for x in nodes]),
+                         hide_index=True,use_container_width=True,height=min(420,100+28*min(len(nodes),12)))
+            _open_selector(nodes,f"spatial_entity_nodes_{oid}")
+
+        cr=_company_corridors(oid)
+        if cr:
+            st.markdown("##### Corridor exposure")
+            rows=[]
+            opens=[]
+            for r in cr:
+                ck=_clean(r.get("corridor_key"))
+                nm=_object_name("corridor",ck)
+                rows.append({"Corridor":nm,"Role":_clean(r.get("corridor_role"))})
+                opens.append({"type":"corridor","id":ck,"name":nm,"relationship":_clean(r.get("corridor_role"))})
+            st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+            _open_selector(opens,f"spatial_entity_corr_{oid}","Open corridor")
+
+    elif typ=="mobile_asset":
+        st.caption("Live AIS is not yet connected. Showing canonical ownership, linked events and infrastructure context from current evidence.")
+        events=_events_for_object("mobile_asset",oid)
+        ports=[]
+        for e in events:
+            loc=_clean(e.get("location"))
+            if loc:
+                ports.append({"Date":_clean(e.get("start_date"))[:10],"Location":loc,"Development":_clean(e.get("title"))})
+        if ports:
+            st.dataframe(pd.DataFrame(ports),hide_index=True,use_container_width=True)
+
+    elif typ=="corridor":
+        st.markdown("##### Corridor geography")
+        st.write(_clean(rec.get("geography") or rec.get("description") or rec.get("corridor_name")))
+        routes=_related_table("pc_transport_routes",oid,_clean(rec.get("corridor_name")),120)
+        if routes:
+            st.markdown("##### Routes / services")
+            st.dataframe(pd.DataFrame(routes),hide_index=True,use_container_width=True)
+
+    elif typ=="event":
+        links=_event_links("event",oid)
+        objs=[]
+        for l in links:
+            lt=_clean(l.get("linked_type")).casefold()
+            if lt=="vessel": lt="mobile_asset"
+            lid=_clean(l.get("linked_id"))
+            if lt in OBJECTS and lid:
+                objs.append({"type":lt,"id":lid,"name":_object_name(lt,lid),"relationship":_clean(l.get("relationship"))})
+        if objs:
+            st.dataframe(pd.DataFrame([{"Object":x["name"],"Relationship":x["relationship"]} for x in objs]),
+                         hide_index=True,use_container_width=True)
+            _open_selector(objs,f"spatial_event_{oid}")
+
+
+def _render_evidence_pane(typ: str, oid: str, rec: dict, lens: str):
+    st.markdown("### Intelligence / Evidence")
+    st.caption("Developments, documents, filings, sanctions and source provenance.")
+
+    events=_events_for_object(typ,oid)
+    if lens=="strategic":
+        events=[e for e in events if STRATEGIC_RX.search(_record_text(e))] or events
+    elif lens=="sanctions":
+        events=[e for e in events if SANCTIONS_RX.search(_record_text(e))] or events
+    _render_event_cards(events,f"evidence_{lens}_{typ}_{oid}",8)
+
+    docs=_documents_for_entity(oid) if typ=="entity" else _documents_by_name(_object_name(typ,oid),30)
+    if docs:
+        st.markdown("##### Documents / filings / research")
+        rows=[]
+        for d in docs[:40]:
+            rows.append({
+                "Date":_clean(d.get("published_date")),
+                "Title":_clean(d.get("title")),
+                "Type":_clean(d.get("document_type")),
+                "Source":_clean(d.get("source_name")),
+                "Relationship":_clean(d.get("_relationship")),
+            })
+        st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True,height=min(420,110+28*len(rows)))
+
+    if lens=="sanctions":
+        san=_related_table("pc_sanctions_designations",oid,_object_name(typ,oid),120)
+        if san:
+            st.markdown("##### Designations / regulatory")
+            st.dataframe(pd.DataFrame(san),hide_index=True,use_container_width=True)
+
+    sources=[]
+    for x in (_meta(rec).get("research_sources") or []):
+        u=x.get("url") if isinstance(x,dict) else x
+        if isinstance(u,str) and u.startswith(("http://","https://")):
+            sources.append(u)
+    if sources:
+        st.markdown("##### Source evidence")
+        for u in list(dict.fromkeys(sources))[:20]:
+            st.markdown("- "+u)
+
+
+def _render_timeline(typ: str, oid: str):
+    events=_events_for_object(typ,oid)
+    if not events:
+        st.caption("No linked chronological developments yet.")
+        return
+    rows=[]
+    for e in events[:80]:
+        rows.append({
+            "Date":_clean(e.get("start_date"))[:10],
+            "Development":_clean(e.get("title")),
+            "Type":_clean(e.get("event_type")).replace("_"," "),
+            "Relationship":_clean(e.get("_relationship")).replace("_"," "),
+        })
+    st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True,height=min(420,110+28*min(len(rows),10)))
+
+
 def _render_layer2(typ: str, oid: str, rec: dict, lens: str):
     st.markdown(f"### {LENS[lens]['layer2']}")
     if typ == "asset":
@@ -977,40 +1250,22 @@ def render_terminal(lens: str = "trade"):
 
     _render_context_header(typ, oid, rec, lens)
 
-    # Three-engine screen: each panel reads the same selected canonical context.
-    c2, c3, c4 = st.columns([1.15, 1.0, 1.0], gap="large")
-    with c2:
+    # Persistent tactical workspace: dossier left, spatial/system center, evidence right.
+    left, center, right = st.columns([1.0, 1.25, 1.0], gap="large")
+    with left:
         with st.container(border=True):
-            _render_layer2(typ, oid, rec, lens)
-    with c3:
+            _render_dossier_pane(typ,oid,rec,lens)
+    with center:
         with st.container(border=True):
-            _render_layer3(typ, oid, rec, lens)
-    with c4:
+            _render_spatial_pane(typ,oid,rec,lens)
+    with right:
         with st.container(border=True):
-            _render_layer4(typ, oid, rec, lens)
+            _render_evidence_pane(typ,oid,rec,lens)
 
     st.divider()
-    tabs = st.tabs([
-        "Canonical record",
-        "Network",
-        "All linked developments",
-        "Documents & evidence",
-    ])
-    with tabs[0]:
+    st.markdown("### Chronological Development & Event Ticker")
+    _render_timeline(typ,oid)
+
+    with st.expander("Developer / raw canonical record"):
+        st.caption("Internal diagnostic view. Normal analyst workflow should not require raw IDs or JSON.")
         st.json(rec)
-    with tabs[1]:
-        rels = _relationships(typ, oid) if typ != "corridor" else []
-        if rels:
-            st.dataframe(pd.DataFrame(rels), hide_index=True, use_container_width=True)
-            objs = _linked_objects_from_relationships(typ, oid)
-            _open_selector(objs, f"terminal_network_{lens}_{typ}_{oid}")
-        else:
-            st.caption("No generic graph relationships recorded. Specialist role tables above may still contain connections.")
-    with tabs[2]:
-        _render_event_cards(_events_for_object(typ, oid), f"terminal_events_{lens}_{typ}_{oid}", 50)
-    with tabs[3]:
-        docs = _documents_for_entity(oid) if typ == "entity" else _documents_by_name(_object_name(typ, oid), 60)
-        if docs:
-            st.dataframe(pd.DataFrame(docs), hide_index=True, use_container_width=True)
-        else:
-            st.caption("No linked document records found for this context.")
