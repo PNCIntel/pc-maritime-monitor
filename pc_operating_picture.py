@@ -214,23 +214,25 @@ def _exact_mentions(sb,row,exclude_ids=None):
     low=text.casefold()
     exclude=set(str(x) for x in (exclude_ids or []) if x)
     found=[]
-    seen=set()
+    seen_ids=set()
+    seen_names=set()
     for obj in _canonical_named_objects(sb):
         oid=str(obj.get("id") or "")
         nm=_clean(obj.get("name"))
         if not oid or oid in exclude or len(nm)<4:
             continue
         nlow=nm.casefold()
-        # Exact canonical-name phrase only. Short all-caps names still require word boundaries.
         if nlow not in low:
             continue
         if len(nm)<=5:
             if not re.search(r"(?<![A-Za-z0-9])"+re.escape(nm)+r"(?![A-Za-z0-9])",text,re.I):
                 continue
-        key=(obj["type"],oid)
-        if key in seen:
+        id_key=(obj["type"],oid)
+        name_key=(obj["type"],nlow)
+        if id_key in seen_ids or name_key in seen_names:
             continue
-        seen.add(key)
+        seen_ids.add(id_key)
+        seen_names.add(name_key)
         found.append(obj)
     return found[:20]
 
@@ -357,7 +359,7 @@ def _event_expander(sb,r,mode,key_prefix="evt"):
         if links or mentions:
             st.markdown("### Connected model")
             st.caption("Open a company, asset or vessel directly beneath the relationship you are reading.")
-            event_key=str(eid or key_prefix)
+            event_key=str(key_prefix)+"__"+str(eid or "event")
             slot=_inline_slot_key(event_key)
 
             for n,x in enumerate(links[:20]):
