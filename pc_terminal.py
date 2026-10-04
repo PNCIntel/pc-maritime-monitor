@@ -2535,79 +2535,180 @@ def _render_company_transaction_cards(tx: list[dict], limit: int=10):
 
 
 def _strategic_company_bundle(oid: str, name: str) -> dict:
-    """Collect specialist defence/shipbuilding records that may bypass generic company links."""
+    """Collect specialist defence/shipbuilding records, including legacy name-linked rows."""
     bundle=_entity_identity_bundle(str(oid))
     ids=bundle.get("ids") or [str(oid)]
+    names=[name] + (bundle.get("names") or [])
+    name_norms={_norm(x) for x in names if _norm(x)}
+    name_cores=set()
+    for n in names:
+        words=_norm(n).split()
+        while words and words[-1] in {"inc","incorporated","ltd","limited","llc","plc","company","co","group","shipbuilding","shipyards"}:
+            words.pop()
+        core=" ".join(words)
+        if core: name_cores.add(core)
 
-    def by_cols(table: str, cols: list[str], limit: int=250) -> list[dict]:
+    def text_matches(row: dict) -> bool:
+        blob=_norm(_record_text(row))
+        if not blob:
+            return False
+        for n in name_norms:
+            if len(n)>=5 and n in blob:
+                return True
+        for core in name_cores:
+            if len(core)>=5 and core in blob:
+                return True
+        return False
+
+    def dedupe(rows: list[dict]) -> list[dict]:
         out=[]; seen=set()
+        for r in rows:
+            k=json.dumps(r,sort_keys=True,default=str)
+            if k not in seen:
+                seen.add(k); out.append(r)
+        return out
+
+    def by_cols(table: str, cols: list[str], limit: int=500, scan_limit: int=7000) -> list[dict]:
+        out=[]
         for col in cols:
             for eid in ids:
                 try:
-                    rows=_filtered_rows(table,col,str(eid),limit)
+                    out.extend(_filtered_rows(table,col,str(eid),limit))
                 except Exception:
-                    rows=[]
-                for r in rows:
-                    k=json.dumps(r,sort_keys=True,default=str)
-                    if k not in seen:
-                        seen.add(k); out.append(r)
-        if not out:
-            try:
-                out=_related_table(table,oid,name,limit)
-            except Exception:
-                out=[]
-        return out
+                    pass
+        out=dedupe(out)
+        if out:
+            return out
+
+        # Legacy/early loader fallback: resolve by human-readable names/metadata.
+        try:
+            all_rows=_rows(table,scan_limit)
+        except Exception:
+            all_rows=[]
+        return dedupe([r for r in all_rows if text_matches(r)])
 
     programmes=by_cols(
         "pc_defence_programmes",
         ["lead_contractor_entity_id","customer_entity_id"],
-        250,
+        500,
     )
     participants=by_cols(
         "pc_defence_programme_participants",
         ["entity_id"],
-        400,
+        800,
     )
     production=by_cols(
         "pc_shipbuilding_production_tasks",
         ["builder_entity_id"],
-        500,
+        1200,
     )
     capacity=by_cols(
         "pc_shipyard_capacity_history",
         ["operator_entity_id"],
-        300,
+        800,
     )
     operations=by_cols(
         "pc_security_operations",
         ["lead_entity_id"],
-        250,
+        500,
     )
     operation_participants=by_cols(
         "pc_security_operation_participants",
         ["entity_id"],
-        300,
+        600,
     )
-    orders=_related_table("pc_shipbuilding_orders",oid,name,300)
-    contracts=_related_table("pc_contracts",oid,name,300)
 
-    # Resolve programme ids represented only through participant rows.
+    # Shipyards themselves may carry the company only in their asset name/metadata.
+    shipyard_assets=[]
+    try:
+        for a in _rows("pc_assets",10000):
+            blob=" ".join([
+                _clean(a.get("name")),_clean(a.get("asset_type")),_clean(a.get("subtype")),
+                _clean(a.get("description")),_clean(a.get("metadata")),
+            ])
+            if any(k in blob.casefold() for k in ("shipyard","shipbuilding","yard")) and text_matches(a):
+                shipyard_assets.append(a)
+    except Exception:
+        pass
+    shipyard_asset_ids={_clean(a.get("asset_id")) for a in shipyard_assets if a.get("asset_id")}
+
+    # Anything performed at one of the company's yards belongs in the industrial dossier even
+    # if builder_entity_id/operator_entity_id was never populated.
+    if shipyard_asset_ids:
+        try:
+            for r in _rows("pc_shipbuilding_production_tasks",7000):
+                if _clean(r.get("shipyard_asset_id")) in shipyard_asset_ids:
+                    production.append(r)
+        except Exception:
+            pass
+        try:
+            for r in _rows("pc_shipyard_capacity_history",7000):
+                if _clean(r.get("shipyard_asset_id")) in shipyard_asset_ids:
+                    capacity.append(r)
+        except Exception:
+            pass
+
+    production=dedupe(production)
+    capacity=dedupe(capacity)
+
+    # Resolve programme ids represented through participants/production.
     programme_ids=set()
     for r in programmes+participants+production:
         pid=_clean(r.get("defence_programme_id"))
         if pid: programme_ids.add(pid)
     for pid in list(programme_ids):
         try:
-            rows=_filtered_rows("pc_defence_programmes","defence_programme_id",pid,2)
+            programmes.extend(_filtered_rows("pc_defence_programmes","defence_programme_id",pid,3))
         except Exception:
-            rows=[]
-        for r in rows:
-            if not any(_clean(x.get("defence_programme_id"))==pid for x in programmes):
-                programmes.append(r)
+            pass
+    programmes=dedupe(programmes)
 
-    # Shipyard assets can be attached through participants, production or capacity.
+    # Pull orders from direct name matches and programme/production references.
+    orders=[]
+    try:
+        all_orders=_rows("pc_shipbuilding_orders",7000)
+    except Exception:
+        all_orders=[]
+    orders.extend([r for r in all_orders if text_matches(r)])
+    order_ids=set()
+    for r in programmes+production:
+        sid=_clean(r.get("shipbuilding_order_id"))
+        if sid: order_ids.add(sid)
+    for r in all_orders:
+        if _clean(r.get("shipbuilding_order_id")) in order_ids:
+            orders.append(r)
+    orders=dedupe(orders)
+
+    # Pull contracts/projects by name and by IDs referenced from programmes/orders.
+    contracts=[]
+    try:
+        all_contracts=_rows("pc_contracts",7000)
+    except Exception:
+        all_contracts=[]
+    contracts.extend([r for r in all_contracts if text_matches(r)])
+    contract_ids={_clean(r.get("contract_id")) for r in programmes if r.get("contract_id")}
+    for r in all_contracts:
+        if _clean(r.get("contract_id")) in contract_ids:
+            contracts.append(r)
+    contracts=dedupe(contracts)
+
+    projects=[]
+    try:
+        projects=[r for r in _rows("pc_project_details",7000) if text_matches(r)]
+    except Exception:
+        projects=[]
+
+    # Resolve shipyard assets from participant/production/capacity links plus name matches.
     shipyards=[]
     seen_assets=set()
+    for a in shipyard_assets:
+        aid=_clean(a.get("asset_id"))
+        if aid and aid not in seen_assets:
+            seen_assets.add(aid)
+            shipyards.append({
+                "type":"asset","id":aid,"name":_clean(a.get("name")) or _asset_chip(aid),
+                "relationship":"shipyard / industrial facility",
+            })
     for r in participants+production+capacity:
         aid=_clean(r.get("shipyard_asset_id"))
         if not aid or aid in seen_assets:
@@ -2621,17 +2722,25 @@ def _strategic_company_bundle(oid: str, name: str) -> dict:
             "relationship":_clean(r.get("participant_role") or r.get("task_type") or "shipyard"),
         })
 
-    # Orders may point to units/vessels elsewhere; keep them as structured industrial activity.
+    # Pull events by exact/name relevance if canonical event links are absent.
+    events=[]
+    try:
+        events=[r for r in _rows("pc_events",5000) if text_matches(r)]
+    except Exception:
+        events=[]
+
     return {
         "programmes":programmes,
-        "participants":participants,
+        "participants":dedupe(participants),
         "production":production,
         "capacity":capacity,
         "orders":orders,
         "contracts":contracts,
-        "operations":operations,
-        "operation_participants":operation_participants,
+        "projects":dedupe(projects),
+        "operations":dedupe(operations),
+        "operation_participants":dedupe(operation_participants),
         "shipyards":shipyards,
+        "events":dedupe(events),
     }
 
 
@@ -2754,6 +2863,13 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     if not events:
         events=_related_table("pc_events",oid,name,150)
     strategic_data=_strategic_company_bundle(oid,name)
+    strategic_events=strategic_data.get("events") or []
+    seen_event_ids={_clean(x.get("event_id")) for x in events if x.get("event_id")}
+    for e in strategic_events:
+        eid=_clean(e.get("event_id"))
+        if eid and eid not in seen_event_ids:
+            events.append(e); seen_event_ids.add(eid)
+    events=sorted(events,key=lambda x:_clean(x.get("start_date")),reverse=True)
     strategic_assets=strategic_data.get("shipyards") or []
     existing_asset_ids={x.get("id") for x in assets}
     for x in strategic_assets:
