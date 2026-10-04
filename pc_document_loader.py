@@ -15,6 +15,17 @@ def _norm(value):
     return ' '.join(re.findall(r'[a-z0-9]+', str(value or '').casefold()))
 
 
+def _numeric_confidence(value):
+    """Only persist finite probabilities; qualitative labels remain in extraction evidence."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if 0.0 <= number <= 1.0 else None
+
+
 def _http_json(endpoint, api_key, payload, timeout=140):
     req = urllib.request.Request(endpoint, data=json.dumps(payload).encode('utf-8'),
         headers={'Authorization': f'Bearer {api_key}', 'Content-Type':'application/json'})
@@ -52,6 +63,7 @@ Return JSON only. Do not invent missing metadata. Use null or [] where evidence 
 Products selected by analyst: {products}
 Source URL supplied by analyst: {source_url or 'none'}
 
+Confidence values must be numbers between 0 and 1, or null; never qualitative labels.
 Required JSON keys:
 title, document_type, published_date (YYYY-MM-DD only if explicitly supported),
 source_organization {{name, organization_type, website, confidence}},
@@ -254,7 +266,7 @@ def render_document_loader(sb):
                 if key2 in seen: continue
                 seen.add(key2)
                 sb.table('pc_document_entity_links').upsert({'document_id':doc_id,'entity_id':eid,'relationship':rel,
-                    'confidence':conf,'evidence':{'document_title':title,'source_url':source_url or None}},
+                    'confidence':_numeric_confidence(conf),'evidence':{'document_title':title,'source_url':source_url or None}},
                     on_conflict='document_id,entity_id,relationship').execute()
             results.append({'Document':title,'Source organisation':org.get('name'),'Canonical source':source_entity_id or 'HELD','Status':msg,'Links':len(seen),'Connected research':connected_job or ('issuer identity only' if connected_research and not is_company else 'not requested'), 'Reused document':bool(existing)})
         except Exception as exc:
