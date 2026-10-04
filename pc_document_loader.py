@@ -207,8 +207,10 @@ def render_document_loader(sb):
     for i,f in enumerate(uploads):
         source_url=url_list[i] if i<len(url_list) else ''
         doc_id = None
+        load_stage = 'starting'
         try:
             from pc_document_vessels import retain_original, extract_pdf, save_vessel_evidence
+            load_stage = 'retain_original'
             stored_file = retain_original(sb, f)
             digest = stored_file['file_sha256']
             hash_matches = sb.table('pc_documents').select('*').eq('file_sha256', digest).limit(2).execute().data or []
@@ -229,6 +231,7 @@ def render_document_loader(sb):
                 doc_id = existing['document_id']
             extraction = (existing.get('metadata') or {}).get('page_extraction')
             if Path(f.name).suffix.lower() == '.pdf' and not extraction:
+                load_stage = 'extract_pdf_pages'
                 with st.status('Read every page: ' + f.name):
                     extraction = extract_pdf(f.getvalue(), key, _http_json,
                         checkpoints=st.session_state.setdefault('pc_pdf_page_checkpoints', {}),
@@ -237,9 +240,11 @@ def render_document_loader(sb):
             if not analysis or (extraction and not (existing.get('metadata') or {}).get('vessel_extraction_version')):
                 text=extraction['text'] if extraction else _text_from_file(f, key)
                 if len(text.strip())<80: raise ValueError('No usable document text extracted; scanned PDF needs OCR')
+                load_stage = 'analyse_document_metadata'
                 analysis=_analyse_document(text,key,products,source_url)
             org=analysis.get('source_organization') or {}
             research=_research_org(org.get('name'),key) if org.get('name') else None
+            load_stage = 'resolve_source_entity'
             source_entity_id,msg=_ensure_source_entity(sb,org,research,entities)
             title=analysis.get('title') or Path(f.name).stem
             from pc_graph_validator import _clean_date
@@ -269,6 +274,7 @@ def render_document_loader(sb):
                 if not source_url: row['source_url']=existing.get('source_url')
                 if not source_entity_id: row['source_entity_id']=existing.get('source_entity_id')
                 sb.table('pc_documents').update(row).eq('document_id',doc_id).execute()
+            load_stage = 'save_vessel_evidence'
             vessel_stats = save_vessel_evidence(sb, doc_id, extraction, analysis) if extraction else None
             connected_job=None
             is_company=any(t in str(org.get('organization_type') or '').casefold()
@@ -298,8 +304,10 @@ def render_document_loader(sb):
                     if connected_job: st.session_state['pc_connected_company_job']=connected_job
                 except Exception as _crexc:
                     connected_job='HELD: '+str(_crexc)[:160]
+            load_stage = 'save_authors'
             for a in authors:
                 sb.table('pc_document_authors').upsert({'document_id':doc_id,'author_name':a,'metadata':{}},on_conflict='document_id,author_name').execute()
+            load_stage = 'save_entity_links'
             links=[]
             if source_entity_id: links.append((source_entity_id,'issued_by',1.0))
             for e in analysis.get('mentioned_entities') or []:
@@ -316,14 +324,28 @@ def render_document_loader(sb):
                 sb.table('pc_document_entity_links').upsert({'document_id':doc_id,'entity_id':eid,'relationship':rel,
                     'confidence':_numeric_confidence(conf),'evidence':{'document_title':title,'source_url':source_url or None}},
                     on_conflict='document_id,entity_id,relationship').execute()
+            load_stage = 'complete'
             results.append({'Document':title,'Source organisation':org.get('name'),'Canonical source':source_entity_id or 'HELD','Status':msg,'Links':len(seen),'Connected research':connected_job or ('issuer identity only' if connected_research and not is_company else 'not requested'), 'Vessel records': vessel_stats, 'Reused document': bool(prior)})
         except Exception as exc:
             if doc_id:
                 try:
-                    sb.table('pc_documents').update({'extraction_status': 'failed'}).eq('document_id', doc_id).execute()
+                    current = (sb.table('pc_documents').select('metadata').eq('document_id', doc_id).limit(1).execute().data or [{}])[0]
+                    current_meta = current.get('metadata') or {}
+                    current_meta['loader_error'] = {
+                        'stage': load_stage,
+                        'message': str(exc)[:4000],
+                        'failed_at': datetime.now(timezone.utc).isoformat(),
+                    }
+                    # A failure after metadata/page extraction is a partial load, not a vanished document.
+                    status = 'partial' if current_meta.get('page_extraction') or current_meta.get('ai_extraction') else 'failed'
+                    sb.table('pc_documents').update({
+                        'extraction_status': status,
+                        'metadata': current_meta,
+                        'updated_at': datetime.now(timezone.utc).isoformat(),
+                    }).eq('document_id', doc_id).execute()
                 except Exception:
                     pass
-            results.append({'Document':f.name,'Status':'ERROR: '+str(exc)[:300]})
+            results.append({'Document':f.name,'Status':f'ERROR at {load_stage}: '+str(exc)[:300]})
     failed=sum(1 for r in results if str(r.get('Status') or '').startswith('ERROR:'))
     if failed: st.warning(f'Saved {len(results)-failed} document(s); {failed} failed. See details below.')
     else: st.success(f'Saved {len(results)} document(s).')
