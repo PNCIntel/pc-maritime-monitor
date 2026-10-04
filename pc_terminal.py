@@ -420,6 +420,42 @@ def _linked_objects_from_relationships(typ: str, oid: str) -> list[dict]:
     return out
 
 
+def _local_infrastructure(asset: dict, limit: int = 80) -> list[dict]:
+    """Return nearby/same-system canonical infrastructure using stored geography.
+
+    This is a discovery lens, not an inferred ownership relationship.
+    """
+    aid=_clean(asset.get("asset_id"))
+    country=_clean(asset.get("country")).casefold()
+    region=_clean(asset.get("region_city")).casefold()
+    name=_clean(asset.get("name")).casefold()
+    out=[]
+    seen={aid}
+    for r in _rows("pc_assets",5000):
+        rid=_clean(r.get("asset_id"))
+        if not rid or rid in seen:
+            continue
+        rc=_clean(r.get("country")).casefold()
+        rr=_clean(r.get("region_city")).casefold()
+        rn=_clean(r.get("name")).casefold()
+        score=0
+        if country and rc==country: score+=10
+        if region and rr:
+            if rr==region: score+=40
+            elif region in rr or rr in region: score+=25
+        if name and rn and (name in rn or rn in name): score+=15
+        if score>=25:
+            seen.add(rid)
+            out.append((score,{
+                "type":"asset","id":rid,"name":_clean(r.get("name")),
+                "relationship":"same local infrastructure system",
+                "asset_type":_clean(r.get("asset_type")),
+                "region":_clean(r.get("region_city")),
+                "country":_clean(r.get("country")),
+            }))
+    out.sort(key=lambda x:(x[0],x[1]["name"]),reverse=True)
+    return [x[1] for x in out[:limit]]
+
 def _asset_companies(asset: dict) -> list[dict]:
     aid = _clean(asset.get("asset_id"))
     seen = set()
@@ -530,6 +566,16 @@ def _render_layer2(typ: str, oid: str, rec: dict, lens: str):
             st.markdown("#### Connected infrastructure / network")
             st.dataframe(pd.DataFrame(connected), hide_index=True, use_container_width=True)
             _open_selector(connected, f"l2_asset_links_{oid}")
+
+        local=_local_infrastructure(rec)
+        if local:
+            st.markdown("#### Local infrastructure system")
+            st.caption("Canonical assets sharing the stored local geography. Discovery only; this does not infer ownership.")
+            st.dataframe(
+                pd.DataFrame([{k:v for k,v in x.items() if k not in ("type","id","relationship")} for x in local]),
+                hide_index=True,use_container_width=True,height=min(420,100+28*min(len(local),10))
+            )
+            _open_selector(local,f"l2_asset_local_{oid}","Open local infrastructure")
     elif typ == "entity":
         roles = _company_asset_roles(oid)
         rows = []
