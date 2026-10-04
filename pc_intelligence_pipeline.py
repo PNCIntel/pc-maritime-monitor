@@ -410,7 +410,7 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                              key='pc_v20_open_workbench_'+str(job),use_container_width=True):
                     st.session_state['pc_exception_job_filter']=str(job)
                     st.session_state['pc_exception_core_only']=True
-                    st.session_state['pc_workspace_simple_v18']='Analyst workbench'
+                    st.session_state['pc_requested_workspace']='Analyst workbench'
                     st.rerun()
             elif holds:
                 st.info('Core publication is clear. Remaining connected holds are downstream enrichment review, not blocking core records.')
