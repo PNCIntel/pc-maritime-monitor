@@ -2663,6 +2663,291 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
                 st.dataframe(pd.DataFrame(tx),hide_index=True,use_container_width=True)
 
 
+def _is_institutional_entity(rec: dict) -> bool:
+    blob=" ".join([
+        _clean(rec.get("entity_type")),
+        _clean(rec.get("sector")),
+        _clean(rec.get("subtype")),
+        _clean(rec.get("name")),
+        _clean(rec.get("description")),
+    ]).casefold()
+    terms=(
+        "authority","agency","administration","ministry","regulator","commission",
+        "coast guard","navy","customs","border guard","port authority","maritime authority",
+        "transport authority","civil aviation","aviation authority","railway authority"
+    )
+    return any(t in blob for t in terms)
+
+
+def _asset_fact_pairs(rec: dict) -> list[tuple[str,str]]:
+    fields=[
+        ("Asset type",rec.get("asset_type")),
+        ("Subtype",rec.get("subtype")),
+        ("Status",rec.get("status")),
+        ("Country",rec.get("country")),
+        ("City / region",rec.get("region_city")),
+        ("Annual capacity",rec.get("annual_capacity")),
+        ("TEU capacity",rec.get("teu_capacity")),
+        ("Cargo capacity",rec.get("capacity")),
+        ("Land area (ha)",rec.get("land_area_ha")),
+        ("Berths",rec.get("berth_count")),
+        ("Depth (m)",rec.get("depth_m")),
+        ("Runways",rec.get("runway_count")),
+        ("Rail sidings",rec.get("rail_siding_count")),
+        ("Operator",_object_name("entity",_clean(rec.get("operator_entity_id"))) if rec.get("operator_entity_id") else ""),
+        ("Owner",_object_name("entity",_clean(rec.get("owner_entity_id"))) if rec.get("owner_entity_id") else ""),
+    ]
+    return [(k,_clean(v)) for k,v in fields if v not in (None,"",[],{})]
+
+
+def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
+    name=_object_name("asset",oid)
+    companies=_asset_companies(rec)
+    local=_local_infrastructure(rec)
+    linked=_linked_objects_from_relationships("asset",oid)
+    corridors=[x for x in linked if x.get("type")=="corridor"]
+    events=_events_for_object("asset",oid)
+    docs=_related_table("pc_documents",oid,name,40)
+    routes=_related_table("pc_transport_routes",oid,name,80)
+    projects=_related_table("pc_projects",oid,name,80)
+
+    # Compact operational strip.
+    m=st.columns(6)
+    m[0].metric("Operators / owners",len(companies))
+    m[1].metric("Connected nodes",len(local))
+    m[2].metric("Corridors",len(corridors))
+    m[3].metric("Routes / services",len(routes))
+    m[4].metric("Projects",len(projects))
+    m[5].metric("Developments",len(events))
+
+    left,right=st.columns([1.0,1.4],gap="large")
+    with left:
+        with st.container(border=True):
+            st.markdown("### Node Profile")
+            desc=_company_display_value(rec.get("description"),rec.get("notes"),rec.get("strategic_role"))
+            if desc:
+                st.write(desc)
+            for label,value in _asset_fact_pairs(rec):
+                st.markdown(
+                    f"<div class='pc-row'><span class='pc-row-label'>{label}</span>"
+                    f"<span class='pc-row-meta' style='white-space:normal;text-align:right'>{value}</span></div>",
+                    unsafe_allow_html=True
+                )
+
+        with st.container(border=True):
+            st.markdown("### Operators, Owners & Authorities")
+            if companies:
+                for i,x in enumerate(companies[:15]):
+                    cols=st.columns([3.2,1.3,1.0])
+                    cols[0].markdown(f"**{x['name']}**")
+                    cols[1].caption((_clean(x.get("role")) or "linked").replace("_"," ").title())
+                    cols[2].button("Open",key=f"infra_comp_{_norm(oid)}_{i}",use_container_width=True,
+                                   on_click=_set_context,args=("entity",x["id"],x["name"]))
+            else:
+                st.caption("No structured owner/operator relationships recorded.")
+
+    with right:
+        with st.container(border=True):
+            st.markdown("### Spatial & Local System")
+            _render_map_for_asset(rec)
+            if local:
+                st.markdown("#### Connected infrastructure")
+                _render_company_asset_cards(local,f"infra_local_{_norm(oid)}",12)
+            elif not _coords_from_record(rec):
+                st.caption("No mapped local network is currently stored for this node.")
+
+        if corridors or routes:
+            with st.container(border=True):
+                st.markdown("### Corridors, Routes & Services")
+                if corridors:
+                    for i,x in enumerate(corridors[:10]):
+                        cols=st.columns([3.2,1.4,1.0])
+                        cols[0].markdown(f"**{x['name']}**")
+                        cols[1].caption((_clean(x.get("relationship")) or "connected").title())
+                        cols[2].button("Open",key=f"infra_corr_{_norm(oid)}_{i}",use_container_width=True,
+                                       on_click=_set_context,args=("corridor",x["id"],x["name"]))
+                if routes:
+                    with st.expander(f"Routes / services ({len(routes)})",expanded=not bool(corridors)):
+                        for r in routes[:20]:
+                            title=_company_display_value(r.get("route_name"),r.get("name"),r.get("service_name"),r.get("title"))
+                            role=_company_display_value(r.get("mode"),r.get("route_type"),r.get("status"))
+                            st.markdown(f"**{title or 'Route / service'}**")
+                            if role: st.caption(role)
+
+    low1,low2=st.columns([1.0,1.25],gap="large")
+    with low1:
+        with st.container(border=True):
+            st.markdown("### Capacity, Projects & Investment")
+            if projects:
+                for p in projects[:12]:
+                    title=_company_display_value(p.get("project_name"),p.get("name"),p.get("title"),p.get("description"))
+                    status=_company_display_value(p.get("status"),p.get("project_status"))
+                    value=_company_display_value(p.get("capex"),p.get("project_value"),p.get("value"))
+                    currency=_company_display_value(p.get("currency"))
+                    st.markdown(f"**{title or 'Project'}**")
+                    bits=[x for x in [status,(currency+' '+value).strip() if value else ""] if x]
+                    if bits: st.caption(" · ".join(bits))
+            else:
+                st.caption("No structured projects or investment records linked yet.")
+
+    with low2:
+        with st.container(border=True):
+            st.markdown("### Current Developments")
+            if events:
+                _render_event_rows(events,"infra_events_"+_norm(oid),10)
+            else:
+                st.caption("No linked developments recorded.")
+
+    with st.container(border=True):
+        st.markdown("### Evidence & Documents")
+        if docs:
+            for i,d in enumerate(docs[:12]):
+                title=_clean(d.get("title")) or "Untitled document"
+                st.markdown(f"**{title}**")
+                src=_company_display_value(d.get("source_name"),d.get("document_type"))
+                if src: st.caption(src)
+                urls=_event_source_urls(d)
+                if urls:
+                    st.link_button("Open source",urls[0],key=f"infra_doc_{_norm(oid)}_{i}")
+        else:
+            st.caption("No linked documents recorded yet.")
+
+    st.markdown("### Operational Timeline")
+    if events:
+        _render_event_rows(events,"infra_timeline_"+_norm(oid),15)
+    else:
+        st.caption("No linked chronological developments yet.")
+
+    with st.expander("Structured data / developer view"):
+        st.json(rec)
+
+
+def _render_institution_terminal(oid: str, rec: dict, lens: str):
+    name=_object_name("entity",oid)
+    profiles=_company_profile_rows(oid)
+    p=profiles[0] if profiles else {}
+    rels=_linked_objects_from_relationships("entity",oid)
+    entities=[x for x in rels if x.get("type")=="entity"]
+    roles=_company_asset_roles(oid)
+    assets=[]
+    for r in roles:
+        aid=_clean(r.get("asset_id"))
+        mid=_clean(r.get("mobile_asset_id"))
+        if aid:
+            assets.append({"type":"asset","id":aid,"name":_asset_chip(aid),"relationship":_clean(r.get("asset_role"))})
+        elif mid:
+            assets.append({"type":"mobile_asset","id":mid,"name":_object_name("mobile_asset",mid),"relationship":_clean(r.get("asset_role"))})
+    corridors=_company_corridors(oid)
+    events=_events_for_object("entity",oid)
+    docs=_documents_for_entity(oid) or _documents_by_name(name,30)
+    programmes=_related_table("pc_programmes",oid,name,100)
+    operations=_related_table("pc_security_operations",oid,name,100)
+
+    m=st.columns(6)
+    m[0].metric("Linked organisations",len(entities))
+    m[1].metric("Assets / facilities",len(assets))
+    m[2].metric("Corridors / systems",len(corridors))
+    m[3].metric("Programmes",len(programmes))
+    m[4].metric("Operations",len(operations))
+    m[5].metric("Developments",len(events))
+
+    left,right=st.columns([1.0,1.35],gap="large")
+    with left:
+        with st.container(border=True):
+            st.markdown("### Institutional Profile")
+            desc=_company_display_value(p.get("business_description"),rec.get("description"),rec.get("business_description"))
+            if desc: st.write(desc)
+            facts=[
+                ("Institution type",_company_display_value(rec.get("entity_type"),rec.get("subtype"))),
+                ("Jurisdiction",_company_display_value(rec.get("hq_country"),rec.get("country"))),
+                ("Headquarters",_company_display_value(rec.get("hq_city"),rec.get("region_city"))),
+                ("Mandate / sector",_company_display_value(p.get("sector"),rec.get("sector"))),
+                ("Website",_company_display_value(p.get("website_url"),rec.get("website_url"))),
+            ]
+            for label,value in facts:
+                if value:
+                    st.markdown(
+                        f"<div class='pc-row'><span class='pc-row-label'>{label}</span>"
+                        f"<span class='pc-row-meta' style='white-space:normal;text-align:right'>{value}</span></div>",
+                        unsafe_allow_html=True
+                    )
+
+        with st.container(border=True):
+            st.markdown("### Institutional Network")
+            _render_company_relationship_cards(entities,f"inst_network_{_norm(oid)}",15)
+
+    with right:
+        with st.container(border=True):
+            st.markdown("### Assets, Facilities & Operating Footprint")
+            mapped=[]
+            for n in assets:
+                if n.get("type")=="asset":
+                    pnt=_asset_point(n.get("id"))
+                    if pnt: mapped.append(pnt)
+            if mapped:
+                st.map(pd.DataFrame(mapped),latitude="lat",longitude="lon",size=44,zoom=None,use_container_width=True)
+            _render_company_asset_cards(assets,f"inst_assets_{_norm(oid)}",12)
+
+        if corridors:
+            with st.container(border=True):
+                st.markdown("### Corridors / Systems Under Exposure")
+                for i,r in enumerate(corridors[:12]):
+                    ck=_clean(r.get("corridor_key"))
+                    nm=_object_name("corridor",ck)
+                    role=_clean(r.get("corridor_role")).replace("_"," ").title()
+                    cols=st.columns([3.2,1.4,1.0])
+                    cols[0].markdown(f"**{nm}**")
+                    cols[1].caption(role or "Connected")
+                    cols[2].button("Open",key=f"inst_corr_{_norm(oid)}_{i}",use_container_width=True,
+                                   on_click=_set_context,args=("corridor",ck,nm))
+
+    low1,low2=st.columns([1.0,1.25],gap="large")
+    with low1:
+        with st.container(border=True):
+            st.markdown("### Programmes / Operations")
+            rows=[]
+            for pgr in programmes[:10]:
+                rows.append(_company_display_value(pgr.get("programme_name"),pgr.get("name"),pgr.get("title")))
+            for op in operations[:10]:
+                rows.append(_company_display_value(op.get("operation_name"),op.get("name"),op.get("title")))
+            rows=[x for x in rows if x]
+            if rows:
+                for x in rows: st.markdown("• "+x)
+            else:
+                st.caption("No structured programmes or operations linked yet.")
+
+    with low2:
+        with st.container(border=True):
+            st.markdown("### Current Developments")
+            if events:
+                _render_event_rows(events,"inst_events_"+_norm(oid),10)
+            else:
+                st.caption("No linked developments recorded.")
+
+    with st.container(border=True):
+        st.markdown("### Directives, Circulars, Evidence & Documents")
+        if docs:
+            for i,d in enumerate(docs[:15]):
+                title=_clean(d.get("title")) or "Untitled document"
+                st.markdown(f"**{title}**")
+                source=_company_display_value(d.get("source_name"),d.get("document_type"),d.get("_relationship"))
+                if source: st.caption(source)
+                urls=_event_source_urls(d)
+                if urls:
+                    st.link_button("Open source",urls[0],key=f"inst_doc_{_norm(oid)}_{i}")
+        else:
+            st.caption("No linked documents recorded yet.")
+
+    st.markdown("### Institutional Timeline")
+    if events:
+        _render_event_rows(events,"inst_timeline_"+_norm(oid),15)
+    else:
+        st.caption("No linked chronological developments yet.")
+
+    with st.expander("Structured data / developer view"):
+        st.json(rec)
+
+
 def _local_infrastructure(rec: dict):
     """Explicitly connected infrastructure; do not infer links from proximity."""
     oid = str(rec.get("asset_id") or "")
@@ -2856,12 +3141,18 @@ def render_terminal(lens: str = "trade"):
         return
     _render_context_header(typ, oid, rec, lens)
 
-    # Companies need an executive dossier, not the generic three-pane database-style workspace.
+    # Entity and infrastructure objects use purpose-built dossiers rather than raw record panes.
     if typ=="entity":
-        _render_company_terminal(oid,rec,lens)
+        if _is_institutional_entity(rec):
+            _render_institution_terminal(oid,rec,lens)
+        else:
+            _render_company_terminal(oid,rec,lens)
+        return
+    if typ=="asset":
+        _render_infrastructure_terminal(oid,rec,lens)
         return
 
-    # Persistent tactical workspace for assets, vessels, corridors and events.
+    # Persistent tactical workspace for vessels, corridors and events.
     left, center, right = st.columns([1.0, 1.25, 1.0], gap="large")
     with left:
         with st.container(border=True):
