@@ -321,6 +321,20 @@ def poll_source(sb, source: dict):
         return {"source": source["source_name"], "found": 0, "new": 0, "error": str(exc)}
 
 
+
+def mark_notice_process_error(sb, notice: dict, exc: Exception):
+    metadata = dict(notice.get("metadata") or {})
+    metadata["process_error"] = {
+        "message": str(exc)[:3000],
+        "failed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    sb.table("pc_maritime_notices").update({
+        "status": "PROCESS_ERROR",
+        "metadata": metadata,
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("notice_id", notice["notice_id"]).execute()
+
+
 def render_port_notice_monitor(sb):
     st.title("Port & Maritime Notice Monitor")
     st.caption("Official port, harbour-master, canal, coast-guard and maritime-regulator notices. Discovery is source-backed; canonical publication remains reviewed.")
@@ -377,34 +391,77 @@ def render_port_notice_monitor(sb):
     total = len(all_notices)
     extracted = sum(1 for n in all_notices if n.get("status") == "EXTRACTED")
     needs_ocr = sum(1 for n in all_notices if n.get("status") == "NEEDS_OCR")
+    process_errors = sum(1 for n in all_notices if n.get("status") == "PROCESS_ERROR")
     with_imos = sum(1 for n in all_notices if n.get("extracted_imo_numbers"))
     other = sum(1 for n in all_notices if n.get("notice_category") == "OTHER")
-    a,b,c1,d,e = st.columns(5)
+    a,b,c1,d,e,fm = st.columns(6)
     a.metric("Notices", total)
     b.metric("Processed", extracted)
     c1.metric("Needs OCR", needs_ocr)
-    d.metric("With IMOs", with_imos)
-    e.metric("Unclassified", other)
+    d.metric("Process errors", process_errors)
+    e.metric("With IMOs", with_imos)
+    fm.metric("Unclassified", other)
 
     st.caption("Discovery finds the official notice. Processing opens the notice/PDF, extracts text and valid IMOs, improves classification and flags documents needing OCR.")
-    processable = [n for n in all_notices if n.get("status") in ("DISCOVERED","NEEDS_OCR")]
-    proc_labels = {n["notice_id"]: f'{source_names.get(n["source_id"], "")} · {n.get("title")}' for n in processable}
-    default_ids = list(proc_labels)[:20]
-    selected_notices = st.multiselect("Notices to process", options=list(proc_labels),
-                                      default=default_ids, format_func=lambda x: proc_labels[x],
-                                      max_selections=50)
-    if st.button("Process selected notices", type="primary", disabled=not selected_notices):
-        progress = st.progress(0.0)
-        results=[]
-        rows={n["notice_id"]:n for n in processable}
-        for i,nid in enumerate(selected_notices,1):
-            try:
-                results.append(enrich_notice(sb, rows[nid]))
-            except Exception as exc:
-                results.append({"title": rows[nid].get("title"), "status": "ERROR", "error": str(exc)[:300]})
-            progress.progress(i/max(len(selected_notices),1))
-        st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-        st.rerun()
+
+    processable = [n for n in all_notices if n.get("status") in ("DISCOVERED","NEEDS_OCR","PROCESS_ERROR")]
+    source_options = sorted({source_names.get(n["source_id"], "") for n in processable if source_names.get(n["source_id"])})
+    category_options = sorted({str(n.get("notice_category") or "OTHER") for n in processable})
+    fc1, fc2, fc3 = st.columns([2,2,1])
+    with fc1:
+        process_source = st.selectbox("Processing source", ["All sources"] + source_options, index=0)
+    with fc2:
+        process_category = st.selectbox("Processing category", ["All categories"] + category_options, index=0)
+    with fc3:
+        batch_size = st.number_input("Batch size", min_value=1, max_value=50, value=20, step=1)
+
+    queue = [n for n in processable
+             if (process_source == "All sources" or source_names.get(n["source_id"], "") == process_source)
+             and (process_category == "All categories" or str(n.get("notice_category") or "OTHER") == process_category)]
+    queue = queue[:int(batch_size)]
+    st.caption(f"{len(queue)} notice(s) queued from the current filters.")
+
+    b1,b2 = st.columns([1,1])
+    with b1:
+        if st.button("Process next batch", type="primary", disabled=not queue, use_container_width=True):
+            progress = st.progress(0.0)
+            results=[]
+            for i,notice in enumerate(queue,1):
+                try:
+                    results.append(enrich_notice(sb, notice))
+                except Exception as exc:
+                    try:
+                        mark_notice_process_error(sb, notice, exc)
+                    except Exception:
+                        pass
+                    results.append({"title": notice.get("title"), "status": "PROCESS_ERROR", "error": str(exc)[:300]})
+                progress.progress(i/max(len(queue),1))
+            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+            st.rerun()
+    with b2:
+        st.info("Use Source + Category to run focused batches, e.g. Fujairah + VESSEL_BAN.")
+
+    with st.expander("Manual notice selection"):
+        proc_labels = {n["notice_id"]: f'{source_names.get(n["source_id"], "")} · {n.get("title")}' for n in processable}
+        selected_notices = st.multiselect("Select specific notices", options=list(proc_labels),
+                                          default=[], format_func=lambda x: proc_labels[x],
+                                          max_selections=50)
+        if st.button("Process selected notices", disabled=not selected_notices):
+            progress = st.progress(0.0)
+            results=[]
+            rows={n["notice_id"]:n for n in processable}
+            for i,nid in enumerate(selected_notices,1):
+                try:
+                    results.append(enrich_notice(sb, rows[nid]))
+                except Exception as exc:
+                    try:
+                        mark_notice_process_error(sb, rows[nid], exc)
+                    except Exception:
+                        pass
+                    results.append({"title": rows[nid].get("title"), "status": "PROCESS_ERROR", "error": str(exc)[:300]})
+                progress.progress(i/max(len(selected_notices),1))
+            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+            st.rerun()
 
     st.subheader("Recent discoveries")
     status_filter = st.multiselect("Status", sorted({str(n.get("status") or "") for n in all_notices}),
