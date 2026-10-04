@@ -130,18 +130,76 @@ def _trade_business_score(r):
     if _clean(r.get("commercial_impact") or r.get("commercial_implications")): score+=10
     return score
 
+def _development_key(r):
+    """UI-level canonical development identity.
+
+    This does not merge database rows. It prevents repeated canonical siblings from
+    appearing as separate analyst developments while the underlying duplicates are
+    being reconciled.
+    """
+    title=re.sub(r"[^a-z0-9]+"," ",_clean(r.get("title")).casefold()).strip()
+    day=_clean(r.get("start_date"))[:10]
+    etype=re.sub(r"[^a-z0-9]+"," ",_clean(r.get("event_type")).casefold()).strip()
+    loc=re.sub(r"[^a-z0-9]+"," ",_display_location(r.get("location")).casefold()).strip()
+    return (day,title,etype,loc)
+
+def _row_richness(r):
+    score=0
+    for k in ("description","operational_impact","commercial_impact","commercial_implications"):
+        if _clean(r.get(k)): score+=3
+    m=_meta(r)
+    for k in ("why_it_matters","assessment","monitoring_indicators"):
+        if m.get(k): score+=3
+    score+=min(len(_sources(r)),5)
+    if _clean(r.get("event_id")): score+=1
+    return score
+
+def _collapse_developments(rows):
+    groups={}
+    order=[]
+    for r in rows or []:
+        key=_development_key(r)
+        if not key[1]:
+            key=("id",_clean(r.get("event_id")) or str(id(r)))
+        if key not in groups:
+            groups[key]=[]
+            order.append(key)
+        groups[key].append(r)
+
+    out=[]
+    for key in order:
+        members=groups[key]
+        best=sorted(
+            members,
+            key=lambda x:(
+                _row_richness(x),
+                str(x.get("published_at") or x.get("created_at") or ""),
+            ),
+            reverse=True,
+        )[0]
+        if len(members)>1:
+            best=dict(best)
+            best["_collapsed_duplicate_count"]=len(members)
+            best["_collapsed_event_ids"]=[
+                _clean(x.get("event_id")) for x in members if _clean(x.get("event_id"))
+            ]
+        out.append(best)
+    return out
+
 @st.cache_data(ttl=45,show_spinner=False)
 def _events(_sb):
     # Prefer the reviewed publication view because this is where new Power Admin
-    # loads appear after canonical publication. Fall back to canonical events.
+    # loads appear after canonical publication. Collapse duplicate canonical siblings
+    # before presenting the analyst feed.
     try:
         rows=(_sb.table("pc_v12_live_developments").select("*")
               .order("start_date",desc=True).limit(400).execute().data or [])
-        if rows: return rows
+        if rows: return _collapse_developments(rows)
     except Exception: pass
     try:
-        return (_sb.table("pc_events").select("*")
-                .order("start_date",desc=True).limit(400).execute().data or [])
+        rows=(_sb.table("pc_events").select("*")
+              .order("start_date",desc=True).limit(400).execute().data or [])
+        return _collapse_developments(rows)
     except Exception:
         return []
 
