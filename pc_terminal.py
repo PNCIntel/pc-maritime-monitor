@@ -1163,6 +1163,23 @@ def _render_layer3(typ: str, oid: str, rec: dict, lens: str):
         if rows:
             st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
+    if lens == "trade":
+        strategic_hits=[]
+        for title,table in (
+            ("Strategic programmes","pc_defence_programmes"),
+            ("Shipbuilding orders","pc_shipbuilding_orders"),
+            ("Shipyard capacity","pc_shipyard_capacity_history"),
+            ("Security / coast guard operations","pc_security_operations"),
+        ):
+            x=_related_table(table,oid,_object_name(typ,oid),80)
+            if x:
+                strategic_hits.append((title,x))
+        if strategic_hits:
+            st.markdown("#### Strategic industrial / security exposure")
+            for title,x in strategic_hits:
+                st.markdown("**"+title+"**")
+                st.dataframe(pd.DataFrame(x),hide_index=True,use_container_width=True,height=min(320,100+28*min(len(x),8)))
+
     if lens == "sanctions":
         st.markdown("#### Sanctions / exposure")
         sanctions=_related_table("pc_sanctions_designations",oid,_object_name(typ,oid),120)
@@ -1374,6 +1391,180 @@ def _safe_df(rows: list[dict], preferred: list[str] | None = None, max_rows: int
             df=df[cols]
     return df
 
+def _render_trade_home():
+    events=_rows("pc_events",2500)
+    events=sorted(events,key=lambda x:_clean(x.get("start_date")),reverse=True)
+    trade_events=[e for e in events if TRADE_RX.search(_record_text(e))]
+    disruptions=[e for e in events if _event_theme(e)=="Operational disruption"]
+    strategic=[e for e in events if STRATEGIC_RX.search(_record_text(e))]
+
+    assets=_rows("pc_assets",10000)
+    entities=_rows("pc_entities",10000)
+    corridors=_rows("pc_trade_corridors",5000)
+
+    def is_shipyard(a):
+        b=_record_text(a)
+        return bool(re.search(r"shipyard|dockyard|yard|naval base|repair yard",b,re.I))
+
+    def is_port(a):
+        b=_record_text(a)
+        return bool(re.search(r"port|terminal|harbour|harbor|dry port|container depot|intermodal",b,re.I))
+
+    def is_air(a):
+        b=_record_text(a)
+        return bool(re.search(r"airport|air cargo|cargo terminal|airfreight|air freight",b,re.I))
+
+    def is_rail(a):
+        b=_record_text(a)
+        return bool(re.search(r"rail|railway|intermodal|freight terminal|dry port",b,re.I))
+
+    ports=[a for a in assets if is_port(a)]
+    shipyards=[a for a in assets if is_shipyard(a)]
+    airports=[a for a in assets if is_air(a)]
+    rail=[a for a in assets if is_rail(a)]
+
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Infrastructure nodes",len(assets))
+    c2.metric("Companies / organisations",len(entities))
+    c3.metric("Trade corridors",len(corridors))
+    c4.metric("Strategic industrial nodes",len(shipyards))
+
+    st.markdown("### Trade operating picture")
+    left,right=st.columns([1.7,1.0],gap="large")
+    with left:
+        st.markdown("#### Priority trade developments")
+        st.caption("Commercial change, infrastructure, capacity, corridors and disruptions.")
+        priority=sorted(
+            trade_events,
+            key=lambda e:(
+                1 if _event_theme(e)=="Operational disruption" else 0,
+                1 if STRATEGIC_RX.search(_record_text(e)) else 0,
+                _clean(e.get("start_date"))
+            ),
+            reverse=True
+        )
+        _render_event_cards(priority,"trade_priority",12)
+
+    with right:
+        st.markdown("#### Network snapshot")
+        snapshot=pd.DataFrame([
+            {"Domain":"Ports / terminals / dry ports","Count":len(ports)},
+            {"Domain":"Rail / intermodal nodes","Count":len(rail)},
+            {"Domain":"Air cargo / airports","Count":len(airports)},
+            {"Domain":"Shipyards / industrial nodes","Count":len(shipyards)},
+            {"Domain":"Trade corridors","Count":len(corridors)},
+        ])
+        st.dataframe(snapshot,hide_index=True,use_container_width=True,height=250)
+
+        st.markdown("#### Operational disruptions")
+        _render_event_cards(disruptions,"trade_disruptions_side",6)
+
+    st.divider()
+    t1,t2,t3,t4=st.tabs([
+        "Infrastructure & Nodes",
+        "Companies & Capital",
+        "Corridors & Markets",
+        "Strategic Industrial Capacity",
+    ])
+
+    with t1:
+        a,b=st.columns(2,gap="large")
+        with a:
+            st.markdown("##### Ports / terminals / dry ports")
+            rows=[]
+            for x in ports[:120]:
+                rows.append({
+                    "Node":_clean(x.get("name")),
+                    "Type":_clean(x.get("asset_type")),
+                    "Country":_clean(x.get("country")),
+                    "Region":_clean(x.get("region_city")),
+                    "Status":_clean(x.get("status")),
+                })
+            if rows:
+                st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True,height=420)
+        with b:
+            st.markdown("##### Rail / intermodal / air cargo")
+            rows=[]
+            seen=set()
+            for x in (rail+airports):
+                aid=_clean(x.get("asset_id"))
+                if aid in seen: continue
+                seen.add(aid)
+                rows.append({
+                    "Node":_clean(x.get("name")),
+                    "Type":_clean(x.get("asset_type")),
+                    "Country":_clean(x.get("country")),
+                    "Region":_clean(x.get("region_city")),
+                })
+            if rows:
+                st.dataframe(pd.DataFrame(rows[:120]),hide_index=True,use_container_width=True,height=420)
+
+    with t2:
+        st.markdown("##### Recent transactions / investment / projects")
+        tx=_rows("pc_transactions",2000)
+        pr=_rows("pc_project_details",2000)
+        col1,col2=st.columns(2,gap="large")
+        with col1:
+            if tx:
+                df=_safe_df(tx,["announced_date","effective_date","transaction_type","title","description","deal_value","value","currency","status","buyer_name","seller_name","target_name"],100)
+                st.dataframe(df,hide_index=True,use_container_width=True,height=420)
+            else:
+                st.caption("No transaction rows returned.")
+        with col2:
+            if pr:
+                df=_safe_df(pr,["project_name","title","project_type","status","country","region","announced_date","completion_date","capex","value","currency"],100)
+                st.dataframe(df,hide_index=True,use_container_width=True,height=420)
+            else:
+                st.caption("No project rows returned.")
+
+    with t3:
+        cA,cB=st.columns(2,gap="large")
+        with cA:
+            st.markdown("##### Corridors")
+            if corridors:
+                rows=[]
+                for r in corridors[:120]:
+                    rows.append({
+                        "Corridor":_clean(r.get("corridor_name")),
+                        "Type":_clean(r.get("corridor_type")),
+                        "Origin":_clean(r.get("origin_region")),
+                        "Destination":_clean(r.get("destination_region")),
+                    })
+                st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True,height=420)
+        with cB:
+            st.markdown("##### Freight / market observations")
+            rates=_rows("pc_freight_rate_observations",2000)
+            if rates:
+                df=_safe_df(rates,["observed_date","route_name","corridor_key","rate_value","value","currency","unit","source_name"],120)
+                st.dataframe(df,hide_index=True,use_container_width=True,height=420)
+            else:
+                st.caption("No freight-rate observations returned.")
+
+    with t4:
+        st.markdown("##### Shipyards, defence/coast guard programmes and industrial capacity")
+        left2,right2=st.columns([1.0,1.2],gap="large")
+        with left2:
+            if shipyards:
+                rows=[]
+                for x in shipyards[:120]:
+                    rows.append({
+                        "Shipyard / industrial node":_clean(x.get("name")),
+                        "Country":_clean(x.get("country")),
+                        "Region":_clean(x.get("region_city")),
+                        "Status":_clean(x.get("status")),
+                    })
+                st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True,height=420)
+            else:
+                st.caption("No shipyard-tagged canonical assets returned.")
+        with right2:
+            programmes=_rows("pc_defence_programmes",2000)
+            if programmes:
+                df=_safe_df(programmes,["programme_name","programme_type","programme_status","firm_quantity","option_quantity","announced_value","currency","announced_date","expected_completion_date"],100)
+                st.dataframe(df,hide_index=True,use_container_width=True,height=300)
+            st.markdown("###### Strategic developments affecting trade / capacity")
+            _render_event_cards(strategic,"trade_strategic",10)
+
+
 def _render_sanctions_home():
     designations=_rows("pc_sanctions_designations",5000)
     cases=_rows("pc_screening_cases",3000)
@@ -1523,6 +1714,9 @@ def _render_home(lens: str):
     st.title(cfg["title"])
     st.markdown(f"<div class='pc-sub'>{cfg['deck']}</div>", unsafe_allow_html=True)
 
+    if lens=="trade":
+        _render_trade_home()
+        return
     if lens=="intelligence":
         _render_intelligence_home()
         return
