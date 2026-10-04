@@ -206,6 +206,25 @@ def require_unambiguous_events(records):
         else: seen[candidate]=p
 
 
+def _payload_source_urls(payload):
+    m=payload.get('metadata') or {}
+    vals=[]
+    for raw in (m.get('research_sources'),m.get('source_urls'),m.get('source_url'),payload.get('source_url')):
+        for x in raw if isinstance(raw,list) else ([raw] if raw else []):
+            u=x.get('url') if isinstance(x,dict) else x
+            if isinstance(u,str) and u.startswith(('http://','https://')):
+                vals.append(u.rstrip('/'))
+    return set(vals)
+
+def _same_event_context(a,b):
+    """Title-independent context check used only with shared source evidence."""
+    return bool(
+        event_day(a.get('start_date')) and
+        event_day(a.get('start_date'))==event_day(b.get('start_date')) and
+        norm(a.get('event_type'))==norm(b.get('event_type')) and
+        norm(a.get('location'))==norm(b.get('location'))
+    )
+
 def bind_existing_events(sb, records):
     """Resolve against stored events using the same conservative event identity.
 
@@ -234,6 +253,24 @@ def bind_existing_events(sb, records):
         exact=[c for c in candidates if key and event_key(c)==key]
         if len(exact)>1:
             raise ValueError('Multiple canonical events share the incident identity; resolve duplicates before enqueue')
+
+        # Fresh reloads of the same article can paraphrase event titles. If the
+        # original source URL, date, event type and location all agree, reuse the
+        # existing canonical event rather than creating a parallel event.
+        if not exact:
+            src=_payload_source_urls(p)
+            source_matches=[]
+            if src:
+                for cand in candidates:
+                    if not _same_event_context(p,cand):
+                        continue
+                    if src & _payload_source_urls(cand):
+                        source_matches.append(cand)
+            if len(source_matches)==1:
+                exact=source_matches
+            elif len(source_matches)>1:
+                raise ValueError('Multiple canonical events share this source/date/type/location; analyst resolution required')
+
         if not exact:
             candidate=event_candidate_key(p)
             possible=[c for c in candidates if candidate and event_candidate_key(c)==candidate]
