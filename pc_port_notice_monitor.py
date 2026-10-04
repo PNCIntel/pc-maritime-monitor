@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import re
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
@@ -94,20 +95,24 @@ def seed_sources(sb):
     return sb.table("pc_maritime_notice_sources").upsert(rows, on_conflict="source_key").execute().data or []
 
 
-def _classify(title: str) -> str:
-    s = (title or "").lower()
+def _classify(text: str) -> str:
+    s = (text or "").lower()
     tests = [
-        ("VESSEL_BAN", ("banning", "banned vessel", "prohibited from", "prohibition of vessel")),
-        ("PORT_ENTRY_RESTRICTION", ("entry restriction", "refusal of access", "port entry", "restricted entry")),
-        ("SANCTIONS_ENFORCEMENT", ("sanction", "ofac", "asset freeze")),
-        ("SECURITY", ("security", "marsec", "terror", "piracy", "armed robbery")),
-        ("NAVIGATION_RESTRICTION", ("navigation", "notice to mariner", "notices to mariners", "obstruction", "closure")),
-        ("INFRASTRUCTURE_OUTAGE", ("bridge", "lock", "outage", "disruption")),
-        ("PILOTAGE", ("pilotage", "pilot service")),
-        ("TARIFF_DUES", ("tariff", "dues", "toll")),
-        ("SAFETY", ("safety", "accident", "hazard")),
-        ("DOCUMENTATION", ("documentation", "certificate", "clearance document")),
-        ("OPERATIONS", ("operation", "booking", "transit", "harbour", "harbor")),
+        ("VESSEL_BAN", ("banning of vessel", "banning of vessels", "banned vessel", "ban imposed on", "prohibit the vessel", "prohibiting the vessel")),
+        ("BAN_LIFTED", ("lifting the ban", "lift the ban", "ban has been lifted", "cancellation of ban")),
+        ("PORT_ENTRY_RESTRICTION", ("entry restriction", "refusal of access", "port entry", "restricted entry", "prohibited from entering")),
+        ("SANCTIONS_ENFORCEMENT", ("sanction", "ofac", "asset freeze", "designated vessel")),
+        ("SECURITY", ("security", "marsec", "terror", "piracy", "armed robbery", "isps")),
+        ("NAVIGATION_RESTRICTION", ("navigation warning", "notice to mariner", "notices to mariners", "obstruction", "channel closure", "navigation restriction")),
+        ("INFRASTRUCTURE_OUTAGE", ("bridge", "lock closure", "outage", "disruption", "dredging", "reclamation")),
+        ("PILOTAGE", ("pilotage", "pilot service", "pilot boarding")),
+        ("TARIFF_DUES", ("tariff", "dues", "toll", "charges")),
+        ("ENVIRONMENTAL", ("oily residue", "oil pollution", "marpol", "waste reception", "ballast water", "pollution")),
+        ("DOCUMENTATION", ("documentation", "certificate", "clearance document", "new forms", "declaration form")),
+        ("VESSEL_REQUIREMENT", ("vessel requirement", "classification society", "p&i club", "insurance requirement", "condition of entry")),
+        ("SAFETY", ("safety", "accident", "hazard", "dangerous goods", "fire")),
+        ("OPERATIONS", ("operation", "booking", "transit", "harbour", "harbor", "anchorage", "berth", "tug")),
+        ("REGULATORY", ("maritime law", "regulation", "circular", "legal requirement")),
     ]
     for category, words in tests:
         if any(w in s for w in words):
@@ -116,15 +121,25 @@ def _classify(title: str) -> str:
 
 
 def _notice_number(title: str):
+    text = " ".join(str(title or "").split())
     patterns = [
-        r"(?i)\b(?:agents?\s+notification|notification|notice|circular|bulletin|advisory|periodical|MSIB|MSOB)\s*(?:no\.?|number|#)?\s*([A-Z]?[- ]?\d{1,3}(?:[-/]\d{2,4})?)",
+        r"(?i)\bNTM\s*(?:NO\.?\s*)?([0-9]{1,4}(?:[-/]\d{2,4})?)\b",
+        r"(?i)\bFMA\s+(?:CIR(?:CULAR)?\.?)\s*(?:NO\.?\s*)?\(?([0-9]{1,3})\)?\s*(?:OF\s*)?([0-9]{4})\b",
+        r"(?i)\b(?:AGENTS?\s+NOTIFICATION|NOTIFICATION)\s*(?:NO\.?|NUMBER|#)?\s*([0-9]{1,3})\s*(?:OF|/|-)\s*([0-9]{4})\b",
+        r"(?i)\b(?:CIRCULAR|BULLETIN|ADVISORY|MSIB|MSOB)\s*(?:NO\.?|NUMBER|#)?\s*\(?([A-Z]?[ -]?[0-9]{1,4}(?:[-/]\d{2,4})?)\)?",
         r"\b([AN]-\d{1,3}-\d{4})\b",
         r"\b(\d{1,3}/\d{4})\b",
     ]
-    for p in patterns:
-        m = re.search(p, title or "")
-        if m:
-            return m.group(1).strip()
+    for idx, p in enumerate(patterns):
+        m = re.search(p, text)
+        if not m:
+            continue
+        if idx == 1 and len(m.groups()) >= 2:
+            return f"FMA-{m.group(1)}-{m.group(2)}"
+        if idx == 2 and len(m.groups()) >= 2:
+            return f"AN-{int(m.group(1)):02d}-{m.group(2)}"
+        value = m.group(1).strip()
+        return ("NTM-" + value) if idx == 0 else value
     return None
 
 
@@ -132,6 +147,100 @@ def _imos(text: str):
     # Discovery-only extraction. Canonical resolution must still validate checksum downstream.
     vals = re.findall(r"(?<!\d)(\d{7})(?!\d)", text or "")
     return sorted(set(vals))
+
+
+def _valid_imo(value: str) -> bool:
+    value = str(value or "").strip()
+    return bool(re.fullmatch(r"\d{7}", value) and
+                sum(int(n) * w for n, w in zip(value[:6], range(7, 1, -1))) % 10 == int(value[-1]))
+
+
+def _extract_valid_imos(text: str):
+    return sorted({v for v in _imos(text) if _valid_imo(v)})
+
+
+def _clean_notice_title(title: str) -> str:
+    return " ".join(str(title or "").split()).strip(" -–—")
+
+
+def _is_junk_candidate(title: str, href: str) -> bool:
+    t = _clean_notice_title(title).casefold()
+    # Generic attachment labels add no intelligence unless their parent notice is fetched.
+    if re.fullmatch(r"attachment\s*\d+", t):
+        return True
+    if t in {"download", "view", "click here", "read more"}:
+        return True
+    return False
+
+
+def _fetch_notice_text(url: str, timeout=45):
+    headers = {"User-Agent": "PowerCorridors-NoticeMonitor/1.1 (+https://www.powerncorridors.com/)"}
+    r = requests.get(url, headers=headers, timeout=timeout)
+    r.raise_for_status()
+    content_type = (r.headers.get("content-type") or "").lower()
+    final_url = r.url
+    data = r.content
+    if "pdf" in content_type or final_url.lower().split("?")[0].endswith(".pdf"):
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(data))
+        parts = [(p.extract_text() or "") for p in reader.pages]
+        text = "\n".join(parts)
+        return {"text": text, "document_url": final_url, "content_type": "application/pdf",
+                "page_count": len(parts), "needs_ocr": len(text.strip()) < 200}
+    soup = BeautifulSoup(r.text, "html.parser")
+    pdfs = []
+    for a in soup.find_all("a", href=True):
+        href = urljoin(final_url, a["href"])
+        label = " ".join(a.get_text(" ", strip=True).split())
+        if href.lower().split("?")[0].endswith(".pdf"):
+            pdfs.append((label, href))
+    text = soup.get_text("\n", strip=True)
+    # Prefer an obvious notice/circular PDF when the index points to an HTML detail page.
+    if len(pdfs) == 1:
+        child = _fetch_notice_text(pdfs[0][1], timeout=timeout)
+        child["html_page_url"] = final_url
+        return child
+    return {"text": text, "document_url": None, "content_type": content_type or "text/html",
+            "page_count": None, "needs_ocr": False, "pdf_candidates": [x[1] for x in pdfs[:10]]}
+
+
+def enrich_notice(sb, notice: dict):
+    fetched = _fetch_notice_text(notice["source_page_url"])
+    text = fetched.get("text") or ""
+    title = notice.get("title") or ""
+    number = notice.get("notice_number") or _notice_number(title) or _notice_number(text[:6000])
+    category = _classify(title + "\n" + text[:12000])
+    imos = _extract_valid_imos(text)
+    status = "NEEDS_OCR" if fetched.get("needs_ocr") else "EXTRACTED"
+    low = text.casefold()
+    temporal = None
+    if any(x in low for x in ("lifting the ban", "ban has been lifted", "lift the ban")):
+        temporal = "LIFTED"
+    elif any(x in low for x in ("cancelled", "canceled", "hereby cancelled", "superseded", "replaced by")):
+        temporal = "SUPERSEDED_OR_CANCELLED"
+    metadata = dict(notice.get("metadata") or {})
+    metadata["document_fetch"] = {
+        "content_type": fetched.get("content_type"),
+        "page_count": fetched.get("page_count"),
+        "needs_ocr": bool(fetched.get("needs_ocr")),
+        "pdf_candidates": fetched.get("pdf_candidates") or [],
+        "processed_at": datetime.now(timezone.utc).isoformat(),
+        "temporal_signal": temporal,
+    }
+    update = {
+        "notice_number": number,
+        "notice_category": category,
+        "status": status,
+        "document_url": fetched.get("document_url") or notice.get("document_url"),
+        "extracted_imo_numbers": imos,
+        "raw_excerpt": text[:12000] or notice.get("raw_excerpt"),
+        "metadata": metadata,
+        "last_seen_at": datetime.now(timezone.utc).isoformat(),
+    }
+    sb.table("pc_maritime_notices").update(update).eq("notice_id", notice["notice_id"]).execute()
+    return {"title": title, "number": number, "category": category, "imos": len(imos),
+            "status": status, "document_url": update["document_url"]}
+
 
 
 def _candidate_key(url: str, title: str) -> str:
@@ -151,6 +260,8 @@ def discover_index(source: dict, timeout=35):
         href = urljoin(source["source_url"], a.get("href", "").strip())
         if not title or len(title) < 8 or href.startswith(("mailto:", "javascript:")):
             continue
+        if _is_junk_candidate(title, href):
+            continue
         low = (title + " " + href).lower()
         if any(x in low for x in IGNORE_HINTS):
             continue
@@ -168,7 +279,7 @@ def discover_index(source: dict, timeout=35):
         out.append({
             "source_notice_key": _candidate_key(href, title),
             "notice_number": _notice_number(title),
-            "title": title[:1000],
+            "title": _clean_notice_title(title)[:1000],
             "notice_category": _classify(title),
             "status": "DISCOVERED",
             "jurisdiction": source.get("country_name"),
@@ -254,18 +365,64 @@ def render_port_notice_monitor(sb):
         st.success(f"Check complete: {int(rdf['new'].sum()) if not rdf.empty else 0} new notice candidates.")
         st.rerun()
 
-    st.subheader("Recent discoveries")
-    notices = (sb.table("pc_maritime_notices")
-               .select("notice_id,source_id,notice_number,title,notice_category,status,jurisdiction,port_name,source_page_url,document_url,extracted_imo_numbers,discovered_at,last_seen_at")
-               .order("discovered_at", desc=True).limit(250).execute().data or [])
-    if not notices:
+    st.subheader("Notice processing")
+    all_notices = (sb.table("pc_maritime_notices")
+               .select("notice_id,source_id,notice_number,title,notice_category,status,jurisdiction,port_name,source_page_url,document_url,extracted_imo_numbers,metadata,discovered_at,last_seen_at")
+               .order("discovered_at", desc=True).limit(1000).execute().data or [])
+    if not all_notices:
         st.info("No notices discovered yet. Select sources above and run a check.")
         return
-    ndf = pd.DataFrame(notices)
-    source_names = {s["source_id"]: s["source_name"] for s in sources}
-    ndf.insert(1, "source", ndf["source_id"].map(source_names))
-    display_cols = [c for c in ["discovered_at","source","notice_number","title","notice_category","status","jurisdiction","port_name","extracted_imo_numbers","source_page_url"] if c in ndf.columns]
-    st.dataframe(ndf[display_cols], use_container_width=True, hide_index=True,
-                 column_config={"source_page_url": st.column_config.LinkColumn("Official source")})
 
-    st.caption("Next layer: document download/storage, full-text extraction, supersession detection and canonical IMO/company/port linking. The schema already preserves those fields so the collector can extend without another data-model reset.")
+    source_names = {s["source_id"]: s["source_name"] for s in sources}
+    total = len(all_notices)
+    extracted = sum(1 for n in all_notices if n.get("status") == "EXTRACTED")
+    needs_ocr = sum(1 for n in all_notices if n.get("status") == "NEEDS_OCR")
+    with_imos = sum(1 for n in all_notices if n.get("extracted_imo_numbers"))
+    other = sum(1 for n in all_notices if n.get("notice_category") == "OTHER")
+    a,b,c1,d,e = st.columns(5)
+    a.metric("Notices", total)
+    b.metric("Processed", extracted)
+    c1.metric("Needs OCR", needs_ocr)
+    d.metric("With IMOs", with_imos)
+    e.metric("Unclassified", other)
+
+    st.caption("Discovery finds the official notice. Processing opens the notice/PDF, extracts text and valid IMOs, improves classification and flags documents needing OCR.")
+    processable = [n for n in all_notices if n.get("status") in ("DISCOVERED","NEEDS_OCR")]
+    proc_labels = {n["notice_id"]: f'{source_names.get(n["source_id"], "")} · {n.get("title")}' for n in processable}
+    default_ids = list(proc_labels)[:20]
+    selected_notices = st.multiselect("Notices to process", options=list(proc_labels),
+                                      default=default_ids, format_func=lambda x: proc_labels[x],
+                                      max_selections=50)
+    if st.button("Process selected notices", type="primary", disabled=not selected_notices):
+        progress = st.progress(0.0)
+        results=[]
+        rows={n["notice_id"]:n for n in processable}
+        for i,nid in enumerate(selected_notices,1):
+            try:
+                results.append(enrich_notice(sb, rows[nid]))
+            except Exception as exc:
+                results.append({"title": rows[nid].get("title"), "status": "ERROR", "error": str(exc)[:300]})
+            progress.progress(i/max(len(selected_notices),1))
+        st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+        st.rerun()
+
+    st.subheader("Recent discoveries")
+    status_filter = st.multiselect("Status", sorted({str(n.get("status") or "") for n in all_notices}),
+                                   default=[])
+    cat_filter = st.multiselect("Category", sorted({str(n.get("notice_category") or "") for n in all_notices}),
+                                default=[])
+    filtered = [n for n in all_notices
+                if (not status_filter or n.get("status") in status_filter)
+                and (not cat_filter or n.get("notice_category") in cat_filter)]
+    ndf = pd.DataFrame(filtered[:500])
+    ndf.insert(1, "source", ndf["source_id"].map(source_names))
+    ndf["imo_count"] = ndf["extracted_imo_numbers"].apply(lambda x: len(x or []))
+    display_cols = [c for c in ["discovered_at","source","notice_number","title","notice_category","status","jurisdiction","port_name","imo_count","source_page_url","document_url"] if c in ndf.columns]
+    st.dataframe(ndf[display_cols], use_container_width=True, hide_index=True,
+                 column_config={
+                     "source_page_url": st.column_config.LinkColumn("Official source"),
+                     "document_url": st.column_config.LinkColumn("Document"),
+                 })
+
+    st.caption("Next: promote processed notices into pc_documents and resolve IMO/company/port links only after the source document is successfully extracted.")
+
