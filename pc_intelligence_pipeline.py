@@ -395,13 +395,31 @@ def render_intelligence_pipeline(sb, job, reviewer='DCM'):
                 st.warning('Population pass completed with held items. Published records are available; held identities/evidence remain for analyst review.')
             else:
                 st.success('Population pass completed with no reported core or connected holds.')
-            a,b,c,d=st.columns(4)
-            a.metric('Published stages',report.get('published_stage_count',0))
-            b.metric('Core exceptions',report.get('remaining_exception_count',0))
+            core_count=int(report.get('remaining_exception_count') or 0)
+            a,b,c=st.columns(3)
+            a.metric('Published',report.get('published_stage_count',0))
+            b.metric('Needs analyst review',core_count)
             c.metric('Publication failures',len(report.get('publication_failures') or []))
-            d.metric('Connected holds',holds)
-            if report.get('source_results'):
-                with st.expander('Results by input source',expanded=True):
+
+            if core_count:
+                st.info(
+                    f"Next step: review {core_count} blocking identity decision(s). "
+                    "Downstream relationship holds will be retried after those core decisions are resolved."
+                )
+                if st.button(f'Review {core_count} blocking exceptions',type='primary',
+                             key='pc_v20_open_workbench_'+str(job),use_container_width=True):
+                    st.session_state['pc_exception_job_filter']=str(job)
+                    st.session_state['pc_exception_core_only']=True
+                    st.session_state['pc_workspace_simple_v18']='Analyst workbench'
+                    st.rerun()
+            elif holds:
+                st.info('Core publication is clear. Remaining connected holds are downstream enrichment review, not blocking core records.')
+            else:
+                st.success('This load is complete.')
+
+            with st.expander('Load diagnostics',expanded=False):
+                st.caption(f'Connected/downstream holds: {holds}')
+                if report.get('source_results'):
                     st.dataframe(report['source_results'],hide_index=True,use_container_width=True)
             if report.get('retained_research_holds'):
                 with st.expander('Research holds retained after identity-only matching'):
