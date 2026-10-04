@@ -2239,6 +2239,51 @@ def _terminal_self_check() -> list[str]:
     return missing
 
 
+def _style(theme: str):
+    if theme == "Light":
+        p = "--bg:#f4f7fb;--panel:#ffffff;--panel2:#f7f9fc;--line:#dfe6ef;--text:#10213a;--muted:#718096;--gold:#9b7a2c;--blue:#2563eb;--red:#d94841;--green:#149563;--orange:#e58a16;--purple:#7057d9"
+    else:
+        p = "--bg:#08111e;--panel:#101a29;--panel2:#0c1522;--line:#26364a;--text:#eef4fb;--muted:#9aabc0;--gold:#d0ad59;--blue:#6ea0ff;--red:#df7770;--green:#66b98c;--orange:#eba34b;--purple:#a994ff"
+    st.markdown(f"""
+    <style>
+    :root{{{p}}}
+    .stApp{{background:var(--bg);color:var(--text)}}
+    [data-testid="stSidebar"]{{background:var(--panel2)!important;border-right:1px solid var(--line);min-width:225px!important}}
+    [data-testid="stSidebar"] *{{color:var(--text)!important}}
+    .block-container{{max-width:1540px;padding-top:.65rem;padding-bottom:2.5rem}}
+    h1{{font-size:2.15rem!important;letter-spacing:-.035em;margin-bottom:.15rem!important}}
+    h2{{font-size:1.35rem!important;letter-spacing:-.02em}}
+    h3{{font-size:1.05rem!important}}
+    h1,h2,h3,h4,p,label,span,li{{color:var(--text)!important}}
+    .pc-k{{color:var(--gold);font-size:.66rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase}}
+    .pc-sub{{color:var(--muted);font-size:.91rem;margin-bottom:.45rem}}
+    .pc-command{{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:.55rem .8rem;margin:.15rem 0 .8rem;box-shadow:0 1px 3px rgba(18,38,63,.03)}}
+    .pc-context{{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:9px;padding:.85rem 1rem;margin:.4rem 0 .8rem}}
+    .pc-card{{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:.8rem .9rem;min-height:110px;box-shadow:0 1px 4px rgba(18,38,63,.035)}}
+    .pc-panel-title{{font-size:1.03rem;font-weight:750;margin-bottom:.05rem}}
+    .pc-panel-sub{{color:var(--muted);font-size:.76rem;margin-bottom:.45rem}}
+    .pc-row{{display:flex;justify-content:space-between;gap:.8rem;padding:.48rem .1rem;border-bottom:1px solid var(--line);font-size:.84rem}}
+    .pc-row:last-child{{border-bottom:none}}
+    .pc-row-label{{font-weight:650}}
+    .pc-row-meta{{color:var(--muted);white-space:nowrap}}
+    .pc-tag{{display:inline-block;border-radius:999px;padding:.18rem .46rem;font-size:.68rem;font-weight:700;background:var(--panel2);border:1px solid var(--line);margin-right:.25rem}}
+    .pc-muted{{color:var(--muted);font-size:.8rem}}
+    [data-testid="stMetric"]{{background:var(--panel);border:1px solid var(--line);padding:.7rem .8rem;border-radius:9px;box-shadow:0 1px 4px rgba(18,38,63,.035);min-height:92px}}
+    [data-testid="stMetric"] label{{font-size:.75rem!important;color:var(--muted)!important}}
+    [data-testid="stMetricValue"]{{font-size:1.65rem!important;font-weight:760!important}}
+    [data-testid="stDataFrame"]{{border:1px solid var(--line);border-radius:8px;overflow:hidden}}
+    [data-testid="stExpander"]{{background:var(--panel);border:1px solid var(--line);border-radius:8px}}
+    [data-testid="stVerticalBlockBorderWrapper"]{{background:var(--panel);border-color:var(--line)!important;border-radius:9px!important;box-shadow:0 1px 4px rgba(18,38,63,.03)}}
+    div.stButton>button{{border:1px solid #b8a16b;color:var(--text);background:var(--panel);border-radius:7px;min-height:2.25rem}}
+    div.stButton>button:hover{{border-color:var(--blue);color:var(--blue)}}
+    [data-baseweb="input"]>div,[data-baseweb="select"]>div,input{{background:var(--panel)!important;color:var(--text)!important}}
+    hr{{border-color:var(--line)!important}}
+    </style>
+    """, unsafe_allow_html=True)
+
+
+
+
 def render_terminal(lens: str = "trade"):
     lens = lens if lens in LENS else "trade"
     cfg = LENS[lens]
