@@ -193,7 +193,7 @@ if _requested_workspace:
 
 mode = st.sidebar.radio(
     'Workspace',
-    ['Load intelligence', 'Analyst workbench', 'Research company', 'Load documents', 'Review exceptions', 'Jobs & history', 'Search / database'],
+    ['Load intelligence', 'Analyst workbench', 'Database hygiene', 'Research company', 'Load documents', 'Review exceptions', 'Jobs & history', 'Search / database'],
     index=0,
     key='pc_workspace_simple_v18',
 )
@@ -201,6 +201,10 @@ st.sidebar.caption('Simple operator view · research, resolve and publish agains
 if mode == 'Analyst workbench':
     from pc_exception_workbench import render_exception_workbench
     render_exception_workbench(sb, ADMIN_CTX)
+    st.stop()
+if mode == 'Database hygiene':
+    from pc_database_hygiene import render_database_hygiene
+    render_database_hygiene(sb)
     st.stop()
 if mode == 'Research company':
     from pc_connected_research import render_company_research
