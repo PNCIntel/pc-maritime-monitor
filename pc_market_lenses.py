@@ -260,32 +260,41 @@ def _render_security_lens(oid: str, rec: dict):
 
 
 def _render_cross_market_infrastructure(oid: str, rec: dict, lens: str):
+    """Render exactly one market lens per rerun.
+
+    Streamlit st.tabs executes every tab body on every rerun.  That made a port such
+    as Antwerp prepare Commercial + Strategic + Sanctions + Security before showing
+    the selected tab.  A segmented control keeps the same UX but only executes the
+    selected market query/render path.
+    """
     if lens == "trade":
-        commercial, strategic, sanctions, security = st.tabs([
-            "Commercial", "Strategic Industry", "Sanctions", "Security & Disruptions"
-        ])
-        with commercial:
-            _ORIGINAL_INFRASTRUCTURE_TERMINAL(oid, rec, lens)
-        with strategic:
+        labels = ["Commercial", "Strategic Industry", "Sanctions", "Security & Disruptions"]
+        key = f"pc_trade_market_lens_{oid}"
+        selected = st.segmented_control("Market lens", labels, default="Commercial",
+                                        key=key, label_visibility="collapsed")
+        if selected == "Strategic Industry":
             _render_strategic_lens(oid, rec)
-        with sanctions:
+        elif selected == "Sanctions":
             _render_sanctions_lens(oid, rec)
-        with security:
+        elif selected == "Security & Disruptions":
             _render_security_lens(oid, rec)
+        else:
+            _ORIGINAL_INFRASTRUCTURE_TERMINAL(oid, rec, "trade")
         return
 
     if lens == "strategic":
-        strategic, commercial, security, sanctions = st.tabs([
-            "Strategic Industry", "Commercial Context", "Security & Disruptions", "Sanctions"
-        ])
-        with strategic:
-            _render_strategic_lens(oid, rec)
-        with commercial:
+        labels = ["Strategic Industry", "Commercial Context", "Security & Disruptions", "Sanctions"]
+        key = f"pc_strategic_market_lens_{oid}"
+        selected = st.segmented_control("Market lens", labels, default="Strategic Industry",
+                                        key=key, label_visibility="collapsed")
+        if selected == "Commercial Context":
             _ORIGINAL_INFRASTRUCTURE_TERMINAL(oid, rec, "trade")
-        with security:
+        elif selected == "Security & Disruptions":
             _render_security_lens(oid, rec)
-        with sanctions:
+        elif selected == "Sanctions":
             _render_sanctions_lens(oid, rec)
+        else:
+            _render_strategic_lens(oid, rec)
         return
 
     _ORIGINAL_INFRASTRUCTURE_TERMINAL(oid, rec, lens)
