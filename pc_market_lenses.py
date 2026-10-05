@@ -291,6 +291,11 @@ def _render_cross_market_infrastructure(oid: str, rec: dict, lens: str):
     _ORIGINAL_INFRASTRUCTURE_TERMINAL(oid, rec, lens)
 
 
+def render_infrastructure_market_lenses(oid: str, rec: dict, lens: str):
+    """Public shared dossier entry used by pc_terminal for Trade/Strategic assets."""
+    return _render_cross_market_infrastructure(oid, rec, lens)
+
+
 def render_market_terminal(lens: str = "trade"):
     """Render the shared terminal with cross-market infrastructure lenses.
 
