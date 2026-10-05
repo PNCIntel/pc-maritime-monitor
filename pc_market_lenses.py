@@ -24,12 +24,19 @@ def _clean(v: Any) -> str:
     return core._clean(v)
 
 
-def _scope(oid: str, rec: dict) -> tuple[set[str], list[dict]]:
-    local = core._local_infrastructure(rec)
-    ids = {str(oid)}
-    ids.update(_clean(x.get("id")) for x in local if x.get("id"))
-    return ids, local
+def _dossier(oid: str) -> dict:
+    try:
+        return core._asset_dossier_rpc(str(oid)) or {}
+    except Exception:
+        return {}
 
+
+def _scope(oid: str, rec: dict, dossier: dict | None = None) -> tuple[set[str], list[dict]]:
+    dossier=dossier or _dossier(oid)
+    local=core._dossier_local(dossier) if dossier else core._local_infrastructure(rec)
+    ids={str(oid)}
+    ids.update(_clean(x.get("id")) for x in local if x.get("id"))
+    return ids,local
 
 def _rows_for_scope(table: str, columns: tuple[str, ...], ids: set[str], limit: int = 3000) -> list[dict]:
     out, seen = [], set()
@@ -58,28 +65,31 @@ def _source_button(row: dict, key: str):
 
 
 def _render_strategic_lens(oid: str, rec: dict):
-    ids, local = _scope(oid, rec)
-    shipyards = _rows_for_scope("pc_shipyard_details", ("asset_id",), ids)
+    dossier=_dossier(oid)
+    ids, local = _scope(oid, rec, dossier)
+    shipyards=list(dossier.get("shipyards") or []) if dossier else _rows_for_scope("pc_shipyard_details", ("asset_id",), ids)
     capacity = _rows_for_scope("pc_shipyard_capacity_history", ("shipyard_asset_id",), ids)
-    participants = _rows_for_scope("pc_defence_programme_participants", ("shipyard_asset_id",), ids)
+    participants=list(dossier.get("programme_participants") or []) if dossier else _rows_for_scope("pc_defence_programme_participants", ("shipyard_asset_id",), ids)
 
     programme_ids = {_clean(x.get("defence_programme_id")) for x in participants if x.get("defence_programme_id")}
-    programmes = []
-    for pid in sorted(programme_ids):
-        programmes += core._filtered_rows("pc_defence_programmes", "defence_programme_id", pid, 5)
+    programmes=list(dossier.get("programmes") or []) if dossier else []
+    if not dossier:
+        for pid in sorted(programme_ids):
+            programmes += core._filtered_rows("pc_defence_programmes", "defence_programme_id", pid, 5)
 
-    # Programme/customer/contract records can also resolve by connected companies and names.
-    companies = core._asset_companies(rec)
-    entity_ids = {_clean(x.get("id")) for x in companies if x.get("id")}
-    for item in local:
-        arec = core.object_record("asset", item.get("id")) or {}
-        for x in core._asset_companies(arec):
-            if x.get("id"):
-                entity_ids.add(_clean(x.get("id")))
-    for eid in sorted(entity_ids):
-        programmes += core._filtered_rows("pc_defence_programmes", "lead_contractor_entity_id", eid, 100)
-        programmes += core._filtered_rows("pc_defence_programmes", "customer_entity_id", eid, 100)
-        participants += core._filtered_rows("pc_defence_programme_participants", "entity_id", eid, 200)
+    # RPC already resolves ecosystem entities -> strategic programmes/participants.
+    entity_ids={_clean(e.get("entity_id")) for e in (dossier.get("entities") or []) if e.get("entity_id")} if dossier else set()
+    if not dossier:
+        companies=core._asset_companies(rec)
+        entity_ids={_clean(x.get("id")) for x in companies if x.get("id")}
+        for item in local:
+            arec=core.object_record("asset",item.get("id")) or {}
+            for x in core._asset_companies(arec):
+                if x.get("id"): entity_ids.add(_clean(x.get("id")))
+        for eid in sorted(entity_ids):
+            programmes += core._filtered_rows("pc_defence_programmes","lead_contractor_entity_id",eid,100)
+            programmes += core._filtered_rows("pc_defence_programmes","customer_entity_id",eid,100)
+            participants += core._filtered_rows("pc_defence_programme_participants","entity_id",eid,200)
 
     # De-duplicate programmes.
     pseen, pdedup = set(), []
@@ -89,15 +99,16 @@ def _render_strategic_lens(oid: str, rec: dict):
             pseen.add(k); pdedup.append(p)
     programmes = pdedup
 
-    contracts = []
-    for p in programmes:
+    contracts=list(dossier.get("contracts") or []) if dossier else []
+    for p in ([] if dossier else programmes):
         cid = _clean(p.get("contract_id"))
         if cid:
             contracts += core._filtered_rows("pc_contracts", "contract_id", cid, 5)
-    for eid in sorted(entity_ids):
-        contracts += core._related_table("pc_contracts", eid, core._object_name("entity", eid), 100)
+    if not dossier:
+        for eid in sorted(entity_ids):
+            contracts += core._related_table("pc_contracts", eid, core._object_name("entity", eid), 100)
 
-    projects = core._infrastructure_projects(oid, local)
+    projects=list(dossier.get("projects") or []) if dossier else core._infrastructure_projects(oid, local)
 
     st.markdown("### Strategic Industry")
     st.caption("Defence, shipbuilding, naval/coast-guard infrastructure, programmes, contracts, suppliers and industrial capacity connected to this same canonical ecosystem.")
