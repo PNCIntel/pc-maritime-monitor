@@ -1053,30 +1053,29 @@ def _render_event_system_map(rec: dict, oid: str):
 def _render_map_for_asset(rec: dict):
     pts = []
     def add(r, label):
-        try:
-            lat = float(r.get("latitude"))
-            lon = float(r.get("longitude"))
-            if -90 <= lat <= 90 and -180 <= lon <= 180:
-                pts.append({"lat": lat, "lon": lon, "name": label})
-        except Exception:
-            pass
+        point=_coords_from_record(r)
+        if point:
+            evidence=_meta(r).get("spatial_evidence") or {}
+            precision=evidence.get("precision") if evidence.get("applied") else "stored coordinate"
+            pts.append({"lat":point[0],"lon":point[1],"name":label,"precision":precision})
     add(rec, _clean(rec.get("name")))
-    country = _clean(rec.get("country"))
-    region = _clean(rec.get("region_city"))
-    for r in _rows("pc_assets", 4000):
-        if _clean(r.get("asset_id")) == _clean(rec.get("asset_id")):
-            continue
-        if country and _clean(r.get("country")).casefold() != country.casefold():
-            continue
-        if region and _clean(r.get("region_city")) and _clean(r.get("region_city")).casefold() != region.casefold():
-            continue
-        add(r, _clean(r.get("name")))
-        if len(pts) >= 40:
-            break
+    connected=_local_infrastructure(rec)
+    for item in connected:
+        r=object_record("asset",item["id"]) or {}
+        add(r,_clean(r.get("name")) or item["name"])
     if pts:
         st.map(pd.DataFrame(pts), latitude="lat", longitude="lon", size=40, zoom=None)
+        st.caption(f"{len(pts)} mapped locations in the connected system. Address points locate buildings or entrances; they do not define facility boundaries.")
+        with st.expander("Mapped locations & precision"):
+            st.dataframe(pd.DataFrame(pts).rename(columns={"name":"Location","precision":"Precision","lat":"Latitude","lon":"Longitude"}),hide_index=True,use_container_width=True)
+        if not _coords_from_record(rec):
+            st.caption("The selected asset has no stored coordinate; the map shows its connected locations.")
     else:
         st.caption("No canonical coordinates are currently stored for this node or its local connected assets.")
+    from urllib.parse import quote
+    query=" ".join(_clean(rec.get(k)) for k in ("name","region_city","country") if rec.get(k))
+    if query:
+        st.link_button("Find this location on a map","https://www.google.com/maps/search/?api=1&query="+quote(query))
 
 
 def _render_context_header(typ: str, oid: str, rec: dict, lens: str):
@@ -2400,6 +2399,11 @@ def _event_source_urls(row: dict) -> list[str]:
         add(row.get(key))
 
     meta=_meta(row)
+    for namespace in ("rotterdam_history", "rotterdam_company_depth"):
+        annotation=meta.get(namespace) or {}
+        if isinstance(annotation,dict):
+            evidence=annotation.get("evidence") or {}
+            if isinstance(evidence,dict): add(evidence.get("url"))
     for key in (
         "source_url","url","article_url","reference_url","original_url",
         "publication_url","document_url","evidence_url","source_link"
@@ -3666,6 +3670,57 @@ def _asset_fact_pairs(rec: dict) -> list[tuple[str,str]]:
     return [(k,_clean(v)) for k,v in fields if v not in (None,"",[],{})]
 
 
+def _facility_fact_rows(rec: dict) -> list[dict]:
+    """Expose dated source observations without treating proposals as operating capacity."""
+    depth=_meta(rec).get("rotterdam_company_depth") or {}
+    out=[]
+    if not isinstance(depth,dict): return out
+    def flatten(value, prefix=""):
+        if isinstance(value,dict):
+            return [pair for key,item in value.items() for pair in flatten(item,(prefix+" / " if prefix else "")+key.replace("_"," "))]
+        if isinstance(value,list):
+            if all(not isinstance(x,(dict,list)) for x in value):
+                return [(prefix,", ".join(_clean(x) for x in value))]
+            return [pair for i,item in enumerate(value,1) for pair in flatten(item,f"{prefix} {i}")]
+        return [(prefix,_clean(value))] if value is not None else []
+    for observation in depth.get("observations") or []:
+        if not isinstance(observation,dict): continue
+        for label,value in flatten({k:v for k,v in observation.items() if k not in {"source_key","source_url","checked_on"}}):
+            out.append({"Observation":label.capitalize(),"Reported value":value,
+                        "Checked":observation.get("checked_on") or depth.get("checked_on"),
+                        "Source":observation.get("source_url") or ""})
+    return out
+
+
+def _render_infrastructure_history(oid: str, rec: dict, events: list[dict]):
+    st.markdown("### History & Throughput")
+    observations=(_meta(rec).get("rotterdam_history") or {}).get("annual_observations") or []
+    if observations:
+        st.caption("Throughput is measured cargo, not terminal capacity. Full-year and half-year periods are labelled separately.")
+        st.dataframe([{"Period":str(x.get("period_start",""))+" – "+str(x.get("period_end","")),
+                       "Coverage":_clean(x.get("period_kind")).replace("_"," "),
+                       "Cargo (million tonnes)":x.get("total_cargo_million_tonnes"),
+                       "Change (%)":x.get("yoy_percent"),"Reported":x.get("report_date"),
+                       "Source":x.get("source_url")} for x in observations],hide_index=True,use_container_width=True)
+    if not events:
+        st.caption("No linked history recorded yet.")
+        return
+    years=sorted({_clean(e.get("start_date"))[:4] for e in events if e.get("start_date")},reverse=True)
+    year=st.selectbox("History year",["All years"]+years,key="infra_history_year_"+_norm(oid))
+    selected=[e for e in events if year=="All years" or _clean(e.get("start_date")).startswith(year)]
+    st.caption(f"{len(selected)} linked developments · newest first")
+    for i,e in enumerate(selected):
+        annotation=_meta(e).get("rotterdam_history") or {}
+        with st.expander(_clean(e.get("start_date"))[:10]+" · "+(_clean(e.get("title")) or "Development")):
+            facts=annotation.get("description") or e.get("description")
+            if facts: st.write(facts)
+            analysis=annotation.get("analysis") or e.get("commercial_impact") or e.get("operational_impact")
+            if analysis:
+                st.caption("Analyst implication")
+                st.write(analysis)
+            _render_event_rows([e],f"infra_history_{_norm(oid)}_{i}",1)
+
+
 def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("asset",oid)
     companies=_asset_companies(rec)
@@ -3751,6 +3806,9 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     with low1:
         with st.container(border=True):
             st.markdown("### Capacity, Projects & Investment")
+            facts=_facility_fact_rows(rec)
+            if facts:
+                st.dataframe(facts,hide_index=True,use_container_width=True)
             if projects:
                 for p in projects[:12]:
                     title=_company_display_value(p.get("project_name"),p.get("name"),p.get("title"),p.get("description"))
@@ -3760,7 +3818,7 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
                     st.markdown(f"**{title or 'Project'}**")
                     bits=[x for x in [status,(currency+' '+value).strip() if value else ""] if x]
                     if bits: st.caption(" · ".join(bits))
-            else:
+            elif not facts:
                 st.caption("No structured projects or investment records linked yet.")
 
     with low2:
@@ -3785,11 +3843,20 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
         else:
             st.caption("No linked documents recorded yet.")
 
-    st.markdown("### Operational Timeline")
-    if events:
-        _render_event_rows(events,"infra_timeline_"+_norm(oid),15)
-    else:
-        st.caption("No linked chronological developments yet.")
+    with st.container(border=True):
+        _render_infrastructure_history(oid,rec,events)
+
+    if local:
+        with st.expander("Facility capacity, investment & operating details"):
+            stored=0
+            for item in local:
+                facility=object_record("asset",item["id"]) or {}
+                facts=_facility_fact_rows(facility)
+                if facts:
+                    stored+=1
+                    st.markdown("#### "+(_clean(facility.get("name")) or item["name"]))
+                    st.dataframe(facts,hide_index=True,use_container_width=True)
+            if not stored: st.caption("No sourced facility observations recorded for connected infrastructure yet.")
 
     with st.expander("Structured data / developer view"):
         st.json(rec)
@@ -4177,6 +4244,3 @@ def render_terminal(lens: str = "trade"):
     with st.expander("Developer / raw canonical record"):
         st.caption("Internal diagnostic view. Normal analyst workflow should not require raw IDs or JSON.")
         st.json(rec)
-
-
-
