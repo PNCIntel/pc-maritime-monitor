@@ -44,4 +44,29 @@ class InfrastructureRoutes(unittest.TestCase):
         ns={'_sb':lambda:Query()};exec(compile(ast.Module(body=[function],type_ignores=[]),'terminal','exec'),ns)
         self.assertEqual(len(ns['_rows_matching_ids']('table','column',('port',))),1201)
 
+    def test_local_infrastructure_recurses_containment_but_not_remote_lateral_networks(self):
+        tree=ast.parse(Path(__file__).with_name('pc_terminal.py').read_text())
+        function=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_local_infrastructure')
+        function.decorator_list=[]
+        tables={
+            'pc_relationships':[
+                self.edge('complex','located_in','port'),
+                self.edge('zone','part_of','complex'),
+                self.edge('terminal','located_in','zone'),
+                self.edge('railnet','connected_to','terminal'),
+                self.edge('remote','connected_to','railnet'),
+            ]
+        }
+        ns={
+            '_clean':lambda v:'' if v is None else str(v),
+            '_norm':lambda v:' '.join(re.findall('[a-z0-9]+',str(v).lower())),
+            '_rows_matching_ids':lambda table,col,values:[r for r in tables.get(table,[]) if r.get(col) in values],
+            'object_record':lambda typ,oid:{'asset_id':oid,'name':oid,'asset_type':'terminal','subtype':'','region_city':'x','country':'y'},
+        }
+        exec(compile(ast.Module(body=[function],type_ignores=[]),'terminal','exec'),ns)
+        rows=ns['_local_infrastructure']({'asset_id':'port'})
+        ids={r['id'] for r in rows}
+        self.assertTrue({'complex','zone','terminal','railnet'} <= ids)
+        self.assertNotIn('remote',ids)
+
 if __name__=='__main__':unittest.main()
