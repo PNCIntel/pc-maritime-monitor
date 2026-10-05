@@ -249,21 +249,293 @@ def _graph_neighborhood(typ: str, oid: str, depth: int=2, max_nodes: int=500) ->
 
 
 def _entity_graph_neighborhood(entity_id: str, depth: int=2) -> dict:
-    """Walk the relationship graph for all canonical identities of one entity."""
+    """Canonical entity graph built from live relationship tables first.
+
+    pc_terminal_link_index remains an accelerator, but canonical relationship tables
+    are the source of truth so a stale/incomplete terminal index cannot make a company
+    appear empty.
+    """
     bundle=_entity_identity_bundle(str(entity_id))
+    entity_ids=bundle.get("ids") or [str(entity_id)]
+
     nodes={}
     edges=[]
     seen_edges=set()
-    for eid in bundle.get("ids") or [str(entity_id)]:
-        g=_graph_neighborhood("entity",eid,depth=depth,max_nodes=500)
-        for n in g["nodes"]:
-            nodes[(n["type"],n["id"])]=n
-        for e in g["edges"]:
-            k=(e["source_type"],e["source_id"],e["relationship"],e["target_type"],e["target_id"],e["source_table"],e["source_record_id"])
-            if k not in seen_edges:
-                seen_edges.add(k)
-                edges.append(e)
+
+    def add_node(typ: str, oid: str, name: str=""):
+        typ=_clean(typ).casefold()
+        if typ=="vessel": typ="mobile_asset"
+        oid=_clean(oid)
+        if not typ or not oid:
+            return
+        key=(typ,oid)
+        if key not in nodes:
+            nm=_clean(name)
+            if not nm:
+                try:
+                    nm=_object_name(typ,oid) if typ in OBJECTS or typ=="corridor" else oid
+                except Exception:
+                    nm=oid
+            nodes[key]={"type":typ,"id":oid,"name":nm or oid}
+
+    def add_edge(source_type,source_id,target_type,target_id,relationship,
+                 family="",source_table="",source_record_id="",event_id="",
+                 confidence="",evidence_url="",metadata=None):
+        styp=_clean(source_type).casefold()
+        ttyp=_clean(target_type).casefold()
+        if styp=="vessel": styp="mobile_asset"
+        if ttyp=="vessel": ttyp="mobile_asset"
+        sid=_clean(source_id); tid=_clean(target_id)
+        if not styp or not ttyp or not sid or not tid:
+            return
+        rel=_clean(relationship) or "related_to"
+        key=(styp,sid,rel,ttyp,tid,_clean(source_table),_clean(source_record_id))
+        if key in seen_edges:
+            return
+        seen_edges.add(key)
+        add_node(styp,sid)
+        add_node(ttyp,tid)
+        edges.append({
+            "source_type":styp,"source_id":sid,
+            "source_name":nodes.get((styp,sid),{}).get("name",""),
+            "target_type":ttyp,"target_id":tid,
+            "target_name":nodes.get((ttyp,tid),{}).get("name",""),
+            "relationship":rel,
+            "family":_clean(family),
+            "source_table":_clean(source_table),
+            "source_record_id":_clean(source_record_id),
+            "event_id":_clean(event_id),
+            "confidence":_clean(confidence),
+            "evidence_url":_clean(evidence_url),
+            "metadata":metadata or {},
+        })
+
+    for eid in entity_ids:
+        add_node("entity",eid,_object_name("entity",eid))
+
+    # 1) Generic canonical graph edges.
+    for eid in entity_ids:
+        for side in ("source","target"):
+            for r in _filtered_rows("pc_relationships",f"{side}_id",eid,1000):
+                add_edge(
+                    r.get("source_type"),r.get("source_id"),
+                    r.get("target_type"),r.get("target_id"),
+                    r.get("relationship_type"),
+                    "relationship","pc_relationships",r.get("relationship_id"),
+                    confidence=r.get("confidence"),
+                    evidence_url=r.get("source_url"),
+                    metadata=r,
+                )
+
+    # 2) Company -> fixed/mobile assets.
+    for eid in entity_ids:
+        for r in _filtered_rows("pc_company_asset_roles","entity_id",eid,1000):
+            aid=_clean(r.get("mobile_asset_id") or r.get("asset_id"))
+            typ="mobile_asset" if r.get("mobile_asset_id") else "asset"
+            add_edge(
+                "entity",eid,typ,aid,r.get("asset_role"),
+                "asset_role","pc_company_asset_roles",
+                r.get("company_asset_role_id") or r.get("id"),
+                confidence=r.get("confidence"),
+                evidence_url=r.get("source_url"),
+                metadata=r,
+            )
+
+    # 3) Company -> corridors.
+    for eid in entity_ids:
+        for r in _filtered_rows("pc_company_corridor_roles","entity_id",eid,1000):
+            add_edge(
+                "entity",eid,"corridor",r.get("corridor_key"),r.get("corridor_role"),
+                "corridor_role","pc_company_corridor_roles",
+                r.get("company_corridor_role_id") or r.get("id"),
+                confidence=r.get("confidence"),
+                evidence_url=r.get("source_url"),
+                metadata=r,
+            )
+
+    # 4) Portfolio/investment relationships.
+    for eid in entity_ids:
+        for r in _filtered_rows("pc_company_portfolio_positions","holder_entity_id",eid,1000):
+            if r.get("investee_entity_id"):
+                add_edge(
+                    "entity",eid,"entity",r.get("investee_entity_id"),r.get("position_type"),
+                    "portfolio","pc_company_portfolio_positions",r.get("portfolio_position_id"),
+                    confidence=r.get("position_status"),metadata=r,
+                )
+            elif r.get("investee_asset_id"):
+                add_edge(
+                    "entity",eid,"asset",r.get("investee_asset_id"),r.get("position_type"),
+                    "portfolio","pc_company_portfolio_positions",r.get("portfolio_position_id"),
+                    confidence=r.get("position_status"),metadata=r,
+                )
+        # Reverse investee relationships also matter for ownership/control context.
+        for r in _filtered_rows("pc_company_portfolio_positions","investee_entity_id",eid,1000):
+            add_edge(
+                "entity",r.get("holder_entity_id"),"entity",eid,r.get("position_type"),
+                "portfolio","pc_company_portfolio_positions",r.get("portfolio_position_id"),
+                confidence=r.get("position_status"),metadata=r,
+            )
+
+    # 5) Explicit event links only — no company-name substring matching.
+    for eid in entity_ids:
+        for r in _filtered_rows("pc_event_links","linked_id",eid,1500):
+            linked_type=_clean(r.get("linked_type")).casefold()
+            if linked_type not in {"entity","company","organisation","organization"}:
+                continue
+            add_edge(
+                "event",r.get("event_id"),"entity",eid,r.get("relationship"),
+                "event_context","pc_event_links",r.get("event_link_id") or r.get("id"),
+                event_id=r.get("event_id"),confidence=r.get("confidence"),
+                evidence_url=r.get("source_url"),metadata=r,
+            )
+
+    # 6) Documents explicitly linked to the entity.
+    for eid in entity_ids:
+        for r in _filtered_rows("pc_document_entity_links","entity_id",eid,1000):
+            add_edge(
+                "entity",eid,"document",r.get("document_id"),r.get("relationship"),
+                "evidence","pc_document_entity_links",r.get("document_entity_link_id") or r.get("id"),
+                confidence=r.get("confidence"),evidence_url=r.get("source_url"),metadata=r,
+            )
+
+    # 7) Sanctions explicitly linked to the entity.
+    for eid in entity_ids:
+        for r in _filtered_rows("pc_sanctions_designations","entity_id",eid,1000):
+            sid=_clean(r.get("sanctions_designation_id"))
+            add_edge(
+                "sanction",sid,"entity",eid,"designates",
+                "sanctions","pc_sanctions_designations",sid,
+                confidence=r.get("confidence"),evidence_url=r.get("source_url"),metadata=r,
+            )
+
+    # 8) Defence programmes: customer, lead contractor, participants, shipyards.
+    programme_ids=set()
+    for eid in entity_ids:
+        for col,role in (("lead_contractor_entity_id","lead_contractor"),
+                         ("customer_entity_id","customer")):
+            for r in _filtered_rows("pc_defence_programmes",col,eid,1000):
+                pid=_clean(r.get("defence_programme_id"))
+                if pid:
+                    programme_ids.add(pid)
+                    add_edge(
+                        "programme",pid,"entity",eid,role,
+                        "strategic_industry","pc_defence_programmes",pid,
+                        confidence=r.get("verification_status"),
+                        evidence_url=r.get("source_url"),metadata=r,
+                    )
+        for r in _filtered_rows("pc_defence_programme_participants","entity_id",eid,1500):
+            pid=_clean(r.get("defence_programme_id"))
+            if pid:
+                programme_ids.add(pid)
+                add_edge(
+                    "programme",pid,"entity",eid,r.get("participant_role"),
+                    "strategic_industry","pc_defence_programme_participants",
+                    r.get("programme_participant_id") or r.get("id"),
+                    confidence=r.get("verification_status"),
+                    evidence_url=r.get("source_url"),metadata=r,
+                )
+            if r.get("shipyard_asset_id"):
+                add_edge(
+                    "entity",eid,"asset",r.get("shipyard_asset_id"),
+                    r.get("participant_role") or "shipyard",
+                    "strategic_industry","pc_defence_programme_participants",
+                    r.get("programme_participant_id") or r.get("id"),
+                    confidence=r.get("verification_status"),
+                    evidence_url=r.get("source_url"),metadata=r,
+                )
+
+    # 9) Shipbuilding production/capacity direct company links.
+    for eid in entity_ids:
+        for r in _filtered_rows("pc_shipbuilding_production_tasks","builder_entity_id",eid,2000):
+            if r.get("shipyard_asset_id"):
+                add_edge(
+                    "entity",eid,"asset",r.get("shipyard_asset_id"),
+                    r.get("task_type") or "builder_at",
+                    "shipbuilding_production","pc_shipbuilding_production_tasks",
+                    r.get("production_task_id"),
+                    confidence=r.get("verification_status"),
+                    evidence_url=r.get("source_url"),metadata=r,
+                )
+            pid=_clean(r.get("defence_programme_id"))
+            if pid:
+                programme_ids.add(pid)
+                add_edge(
+                    "entity",eid,"programme",pid,r.get("task_type") or "production_for",
+                    "shipbuilding_production","pc_shipbuilding_production_tasks",
+                    r.get("production_task_id"),
+                    confidence=r.get("verification_status"),
+                    evidence_url=r.get("source_url"),metadata=r,
+                )
+
+        for r in _filtered_rows("pc_shipyard_capacity_history","operator_entity_id",eid,1500):
+            add_edge(
+                "entity",eid,"asset",r.get("shipyard_asset_id"),"operates_shipyard",
+                "shipyard_capacity","pc_shipyard_capacity_history",
+                r.get("shipyard_capacity_history_id"),
+                confidence=r.get("verification_status"),
+                evidence_url=r.get("source_url"),metadata=r,
+            )
+
+    # 10) Security operations.
+    for eid in entity_ids:
+        for r in _filtered_rows("pc_security_operations","lead_entity_id",eid,1000):
+            add_edge(
+                "security_operation",r.get("security_operation_id"),"entity",eid,"lead_entity",
+                "security_operation","pc_security_operations",r.get("security_operation_id"),
+                confidence=r.get("verification_status"),
+                evidence_url=r.get("source_url"),metadata=r,
+            )
+        for r in _filtered_rows("pc_security_operation_participants","entity_id",eid,1000):
+            add_edge(
+                "security_operation",r.get("security_operation_id"),"entity",eid,r.get("participant_role"),
+                "security_operation","pc_security_operation_participants",
+                r.get("security_operation_participant_id") or r.get("id"),
+                confidence=r.get("verification_status"),
+                evidence_url=r.get("source_url"),metadata=r,
+            )
+
+    # 11) Company milestones, where relationships are explicit.
+    for eid in entity_ids:
+        for r in _filtered_rows("pc_company_milestones","entity_id",eid,1000):
+            if r.get("event_id"):
+                add_edge(
+                    "entity",eid,"event",r.get("event_id"),r.get("milestone_type"),
+                    "company_milestone","pc_company_milestones",r.get("company_milestone_id"),
+                    event_id=r.get("event_id"),confidence=r.get("milestone_status"),
+                    evidence_url=r.get("source_url"),metadata=r,
+                )
+            if r.get("related_asset_id"):
+                add_edge(
+                    "entity",eid,"asset",r.get("related_asset_id"),r.get("milestone_type"),
+                    "company_milestone","pc_company_milestones",r.get("company_milestone_id"),
+                    confidence=r.get("milestone_status"),
+                    evidence_url=r.get("source_url"),metadata=r,
+                )
+            if r.get("related_entity_id"):
+                add_edge(
+                    "entity",eid,"entity",r.get("related_entity_id"),r.get("milestone_type"),
+                    "company_milestone","pc_company_milestones",r.get("company_milestone_id"),
+                    confidence=r.get("milestone_status"),
+                    evidence_url=r.get("source_url"),metadata=r,
+                )
+
+    # 12) Union indexed graph for any relationship families added elsewhere.
+    for eid in entity_ids:
+        g=_graph_neighborhood("entity",eid,depth=max(1,min(depth,3)),max_nodes=500)
+        for n in g.get("nodes") or []:
+            add_node(n.get("type"),n.get("id"),n.get("name"))
+        for e in g.get("edges") or []:
+            add_edge(
+                e.get("source_type"),e.get("source_id"),
+                e.get("target_type"),e.get("target_id"),
+                e.get("relationship"),e.get("family"),
+                e.get("source_table"),e.get("source_record_id"),
+                e.get("event_id"),e.get("confidence"),
+                e.get("evidence_url"),e.get("metadata"),
+            )
+
     return {"nodes":list(nodes.values()),"edges":edges}
+
 
 
 def _record_text(row: dict) -> str:
