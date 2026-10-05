@@ -197,6 +197,75 @@ def _indexed_links(typ: str, oid: str, limit: int=1000) -> list[dict]:
         seen.add(k); out.append(r)
     return out
 
+def _graph_neighborhood(typ: str, oid: str, depth: int=2, max_nodes: int=500) -> dict:
+    """Walk the terminal relationship index from one canonical object."""
+    start=(typ,str(oid))
+    nodes={start:{"type":typ,"id":str(oid),"name":str(oid)}}
+    edges=[]
+    frontier=[start]
+    seen_edges=set()
+    for hop in range(max(1,min(depth,3))):
+        next_frontier=[]
+        for ntyp,nid in frontier:
+            for l in _indexed_links(ntyp,nid,1200):
+                lk=_clean(l.get("link_key")) or repr((l.get("source_type"),l.get("source_id"),l.get("relation_type"),l.get("target_type"),l.get("target_id")))
+                if lk in seen_edges:
+                    continue
+                seen_edges.add(lk)
+                is_src=_clean(l.get("source_type"))==ntyp and _clean(l.get("source_id"))==nid
+                otyp=_clean(l.get("target_type") if is_src else l.get("source_type")).casefold()
+                oid2=_clean(l.get("target_id") if is_src else l.get("source_id"))
+                oname=_clean(l.get("target_name") if is_src else l.get("source_name"))
+                if not otyp or not oid2:
+                    continue
+                if otyp=="vessel":
+                    otyp="mobile_asset"
+                node_key=(otyp,oid2)
+                if node_key not in nodes:
+                    nodes[node_key]={"type":otyp,"id":oid2,"name":oname or oid2}
+                    if len(nodes)<max_nodes:
+                        next_frontier.append(node_key)
+                edges.append({
+                    "source_type":_clean(l.get("source_type")),
+                    "source_id":_clean(l.get("source_id")),
+                    "source_name":_clean(l.get("source_name")),
+                    "target_type":_clean(l.get("target_type")),
+                    "target_id":_clean(l.get("target_id")),
+                    "target_name":_clean(l.get("target_name")),
+                    "relationship":_clean(l.get("relation_type")),
+                    "family":_clean(l.get("relation_family")),
+                    "source_table":_clean(l.get("source_table")),
+                    "source_record_id":_clean(l.get("source_record_id")),
+                    "event_id":_clean(l.get("event_id")),
+                    "confidence":_clean(l.get("confidence")),
+                    "evidence_url":_clean(l.get("evidence_url")),
+                    "metadata":l.get("metadata") or {},
+                    "hop":hop+1,
+                })
+        frontier=next_frontier
+        if not frontier or len(nodes)>=max_nodes:
+            break
+    return {"nodes":list(nodes.values()),"edges":edges}
+
+
+def _entity_graph_neighborhood(entity_id: str, depth: int=2) -> dict:
+    """Walk the relationship graph for all canonical identities of one entity."""
+    bundle=_entity_identity_bundle(str(entity_id))
+    nodes={}
+    edges=[]
+    seen_edges=set()
+    for eid in bundle.get("ids") or [str(entity_id)]:
+        g=_graph_neighborhood("entity",eid,depth=depth,max_nodes=500)
+        for n in g["nodes"]:
+            nodes[(n["type"],n["id"])]=n
+        for e in g["edges"]:
+            k=(e["source_type"],e["source_id"],e["relationship"],e["target_type"],e["target_id"],e["source_table"],e["source_record_id"])
+            if k not in seen_edges:
+                seen_edges.add(k)
+                edges.append(e)
+    return {"nodes":list(nodes.values()),"edges":edges}
+
+
 def _record_text(row: dict) -> str:
     return " ".join(_clean(v) for v in row.values())
 
