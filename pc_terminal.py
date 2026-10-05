@@ -709,6 +709,18 @@ def _search_objects(q: str, lens: str, limit: int = 80) -> list[dict]:
     return final
 
 def _set_context(typ: str, oid: str, name: str = ""):
+    # Keep a lightweight dossier history so every arrow/open action is reversible.
+    prev_typ=st.session_state.get("pc_terminal_type")
+    prev_id=st.session_state.get("pc_terminal_id")
+    if prev_typ and prev_id and (str(prev_typ),str(prev_id)) != (str(typ),str(oid)):
+        history=st.session_state.setdefault("pc_terminal_history",[])
+        history.append({
+            "type":str(prev_typ),
+            "id":str(prev_id),
+            "name":st.session_state.get("pc_terminal_name") or object_label(prev_typ,prev_id),
+        })
+        if len(history)>40:
+            del history[:-40]
     if typ == "entity":
         try:
             oid2, rec = preferred_entity_id(oid)
@@ -730,6 +742,26 @@ def _set_context(typ: str, oid: str, name: str = ""):
         pass
 
 
+def _back_context():
+    history=st.session_state.get("pc_terminal_history") or []
+    if not history:
+        return
+    prev=history.pop()
+    st.session_state["pc_terminal_history"]=history
+    # Restore directly rather than calling _set_context, which would push the
+    # current dossier back onto the history stack.
+    st.session_state["pc_document_browser"]=False
+    st.session_state["pc_uae_ofac_overlap"]=False
+    st.session_state["pc_terminal_type"]=prev["type"]
+    st.session_state["pc_terminal_id"]=prev["id"]
+    st.session_state["pc_terminal_name"]=prev.get("name") or object_label(prev["type"],prev["id"])
+    try:
+        st.query_params["pc_terminal_type"]=prev["type"]
+        st.query_params["pc_terminal_id"]=prev["id"]
+    except Exception:
+        pass
+
+
 def _restore_context():
     if st.session_state.get("pc_terminal_id"):
         return
@@ -743,6 +775,7 @@ def _restore_context():
 
 
 def _clear_context():
+    st.session_state.pop("pc_terminal_history",None)
     for k in ("pc_terminal_type", "pc_terminal_id", "pc_terminal_name"):
         st.session_state.pop(k, None)
     try:
@@ -1974,7 +2007,7 @@ def _featured_search_cards(items: list[tuple[str,str]], lens: str):
             with st.container(border=True):
                 st.markdown(f"**{label}**")
                 st.caption("Open in terminal")
-                if st.button("Open",key=f"featured_{lens}_{i}_{_norm(query)}",use_container_width=True):
+                if st.button("→",key=f"featured_{lens}_{i}_{_norm(query)}",use_container_width=True):
                     results=_search_objects(query,lens,10)
                     if results:
                         x=results[0]
@@ -3353,7 +3386,7 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
                     cols=st.columns([3.3,1.3,1.0])
                     cols[0].markdown(f"**{nm}**")
                     cols[1].caption(role or "Connected")
-                    cols[2].button("Open",key=f"company_corr_{_norm(oid)}_{i}",use_container_width=True,
+                    cols[2].button("→",key=f"company_corr_{_norm(oid)}_{i}",use_container_width=True,
                                    on_click=_set_context,args=("corridor",ck,nm))
 
     _render_strategic_company_activity(strategic_data,oid)
@@ -3530,7 +3563,7 @@ def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
                     cols=st.columns([3.2,1.4,1.0])
                     cols[0].markdown(f"**{x.get('name')}**")
                     cols[1].caption((_clean(x.get("relationship")) or "connected").replace("_"," ").title())
-                    cols[2].button("Open",key=f"mobile_corr_{_norm(oid)}_{i}",use_container_width=True,
+                    cols[2].button("→",key=f"mobile_corr_{_norm(oid)}_{i}",use_container_width=True,
                                    on_click=_set_context,args=("corridor",x.get("id"),x.get("name") or ""))
 
     low1,low2=st.columns([1.0,1.25],gap="large")
@@ -3639,7 +3672,7 @@ def _render_port_operator_terminal(oid: str, rec: dict, lens: str):
                     cols=st.columns([3.2,1.4,1.0])
                     cols[0].markdown(f"**{nm}**")
                     cols[1].caption((_clean(r.get("corridor_role")) or "connected").replace("_"," ").title())
-                    cols[2].button("Open",key=f"portop_corr_{_norm(oid)}_{i}",use_container_width=True,
+                    cols[2].button("→",key=f"portop_corr_{_norm(oid)}_{i}",use_container_width=True,
                                    on_click=_set_context,args=("corridor",ck,nm))
 
     low1,low2=st.columns([1.0,1.25],gap="large")
@@ -3982,7 +4015,7 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
                     cols=st.columns([3.2,1.3,1.0])
                     cols[0].markdown(f"**{x['name']}**")
                     cols[1].caption((_clean(x.get("role")) or "linked").replace("_"," ").title())
-                    cols[2].button("Open",key=f"infra_comp_{_norm(oid)}_{i}",use_container_width=True,
+                    cols[2].button("→",key=f"infra_comp_{_norm(oid)}_{i}",use_container_width=True,
                                    on_click=_set_context,args=("entity",x["id"],x["name"]))
             else:
                 st.caption("No structured owner/operator relationships recorded.")
@@ -4020,7 +4053,7 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
                         cols=st.columns([3.2,1.4,1.0])
                         cols[0].markdown(f"**{x['name']}**")
                         cols[1].caption((_clean(x.get("relationship")) or "connected").title())
-                        cols[2].button("Open",key=f"infra_corr_{_norm(oid)}_{i}",use_container_width=True,
+                        cols[2].button("→",key=f"infra_corr_{_norm(oid)}_{i}",use_container_width=True,
                                        on_click=_set_context,args=("corridor",x["id"],x["name"]))
                 if routes:
                     st.markdown(f"#### Routes / services ({len(routes)})")
@@ -4205,7 +4238,7 @@ def _render_institution_terminal(oid: str, rec: dict, lens: str):
                     cols=st.columns([3.2,1.4,1.0])
                     cols[0].markdown(f"**{nm}**")
                     cols[1].caption(role or "Connected")
-                    cols[2].button("Open",key=f"inst_corr_{_norm(oid)}_{i}",use_container_width=True,
+                    cols[2].button("→",key=f"inst_corr_{_norm(oid)}_{i}",use_container_width=True,
                                    on_click=_set_context,args=("corridor",ck,nm))
 
     low1,low2=st.columns([1.0,1.25],gap="large")
@@ -4442,6 +4475,8 @@ def render_terminal(lens: str = "trade"):
             st.markdown("<div class='pc-k'>VIEWING DOSSIER</div>",unsafe_allow_html=True)
             st.markdown("**"+_clean(selected_name)+"**")
             st.caption((_clean(st.session_state.get("pc_terminal_type")) or "object").replace("_"," ").title())
+            if st.session_state.get("pc_terminal_history"):
+                st.button("← Back",key=f"pc_back_{lens}",use_container_width=True,on_click=_back_context)
             st.divider()
 
         for i,(label,query) in enumerate(navs.get(lens,[])):
