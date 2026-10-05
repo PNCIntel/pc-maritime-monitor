@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from pc_terminal import render_terminal
+from pc_market_lenses import render_market_terminal
 
 st.set_page_config(
     page_title="P&C Trade",
@@ -15,4 +15,4 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-render_terminal("trade")
+render_market_terminal("trade")
