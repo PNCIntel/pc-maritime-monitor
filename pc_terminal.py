@@ -3722,8 +3722,13 @@ def _render_infrastructure_history(oid: str, rec: dict, events: list[dict]):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def _rows_matching_ids(table: str, column: str, values: tuple[str, ...]) -> list[dict]:
-    """Fetch scoped records with pagination instead of scanning a truncated global table."""
+    """Fetch scoped records with pagination instead of scanning a truncated global table.
+
+    Cached because one dossier/lens resolves the same ecosystem IDs repeatedly across
+    relationships, routes, projects and market views.
+    """
     sb=_sb()
     if sb is None or not values: return []
     out=[]
