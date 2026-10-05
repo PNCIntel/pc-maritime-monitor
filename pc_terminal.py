@@ -886,6 +886,16 @@ def _asset_companies(asset: dict) -> list[dict]:
         if eid and eid not in seen:
             seen.add(eid)
             out.append({"id": eid, "name": _object_name("entity", eid), "role": _clean(r.get("asset_role"))})
+    for item in _linked_objects_from_relationships("asset",aid):
+        if item.get("type")!="entity":
+            continue
+        role=_clean(item.get("relationship")).casefold()
+        if role not in {"owns","owned by","operates","operated by","manages","managed by","controls","controlled by"}:
+            continue
+        eid=_clean(item.get("id"))
+        if eid and eid not in seen:
+            seen.add(eid)
+            out.append({"id":eid,"name":item.get("name") or _object_name("entity",eid),"role":role})
     return out
 
 
@@ -2710,11 +2720,25 @@ def _events_for_object(typ: str, oid: str) -> list[dict]:
     return sorted(out, key=lambda x: _clean(x.get("start_date")), reverse=True)
 
 def _relationships(typ: str, oid: str) -> list[dict]:
-    indexed=_indexed_links(typ,str(oid),1000)
-    if indexed:
-        out=[]
-        for r in indexed:
-            is_src=_clean(r.get("source_type"))==typ and _clean(r.get("source_id"))==str(oid)
+    """Read canonical edges first; supplement them with specialist index links."""
+    ids=_entity_identity_bundle(str(oid)).get("ids") if typ=="entity" else [str(oid)]
+    ids={str(x) for x in (ids or [str(oid)])}
+    out=[]
+    canonical_ids=set()
+    for side in ("source", "target"):
+        for identity_id in sorted(ids):
+            for r in _filtered_rows("pc_relationships", f"{side}_id", identity_id, 1000):
+                if _clean(r.get(f"{side}_type")).casefold()!=typ:
+                    continue
+                out.append(r)
+                canonical_ids.add(_clean(r.get("relationship_id")))
+    for identity_id in sorted(ids):
+        for r in _indexed_links(typ,identity_id,1000):
+            # Generic indexed edges are copies of canonical rows. Keep the live
+            # version, including its current endpoints and relationship name.
+            if (_clean(r.get("source_table"))=="pc_relationships"
+                    and _clean(r.get("source_record_id")) in canonical_ids):
+                continue
             out.append({
                 "relationship_id":_clean(r.get("link_key")),
                 "source_type":_clean(r.get("source_type")),
@@ -2730,21 +2754,14 @@ def _relationships(typ: str, oid: str) -> list[dict]:
                 "event_id":_clean(r.get("event_id")),
                 "metadata":r.get("metadata") or {},
             })
-        return out
-
-    out = []
-    ids=_entity_identity_bundle(str(oid)).get("ids") if typ=="entity" else [str(oid)]
-    for side in ("source", "target"):
-        for identity_id in (ids or [str(oid)]):
-            out.extend(_filtered_rows("pc_relationships", f"{side}_id", str(identity_id), 500))
-    seen = set()
-    final = []
+    seen=set(); final=[]
     for r in out:
-        k = _clean(r.get("relationship_id")) or repr((r.get("source_id"), r.get("relationship_type"), r.get("target_id")))
-        if k in seen:
+        key=(_clean(r.get("source_type")).casefold(),_clean(r.get("source_id")),
+             _clean(r.get("relationship_type")).casefold(),
+             _clean(r.get("target_type")).casefold(),_clean(r.get("target_id")))
+        if key in seen:
             continue
-        seen.add(k)
-        final.append(r)
+        seen.add(key); final.append(r)
     return final
 
 def _company_asset_roles(entity_id: str) -> list[dict]:
@@ -3655,6 +3672,8 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     local=_local_infrastructure(rec)
     linked=_linked_objects_from_relationships("asset",oid)
     corridors=[x for x in linked if x.get("type")=="corridor"]
+    company_ids={x["id"] for x in companies}
+    service_companies=[x for x in linked if x.get("type")=="entity" and x.get("id") not in company_ids]
     events=_events_for_object("asset",oid)
     docs=_related_table("pc_documents",oid,name,40)
     routes=_related_table("pc_transport_routes",oid,name,80)
@@ -3694,6 +3713,11 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
                                    on_click=_set_context,args=("entity",x["id"],x["name"]))
             else:
                 st.caption("No structured owner/operator relationships recorded.")
+
+        if service_companies:
+            with st.container(border=True):
+                st.markdown("### Connected Companies & Services")
+                _render_company_relationship_cards(service_companies,f"infra_services_{_norm(oid)}",15)
 
     with right:
         with st.container(border=True):
@@ -4153,5 +4177,6 @@ def render_terminal(lens: str = "trade"):
     with st.expander("Developer / raw canonical record"):
         st.caption("Internal diagnostic view. Normal analyst workflow should not require raw IDs or JSON.")
         st.json(rec)
+
 
 
