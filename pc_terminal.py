@@ -4528,6 +4528,16 @@ def render_terminal(lens: str = "trade"):
             _render_company_terminal(oid,rec,lens)
         return
     if typ=="asset":
+        # Lazy import prevents circular startup imports while guaranteeing that Trade
+        # and Strategic Industries both get the shared cross-market dossier tabs even
+        # when the deployment entry point imports pc_terminal directly.
+        if lens in {"trade", "strategic"}:
+            try:
+                from pc_market_lenses import render_infrastructure_market_lenses
+                render_infrastructure_market_lenses(oid, rec, lens)
+                return
+            except Exception as exc:
+                st.warning("Cross-market lenses unavailable; showing core infrastructure dossier. " + str(exc)[:180])
         _render_infrastructure_terminal(oid,rec,lens)
         return
     if typ=="mobile_asset":
