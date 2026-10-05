@@ -3842,6 +3842,36 @@ def _render_infrastructure_routes(routes: list[dict], oid: str):
             for url in dict.fromkeys(urls): st.link_button("Source",url)
 
 
+def _infrastructure_projects(oid: str, local: list[dict]) -> list[dict]:
+    """Project-detail rows attached to the selected infrastructure ecosystem.
+
+    pc_project_details is the canonical project extension table.  Project assets can
+    sit anywhere beneath the selected port/system, so resolve against the recursively
+    traversed local asset scope rather than relying on the deprecated pc_projects path.
+    """
+    scope={str(oid)}
+    scope.update(_clean(x.get("id")) for x in (local or []) if x.get("id"))
+    rows=_rows_matching_ids("pc_project_details","asset_id",tuple(sorted(scope)))
+    out=[]
+    for r in rows:
+        aid=_clean(r.get("asset_id"))
+        asset=object_record("asset",aid) or {}
+        out.append({
+            **r,
+            "_project_name":_clean(asset.get("name")) or aid,
+            "_project_status":_clean(asset.get("status") or r.get("project_stage")),
+            "_project_region":_clean(asset.get("region_city")),
+        })
+    return sorted(
+        out,
+        key=lambda r: (
+            _clean(r.get("announced_date") or r.get("construction_start_date") or r.get("expected_completion_date")),
+            _clean(r.get("_project_name")),
+        ),
+        reverse=True,
+    )
+
+
 def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("asset",oid)
     companies=_asset_companies(rec)
@@ -3853,7 +3883,7 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     events=_events_for_object("asset",oid)
     docs=_related_table("pc_documents",oid,name,40)
     routes=_infrastructure_routes(oid)
-    projects=_related_table("pc_projects",oid,name,80)
+    projects=_infrastructure_projects(oid,local)
 
     # Compact operational strip.  "Ecosystem nodes" is the recursively resolved
     # physical/system scope, not merely first-hop asset relationships.
@@ -3941,16 +3971,59 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
             if facts:
                 st.dataframe(facts,hide_index=True,use_container_width=True)
             if projects:
-                for p in projects[:12]:
-                    title=_company_display_value(p.get("project_name"),p.get("name"),p.get("title"),p.get("description"))
-                    status=_company_display_value(p.get("status"),p.get("project_status"))
-                    value=_company_display_value(p.get("capex"),p.get("project_value"),p.get("value"))
+                for i,p in enumerate(projects[:18]):
+                    title=_company_display_value(p.get("_project_name"),p.get("scope_description"),"Project")
+                    status=_company_display_value(p.get("_project_status"),p.get("project_stage"))
+                    value=p.get("estimated_cost")
                     currency=_company_display_value(p.get("currency"))
-                    st.markdown(f"**{title or 'Project'}**")
-                    bits=[x for x in [status,(currency+' '+value).strip() if value else ""] if x]
+                    st.markdown(f"**{title}**")
+                    bits=[]
+                    if status: bits.append(status.replace("_"," ").title())
+                    if value not in (None,""):
+                        try:
+                            amount=float(value)
+                            if amount>=1_000_000_000:
+                                vtxt=f"{amount/1_000_000_000:.2f}bn"
+                            elif amount>=1_000_000:
+                                vtxt=f"{amount/1_000_000:.1f}m"
+                            else:
+                                vtxt=f"{amount:,.0f}"
+                            bits.append(((currency+" ") if currency else "")+vtxt)
+                        except Exception:
+                            bits.append(((currency+" ") if currency else "")+_clean(value))
+                    dates=[]
+                    if p.get("announced_date"): dates.append("announced "+_clean(p.get("announced_date"))[:10])
+                    if p.get("construction_start_date"): dates.append("start "+_clean(p.get("construction_start_date"))[:10])
+                    if p.get("expected_completion_date"): dates.append("target "+_clean(p.get("expected_completion_date"))[:10])
+                    if dates: bits.append(" · ".join(dates))
                     if bits: st.caption(" · ".join(bits))
+                    if p.get("scope_description"): st.write(p.get("scope_description"))
+                    src=_clean(p.get("source_url"))
+                    if not src and p.get("source_id"):
+                        ss=_filtered_rows("pc_sources","source_id",_clean(p.get("source_id")),1)
+                        if ss: src=_clean(ss[0].get("url"))
+                    if src:
+                        st.link_button("Source",src,key=f"infra_project_src_{_norm(oid)}_{i}")
             elif not facts:
                 st.caption("No structured projects or investment records linked yet.")
+
+            investment_events=[
+                e for e in events
+                if "investment" in _norm(e.get("event_type"))
+                or "investment" in _norm(e.get("event_family"))
+                or "capital" in _norm(e.get("event_category"))
+            ]
+            if investment_events:
+                st.markdown("#### Investment history")
+                hist=[]
+                for e in sorted(investment_events,key=lambda x:_clean(x.get("start_date")),reverse=True)[:12]:
+                    m=_meta(e)
+                    hist.append({
+                        "Date":_clean(e.get("start_date"))[:10],
+                        "Investment":_clean(e.get("title")),
+                        "Value":_clean(m.get("investment_value_display") or m.get("investment_value_eur")),
+                    })
+                st.dataframe(pd.DataFrame(hist),hide_index=True,use_container_width=True)
 
     with low2:
         with st.container(border=True):
