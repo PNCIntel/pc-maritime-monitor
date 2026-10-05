@@ -3721,6 +3721,127 @@ def _render_infrastructure_history(oid: str, rec: dict, events: list[dict]):
             _render_event_rows([e],f"infra_history_{_norm(oid)}_{i}",1)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _rows_matching_ids(table: str, column: str, values: tuple[str, ...]) -> list[dict]:
+    """Fetch scoped records with pagination instead of scanning a truncated global table."""
+    sb=_sb()
+    if sb is None or not values: return []
+    out=[]
+    try:
+        for offset in range(0,len(values),100):
+            page_start=0
+            while True:
+                page=(sb.table(table).select("*").in_(column,list(values[offset:offset+100]))
+                      .range(page_start,page_start+499).execute().data or [])
+                out.extend(page)
+                if len(page)<500: break
+                page_start+=500
+    except Exception:
+        return []
+    return out
+
+
+def _infrastructure_service_scope(oid: str) -> set[str]:
+    """Explicit aliases and contained facilities; no operator portfolios or regional guesses."""
+    scope={str(oid)}; frontier=scope.copy()
+    for _ in range(3):
+        added=set()
+        for side in ("source","target"):
+            for r in _rows_matching_ids("pc_relationships",side+"_id",tuple(sorted(frontier))):
+                if r.get("source_type")!="asset" or r.get("target_type")!="asset": continue
+                source=_clean(r.get("source_id"));target=_clean(r.get("target_id"))
+                relation=_norm(r.get("relationship_type"))
+                if relation in {"alias of","same as"}:
+                    if source in frontier: added.add(target)
+                    if target in frontier: added.add(source)
+                elif relation in {"located in","part of","terminal of","facility of"} and target in frontier:
+                    added.add(source)
+        frontier=added-scope
+        scope.update(frontier)
+        if not frontier: break
+    return scope
+
+
+def _infrastructure_routes(oid: str) -> list[dict]:
+    scope=_infrastructure_service_scope(oid)
+    values=tuple(sorted(scope));records={};matches={}
+    def note(kind,rid,aid):
+        if rid and aid in scope: matches.setdefault((kind,rid),set()).add(aid)
+    def endpoints(kind,table,pk,columns,typed=False):
+        for column in columns:
+            for r in _rows_matching_ids(table,column,values):
+                if typed and _norm(r.get(column.replace("_id","_type"))) not in {"asset","port","terminal","facility","airport","rail node","rail terminal","infrastructure"}: continue
+                rid=_clean(r.get(pk))
+                if rid:
+                    records[(kind,rid)]=r
+                    note(kind,rid,_clean(r.get(column)))
+    endpoints("service","pc_transport_services","transport_service_id",("origin_asset_id","destination_asset_id"))
+    for table,columns in (("pc_transport_service_stops",("asset_id","terminal_asset_id")),
+                          ("pc_transport_service_network_links",("asset_id",))):
+        for column in columns:
+            for r in _rows_matching_ids(table,column,values):
+                note("service",_clean(r.get("transport_service_id")),_clean(r.get(column)))
+    service_ids=tuple(sorted(rid for kind,rid in matches if kind=="service"))
+    for r in _rows_matching_ids("pc_transport_services","transport_service_id",service_ids):
+        records[("service",_clean(r.get("transport_service_id")))]=r
+    endpoints("route","pc_transport_routes","route_id",("origin_id","destination_id"),typed=True)
+    endpoints("ferry","pc_ferry_routes","ferry_route_id",("origin_asset_id","destination_asset_id"))
+    for r in _rows_matching_ids("pc_ferry_route_stops","stop_asset_id",values):
+        note("ferry",_clean(r.get("ferry_route_id")),_clean(r.get("stop_asset_id")))
+    ferry_ids=tuple(sorted(rid for kind,rid in matches if kind=="ferry"))
+    for r in _rows_matching_ids("pc_ferry_routes","ferry_route_id",ferry_ids):
+        records[("ferry",_clean(r.get("ferry_route_id")))]=r
+    out=[]
+    for (kind,rid),row in records.items():
+        if (kind,rid) not in matches: continue
+        out.append(dict(row,_route_kind=kind,_route_id=rid,_matched_asset_ids=sorted(matches[(kind,rid)])))
+    return sorted(out,key=lambda r:_clean(r.get("service_name") or r.get("route_name")).casefold())
+
+
+def _render_infrastructure_routes(routes: list[dict], oid: str):
+    st.caption("Explicit endpoints, service calls and network links, including contained terminals and stored aliases. Status and dates reflect the stored record.")
+    for i,r in enumerate(routes):
+        title=_company_display_value(r.get("service_name"),r.get("route_name"),"Transport connection")
+        status=_company_display_value(r.get("status"),r.get("current_status"),"Status not recorded")
+        mode=_clean(r.get("mode")) or ("ferry" if r["_route_kind"]=="ferry" else "Mode not recorded")
+        with st.expander(title+" · "+mode+" · "+status):
+            labels=[_object_name("asset",aid) for aid in r["_matched_asset_ids"]]
+            st.caption("Linked at: "+", ".join(labels))
+            for label,columns in (("Service code",("service_code",)),("Type",("service_type",)),
+                 ("Frequency",("frequency_value","frequency_unit")),("Effective from",("effective_start",)),
+                 ("Effective to",("effective_end",)),("Trade lane",("trade_lane",)),
+                 ("Description",("description",)),("Transit hours",("average_transit_time_hours",))):
+                value=" ".join(_clean(r.get(c)) for c in columns if r.get(c) is not None)
+                if value: st.write(label+": "+value)
+            operator=_clean(r.get("primary_operator_entity_id") or r.get("operator_entity_id"))
+            if operator:
+                name=_object_name("entity",operator)
+                st.button("Open operator: "+name,key=f"infra_route_operator_{_norm(oid)}_{i}",on_click=_set_context,args=("entity",operator,name))
+            stops=[]; kind=r["_route_kind"];rid=r["_route_id"]
+            if kind=="service":
+                stops=_filtered_rows("pc_transport_service_stops","transport_service_id",rid,1000)
+                schedules=_filtered_rows("pc_transport_service_schedules","transport_service_id",rid,100)
+                if schedules:
+                    st.dataframe([{k:s.get(k) for k in ("direction","frequency_value","frequency_unit","departure_local_time","timezone","valid_from","valid_to")} for s in schedules],hide_index=True,use_container_width=True)
+            elif kind=="ferry": stops=_filtered_rows("pc_ferry_route_stops","ferry_route_id",rid,1000)
+            if stops:
+                stops.sort(key=lambda s:(_clean(s.get("direction")),int(s.get("sequence_no") or 0)))
+                st.markdown("**Stored rotation / stops**")
+                st.dataframe([{"Direction":s.get("direction"),"Sequence":s.get("sequence_no"),
+                    "Stop":_object_name("asset",_clean(s.get("asset_id") or s.get("stop_asset_id"))),
+                    "Terminal":_object_name("asset",_clean(s.get("terminal_asset_id"))) if s.get("terminal_asset_id") else "",
+                    "Call":s.get("call_type") or s.get("stop_role"),"Valid from":s.get("valid_from"),"Valid to":s.get("valid_to")} for s in stops],hide_index=True,use_container_width=True)
+                _open_selector([{"type":"asset","id":aid,"name":_object_name("asset",aid)} for s in stops for aid in [s.get("terminal_asset_id") or s.get("asset_id") or s.get("stop_asset_id")] if aid],f"infra_route_stops_{_norm(oid)}_{i}")
+            urls=_event_source_urls(r)
+            if r.get("source_id"):
+                for source in _filtered_rows("pc_sources","source_id",_clean(r.get("source_id")),1):
+                    urls+=_event_source_urls(source)
+            if kind=="service":
+                for source in _filtered_rows("pc_transport_service_sources","transport_service_id",rid,100):
+                    urls+=_event_source_urls(source)
+            for url in dict.fromkeys(urls): st.link_button("Source",url)
+
+
 def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("asset",oid)
     companies=_asset_companies(rec)
@@ -3731,7 +3852,7 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     service_companies=[x for x in linked if x.get("type")=="entity" and x.get("id") not in company_ids]
     events=_events_for_object("asset",oid)
     docs=_related_table("pc_documents",oid,name,40)
-    routes=_related_table("pc_transport_routes",oid,name,80)
+    routes=_infrastructure_routes(oid)
     projects=_related_table("pc_projects",oid,name,80)
 
     # Compact operational strip.
@@ -3795,12 +3916,8 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
                         cols[2].button("Open",key=f"infra_corr_{_norm(oid)}_{i}",use_container_width=True,
                                        on_click=_set_context,args=("corridor",x["id"],x["name"]))
                 if routes:
-                    with st.expander(f"Routes / services ({len(routes)})",expanded=not bool(corridors)):
-                        for r in routes[:20]:
-                            title=_company_display_value(r.get("route_name"),r.get("name"),r.get("service_name"),r.get("title"))
-                            role=_company_display_value(r.get("mode"),r.get("route_type"),r.get("status"))
-                            st.markdown(f"**{title or 'Route / service'}**")
-                            if role: st.caption(role)
+                    st.markdown(f"#### Routes / services ({len(routes)})")
+                    _render_infrastructure_routes(routes,oid)
 
     low1,low2=st.columns([1.0,1.25],gap="large")
     with low1:
