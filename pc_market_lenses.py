@@ -298,4 +298,156 @@ def render_market_terminal(lens: str = "trade"):
     canonical object, relationships, events, sanctions and strategic-industry tables.
     """
     core._render_infrastructure_terminal = _render_cross_market_infrastructure
+    core._render_home = _render_market_home
     core.render_terminal(lens)
+
+
+def _strategic_asset_rows() -> list[dict]:
+    """Canonical strategic fixed assets, not a port-specific list."""
+    out, seen = [], set()
+    strategic_asset_ids = set()
+    for r in core._rows("pc_shipyard_details", 5000):
+        if r.get("asset_id"):
+            strategic_asset_ids.add(_clean(r.get("asset_id")))
+    for r in core._rows("pc_defence_programme_participants", 5000):
+        if r.get("shipyard_asset_id"):
+            strategic_asset_ids.add(_clean(r.get("shipyard_asset_id")))
+    for a in core._rows("pc_assets", 10000):
+        aid = _clean(a.get("asset_id"))
+        blob = core._record_text(a)
+        if aid in strategic_asset_ids or core.STRATEGIC_RX.search(blob):
+            if aid and aid not in seen:
+                seen.add(aid); out.append(a)
+    return out
+
+
+def _render_strategic_picture_home():
+    """Market home for Strategic Industries over the shared canonical graph."""
+    programmes = core._rows("pc_defence_programmes", 5000)
+    participants = core._rows("pc_defence_programme_participants", 8000)
+    contracts = core._rows("pc_contracts", 5000)
+    orders = core._rows("pc_shipbuilding_orders", 5000)
+    tasks = core._rows("pc_shipbuilding_production_tasks", 8000)
+    milestones = core._rows("pc_defence_programme_milestones", 8000)
+    capacity = core._rows("pc_shipyard_capacity_history", 8000)
+    projects = core._rows("pc_project_details", 5000)
+    assets = _strategic_asset_rows()
+    events = sorted(
+        [e for e in core._rows("pc_events", 4000) if core.STRATEGIC_RX.search(core._record_text(e))],
+        key=lambda x: _clean(x.get("start_date")), reverse=True
+    )
+    active = [p for p in programmes if _clean(p.get("programme_status")).casefold()
+              not in {"completed", "cancelled", "closed"}]
+
+    core._dashboard_header(
+        "P&C STRATEGIC INDUSTRIES · CONNECTED INDUSTRIAL BASE",
+        "Strategic Industrial Picture",
+        "Organisations, shipyards, facilities, programmes, contracts, platforms, investment and disruption — one connected industrial graph."
+    )
+
+    m = st.columns(6)
+    m[0].metric("Strategic facilities", len(assets))
+    m[1].metric("Active programmes", len(active))
+    m[2].metric("Contracts", len(contracts))
+    m[3].metric("Shipbuilding orders", len(orders))
+    m[4].metric("Projects / investment", len(projects))
+    m[5].metric("Programme participants", len(participants))
+
+    left, right = st.columns([1.55, 1.0], gap="medium")
+    with left:
+        with st.container(border=True):
+            core._panel_header(
+                "Strategic Industrial Footprint",
+                "Shipyards, naval/coast-guard facilities and strategic industrial nodes resolved from canonical records."
+            )
+            pts = []
+            for a in assets:
+                try:
+                    lat, lon = float(a.get("latitude")), float(a.get("longitude"))
+                except Exception:
+                    continue
+                if -90 <= lat <= 90 and -180 <= lon <= 180:
+                    pts.append({"lat": lat, "lon": lon, "name": _clean(a.get("name")),
+                                "type": _clean(a.get("asset_type") or a.get("subtype"))})
+            if pts:
+                st.map(pd.DataFrame(pts), latitude="lat", longitude="lon", size=30,
+                       zoom=None, use_container_width=True)
+                st.caption(f"{len(pts)} mapped strategic facilities · {len(assets)} strategic facilities resolved.")
+            else:
+                st.info("Strategic facilities are stored, but mapped coordinates have not yet resolved.")
+    with right:
+        with st.container(border=True):
+            core._panel_header("Industrial Base", "Current structured production and delivery records.")
+            core._html_rows([
+                ("Strategic facilities", str(len(assets))),
+                ("Capacity observations", str(len(capacity))),
+                ("Production tasks", str(len(tasks))),
+                ("Programme milestones", str(len(milestones))),
+                ("Shipbuilding orders", str(len(orders))),
+            ], 8)
+        with st.container(border=True):
+            core._panel_header("Investment & Build-out", "Capital projects attached to the same industrial graph.")
+            strategic_projects = [
+                p for p in projects
+                if re.search(r"defen|naval|ship|dock|yard|military|coast guard|industrial",
+                             core._record_text(p), re.I)
+            ]
+            core._html_rows([
+                ("Strategic projects", str(len(strategic_projects))),
+                ("All connected projects", str(len(projects))),
+            ], 5)
+
+    st.markdown("### Industrial Network")
+    a, b, c = st.columns([1.0, 1.0, 1.15], gap="medium")
+    with a:
+        with st.container(border=True):
+            core._panel_header("Active Programmes", "Procurement, fleet and industrial programmes.")
+            rows = [(_clean(p.get("programme_name")) or "Unnamed programme",
+                     _clean(p.get("programme_status")) or _clean(p.get("programme_type")))
+                    for p in active[:10]]
+            core._html_rows(rows, 10)
+    with b:
+        with st.container(border=True):
+            core._panel_header("Contracts & Orders", "Contract and shipbuilding demand flowing into the industrial base.")
+            recent_contracts = sorted(contracts, key=lambda x: _clean(x.get("announced_date")), reverse=True)
+            rows = [(_clean(x.get("contract_name")) or "Contract",
+                     _clean(x.get("status")) or _clean(x.get("contract_type")))
+                    for x in recent_contracts[:6]]
+            rows += [(_clean(x.get("order_name") or x.get("name")) or "Shipbuilding order",
+                      _clean(x.get("status"))) for x in orders[:4]]
+            core._html_rows(rows, 10)
+    with c:
+        with st.container(border=True):
+            core._panel_header("Security & Disruptions",
+                               "Industrial-security developments affecting facilities, programmes and supply chains.")
+            security = [e for e in events if SECURITY_RX.search(core._record_text(e))]
+            core._html_rows(core._recent_event_rows(security, 9), 9)
+
+    st.markdown("### Reference Industrial Ecosystems")
+    st.caption("The same canonical records can be entered through a company, shipyard, port, programme or platform.")
+    core._featured_search_cards([
+        ("EDGE", "EDGE"),
+        ("Fincantieri", "Fincantieri"),
+        ("Damen", "Damen"),
+        ("Port of Rotterdam", "Port of Rotterdam"),
+        ("Port of Antwerp-Bruges", "Port of Antwerp-Bruges"),
+        ("Zeebrugge", "Zeebrugge"),
+    ], "strategic")
+
+    if events:
+        with st.container(border=True):
+            core._panel_header("Recent Strategic Developments",
+                               "Defence-industrial, shipbuilding, programme, facility and industrial-security developments.")
+            core._render_event_rows(events, "strategic_home_events", 10)
+
+
+_ORIGINAL_HOME = core._render_home
+
+
+def _render_market_home(lens: str):
+    # Avoid the old double Strategic Industries header and replace its generic KPI
+    # dashboard with the connected industrial-base picture.
+    if lens == "strategic":
+        _render_strategic_picture_home()
+        return
+    _ORIGINAL_HOME(lens)
