@@ -3743,7 +3743,22 @@ def render_terminal(lens: str = "trade"):
             _home_nav(lens)
             st.rerun()
         if st.button("Refresh database", use_container_width=True):
+            refresh_errors=[]
+            try:
+                sb.rpc("pc_refresh_terminal_indexes").execute()
+            except Exception as exc:
+                refresh_errors.append("core graph: "+str(exc)[:180])
+            try:
+                sb.rpc("pc_refresh_terminal_industrial_links").execute()
+            except Exception as exc:
+                # 062 may not be installed yet; keep core refresh usable.
+                if "Could not find the function" not in str(exc) and "PGRST202" not in str(exc):
+                    refresh_errors.append("industrial graph: "+str(exc)[:180])
             st.cache_data.clear()
+            if refresh_errors:
+                st.warning("Database refreshed with warnings: "+"; ".join(refresh_errors))
+            else:
+                st.success("Canonical terminal relationship graph refreshed.")
             st.rerun()
         st.caption("Terminal index: " + ("active" if _terminal_index_ready() else "legacy fallback"))
 
