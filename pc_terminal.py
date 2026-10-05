@@ -3742,13 +3742,13 @@ def _rows_matching_ids(table: str, column: str, values: tuple[str, ...]) -> list
 
 
 def _infrastructure_service_scope(oid: str) -> set[str]:
-    """Explicit aliases and contained facilities; no operator portfolios or regional guesses."""
+    """Explicit aliases and contained facilities used for route/service resolution."""
     scope={str(oid)}; frontier=scope.copy()
-    for _ in range(3):
+    for _ in range(4):
         added=set()
         for side in ("source","target"):
             for r in _rows_matching_ids("pc_relationships",side+"_id",tuple(sorted(frontier))):
-                if r.get("source_type")!="asset" or r.get("target_type")!="asset": continue
+                if _clean(r.get("source_type")).casefold()!="asset" or _clean(r.get("target_type")).casefold()!="asset": continue
                 source=_clean(r.get("source_id"));target=_clean(r.get("target_id"))
                 relation=_norm(r.get("relationship_type"))
                 if relation in {"alias of","same as"}:
@@ -3855,11 +3855,15 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     routes=_infrastructure_routes(oid)
     projects=_related_table("pc_projects",oid,name,80)
 
-    # Compact operational strip.
+    # Compact operational strip.  "Ecosystem nodes" is the recursively resolved
+    # physical/system scope, not merely first-hop asset relationships.
+    groups={}
+    for x in local:
+        groups[_infrastructure_group(x)]=groups.get(_infrastructure_group(x),0)+1
     m=st.columns(6)
     m[0].metric("Operators / owners",len(companies))
-    m[1].metric("Connected nodes",len(local))
-    m[2].metric("Corridors",len(corridors))
+    m[1].metric("Ecosystem nodes",len(local))
+    m[2].metric("Industrial / energy",groups.get("Industrial",0)+groups.get("Energy & Utilities",0))
     m[3].metric("Routes / services",len(routes))
     m[4].metric("Projects",len(projects))
     m[5].metric("Developments",len(events))
@@ -3900,8 +3904,18 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
             st.markdown("### Spatial & Local System")
             _render_map_for_asset(rec)
             if local:
-                st.markdown("#### Connected infrastructure")
-                _render_company_asset_cards(local,f"infra_local_{_norm(oid)}",12)
+                st.markdown(f"#### Connected infrastructure ecosystem ({len(local)})")
+                st.caption("Recursive explicit graph traversal: contained port complexes, zones, docks, terminals and facilities, plus one-hop rail/pipeline/utility system links.")
+                grouped={}
+                for item in local:
+                    grouped.setdefault(_infrastructure_group(item),[]).append(item)
+                for group_name in ("Terminals","Industrial","Energy & Utilities","Rail & Intermodal",
+                                   "Marine Services","Port Infrastructure","Ro-Ro / Cruise","Other Infrastructure"):
+                    rows=grouped.get(group_name) or []
+                    if not rows:
+                        continue
+                    with st.expander(f"{group_name} ({len(rows)})", expanded=group_name in {"Terminals","Industrial"}):
+                        _render_company_asset_cards(rows,f"infra_local_{_norm(oid)}_{_norm(group_name)}",30)
             elif not _coords_from_record(rec):
                 st.caption("No mapped local network is currently stored for this node.")
 
@@ -4105,19 +4119,124 @@ def _render_institution_terminal(oid: str, rec: dict, lens: str):
         st.json(rec)
 
 
-def _local_infrastructure(rec: dict):
-    """Explicitly connected infrastructure; do not infer links from proximity."""
-    oid = str(rec.get("asset_id") or "")
-    if not oid:
+def _local_infrastructure(rec: dict, max_depth: int = 4, max_nodes: int = 250):
+    """Return the explicit infrastructure ecosystem beneath/around an asset.
+
+    Structural containment is traversed recursively so a port-system dossier can see
+    port complexes -> zones/docks -> terminals/facilities -> sub-facilities. Explicit
+    lateral infrastructure links are then added one hop from that structural scope.
+    No proximity, operator-portfolio or same-region inference is used.
+    """
+    root = str(rec.get("asset_id") or "")
+    if not root:
         return []
+
+    structural = {"located in", "part of", "terminal of", "facility of", "alias of", "same as"}
+    lateral = {
+        "connected to", "connects to", "rail connected to", "pipeline connected to",
+        "feeds", "serves", "uses", "co located with", "integrated with",
+        "receives feedstock from", "supplies steam to", "planned connection to"
+    }
+
+    depth_by_id = {root: 0}
+    rel_by_id = {}
+    frontier = {root}
+
+    # Descendants/aliases: recurse only through explicit structural relationships.
+    for depth in range(max(1, min(max_depth, 6))):
+        if not frontier or len(depth_by_id) >= max_nodes:
+            break
+        next_frontier = set()
+        for side in ("source", "target"):
+            for r in _rows_matching_ids("pc_relationships", side + "_id", tuple(sorted(frontier))):
+                if _clean(r.get("source_type")).casefold() != "asset" or _clean(r.get("target_type")).casefold() != "asset":
+                    continue
+                source = _clean(r.get("source_id"))
+                target = _clean(r.get("target_id"))
+                relation = _norm(r.get("relationship_type"))
+                child = None
+
+                if relation in {"alias of", "same as"}:
+                    if source in frontier:
+                        child = target
+                    elif target in frontier:
+                        child = source
+                elif relation in structural and target in frontier:
+                    # Canonical direction: child/facility -> relation -> parent/system.
+                    child = source
+
+                if child and child not in depth_by_id and len(depth_by_id) < max_nodes:
+                    depth_by_id[child] = depth + 1
+                    rel_by_id[child] = relation
+                    next_frontier.add(child)
+        frontier = next_frontier
+
+    structural_ids = set(depth_by_id)
+
+    # One-hop explicit system connections from any structural node.  Do not recurse
+    # these, otherwise a rail/pipeline connection can fan out into a remote network.
+    for side in ("source", "target"):
+        for r in _rows_matching_ids("pc_relationships", side + "_id", tuple(sorted(structural_ids))):
+            if _clean(r.get("source_type")).casefold() != "asset" or _clean(r.get("target_type")).casefold() != "asset":
+                continue
+            relation = _norm(r.get("relationship_type"))
+            if relation not in lateral:
+                continue
+            source = _clean(r.get("source_id"))
+            target = _clean(r.get("target_id"))
+            if source in structural_ids:
+                other = target
+            elif target in structural_ids:
+                other = source
+            else:
+                continue
+            if other and other != root and other not in depth_by_id and len(depth_by_id) < max_nodes:
+                depth_by_id[other] = min(max_depth + 1, 7)
+                rel_by_id[other] = relation
+
     out = []
-    for item in _linked_objects_from_relationships("asset", oid):
-        if item.get("type") != "asset":
+    for aid, depth in sorted(depth_by_id.items(), key=lambda kv: (kv[1], kv[0])):
+        if aid == root:
             continue
-        row = object_record("asset", item["id"]) or {}
-        out.append({**item, "asset_type": row.get("asset_type"),
-                    "region": row.get("region_city"), "country": row.get("country")})
+        row = object_record("asset", aid) or {}
+        if not row:
+            continue
+        out.append({
+            "type": "asset",
+            "id": aid,
+            "name": _clean(row.get("name")) or aid,
+            "relationship": rel_by_id.get(aid, "contained infrastructure").replace("_", " "),
+            "asset_type": row.get("asset_type"),
+            "subtype": row.get("subtype"),
+            "region": row.get("region_city"),
+            "country": row.get("country"),
+            "depth": depth,
+        })
     return out
+
+
+def _infrastructure_group(item: dict) -> str:
+    """Stable analyst-facing grouping for port/infrastructure ecosystem nodes."""
+    text = " ".join([
+        _clean(item.get("asset_type")),
+        _clean(item.get("subtype")),
+        _clean(item.get("name")),
+    ]).casefold()
+    if re.search(r"rail|intermodal|marshalling|line 11|freight line", text):
+        return "Rail & Intermodal"
+    if re.search(r"pipeline|hydrogen|co2|steam|utility|energy|lng|ammonia|shore power", text):
+        return "Energy & Utilities"
+    if re.search(r"refiner|chemical|industrial|plant|complex|verbund|polymer|olefin|phenol", text):
+        return "Industrial"
+    if re.search(r"shipyard|dry ?dock|towage|tug|vessel traffic|vts|marine maintenance|crane", text):
+        return "Marine Services"
+    if re.search(r"lock|dock|bridge|port zone|outer port|left bank|right bank|harbour", text):
+        return "Port Infrastructure"
+    if re.search(r"cruise|roro|ro-ro|ferry|automotive", text):
+        return "Ro-Ro / Cruise"
+    if re.search(r"terminal|container depot|breakbulk|bulk|tank", text):
+        return "Terminals"
+    return "Other Infrastructure"
 
 
 def render_terminal(lens: str = "trade"):
