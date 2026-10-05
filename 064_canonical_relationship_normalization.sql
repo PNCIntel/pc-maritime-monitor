@@ -29,6 +29,7 @@ declare
     n_capacity bigint:=0;
     n_operations bigint:=0;
     n_milestones bigint:=0;
+    n_added bigint:=0;
 begin
 
     -- -----------------------------------------------------------------------
@@ -78,7 +79,8 @@ begin
           and lower(coalesce(r.relationship_type,'')) in ('operates','operator','operated_by')
       )
     on conflict (relationship_id) do nothing;
-    get diagnostics n_assets=n_assets+row_count;
+    get diagnostics n_added=row_count;
+    n_assets:=n_assets+n_added;
 
     -- -----------------------------------------------------------------------
     -- Mobile assets: explicit owner/operator/manager foreign keys
@@ -127,7 +129,8 @@ begin
           and lower(coalesce(r.relationship_type,'')) in ('operates','operator','operated_by')
       )
     on conflict (relationship_id) do nothing;
-    get diagnostics n_mobile=n_mobile+row_count;
+    get diagnostics n_added=row_count;
+    n_mobile:=n_mobile+n_added;
 
     if exists (
       select 1 from information_schema.columns
@@ -156,7 +159,8 @@ begin
           )
         on conflict (relationship_id) do nothing
       $q$;
-      get diagnostics n_mobile=n_mobile+row_count;
+      get diagnostics n_added=row_count;
+    n_mobile:=n_mobile+n_added;
     end if;
 
     -- -----------------------------------------------------------------------
@@ -205,7 +209,8 @@ begin
             and r.target_id::text=p.defence_programme_id::text
         )
       on conflict (relationship_id) do nothing;
-      get diagnostics n_programmes=n_programmes+row_count;
+      get diagnostics n_added=row_count;
+      n_programmes:=n_programmes+n_added;
     end if;
 
     if to_regclass('public.pc_defence_programme_participants') is not null then
@@ -231,7 +236,8 @@ begin
             and r.target_id::text=pp.defence_programme_id::text
         )
       on conflict (relationship_id) do nothing;
-      get diagnostics n_programmes=n_programmes+row_count;
+      get diagnostics n_added=row_count;
+      n_programmes:=n_programmes+n_added;
     end if;
 
     -- -----------------------------------------------------------------------
@@ -343,7 +349,8 @@ begin
             and r.target_id::text=p.security_operation_id::text
         )
       on conflict (relationship_id) do nothing;
-      get diagnostics n_operations=n_operations+row_count;
+      get diagnostics n_added=row_count;
+      n_operations:=n_operations+n_added;
     end if;
 
     -- -----------------------------------------------------------------------
@@ -394,7 +401,8 @@ begin
             and r.target_id::text=m.related_entity_id::text
         )
       on conflict (relationship_id) do nothing;
-      get diagnostics n_milestones=n_milestones+row_count;
+      get diagnostics n_added=row_count;
+      n_milestones:=n_milestones+n_added;
     end if;
 
     return jsonb_build_object(
