@@ -294,16 +294,15 @@ def _render_cross_market_infrastructure(oid: str, rec: dict, lens: str):
         return
 
     if lens == "strategic":
-        labels = ["Strategic Industry", "Commercial Context", "Security & Disruptions", "Sanctions"]
+        # Strategic Industries is a focused industrial product, not a mirror of Trade.
+        # Commercial and sanctions context remain in the canonical graph and their
+        # dedicated products, while this dossier concentrates on the industrial base.
+        labels = ["Strategic Industry", "Security & Disruptions"]
         key = f"pc_strategic_market_lens_{oid}"
-        selected = st.segmented_control("Market lens", labels, default="Strategic Industry",
+        selected = st.segmented_control("Strategic view", labels, default="Strategic Industry",
                                         key=key, label_visibility="collapsed")
-        if selected == "Commercial Context":
-            _ORIGINAL_INFRASTRUCTURE_TERMINAL(oid, rec, "trade")
-        elif selected == "Security & Disruptions":
+        if selected == "Security & Disruptions":
             _render_security_lens(oid, rec)
-        elif selected == "Sanctions":
-            _render_sanctions_lens(oid, rec)
         else:
             _render_strategic_lens(oid, rec)
         return
