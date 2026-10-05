@@ -87,10 +87,13 @@ documents as (
     group by entity_id::text
 ),
 sanctions as (
-    select entity_id::text entity_id,count(*)::bigint sanctions_records
-    from public.pc_sanctions_designations
-    where entity_id is not null
-    group by entity_id::text
+    select
+        l.linked_id::text as entity_id,
+        count(*)::bigint as sanctions_records
+    from public.pc_sanctions_links l
+    where lower(coalesce(l.linked_type,'')) in ('entity','company','organisation','organization')
+      and nullif(l.linked_id::text,'') is not null
+    group by l.linked_id::text
 ),
 programmes as (
     select entity_id,count(*)::bigint defence_programme_links
@@ -531,9 +534,13 @@ as $$
       'event_links',
       coalesce((select jsonb_agg(to_jsonb(el)) from public.pc_event_links el
                 where lower(coalesce(el.linked_type,'')) in ('entity','company','organisation','organization')
-                  and el.linked_id::text=p_entity_id),'[]'::jsonb)
+                  and el.linked_id::text=p_entity_id),'[]'::jsonb),
+      'sanctions_links',
+      coalesce((select jsonb_agg(to_jsonb(sl)) from public.pc_sanctions_links sl
+                where lower(coalesce(sl.linked_type,'')) in ('entity','company','organisation','organization')
+                  and sl.linked_id::text=p_entity_id),'[]'::jsonb)
     );
-$$;
+$;
 
 grant select on public.pc_v_entity_relationship_coverage to authenticated,service_role;
 grant select on public.pc_v_model_relationship_gaps to authenticated,service_role;
