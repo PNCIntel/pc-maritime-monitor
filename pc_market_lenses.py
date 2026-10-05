@@ -64,6 +64,104 @@ def _source_button(row: dict, key: str):
         st.link_button("Source", urls[0], key=key)
 
 
+def _strategic_entity_graph(seed_ids: set[str], max_depth: int = 3, max_nodes: int = 180) -> tuple[set[str], list[dict]]:
+    """Traverse existing canonical entity relationships for strategic discovery.
+
+    This deliberately reads the legacy/general graph as well as the newer
+    strategic tables.  It does not merge identities or create relationships.
+    """
+    seen={str(x) for x in seed_ids if x}
+    frontier=set(seen)
+    edges=[]
+    allowed={"owns","controls","parent of","parent_of","part of","part_of",
+             "owns / controls","owns_51_percent","owns_49_percent",
+             "subsidiary of","subsidiary_of","operates","operator of",
+             "prime_support_contractor_with","participates_in"}
+    for _ in range(max_depth):
+        if not frontier or len(seen)>=max_nodes:
+            break
+        found=[]
+        vals=tuple(sorted(frontier))
+        for col in ("source_id","target_id"):
+            try:
+                found += core._rows_matching_ids("pc_relationships",col,vals)
+            except Exception:
+                pass
+        nxt=set()
+        for r in found:
+            rt=_clean(r.get("relationship_type")).casefold()
+            rt_norm=rt.replace("_"," ")
+            if rt not in allowed and rt_norm not in {x.replace("_"," ") for x in allowed}:
+                continue
+            stype=_clean(r.get("source_type")).casefold()
+            ttype=_clean(r.get("target_type")).casefold()
+            if stype=="entity" and ttype=="entity":
+                sid=_clean(r.get("source_id")); tid=_clean(r.get("target_id"))
+                if sid and tid and (sid in frontier or tid in frontier):
+                    edges.append(r)
+                    for eid in (sid,tid):
+                        if eid not in seen and len(seen)+len(nxt)<max_nodes:
+                            nxt.add(eid)
+        seen.update(nxt); frontier=nxt
+    return seen,edges
+
+
+def _strategic_existing_graph(seed_entity_ids: set[str]) -> dict:
+    """Resolve strategic material already present in all generations of the DB."""
+    entity_ids,edges=_strategic_entity_graph(seed_entity_ids)
+    assets=[]; mobile=[]; participants=[]; programmes=[]; contracts=[]; orders=[]
+    for eid in sorted(entity_ids):
+        for col in ("owner_entity_id","operator_entity_id"):
+            assets += core._filtered_rows("pc_assets",col,eid,300)
+        # Older datasets frequently encoded asset ownership/operation only in
+        # pc_relationships, so include entity -> asset edges as well.
+        try:
+            rels=core._rows_matching_ids("pc_relationships","source_id",(eid,))
+        except Exception:
+            rels=[]
+        for r in rels:
+            if _clean(r.get("source_type")).casefold()=="entity" and _clean(r.get("target_type")).casefold()=="asset":
+                aid=_clean(r.get("target_id"))
+                if aid:
+                    ar=core.object_record("asset",aid)
+                    if ar: assets.append(ar)
+            elif _clean(r.get("source_type")).casefold()=="entity" and _clean(r.get("target_type")).casefold()=="mobile_asset":
+                mid=_clean(r.get("target_id"))
+                if mid:
+                    mr=core.object_record("mobile_asset",mid)
+                    if mr: mobile.append(mr)
+        participants += core._filtered_rows("pc_defence_programme_participants","entity_id",eid,300)
+        programmes += core._filtered_rows("pc_defence_programmes","customer_entity_id",eid,200)
+        programmes += core._filtered_rows("pc_defence_programmes","lead_contractor_entity_id",eid,200)
+        contracts += core._related_table("pc_contracts",eid,core._object_name("entity",eid),200)
+        orders += core._filtered_rows("pc_shipbuilding_orders","buyer_entity_id",eid,200)
+        orders += core._filtered_rows("pc_shipbuilding_orders","builder_entity_id",eid,200)
+
+    # Participant -> programme, then programme -> contract/order.
+    for p in participants:
+        pid=_clean(p.get("defence_programme_id"))
+        if pid: programmes += core._filtered_rows("pc_defence_programmes","defence_programme_id",pid,5)
+    for p in programmes:
+        cid=_clean(p.get("contract_id")); soid=_clean(p.get("shipbuilding_order_id"))
+        if cid: contracts += core._filtered_rows("pc_contracts","contract_id",cid,5)
+        if soid: orders += core._filtered_rows("pc_shipbuilding_orders","shipbuilding_order_id",soid,5)
+
+    def dedup(rows, key):
+        out=[]; seen=set()
+        for r in rows:
+            k=_clean(r.get(key)) or repr(r)
+            if k not in seen: seen.add(k); out.append(r)
+        return out
+    return {
+        "entity_ids":entity_ids,"edges":edges,
+        "assets":dedup(assets,"asset_id"),"mobile":dedup(mobile,"mobile_asset_id"),
+        "participants":dedup(participants,"programme_participant_id"),
+        "programmes":dedup(programmes,"defence_programme_id"),
+        "contracts":dedup(contracts,"contract_id"),
+        "orders":dedup(orders,"shipbuilding_order_id"),
+    }
+
+
 def _render_strategic_lens(oid: str, rec: dict):
     dossier=_dossier(oid)
     ids, local = _scope(oid, rec, dossier)
@@ -77,8 +175,18 @@ def _render_strategic_lens(oid: str, rec: dict):
         for pid in sorted(programme_ids):
             programmes += core._filtered_rows("pc_defence_programmes", "defence_programme_id", pid, 5)
 
-    # RPC already resolves ecosystem entities -> strategic programmes/participants.
+    # RPC resolves the newer structured graph.  Expand it through the existing
+    # canonical corporate/industrial graph so older EDGE/Inocea/Irving/Seaspan/
+    # Fincantieri/Helsinki material is discoverable without duplicating records.
     entity_ids={_clean(e.get("entity_id")) for e in (dossier.get("entities") or []) if e.get("entity_id")} if dossier else set()
+    if not entity_ids:
+        entity_ids={_clean(x.get("id")) for x in core._asset_companies(rec) if x.get("id")}
+    legacy=_strategic_existing_graph(entity_ids) if entity_ids else {}
+    participants += list(legacy.get("participants") or [])
+    programmes += list(legacy.get("programmes") or [])
+    contracts_from_graph=list(legacy.get("contracts") or [])
+    graph_assets=list(legacy.get("assets") or [])
+    graph_mobile=list(legacy.get("mobile") or [])
     if not dossier:
         companies=core._asset_companies(rec)
         entity_ids={_clean(x.get("id")) for x in companies if x.get("id")}
@@ -100,6 +208,7 @@ def _render_strategic_lens(oid: str, rec: dict):
     programmes = pdedup
 
     contracts=list(dossier.get("contracts") or []) if dossier else []
+    contracts += contracts_from_graph
     for p in ([] if dossier else programmes):
         cid = _clean(p.get("contract_id"))
         if cid:
@@ -147,6 +256,14 @@ def _render_strategic_lens(oid: str, rec: dict):
         with st.container(border=True):
             st.markdown("#### Facilities & Industrial Capacity")
             strategic_assets = [x for x in local if core._infrastructure_group(x) in {"Marine Services", "Industrial", "Port Infrastructure"}]
+            # Add strategic assets discovered through company/corporate graph.
+            existing_asset_ids={_clean(x.get("id")) for x in strategic_assets}
+            for a in graph_assets:
+                aid=_clean(a.get("asset_id"))
+                blob=" ".join(_clean(a.get(k)) for k in ("name","asset_type","subtype"))
+                if aid and aid not in existing_asset_ids and core.STRATEGIC_RX.search(blob):
+                    strategic_assets.append({"id":aid,"name":_clean(a.get("name")),"type":_clean(a.get("asset_type")),"subtype":_clean(a.get("subtype")),"depth":1})
+                    existing_asset_ids.add(aid)
             if strategic_assets:
                 core._render_company_asset_cards(strategic_assets, f"market_strat_assets_{core._norm(oid)}", 25)
             if shipyards:
@@ -159,6 +276,14 @@ def _render_strategic_lens(oid: str, rec: dict):
                     st.dataframe(view[cols] if cols else view, hide_index=True, use_container_width=True)
             if not strategic_assets and not shipyards and not capacity:
                 st.caption("No strategic industrial facility/capacity record is currently linked.")
+
+    if graph_mobile or legacy.get("orders"):
+        with st.container(border=True):
+            st.markdown("#### Platforms & Shipbuilding")
+            st.caption(f"{len(graph_mobile)} linked platform(s) · {len(legacy.get('orders') or [])} shipbuilding order(s) resolved through the existing canonical graph.")
+            if graph_mobile:
+                rows=[{"Platform":_clean(x.get("name")),"Type":_clean(x.get("asset_type") or x.get("subtype")),"Flag":_clean(x.get("flag")),"IMO":_clean(x.get("imo"))} for x in graph_mobile[:40]]
+                st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
 
     if participants:
         with st.container(border=True):
