@@ -140,6 +140,47 @@ def _filtered_rows(table: str, column: str, value: str, limit: int = 500) -> lis
         return []
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def _asset_dossier_rpc(asset_id: str, max_depth: int = 4, max_nodes: int = 250) -> dict:
+    """Fast database-side infrastructure dossier.
+
+    The RPC resolves the shared physical ecosystem and its commercial/strategic
+    records once in PostgreSQL.  Keep a graceful fallback while deployments catch up.
+    """
+    sb=_sb()
+    if sb is None or not asset_id:
+        return {}
+    try:
+        data=sb.rpc("pc_terminal_asset_dossier",{
+            "p_asset_id":str(asset_id),
+            "p_max_depth":int(max_depth),
+            "p_max_nodes":int(max_nodes),
+        }).execute().data
+        return data if isinstance(data,dict) else {}
+    except Exception:
+        return {}
+
+
+def _dossier_local(dossier: dict) -> list[dict]:
+    """Adapt RPC asset rows to the legacy local-infrastructure card shape."""
+    out=[]
+    for a in (dossier or {}).get("assets") or []:
+        if _clean(a.get("scope_kind"))=="root" or int(a.get("depth") or 0)==0:
+            continue
+        out.append({
+            "type":"asset",
+            "id":_clean(a.get("asset_id")),
+            "name":_clean(a.get("name")) or _clean(a.get("asset_id")),
+            "relationship":(_clean(a.get("scope_relationship")) or "contained infrastructure").replace("_"," "),
+            "asset_type":a.get("asset_type"),
+            "subtype":a.get("subtype"),
+            "region":a.get("region_city"),
+            "country":a.get("country"),
+            "depth":int(a.get("depth") or 0),
+        })
+    return out
+
+
 @st.cache_data(ttl=45, show_spinner=False)
 def _terminal_index_ready() -> bool:
     sb=_sb()
@@ -3879,16 +3920,33 @@ def _infrastructure_projects(oid: str, local: list[dict]) -> list[dict]:
 
 def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("asset",oid)
-    companies=_asset_companies(rec)
-    local=_local_infrastructure(rec)
+    dossier=_asset_dossier_rpc(oid)
+    local=_dossier_local(dossier) if dossier else _local_infrastructure(rec)
+    # The commercial dossier now reuses database-side entities/projects/events where
+    # available; relationship-index calls remain only for corridors/service companies.
+    companies=[]
+    seen_company_ids=set()
+    for e in (dossier.get("entities") or []) if dossier else []:
+        eid=_clean(e.get("entity_id"))
+        if eid and eid not in seen_company_ids:
+            seen_company_ids.add(eid)
+            companies.append({"id":eid,"name":_clean(e.get("name")) or eid,"role":"connected"})
+    if not companies:
+        companies=_asset_companies(rec)
     linked=_linked_objects_from_relationships("asset",oid)
     corridors=[x for x in linked if x.get("type")=="corridor"]
     company_ids={x["id"] for x in companies}
     service_companies=[x for x in linked if x.get("type")=="entity" and x.get("id") not in company_ids]
-    events=_events_for_object("asset",oid)
+    events=(dossier.get("events") or []) if dossier else _events_for_object("asset",oid)
     docs=_related_table("pc_documents",oid,name,40)
     routes=_infrastructure_routes(oid)
-    projects=_infrastructure_projects(oid,local)
+    projects=(dossier.get("projects") or []) if dossier else _infrastructure_projects(oid,local)
+    if dossier:
+        # Preserve the display fields expected by the commercial project renderer.
+        asset_names={_clean(a.get("asset_id")):_clean(a.get("name")) for a in dossier.get("assets") or []}
+        projects=[{**p,
+                   "_project_name":asset_names.get(_clean(p.get("asset_id")), _clean(p.get("asset_id"))),
+                   "_project_status":_clean(p.get("project_stage"))} for p in projects]
 
     # Compact operational strip.  "Ecosystem nodes" is the recursively resolved
     # physical/system scope, not merely first-hop asset relationships.
