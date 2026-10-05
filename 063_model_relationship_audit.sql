@@ -1,4 +1,5 @@
 -- Power & Corridors
+-- syntax repair verified: dollar quote closes with $;
 -- 063_model_relationship_audit.sql
 -- Live audit of canonical objects, relationship coverage and graph gaps.
 --
@@ -540,7 +541,7 @@ as $$
                 where lower(coalesce(sl.linked_type,'')) in ('entity','company','organisation','organization')
                   and sl.linked_id::text=p_entity_id),'[]'::jsonb)
     );
-$;
+$$;
 
 grant select on public.pc_v_entity_relationship_coverage to authenticated,service_role;
 grant select on public.pc_v_model_relationship_gaps to authenticated,service_role;
