@@ -37,8 +37,8 @@ set canonical_id=excluded.canonical_id,
 -- Generic graph endpoints.
 -- Build the FINAL redirected relationship identity first. This avoids violating
 -- ux_pc_relationships_identity when the canonical object already has the same edge.
-drop table if exists pc_071_relationship_redirect_plan;
-create temporary table pc_071_relationship_redirect_plan on commit drop as
+drop table if exists public.public.pc_071_relationship_redirect_plan_work_work;
+create table public.public.pc_071_relationship_redirect_plan_work_work as
 with desired as (
   select
     r.relationship_id::text relationship_id,
@@ -105,7 +105,7 @@ select
   p.relationship_id,
   'dedupe_relationship_during_redirect',
   to_jsonb(r)
-from pc_071_relationship_redirect_plan p
+from public.pc_071_relationship_redirect_plan_work p
 join public.pc_relationships r
   on r.relationship_id::text=p.relationship_id
 where p.affected
@@ -113,7 +113,7 @@ where p.affected
 on conflict (repair_audit_id) do nothing;
 
 delete from public.pc_relationships r
-using pc_071_relationship_redirect_plan p
+using public.pc_071_relationship_redirect_plan_work p
 where r.relationship_id::text=p.relationship_id
   and p.affected
   and p.canonical_rank>1;
@@ -132,7 +132,7 @@ set source_id=p.desired_source_id,
            )
          ),
     updated_at=now()
-from pc_071_relationship_redirect_plan p
+from public.pc_071_relationship_redirect_plan_work p
 where r.relationship_id::text=p.relationship_id
   and p.affected
   and p.canonical_rank=1;
@@ -284,6 +284,8 @@ begin
 end $$;
 
 grant select on public.pc_canonical_redirects to authenticated,service_role;
+
+drop table if exists public.pc_071_relationship_redirect_plan_work;
 
 commit;
 
