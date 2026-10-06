@@ -48,8 +48,11 @@ begin
         from public.pc_entities e
         where public.pc_norm_identity_text(e.name) =
               public.pc_norm_identity_text(m.metadata->'research_attributes'->>'builder')
-        group by e.entity_id,e.name
-        having count(*) over (partition by public.pc_norm_identity_text(e.name))=1
+        and (
+          select count(*)
+          from public.pc_entities e2
+          where public.pc_norm_identity_text(e2.name)=public.pc_norm_identity_text(e.name)
+        )=1
         limit 1
       ) entity_id
     from public.pc_mobile_assets m
@@ -93,8 +96,11 @@ begin
         from public.pc_entities e
         where public.pc_norm_identity_text(e.name) =
               public.pc_norm_identity_text(m.metadata->'research_attributes'->>'operator')
-        group by e.entity_id,e.name
-        having count(*) over (partition by public.pc_norm_identity_text(e.name))=1
+        and (
+          select count(*)
+          from public.pc_entities e2
+          where public.pc_norm_identity_text(e2.name)=public.pc_norm_identity_text(e.name)
+        )=1
         limit 1
       ) entity_id
     from public.pc_mobile_assets m
@@ -138,8 +144,11 @@ begin
         from public.pc_entities e
         where public.pc_norm_identity_text(e.name) =
               public.pc_norm_identity_text(m.metadata->'research_attributes'->>'owner')
-        group by e.entity_id,e.name
-        having count(*) over (partition by public.pc_norm_identity_text(e.name))=1
+        and (
+          select count(*)
+          from public.pc_entities e2
+          where public.pc_norm_identity_text(e2.name)=public.pc_norm_identity_text(e.name)
+        )=1
         limit 1
       ) entity_id
     from public.pc_mobile_assets m
@@ -191,8 +200,11 @@ begin
                   m.metadata->'research_attributes'->>'ism_manager'
                 )
               )
-        group by e.entity_id,e.name
-        having count(*) over (partition by public.pc_norm_identity_text(e.name))=1
+        and (
+          select count(*)
+          from public.pc_entities e2
+          where public.pc_norm_identity_text(e2.name)=public.pc_norm_identity_text(e.name)
+        )=1
         limit 1
       ) entity_id
     from public.pc_mobile_assets m
@@ -240,8 +252,11 @@ begin
           from public.pc_defence_programmes p
           where public.pc_norm_identity_text(p.programme_name) =
                 public.pc_norm_identity_text(m.metadata->'research_attributes'->>'programme')
-          group by p.defence_programme_id,p.programme_name
-          having count(*) over (partition by public.pc_norm_identity_text(p.programme_name))=1
+          and (
+            select count(*)
+            from public.pc_defence_programmes p2
+            where public.pc_norm_identity_text(p2.programme_name)=public.pc_norm_identity_text(p.programme_name)
+          )=1
           limit 1
         ) programme_id
       from public.pc_mobile_assets m
@@ -290,8 +305,11 @@ begin
             or lower(coalesce(a.subtype,'')) like '%shipyard%'
             or lower(coalesce(a.name,'')) like '%shipyard%'
           )
-        group by a.asset_id,a.name
-        having count(*) over (partition by public.pc_norm_identity_text(a.name))=1
+        and (
+          select count(*)
+          from public.pc_assets a2
+          where public.pc_norm_identity_text(a2.name)=public.pc_norm_identity_text(a.name)
+        )=1
         limit 1
       ) shipyard_asset_id
     from public.pc_mobile_assets m
