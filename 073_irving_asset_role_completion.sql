@@ -20,7 +20,7 @@ insert into public.pc_company_asset_roles(
   metadata
 )
 select
-  'CAR_073_'||upper(substr(md5('COMP_IRVING|'||a.asset_id||'|operator'),1,24)),
+  gen_random_uuid(),
   'COMP_IRVING',
   a.asset_id,
   null,
