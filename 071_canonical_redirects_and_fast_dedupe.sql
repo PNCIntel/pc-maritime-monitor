@@ -35,17 +35,101 @@ set canonical_id=excluded.canonical_id,
     repair_batch=excluded.repair_batch;
 
 -- Generic graph endpoints.
-update public.pc_relationships r
-set source_id=d.canonical_id, updated_at=now()
-from public.pc_canonical_redirects d
-where d.object_type=lower(r.source_type)
-  and r.source_id::text=d.old_id;
+-- Build the FINAL redirected relationship identity first. This avoids violating
+-- ux_pc_relationships_identity when the canonical object already has the same edge.
+drop table if exists pc_071_relationship_redirect_plan;
+create temporary table pc_071_relationship_redirect_plan on commit drop as
+with desired as (
+  select
+    r.relationship_id::text relationship_id,
+    r.source_type,
+    r.source_id::text old_source_id,
+    coalesce(ds.canonical_id,r.source_id::text) desired_source_id,
+    r.relationship_type,
+    r.target_type,
+    r.target_id::text old_target_id,
+    coalesce(dt.canonical_id,r.target_id::text) desired_target_id,
+    r.valid_from,
+    r.record_status,
+    r.confidence,
+    r.created_at,
+    (ds.old_id is not null or dt.old_id is not null) as affected
+  from public.pc_relationships r
+  left join public.pc_canonical_redirects ds
+    on ds.object_type=lower(r.source_type)
+   and ds.old_id=r.source_id::text
+   and ds.repair_batch='071'
+  left join public.pc_canonical_redirects dt
+    on dt.object_type=lower(r.target_type)
+   and dt.old_id=r.target_id::text
+   and dt.repair_batch='071'
+),
+ranked as (
+  select
+    d.*,
+    row_number() over (
+      partition by
+        lower(coalesce(d.source_type,'')),
+        d.desired_source_id,
+        lower(coalesce(d.relationship_type,'')),
+        lower(coalesce(d.target_type,'')),
+        d.desired_target_id,
+        coalesce(d.valid_from,date '0001-01-01')
+      order by
+        case when d.old_source_id=d.desired_source_id
+                  and d.old_target_id=d.desired_target_id then 0 else 1 end,
+        case when lower(coalesce(d.record_status,''))='verified' then 0 else 1 end,
+        coalesce(d.confidence::numeric,0) desc,
+        d.created_at nulls last,
+        d.relationship_id
+    ) as canonical_rank
+  from desired d
+)
+select * from ranked;
 
+-- Preserve any redirected edge that would become a duplicate of a better existing
+-- canonical edge, then remove only that redundant graph row.
+insert into public.pc_model_repair_audit(
+  repair_audit_id,repair_batch,object_type,object_id,repair_action,before_record
+)
+select
+  'AUDIT_071_'||upper(substr(md5('relationship_collision|'||p.relationship_id),1,24)),
+  '071',
+  'relationship',
+  p.relationship_id,
+  'dedupe_relationship_during_redirect',
+  to_jsonb(r)
+from pc_071_relationship_redirect_plan p
+join public.pc_relationships r
+  on r.relationship_id::text=p.relationship_id
+where p.affected
+  and p.canonical_rank>1
+on conflict (repair_audit_id) do nothing;
+
+delete from public.pc_relationships r
+using pc_071_relationship_redirect_plan p
+where r.relationship_id::text=p.relationship_id
+  and p.affected
+  and p.canonical_rank>1;
+
+-- Repoint the surviving affected graph rows directly to their final canonical IDs.
 update public.pc_relationships r
-set target_id=d.canonical_id, updated_at=now()
-from public.pc_canonical_redirects d
-where d.object_type=lower(r.target_type)
-  and r.target_id::text=d.old_id;
+set source_id=p.desired_source_id,
+    target_id=p.desired_target_id,
+    metadata=coalesce(r.metadata,'{}'::jsonb)
+      || jsonb_build_object(
+           'canonical_redirect',
+           jsonb_build_object(
+             'batch','071',
+             'previous_source_id',p.old_source_id,
+             'previous_target_id',p.old_target_id
+           )
+         ),
+    updated_at=now()
+from pc_071_relationship_redirect_plan p
+where r.relationship_id::text=p.relationship_id
+  and p.affected
+  and p.canonical_rank=1;
 
 -- Event links.
 update public.pc_event_links el
