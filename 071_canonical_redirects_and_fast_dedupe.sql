@@ -35,10 +35,9 @@ set canonical_id=excluded.canonical_id,
     repair_batch=excluded.repair_batch;
 
 -- Generic graph endpoints.
--- Build the FINAL redirected relationship identity first. This avoids violating
--- ux_pc_relationships_identity when the canonical object already has the same edge.
-drop table if exists public.pc_071_relationship_redirect_plan_work;
-create table public.pc_071_relationship_redirect_plan_work as
+-- Each statement computes its own redirect plan. No temporary or working table
+-- is required, which keeps this migration safe in Supabase's SQL runner.
+
 with desired as (
   select
     r.relationship_id::text relationship_id,
@@ -91,10 +90,7 @@ ranked as (
     ) as canonical_rank
   from desired d
 )
-select * from ranked;
 
--- Preserve any redirected edge that would become a duplicate of a better existing
--- canonical edge, then remove only that redundant graph row.
 insert into public.pc_model_repair_audit(
   repair_audit_id,repair_batch,object_type,object_id,repair_action,before_record
 )
@@ -105,20 +101,125 @@ select
   p.relationship_id,
   'dedupe_relationship_during_redirect',
   to_jsonb(r)
-from public.pc_071_relationship_redirect_plan_work p
+from ranked p
 join public.pc_relationships r
   on r.relationship_id::text=p.relationship_id
 where p.affected
   and p.canonical_rank>1
 on conflict (repair_audit_id) do nothing;
 
+with desired as (
+  select
+    r.relationship_id::text relationship_id,
+    r.source_type,
+    r.source_id::text old_source_id,
+    coalesce(ds.canonical_id,r.source_id::text) desired_source_id,
+    r.relationship_type,
+    r.target_type,
+    r.target_id::text old_target_id,
+    coalesce(dt.canonical_id,r.target_id::text) desired_target_id,
+    r.valid_from,
+    r.record_status,
+    r.confidence,
+    r.created_at,
+    (ds.old_id is not null or dt.old_id is not null) as affected
+  from public.pc_relationships r
+  left join public.pc_canonical_redirects ds
+    on ds.object_type=lower(r.source_type)
+   and ds.old_id=r.source_id::text
+   and ds.repair_batch='071'
+  left join public.pc_canonical_redirects dt
+    on dt.object_type=lower(r.target_type)
+   and dt.old_id=r.target_id::text
+   and dt.repair_batch='071'
+),
+ranked as (
+  select
+    d.*,
+    row_number() over (
+      partition by
+        lower(coalesce(d.source_type,'')),
+        d.desired_source_id,
+        lower(coalesce(d.relationship_type,'')),
+        lower(coalesce(d.target_type,'')),
+        d.desired_target_id,
+        coalesce(d.valid_from,date '0001-01-01')
+      order by
+        case when d.old_source_id=d.desired_source_id
+                  and d.old_target_id=d.desired_target_id then 0 else 1 end,
+        case when lower(coalesce(d.record_status,''))='verified' then 0 else 1 end,
+        case
+          when lower(trim(coalesce(d.confidence::text,''))) in ('very high','high') then 4
+          when lower(trim(coalesce(d.confidence::text,'')))='medium' then 3
+          when lower(trim(coalesce(d.confidence::text,'')))='low' then 2
+          when nullif(trim(coalesce(d.confidence::text,'')),'') is not null then 1
+          else 0
+        end desc,
+        d.created_at nulls last,
+        d.relationship_id
+    ) as canonical_rank
+  from desired d
+)
+
 delete from public.pc_relationships r
-using public.pc_071_relationship_redirect_plan_work p
+using ranked p
 where r.relationship_id::text=p.relationship_id
   and p.affected
   and p.canonical_rank>1;
 
--- Repoint the surviving affected graph rows directly to their final canonical IDs.
+with desired as (
+  select
+    r.relationship_id::text relationship_id,
+    r.source_type,
+    r.source_id::text old_source_id,
+    coalesce(ds.canonical_id,r.source_id::text) desired_source_id,
+    r.relationship_type,
+    r.target_type,
+    r.target_id::text old_target_id,
+    coalesce(dt.canonical_id,r.target_id::text) desired_target_id,
+    r.valid_from,
+    r.record_status,
+    r.confidence,
+    r.created_at,
+    (ds.old_id is not null or dt.old_id is not null) as affected
+  from public.pc_relationships r
+  left join public.pc_canonical_redirects ds
+    on ds.object_type=lower(r.source_type)
+   and ds.old_id=r.source_id::text
+   and ds.repair_batch='071'
+  left join public.pc_canonical_redirects dt
+    on dt.object_type=lower(r.target_type)
+   and dt.old_id=r.target_id::text
+   and dt.repair_batch='071'
+),
+ranked as (
+  select
+    d.*,
+    row_number() over (
+      partition by
+        lower(coalesce(d.source_type,'')),
+        d.desired_source_id,
+        lower(coalesce(d.relationship_type,'')),
+        lower(coalesce(d.target_type,'')),
+        d.desired_target_id,
+        coalesce(d.valid_from,date '0001-01-01')
+      order by
+        case when d.old_source_id=d.desired_source_id
+                  and d.old_target_id=d.desired_target_id then 0 else 1 end,
+        case when lower(coalesce(d.record_status,''))='verified' then 0 else 1 end,
+        case
+          when lower(trim(coalesce(d.confidence::text,''))) in ('very high','high') then 4
+          when lower(trim(coalesce(d.confidence::text,'')))='medium' then 3
+          when lower(trim(coalesce(d.confidence::text,'')))='low' then 2
+          when nullif(trim(coalesce(d.confidence::text,'')),'') is not null then 1
+          else 0
+        end desc,
+        d.created_at nulls last,
+        d.relationship_id
+    ) as canonical_rank
+  from desired d
+)
+
 update public.pc_relationships r
 set source_id=p.desired_source_id,
     target_id=p.desired_target_id,
@@ -132,7 +233,7 @@ set source_id=p.desired_source_id,
            )
          ),
     updated_at=now()
-from public.pc_071_relationship_redirect_plan_work p
+from ranked p
 where r.relationship_id::text=p.relationship_id
   and p.affected
   and p.canonical_rank=1;
@@ -285,7 +386,6 @@ end $$;
 
 grant select on public.pc_canonical_redirects to authenticated,service_role;
 
-drop table if exists public.pc_071_relationship_redirect_plan_work;
 
 commit;
 
