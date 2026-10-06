@@ -80,7 +80,12 @@ ranked as (
                   and d.old_target_id=d.desired_target_id then 0 else 1 end,
         case when lower(coalesce(d.record_status,''))='verified' then 0 else 1 end,
         case
-          when trim(coalesce(d.confidence::text,'')) ~ '^[0-9]+(\\.[0-9]+)?
+          when lower(trim(coalesce(d.confidence::text,''))) in ('very high','high') then 4
+          when lower(trim(coalesce(d.confidence::text,'')))='medium' then 3
+          when lower(trim(coalesce(d.confidence::text,'')))='low' then 2
+          when nullif(trim(coalesce(d.confidence::text,'')),'') is not null then 1
+          else 0
+        end desc,
         d.created_at nulls last,
         d.relationship_id
     ) as canonical_rank
