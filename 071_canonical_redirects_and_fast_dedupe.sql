@@ -195,9 +195,19 @@ from public.pc_canonical_redirects d
 where d.object_type='entity' and x.entity_id::text=d.old_id;
 
 update public.pc_company_portfolio_positions x
-set entity_id=d.canonical_id
+set holder_entity_id=d.canonical_id
 from public.pc_canonical_redirects d
-where d.object_type='entity' and x.entity_id::text=d.old_id;
+where d.object_type='entity' and x.holder_entity_id::text=d.old_id;
+
+update public.pc_company_portfolio_positions x
+set investee_entity_id=d.canonical_id
+from public.pc_canonical_redirects d
+where d.object_type='entity' and x.investee_entity_id::text=d.old_id;
+
+update public.pc_company_portfolio_positions x
+set investee_asset_id=d.canonical_id
+from public.pc_canonical_redirects d
+where d.object_type='asset' and x.investee_asset_id::text=d.old_id;
 
 update public.pc_document_entity_links x
 set entity_id=d.canonical_id
