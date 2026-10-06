@@ -37,8 +37,8 @@ set canonical_id=excluded.canonical_id,
 -- Generic graph endpoints.
 -- Build the FINAL redirected relationship identity first. This avoids violating
 -- ux_pc_relationships_identity when the canonical object already has the same edge.
-drop table if exists public.public.pc_071_relationship_redirect_plan_work_work;
-create table public.public.pc_071_relationship_redirect_plan_work_work as
+drop table if exists public.pc_071_relationship_redirect_plan_work;
+create table public.pc_071_relationship_redirect_plan_work as
 with desired as (
   select
     r.relationship_id::text relationship_id,
