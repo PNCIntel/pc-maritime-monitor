@@ -22,6 +22,7 @@ except Exception:
     from pc_db import client as pc_db_client
 
 from pc_drilldown import object_record, object_label, preferred_entity_id
+from pc_corporate_network import render_network
 
 LENS = {
     "trade": {
@@ -3468,6 +3469,70 @@ def _company_group_asset_summary(entity_ids: set[str]) -> dict[str, int]:
     return total
 
 
+
+def _company_network_payload(root_id: str, children: dict[str, list[dict]], include_assets: bool=False, max_nodes: int=90):
+    nodes=[]; edges=[]; seen={str(root_id)}; queue=[(str(root_id),0)]; depth_by={str(root_id):0}
+    while queue and len(seen)<max_nodes:
+        parent,depth=queue.pop(0)
+        for edge in children.get(parent,[]):
+            child=_clean(edge.get("child_company_key"))
+            if not child:
+                continue
+            edges.append({"source":parent,"target":child,"label":_company_tree_edge_label(edge),"kind":"corporate"})
+            if child not in seen and depth<7:
+                seen.add(child); depth_by[child]=depth+1; queue.append((child,depth+1))
+
+    for eid in seen:
+        erec=object_record("entity",eid) or {}
+        direct=_company_direct_asset_counts(eid)
+        metrics=[]
+        if direct["vessels"]: metrics.append(f"{direct['vessels']} vessels")
+        if direct["aircraft"]: metrics.append(f"{direct['aircraft']} aircraft")
+        if direct["ports_terminals"]: metrics.append(f"{direct['ports_terminals']} ports/terminals")
+        if direct["shipyards"]: metrics.append(f"{direct['shipyards']} shipyards")
+        if direct["rail"] or direct["warehouses"]:
+            metrics.append(f"{direct['rail']+direct['warehouses']} rail/logistics")
+        nodes.append({
+            "id":eid,
+            "name":_object_name("entity",eid),
+            "depth":depth_by.get(eid,0),
+            "kind":"company",
+            "subtype":_company_display_value(erec.get("subtype"),erec.get("entity_type")),
+            "metrics":" · ".join(metrics[:2]),
+        })
+
+    if include_assets:
+        for eid in list(seen):
+            if len(nodes)>=max_nodes: break
+            try:
+                roles=_company_asset_roles(eid)
+            except Exception:
+                roles=[]
+            for r in roles:
+                if len(nodes)>=max_nodes: break
+                aid=_clean(r.get("asset_id")); mid=_clean(r.get("mobile_asset_id"))
+                obj_type="asset" if aid else ("mobile_asset" if mid else "")
+                obj_id=aid or mid
+                if not obj_type or not obj_id: continue
+                nid=f"{obj_type}:{obj_id}"
+                if any(n["id"]==nid for n in nodes): continue
+                arec=object_record(obj_type,obj_id) or {}
+                nodes.append({
+                    "id":nid,
+                    "name":_object_name(obj_type,obj_id),
+                    "depth":depth_by.get(eid,0)+1,
+                    "kind":"asset",
+                    "subtype":_company_display_value(arec.get("subtype"),arec.get("asset_type")),
+                    "metrics":"",
+                })
+                edges.append({
+                    "source":eid,
+                    "target":nid,
+                    "label":(_clean(r.get("asset_role")) or "linked asset").replace("_"," ").title(),
+                    "kind":"asset",
+                })
+    return nodes,edges
+
 def _render_company_tree_view(oid: str, rec: dict, tx: list[dict] | None = None):
     all_nodes, all_edges = _company_relationship_neighborhood(oid)
 
@@ -3580,65 +3645,91 @@ def _render_company_tree_view(oid: str, rec: dict, tx: list[dict] | None = None)
                     args=("entity", pid, pname),
                 )
 
-    with st.container(border=True):
-        st.markdown(f"#### Structure in {year}")
+    hierarchy_tab, network_tab = st.tabs(["Hierarchy", "Network"])
 
-        def render_node(eid: str, depth: int, visited: set[str]):
-            if eid in visited or depth > 8:
-                return
-            visited = set(visited)
-            visited.add(eid)
+    with hierarchy_tab:
+        with st.container(border=True):
+            st.markdown(f"#### Structure in {year}")
 
-            name = _object_name("entity", eid)
-            erec = object_record("entity", eid) or {}
-            subtype = _company_display_value(erec.get("subtype"), erec.get("entity_type"))
-            direct = _company_direct_asset_counts(eid)
-            bits = []
-            if direct["vessels"]:
-                bits.append(f"{direct['vessels']} vessels")
-            if direct["aircraft"]:
-                bits.append(f"{direct['aircraft']} aircraft")
-            if direct["ports_terminals"]:
-                bits.append(f"{direct['ports_terminals']} ports/terminals")
-            if direct["shipyards"]:
-                bits.append(f"{direct['shipyards']} shipyards")
-            if direct["rail"] or direct["warehouses"]:
-                bits.append(f"{direct['rail'] + direct['warehouses']} rail/logistics assets")
+            def render_node(eid: str, depth: int, visited: set[str]):
+                if eid in visited or depth > 8:
+                    return
+                visited = set(visited)
+                visited.add(eid)
 
-            if depth == 0:
-                edge_text = "Selected company"
-            else:
-                edge_text = ""
+                name = _object_name("entity", eid)
+                erec = object_record("entity", eid) or {}
+                subtype = _company_display_value(erec.get("subtype"), erec.get("entity_type"))
+                direct = _company_direct_asset_counts(eid)
+                bits = []
+                if direct["vessels"]:
+                    bits.append(f"{direct['vessels']} vessels")
+                if direct["aircraft"]:
+                    bits.append(f"{direct['aircraft']} aircraft")
+                if direct["ports_terminals"]:
+                    bits.append(f"{direct['ports_terminals']} ports/terminals")
+                if direct["shipyards"]:
+                    bits.append(f"{direct['shipyards']} shipyards")
+                if direct["rail"] or direct["warehouses"]:
+                    bits.append(f"{direct['rail'] + direct['warehouses']} rail/logistics assets")
 
-            row = st.columns([0.16 * depth + 0.02, 4.8, 1.05])
-            row[0].markdown("")
-            with row[1]:
-                st.markdown(f"**{name}**")
-                meta = " · ".join(x for x in [subtype, edge_text, ", ".join(bits)] if x)
-                if meta:
-                    st.caption(meta)
-            if eid != str(oid):
-                row[2].button(
-                    "Open",
-                    key=f"tree_open_{_norm(oid)}_{depth}_{_norm(eid)}",
-                    use_container_width=True,
-                    on_click=_set_context,
-                    args=("entity", eid, name),
-                )
+                if depth == 0:
+                    edge_text = "Selected company"
+                else:
+                    edge_text = ""
 
-            for j, edge in enumerate(sorted(
-                children.get(eid, []),
-                key=lambda x: (_clean(x.get("child_company_key")), _clean(x.get("relationship")))
-            )):
-                child = _clean(edge.get("child_company_key"))
-                if not child or child in visited:
-                    continue
-                indent = st.columns([0.16 * (depth + 1) + 0.02, 4.8, 1.05])
-                indent[0].markdown("")
-                indent[1].caption("↳ " + _company_tree_edge_label(edge))
-                render_node(child, depth + 1, visited)
+                row = st.columns([0.16 * depth + 0.02, 4.8, 1.05])
+                row[0].markdown("")
+                with row[1]:
+                    st.markdown(f"**{name}**")
+                    meta = " · ".join(x for x in [subtype, edge_text, ", ".join(bits)] if x)
+                    if meta:
+                        st.caption(meta)
+                if eid != str(oid):
+                    row[2].button(
+                        "Open",
+                        key=f"tree_open_{_norm(oid)}_{depth}_{_norm(eid)}",
+                        use_container_width=True,
+                        on_click=_set_context,
+                        args=("entity", eid, name),
+                    )
 
-        render_node(str(oid), 0, set())
+                for j, edge in enumerate(sorted(
+                    children.get(eid, []),
+                    key=lambda x: (_clean(x.get("child_company_key")), _clean(x.get("relationship")))
+                )):
+                    child = _clean(edge.get("child_company_key"))
+                    if not child or child in visited:
+                        continue
+                    indent = st.columns([0.16 * (depth + 1) + 0.02, 4.8, 1.05])
+                    indent[0].markdown("")
+                    indent[1].caption("↳ " + _company_tree_edge_label(edge))
+                    render_node(child, depth + 1, visited)
+
+            render_node(str(oid), 0, set())
+
+
+    with network_tab:
+        network_mode = st.radio(
+            "Network detail",
+            ["Companies only", "Companies + assets"],
+            horizontal=True,
+            key=f"company_network_mode_{_norm(oid)}",
+        )
+        st.caption("Visual view of the same year-filtered corporate graph.")
+        network_nodes, network_edges = _company_network_payload(
+            str(oid), children,
+            include_assets=(network_mode == "Companies + assets"),
+            max_nodes=90,
+        )
+        render_network(
+            network_nodes,
+            network_edges,
+            root_id=str(oid),
+            key_prefix=f"corp_network_{_norm(oid)}",
+            open_callback=_set_context,
+            include_assets=(network_mode == "Companies + assets"),
+        )
 
     if affiliation_edges:
         with st.expander(f"Operational / affiliated relationships ({len(affiliation_edges)})"):
