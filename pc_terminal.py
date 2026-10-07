@@ -4006,9 +4006,165 @@ def _mobile_identity_facts(rec: dict) -> list[tuple[str,str]]:
     return [(k,_clean(v)) for k,v in fields if v not in (None,"",[],{})]
 
 
+def _mobile_role_rows(oid: str, rec: dict) -> list[dict]:
+    """Resolve all current company roles on a mobile asset, preserving role detail."""
+    out=[]; seen=set()
+
+    # Authoritative role table first.
+    try:
+        rows=_filtered_rows("pc_company_asset_roles","mobile_asset_id",str(oid),500)
+    except Exception:
+        rows=[]
+    for r in rows:
+        if r.get("valid_to") not in (None,""):
+            continue
+        eid=_clean(r.get("entity_id"))
+        role=_clean(r.get("asset_role")) or "linked"
+        meta=r.get("metadata") if isinstance(r.get("metadata"),dict) else {}
+        detail=_clean(meta.get("role_detail"))
+        key=(eid,role,detail)
+        if eid and key not in seen:
+            seen.add(key)
+            out.append({
+                "entity_id":eid,
+                "name":_object_name("entity",eid),
+                "role":role,
+                "role_detail":detail,
+                "as_of":_clean(r.get("as_of")),
+                "source_id":_clean(r.get("source_id")),
+                "metadata":meta,
+            })
+
+    # Summary pointers are useful fallbacks but must not erase detailed roles.
+    for col,role in (
+        ("owner_entity_id","legal_owner"),
+        ("operator_entity_id","operator"),
+        ("manager_entity_id","manager"),
+    ):
+        eid=_clean(rec.get(col))
+        key=(eid,role,"")
+        if eid and not any(x["entity_id"]==eid and x["role"]==role for x in out):
+            out.append({
+                "entity_id":eid,
+                "name":_object_name("entity",eid),
+                "role":role,
+                "role_detail":"",
+                "as_of":"",
+                "source_id":"",
+                "metadata":{},
+            })
+    return out
+
+
+def _current_parent_edge(entity_id: str) -> dict | None:
+    """Return one current ownership/control parent edge for a corporate path."""
+    try:
+        rows=_filtered_rows("pc_company_relationships","child_company_key",str(entity_id),200)
+    except Exception:
+        rows=[]
+    now=pd.Timestamp.now()
+    candidates=[]
+    priority={
+        "equity_owner":0,"owns_controls":1,"owns":2,"controls":3,
+        "controlled_interest":4,"business_unit_parent":5,"parent_of":6,
+        "subsidiary":7,"portfolio_company":8,"joint_venture":9,
+    }
+    for r in rows:
+        if not _company_relationship_active(r,now):
+            continue
+        rel=_clean(r.get("relationship")).casefold()
+        rel_norm=rel.replace("_"," ")
+        if rel not in _CORPORATE_TREE_RELATIONSHIPS and rel_norm not in {
+            x.replace("_"," ") for x in _CORPORATE_TREE_RELATIONSHIPS
+        }:
+            continue
+        candidates.append((priority.get(rel,99),r))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x:(x[0],_clean(x[1].get("effective_from"))),reverse=False)
+    return candidates[0][1]
+
+
+def _mobile_corporate_path(role_rows: list[dict], max_depth: int=5) -> list[dict]:
+    """Build a compact parent -> ... -> direct owner path from the legal owner."""
+    owner=None
+    for r in role_rows:
+        if r.get("role")=="legal_owner":
+            owner=r.get("entity_id"); break
+    if not owner:
+        for r in role_rows:
+            if r.get("role")=="owner":
+                owner=r.get("entity_id"); break
+    if not owner:
+        return []
+
+    chain=[{"id":owner,"name":_object_name("entity",owner)}]
+    current=owner
+    seen={owner}
+    for _ in range(max_depth):
+        edge=_current_parent_edge(current)
+        if not edge:
+            break
+        parent=_clean(edge.get("parent_company_key"))
+        if not parent or parent in seen:
+            break
+        chain.append({"id":parent,"name":_object_name("entity",parent),"edge":edge})
+        seen.add(parent); current=parent
+    return list(reversed(chain))
+
+
+def _mobile_siblings(role_rows: list[dict], oid: str, limit: int=12) -> list[dict]:
+    owner=None
+    for r in role_rows:
+        if r.get("role")=="legal_owner":
+            owner=r.get("entity_id"); break
+    if not owner:
+        return []
+    try:
+        rows=_filtered_rows("pc_company_asset_roles","entity_id",owner,500)
+    except Exception:
+        return []
+    out=[]; seen=set()
+    for r in rows:
+        if _clean(r.get("asset_role"))!="legal_owner" or r.get("valid_to") not in (None,""):
+            continue
+        mid=_clean(r.get("mobile_asset_id"))
+        if not mid or mid==str(oid) or mid in seen:
+            continue
+        seen.add(mid)
+        out.append({"id":mid,"name":_object_name("mobile_asset",mid)})
+        if len(out)>=limit:
+            break
+    return out
+
+
+def _render_mobile_role_stack(role_rows: list[dict], key_prefix: str):
+    if not role_rows:
+        st.caption("No current ownership / operating roles resolved.")
+        return
+    role_order={
+        "legal_owner":0,"owner":1,"operator":2,"manager":3,"service_provider":4,"other":5
+    }
+    rows=sorted(role_rows,key=lambda r:(role_order.get(r.get("role"),9),r.get("name","")))
+    for i,r in enumerate(rows):
+        role=(_clean(r.get("role")) or "linked").replace("_"," ").title()
+        detail=(_clean(r.get("role_detail")) or "").replace("_"," ").title()
+        cols=st.columns([2.8,2.0,1.0])
+        cols[0].markdown(f"**{r.get('name') or r.get('entity_id')}**")
+        cols[1].caption(" · ".join(x for x in [role,detail] if x))
+        cols[2].button(
+            "Open",
+            key=f"{key_prefix}_{i}_{_norm(r.get('entity_id'))}",
+            use_container_width=True,
+            on_click=_set_context,
+            args=("entity",r.get("entity_id"),r.get("name") or ""),
+        )
+        st.markdown("<div style='height:1px;background:var(--line);margin:.12rem 0 .42rem'></div>",unsafe_allow_html=True)
+
+
 def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("mobile_asset",oid)
-    companies=_mobile_companies(rec)
+    role_rows=_mobile_role_rows(oid,rec)
     linked=_linked_objects_from_relationships("mobile_asset",oid)
     events=_events_for_object("mobile_asset",oid)
     sanctions=_filtered_rows("pc_sanctions_designations","mobile_asset_id",str(oid),200)
@@ -4025,109 +4181,188 @@ def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
 
     infra=[x for x in linked if x.get("type")=="asset"]
     corridors=[x for x in linked if x.get("type")=="corridor"]
-    related_entities=[x for x in linked if x.get("type")=="entity"]
+    corporate_path=_mobile_corporate_path(role_rows)
+    siblings=_mobile_siblings(role_rows,oid,12)
 
-    m=st.columns(6)
-    m[0].metric("Owners / managers",len(companies) or len(related_entities))
-    m[1].metric("Linked locations",len(infra))
-    m[2].metric("Corridors",len(corridors))
-    m[3].metric("Developments",len(events))
-    m[4].metric("Sanctions records",len(sanctions))
-    m[5].metric("Source documents",len(docs))
+    # ------------------------------------------------------------------
+    # Executive vessel strip
+    # ------------------------------------------------------------------
+    subtype=_company_display_value(rec.get("subtype"),rec.get("asset_type")).replace("_"," ").title()
+    status=_company_display_value(rec.get("status"),"Unknown")
+    st.markdown(f"### {name}")
+    headline_bits=[
+        f"IMO {_clean(rec.get('imo'))}" if rec.get("imo") else "",
+        subtype,
+        status.title() if status else "",
+    ]
+    st.caption(" · ".join(x for x in headline_bits if x))
 
-    left,right=st.columns([1.0,1.4],gap="large")
-    with left:
+    top=st.columns(6)
+    top[0].metric("IMO",_clean(rec.get("imo")) or "—")
+    top[1].metric("Built",_company_display_value(rec.get("year_built"),rec.get("build_year")) or "—")
+    top[2].metric("DWT",_clean(rec.get("dwt")) or "—")
+    top[3].metric("TEU",_company_display_value(rec.get("capacity_value") if _clean(rec.get("capacity_unit")).casefold()=="teu" else None,rec.get("teu_capacity"),rec.get("teu")) or "—")
+    top[4].metric("Flag",_clean(rec.get("flag")) or "—")
+    top[5].metric("Events",len(events))
+
+    if corporate_path:
         with st.container(border=True):
-            st.markdown("### Asset Identity")
-            st.markdown(f"#### {name}")
-            subtype=_company_display_value(rec.get("subtype"),rec.get("asset_type"))
-            if subtype: st.caption(subtype.replace("_"," ").title())
-            for label,value in _mobile_identity_facts(rec):
-                st.markdown(
-                    f"<div class='pc-row'><span class='pc-row-label'>{label}</span>"
-                    f"<span class='pc-row-meta' style='white-space:normal;text-align:right'>{value}</span></div>",
-                    unsafe_allow_html=True
+            st.markdown("#### Corporate path")
+            path_text=" → ".join(x["name"] for x in corporate_path) + f" → {name}"
+            st.markdown(f"**{path_text}**")
+            st.caption("Current corporate ownership/control path reconstructed from company relationships.")
+
+    tabs=st.tabs([
+        "Overview",
+        "Ownership & Management",
+        "Activity",
+        "Routes & Locations",
+        "Sanctions",
+        "Evidence",
+    ])
+
+    # ------------------------------------------------------------------
+    # Overview
+    # ------------------------------------------------------------------
+    with tabs[0]:
+        left,right=st.columns([1.0,1.25],gap="large")
+        with left:
+            with st.container(border=True):
+                st.markdown("#### Vessel Identity")
+                for label,value in _mobile_identity_facts(rec):
+                    st.markdown(
+                        f"<div class='pc-row'><span class='pc-row-label'>{label}</span>"
+                        f"<span class='pc-row-meta' style='white-space:normal;text-align:right'>{value}</span></div>",
+                        unsafe_allow_html=True
+                    )
+        with right:
+            with st.container(border=True):
+                st.markdown("#### Current Roles")
+                _render_mobile_role_stack(role_rows,f"mobile_roles_overview_{_norm(oid)}")
+
+            if siblings:
+                with st.container(border=True):
+                    st.markdown("#### Other vessels under the same legal owner")
+                    for i,x in enumerate(siblings):
+                        cols=st.columns([4.0,1.0])
+                        cols[0].markdown(f"**{x['name']}**")
+                        cols[1].button(
+                            "Open",
+                            key=f"mobile_sibling_{_norm(oid)}_{i}",
+                            use_container_width=True,
+                            on_click=_set_context,
+                            args=("mobile_asset",x["id"],x["name"]),
+                        )
+
+    # ------------------------------------------------------------------
+    # Ownership & management
+    # ------------------------------------------------------------------
+    with tabs[1]:
+        st.markdown("### Ownership, Operation & Management")
+        st.caption("Legal owner, operator, commercial/ISM management and other current company roles are kept separately.")
+        _render_mobile_role_stack(role_rows,f"mobile_roles_{_norm(oid)}")
+        if corporate_path:
+            st.markdown("#### Ownership chain")
+            for i,x in enumerate(corporate_path):
+                cols=st.columns([4.0,1.0])
+                cols[0].markdown(f"**{'↳ ' if i else ''}{x['name']}**")
+                cols[1].button(
+                    "Open",
+                    key=f"mobile_path_{_norm(oid)}_{i}",
+                    use_container_width=True,
+                    on_click=_set_context,
+                    args=("entity",x["id"],x["name"]),
                 )
 
-        with st.container(border=True):
-            st.markdown("### Ownership, Operation & Management")
-            combined=[]; seen=set()
-            for x in companies:
-                k=x.get("id")
-                if k and k not in seen:
-                    seen.add(k); combined.append({"type":"entity","id":k,"name":x.get("name"),"relationship":x.get("role")})
-            for x in related_entities:
-                if x.get("id") and x.get("id") not in seen:
-                    seen.add(x.get("id")); combined.append(x)
-            _render_company_relationship_cards(combined,f"mobile_comp_{_norm(oid)}",15)
+    # ------------------------------------------------------------------
+    # Activity
+    # ------------------------------------------------------------------
+    with tabs[2]:
+        st.markdown("### Recent Activity & Intelligence")
+        _render_event_rows(events,"mobile_events_"+_norm(oid),18)
+        st.markdown("### Asset Timeline")
+        _render_event_rows(events,"mobile_timeline_"+_norm(oid),30)
 
-        if sanctions:
+    # ------------------------------------------------------------------
+    # Routes & locations
+    # ------------------------------------------------------------------
+    with tabs[3]:
+        left,right=st.columns([1.35,1.0],gap="large")
+        with left:
             with st.container(border=True):
-                st.markdown("### Sanctions / Restrictions")
-                for s in sanctions[:12]:
-                    title=_company_display_value(s.get("designated_name"),s.get("subject_name"),s.get("name"),"Designation")
-                    regime=_company_display_value(s.get("program"),s.get("regime"),s.get("authority"))
-                    status=_company_display_value(s.get("status"),s.get("designation_status"))
-                    st.markdown(f"**{title}**")
-                    st.caption(" · ".join(x for x in [regime,status,_clean(s.get("designation_date"))] if x))
-
-    with right:
-        with st.container(border=True):
-            st.markdown("### Operational / Geographic Context")
-            points=[]
-            xy=_coords_from_record(rec)
-            if xy: points.append({"lat":xy[0],"lon":xy[1],"name":name,"type":"mobile asset"})
-            for x in infra[:30]:
-                p=_asset_point(x.get("id"))
-                if p: points.append(p)
-            if points:
-                st.map(pd.DataFrame(points),latitude="lat",longitude="lon",size=46,zoom=None,use_container_width=True)
-            else:
-                st.caption("No current coordinate or linked mapped infrastructure is stored yet. Live AIS/ADS-B can be layered here later.")
-            if infra:
+                st.markdown("#### Operational / Geographic Context")
+                points=[]
+                xy=_coords_from_record(rec)
+                if xy: points.append({"lat":xy[0],"lon":xy[1],"name":name,"type":"mobile asset"})
+                for x in infra[:30]:
+                    p=_asset_point(x.get("id"))
+                    if p: points.append(p)
+                if points:
+                    st.map(pd.DataFrame(points),latitude="lat",longitude="lon",size=46,zoom=None,use_container_width=True)
+                else:
+                    st.caption("No current coordinate or linked mapped infrastructure is stored yet. Live AIS/ADS-B can be layered here later.")
+        with right:
+            with st.container(border=True):
                 st.markdown("#### Linked ports / terminals / infrastructure")
-                _render_company_asset_cards(infra,f"mobile_infra_{_norm(oid)}",12)
-
+                if infra:
+                    _render_company_asset_cards(infra,f"mobile_infra_{_norm(oid)}",15)
+                else:
+                    st.caption("No linked fixed infrastructure recorded yet.")
         if corridors:
             with st.container(border=True):
-                st.markdown("### Corridor / Route Exposure")
-                for i,x in enumerate(corridors[:12]):
+                st.markdown("#### Corridor / Route Exposure")
+                for i,x in enumerate(corridors[:20]):
                     cols=st.columns([3.2,1.4,1.0])
                     cols[0].markdown(f"**{x.get('name')}**")
                     cols[1].caption((_clean(x.get("relationship")) or "connected").replace("_"," ").title())
-                    cols[2].button("→",key=f"mobile_corr_{_norm(oid)}_{i}",use_container_width=True,
-                                   on_click=_set_context,args=("corridor",x.get("id"),x.get("name") or ""))
+                    cols[2].button(
+                        "Open",
+                        key=f"mobile_corr_{_norm(oid)}_{i}",
+                        use_container_width=True,
+                        on_click=_set_context,
+                        args=("corridor",x.get("id"),x.get("name") or ""),
+                    )
 
-    low1,low2=st.columns([1.0,1.25],gap="large")
-    with low1:
-        with st.container(border=True):
-            st.markdown("### Source Evidence")
-            if docs:
-                for i,d in enumerate(docs[:12]):
-                    title=_clean(d.get("title")) or "Source document"
-                    st.markdown(f"**{title}**")
-                    src=_company_display_value(d.get("source_name"),d.get("publisher"),d.get("document_type"))
-                    if src: st.caption(src)
-                    urls=_event_source_urls(d)
-                    if urls: st.link_button("Open source",urls[0],key=f"mobile_doc_{_norm(oid)}_{i}")
-            else:
-                st.caption("No linked source documents recorded yet.")
-    with low2:
-        with st.container(border=True):
-            st.markdown("### Recent Activity & Intelligence")
-            _render_event_rows(events,"mobile_events_"+_norm(oid),12)
+    # ------------------------------------------------------------------
+    # Sanctions
+    # ------------------------------------------------------------------
+    with tabs[4]:
+        st.markdown("### Sanctions / Restrictions")
+        if sanctions:
+            for s in sanctions[:40]:
+                title=_company_display_value(s.get("designated_name"),s.get("subject_name"),s.get("name"),"Designation")
+                regime=_company_display_value(s.get("program"),s.get("regime"),s.get("authority"))
+                status2=_company_display_value(s.get("status"),s.get("designation_status"))
+                st.markdown(f"**{title}**")
+                st.caption(" · ".join(x for x in [regime,status2,_clean(s.get("designation_date"))] if x))
+        else:
+            st.caption("No sanctions/designation records linked to this vessel.")
 
-    st.markdown("### Asset Timeline")
-    _render_event_rows(events,"mobile_timeline_"+_norm(oid),18)
+    # ------------------------------------------------------------------
+    # Evidence
+    # ------------------------------------------------------------------
+    with tabs[5]:
+        st.markdown("### Source Evidence")
+        if docs:
+            for i,d in enumerate(docs[:30]):
+                title=_clean(d.get("title")) or "Source document"
+                st.markdown(f"**{title}**")
+                src=_company_display_value(d.get("source_name"),d.get("publisher"),d.get("document_type"))
+                if src: st.caption(src)
+                urls=_event_source_urls(d)
+                if urls:
+                    st.link_button("Open source",urls[0],key=f"mobile_doc_{_norm(oid)}_{i}")
+                st.markdown("<div style='height:1px;background:var(--line);margin:.12rem 0 .45rem'></div>",unsafe_allow_html=True)
+        else:
+            st.caption("No linked source documents recorded yet.")
 
-    with st.expander("Identity history / structured data"):
-        history=[]
-        for table in ("pc_mobile_asset_name_history","pc_mobile_asset_identity_history","pc_vessel_identifiers"):
-            history.extend(_related_table(table,oid,name,100))
-        if history:
-            st.dataframe(pd.DataFrame(history),hide_index=True,use_container_width=True)
-        st.json(rec)
-
+        with st.expander("Identity history / structured data"):
+            history=[]
+            for table in ("pc_mobile_asset_name_history","pc_mobile_asset_identity_history","pc_vessel_identifiers"):
+                history.extend(_related_table(table,oid,name,100))
+            if history:
+                st.dataframe(pd.DataFrame(history),hide_index=True,use_container_width=True)
+            st.json(rec)
 
 def _render_port_operator_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("entity",oid)
