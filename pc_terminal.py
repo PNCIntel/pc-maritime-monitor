@@ -4063,6 +4063,21 @@ def _render_port_operator_terminal(oid: str, rec: dict, lens: str):
     docs=_documents_for_entity(oid) or _documents_by_name(name,25)
     countries=sorted(set(x.get("country") for x in footprint if x.get("country")))
 
+    # Corporate Tree is available on specialised operator dossiers too.
+    # This is essential for diversified groups such as AD Ports and DP World,
+    # which are routed through the port-operator renderer rather than the
+    # generic company renderer.
+    company_view = st.radio(
+        "Company view",
+        ["Overview", "Corporate Tree"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key=f"company_view_{_norm(oid)}",
+    )
+    if company_view == "Corporate Tree":
+        _render_company_tree_view(oid, rec, tx)
+        return
+
     m=st.columns(6)
     m[0].metric("Ports / terminals",len(footprint))
     m[1].metric("Countries",len(countries))
@@ -4623,6 +4638,20 @@ def _render_institution_terminal(oid: str, rec: dict, lens: str):
     docs=_documents_for_entity(oid) or _documents_by_name(name,30)
     programmes=_related_table("pc_programmes",oid,name,100)
     operations=_related_table("pc_security_operations",oid,name,100)
+
+    # Investment platforms / institutional entities (for example ADQ or LIMAD)
+    # use their own dossier renderer, but should expose the same temporal
+    # corporate-tree view as operating companies.
+    company_view = st.radio(
+        "Company view",
+        ["Overview", "Corporate Tree"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key=f"company_view_{_norm(oid)}",
+    )
+    if company_view == "Corporate Tree":
+        _render_company_tree_view(oid, rec, None)
+        return
 
     m=st.columns(6)
     m[0].metric("Linked organisations",len(entities))
