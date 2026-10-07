@@ -3248,6 +3248,434 @@ def _render_strategic_company_activity(data: dict, oid: str):
                 st.caption(" · ".join(x for x in [typ,status] if x))
 
 
+
+# ---------------------------------------------------------------------
+# Corporate tree / temporal group view
+# ---------------------------------------------------------------------
+
+_CORPORATE_TREE_RELATIONSHIPS = {
+    "equity_owner",
+    "owns_controls",
+    "owns",
+    "controls",
+    "controlled_interest",
+    "business_unit_parent",
+    "parent_of",
+    "parent of",
+    "subsidiary",
+    "subsidiary_of",
+    "subsidiary of",
+    "portfolio_company",
+    "joint_venture",
+}
+
+
+def _company_relationship_neighborhood(entity_id: str, max_depth: int = 6, max_nodes: int = 250) -> tuple[set[str], list[dict]]:
+    """Collect corporate relationships around an entity across time.
+
+    pc_company_relationships is intentionally treated as a temporal edge table:
+    we collect both current and historical rows here, then filter for the selected
+    year in the renderer. This keeps the view generic for AD Ports, CMA CGM,
+    DP World, ADQ, LIMAD and other complex groups.
+    """
+    root = str(entity_id)
+    seen = {root}
+    frontier = {root}
+    edges: list[dict] = []
+    edge_keys = set()
+
+    for _ in range(max_depth):
+        if not frontier or len(seen) >= max_nodes:
+            break
+
+        found: list[dict] = []
+        for eid in tuple(frontier):
+            for col in ("parent_company_key", "child_company_key"):
+                try:
+                    found.extend(_filtered_rows("pc_company_relationships", col, eid, 500))
+                except Exception:
+                    pass
+
+        nxt = set()
+        for r in found:
+            parent = _clean(r.get("parent_company_key"))
+            child = _clean(r.get("child_company_key"))
+            if not parent or not child:
+                continue
+
+            key = (
+                parent,
+                child,
+                _clean(r.get("relationship")),
+                _clean(r.get("effective_from")),
+                _clean(r.get("effective_to")),
+                _clean(r.get("value")),
+                _clean(r.get("unit")),
+            )
+            if key not in edge_keys:
+                edge_keys.add(key)
+                edges.append(r)
+
+            if parent in frontier and child not in seen and len(seen) + len(nxt) < max_nodes:
+                nxt.add(child)
+            if child in frontier and parent not in seen and len(seen) + len(nxt) < max_nodes:
+                nxt.add(parent)
+
+        seen.update(nxt)
+        frontier = nxt
+
+    return seen, edges
+
+
+def _company_relationship_active(row: dict, cutoff: pd.Timestamp) -> bool:
+    start = pd.to_datetime(row.get("effective_from"), errors="coerce")
+    end = pd.to_datetime(row.get("effective_to"), errors="coerce")
+    if pd.notna(start) and start > cutoff:
+        return False
+    if pd.notna(end) and end < cutoff:
+        return False
+    return True
+
+
+def _company_tree_edge_label(row: dict) -> str:
+    rel = (_clean(row.get("relationship")) or "linked").replace("_", " ").title()
+    value = row.get("value")
+    unit = _clean(row.get("unit"))
+    stake = ""
+    if value not in (None, ""):
+        try:
+            fv = float(value)
+            stake = f"{fv:g}{'%' if unit.casefold() in {'percent','%'} else (' '+unit if unit else '')}"
+        except Exception:
+            stake = f"{value}{(' '+unit) if unit else ''}"
+    bits = [x for x in (rel, stake, _clean(row.get("effective_from"))) if x]
+    return " · ".join(bits)
+
+
+def _company_direct_asset_counts(entity_id: str) -> dict[str, int]:
+    """Small, generic per-node footprint summary derived from existing graph data."""
+    counts = {
+        "vessels": 0,
+        "aircraft": 0,
+        "ports_terminals": 0,
+        "shipyards": 0,
+        "rail": 0,
+        "warehouses": 0,
+        "other_assets": 0,
+    }
+    mobile_seen, asset_seen = set(), set()
+
+    try:
+        roles = _company_asset_roles(entity_id)
+    except Exception:
+        roles = []
+
+    for r in roles:
+        mid = _clean(r.get("mobile_asset_id"))
+        aid = _clean(r.get("asset_id"))
+
+        if mid and mid not in mobile_seen:
+            mobile_seen.add(mid)
+            rec = object_record("mobile_asset", mid) or {}
+            blob = " ".join([
+                _clean(rec.get("asset_type")),
+                _clean(rec.get("subtype")),
+                _clean(rec.get("name")),
+            ]).casefold()
+            if "aircraft" in blob or "plane" in blob or "helicopter" in blob:
+                counts["aircraft"] += 1
+            else:
+                counts["vessels"] += 1
+
+        if aid and aid not in asset_seen:
+            asset_seen.add(aid)
+            rec = object_record("asset", aid) or {}
+            blob = " ".join([
+                _clean(rec.get("asset_type")),
+                _clean(rec.get("subtype")),
+                _clean(rec.get("name")),
+            ]).casefold()
+            if re.search(r"\bport\b|terminal|container depot|cruise|roro|ro-ro", blob):
+                counts["ports_terminals"] += 1
+            elif re.search(r"shipyard|dry ?dock|dockyard", blob):
+                counts["shipyards"] += 1
+            elif re.search(r"rail|intermodal|marshalling|freight line", blob):
+                counts["rail"] += 1
+            elif re.search(r"warehouse|distribution centre|distribution center|logistics centre|logistics center", blob):
+                counts["warehouses"] += 1
+            else:
+                counts["other_assets"] += 1
+
+    return counts
+
+
+def _company_group_asset_summary(entity_ids: set[str]) -> dict[str, int]:
+    total = {
+        "vessels": 0,
+        "aircraft": 0,
+        "ports_terminals": 0,
+        "shipyards": 0,
+        "rail": 0,
+        "warehouses": 0,
+        "other_assets": 0,
+    }
+    # Avoid double counting shared assets across operating entities.
+    mobile_ids, asset_ids = set(), set()
+
+    for eid in entity_ids:
+        try:
+            roles = _company_asset_roles(eid)
+        except Exception:
+            roles = []
+        for r in roles:
+            mid = _clean(r.get("mobile_asset_id"))
+            aid = _clean(r.get("asset_id"))
+            if mid:
+                mobile_ids.add(mid)
+            if aid:
+                asset_ids.add(aid)
+
+    for mid in mobile_ids:
+        rec = object_record("mobile_asset", mid) or {}
+        blob = " ".join([
+            _clean(rec.get("asset_type")),
+            _clean(rec.get("subtype")),
+            _clean(rec.get("name")),
+        ]).casefold()
+        if "aircraft" in blob or "plane" in blob or "helicopter" in blob:
+            total["aircraft"] += 1
+        else:
+            total["vessels"] += 1
+
+    for aid in asset_ids:
+        rec = object_record("asset", aid) or {}
+        blob = " ".join([
+            _clean(rec.get("asset_type")),
+            _clean(rec.get("subtype")),
+            _clean(rec.get("name")),
+        ]).casefold()
+        if re.search(r"\bport\b|terminal|container depot|cruise|roro|ro-ro", blob):
+            total["ports_terminals"] += 1
+        elif re.search(r"shipyard|dry ?dock|dockyard", blob):
+            total["shipyards"] += 1
+        elif re.search(r"rail|intermodal|marshalling|freight line", blob):
+            total["rail"] += 1
+        elif re.search(r"warehouse|distribution centre|distribution center|logistics centre|logistics center", blob):
+            total["warehouses"] += 1
+        else:
+            total["other_assets"] += 1
+
+    return total
+
+
+def _render_company_tree_view(oid: str, rec: dict, tx: list[dict] | None = None):
+    all_nodes, all_edges = _company_relationship_neighborhood(oid)
+
+    if not all_edges:
+        st.info("No temporal corporate relationships are currently recorded for this entity.")
+        return
+
+    years = []
+    for r in all_edges:
+        for k in ("effective_from", "effective_to"):
+            d = pd.to_datetime(r.get(k), errors="coerce")
+            if pd.notna(d):
+                years.append(int(d.year))
+
+    now = pd.Timestamp.now()
+    current_year = int(now.year)
+    min_year = min(years) if years else current_year
+    min_year = max(1980, min_year)
+    max_year = max([current_year] + years) if years else current_year
+
+    st.markdown("### Corporate Tree")
+    st.caption(
+        "Ownership, control, business units and portfolio relationships reconstructed from temporal corporate edges. "
+        "Change the year to see how the group evolved."
+    )
+
+    control_left, control_right = st.columns([2.0, 1.0], gap="large")
+    with control_left:
+        year = st.slider(
+            "Structure as of year",
+            min_value=min_year,
+            max_value=max_year,
+            value=current_year,
+            step=1,
+            key=f"company_tree_year_{_norm(oid)}",
+        )
+    with control_right:
+        st.metric("Known corporate nodes", max(1, len(all_nodes)))
+
+    cutoff = now if year == current_year else pd.Timestamp(year=year, month=12, day=31)
+
+    active_edges = [r for r in all_edges if _company_relationship_active(r, cutoff)]
+
+    # Hierarchy edges are kept separate from operational affiliations so the
+    # corporate tree remains an ownership/control view rather than a hairball.
+    hierarchy_edges = []
+    affiliation_edges = []
+    for r in active_edges:
+        rel = (_clean(r.get("relationship")) or "").casefold()
+        rel_norm = rel.replace("_", " ")
+        accepted = rel in _CORPORATE_TREE_RELATIONSHIPS or rel_norm in {
+            x.replace("_", " ") for x in _CORPORATE_TREE_RELATIONSHIPS
+        }
+        if accepted:
+            hierarchy_edges.append(r)
+        else:
+            affiliation_edges.append(r)
+
+    # Build descendants from the selected company. If this entity is a lower
+    # level operating company, also retain its immediate parent context.
+    children: dict[str, list[dict]] = {}
+    parents: dict[str, list[dict]] = {}
+    for r in hierarchy_edges:
+        p = _clean(r.get("parent_company_key"))
+        c = _clean(r.get("child_company_key"))
+        if not p or not c:
+            continue
+        children.setdefault(p, []).append(r)
+        parents.setdefault(c, []).append(r)
+
+    descendant_ids = {str(oid)}
+    frontier = {str(oid)}
+    for _ in range(8):
+        nxt = set()
+        for p in frontier:
+            for r in children.get(p, []):
+                c = _clean(r.get("child_company_key"))
+                if c and c not in descendant_ids:
+                    nxt.add(c)
+        if not nxt:
+            break
+        descendant_ids.update(nxt)
+        frontier = nxt
+
+    summary = _company_group_asset_summary(descendant_ids)
+    k = st.columns(6)
+    k[0].metric("Companies / JVs", max(0, len(descendant_ids) - 1))
+    k[1].metric("Vessels", summary["vessels"])
+    k[2].metric("Aircraft", summary["aircraft"])
+    k[3].metric("Ports / terminals", summary["ports_terminals"])
+    k[4].metric("Shipyards", summary["shipyards"])
+    k[5].metric("Rail / logistics", summary["rail"] + summary["warehouses"])
+
+    # Parent context for lower-level entities.
+    root_parents = parents.get(str(oid), [])
+    if root_parents:
+        with st.container(border=True):
+            st.markdown("#### Parent / ownership context")
+            for i, r in enumerate(root_parents[:8]):
+                pid = _clean(r.get("parent_company_key"))
+                pname = _object_name("entity", pid)
+                cols = st.columns([3.5, 2.2, 1.0])
+                cols[0].markdown(f"**{pname}**")
+                cols[1].caption(_company_tree_edge_label(r))
+                cols[2].button(
+                    "Open",
+                    key=f"tree_parent_{_norm(oid)}_{i}_{_norm(pid)}",
+                    use_container_width=True,
+                    on_click=_set_context,
+                    args=("entity", pid, pname),
+                )
+
+    with st.container(border=True):
+        st.markdown(f"#### Structure in {year}")
+
+        def render_node(eid: str, depth: int, visited: set[str]):
+            if eid in visited or depth > 8:
+                return
+            visited = set(visited)
+            visited.add(eid)
+
+            name = _object_name("entity", eid)
+            erec = object_record("entity", eid) or {}
+            subtype = _company_display_value(erec.get("subtype"), erec.get("entity_type"))
+            direct = _company_direct_asset_counts(eid)
+            bits = []
+            if direct["vessels"]:
+                bits.append(f"{direct['vessels']} vessels")
+            if direct["aircraft"]:
+                bits.append(f"{direct['aircraft']} aircraft")
+            if direct["ports_terminals"]:
+                bits.append(f"{direct['ports_terminals']} ports/terminals")
+            if direct["shipyards"]:
+                bits.append(f"{direct['shipyards']} shipyards")
+            if direct["rail"] or direct["warehouses"]:
+                bits.append(f"{direct['rail'] + direct['warehouses']} rail/logistics assets")
+
+            if depth == 0:
+                edge_text = "Selected company"
+            else:
+                edge_text = ""
+
+            row = st.columns([0.16 * depth + 0.02, 4.8, 1.05])
+            row[0].markdown("")
+            with row[1]:
+                st.markdown(f"**{name}**")
+                meta = " · ".join(x for x in [subtype, edge_text, ", ".join(bits)] if x)
+                if meta:
+                    st.caption(meta)
+            if eid != str(oid):
+                row[2].button(
+                    "Open",
+                    key=f"tree_open_{_norm(oid)}_{depth}_{_norm(eid)}",
+                    use_container_width=True,
+                    on_click=_set_context,
+                    args=("entity", eid, name),
+                )
+
+            for j, edge in enumerate(sorted(
+                children.get(eid, []),
+                key=lambda x: (_clean(x.get("child_company_key")), _clean(x.get("relationship")))
+            )):
+                child = _clean(edge.get("child_company_key"))
+                if not child or child in visited:
+                    continue
+                indent = st.columns([0.16 * (depth + 1) + 0.02, 4.8, 1.05])
+                indent[0].markdown("")
+                indent[1].caption("↳ " + _company_tree_edge_label(edge))
+                render_node(child, depth + 1, visited)
+
+        render_node(str(oid), 0, set())
+
+    if affiliation_edges:
+        with st.expander(f"Operational / affiliated relationships ({len(affiliation_edges)})"):
+            for i, r in enumerate(affiliation_edges[:40]):
+                p = _clean(r.get("parent_company_key"))
+                c = _clean(r.get("child_company_key"))
+                st.markdown(f"**{_object_name('entity', p)} → {_object_name('entity', c)}**")
+                st.caption(_company_tree_edge_label(r))
+                url = _clean(r.get("source_url"))
+                if url:
+                    st.link_button("Source", url, key=f"tree_aff_src_{_norm(oid)}_{i}")
+
+    # Temporal change log / acquisition timeline.
+    timeline = sorted(
+        [r for r in all_edges if _clean(r.get("effective_from"))],
+        key=lambda x: _clean(x.get("effective_from")),
+        reverse=True,
+    )
+    st.markdown("### Acquisition & Structure Timeline")
+    st.caption("Dated ownership changes, acquisitions, restructurings and other recorded corporate changes.")
+    if timeline:
+        for i, r in enumerate(timeline[:40]):
+            parent = _object_name("entity", _clean(r.get("parent_company_key")))
+            child = _object_name("entity", _clean(r.get("child_company_key")))
+            st.markdown(f"**{_clean(r.get('effective_from'))} · {parent} → {child}**")
+            st.caption(_company_tree_edge_label(r))
+            notes = _clean(r.get("notes"))
+            if notes:
+                st.write(notes[:420])
+            url = _clean(r.get("source_url"))
+            if url:
+                st.link_button("Source", url, key=f"tree_timeline_src_{_norm(oid)}_{i}")
+            st.markdown("<div style='height:1px;background:var(--line);margin:.12rem 0 .5rem'></div>", unsafe_allow_html=True)
+    else:
+        st.caption("No dated corporate changes recorded yet.")
+
+
 def _render_company_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("entity",oid)
     bundle=_entity_identity_bundle(str(oid))
@@ -3300,6 +3728,19 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     location=", ".join(x for x in [hq,country] if x)
     website=_company_display_value(p.get("website_url"),rec.get("website_url"))
     description=_company_display_value(p.get("business_description"),rec.get("description"),rec.get("business_description"))
+
+    # Company-level navigation. Corporate Tree is a graph view of the same
+    # canonical records, not a separate dataset.
+    company_view = st.radio(
+        "Company view",
+        ["Overview", "Corporate Tree"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key=f"company_view_{_norm(oid)}",
+    )
+    if company_view == "Corporate Tree":
+        _render_company_tree_view(oid, rec, tx)
+        return
 
     # Executive company strip.
     m=st.columns(6)
