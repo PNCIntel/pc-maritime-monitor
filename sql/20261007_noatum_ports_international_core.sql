@@ -57,25 +57,41 @@ where not exists (
      or lower(trim(e.name))=lower(trim(s.name))
 );
 
+-- Resolve the actual Noatum Ports entity key in this database.
+-- Some environments already contain Noatum Ports under an auto-generated
+-- canonical ID, so do not assume COMP_NOATUM_PORTS exists just because the
+-- company name is present.
+drop table if exists pg_temp.pc_noatum_ports_ctx;
+create temp table pc_noatum_ports_ctx(entity_id text primary key) on commit drop;
+
+insert into pc_noatum_ports_ctx(entity_id)
+select e.entity_id
+from public.pc_entities e
+where e.entity_id='COMP_NOATUM_PORTS'
+   or lower(trim(e.name))=lower(trim('Noatum Ports'))
+order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+         e.created_at nulls last
+limit 1;
+
 -- ---------------------------------------------------------------------------
 -- 2. Corporate operating relationships beneath Noatum Ports
 -- ---------------------------------------------------------------------------
 
-with rel(parent_company_key,child_company_key,relationship,value,unit,effective_from,source_url,notes,metadata) as (
+with rel(child_company_key,relationship,value,unit,effective_from,source_url,notes,metadata) as (
   values
-    ('COMP_NOATUM_PORTS','COMP_KGTL','controlled_interest',60::numeric,'percent',null::date,
+    ('COMP_KGTL','controlled_interest',60::numeric,'percent',null::date,
      'https://www.adportsgroup.com/-/media/sites/adports/investors/2025/downloads/adpg--2025-capital-market-day-consolidated.pdf?rev=-1',
      'Karachi container terminal concession; AD Ports Group / Noatum Ports economic interest reported at 60%.',
      jsonb_build_object('concession_years',50,'terminal_type','container')),
-    ('COMP_NOATUM_PORTS','COMP_KGTML','controlled_interest',60::numeric,'percent',null::date,
+    ('COMP_KGTML','controlled_interest',60::numeric,'percent',null::date,
      'https://www.adportsgroup.com/-/media/sites/adports/investors/2025/downloads/adpg--2025-capital-market-day-consolidated.pdf?rev=-1',
      'Karachi multipurpose terminal concession; AD Ports Group / Noatum Ports economic interest reported at 60%.',
      jsonb_build_object('concession_years',25,'terminal_type','multipurpose')),
-    ('COMP_NOATUM_PORTS','COMP_SARZHA_GRAIN_TERMINAL','controlled_interest',51::numeric,'percent',date '2025-01-14',
+    ('COMP_SARZHA_GRAIN_TERMINAL','controlled_interest',51::numeric,'percent',date '2025-01-14',
      'https://www.adportsgroup.com/en/news-and-media/2025/01/14/ad-ports-group-to-invest-in-greenfield-sarzha-grain-terminal-in-kuryk-port-kazakhstan',
      'AD Ports Group owns 51% of the Sarzha Grain Terminal partnership; Semurg owns 49%.',
      jsonb_build_object('partner','SEMURG INVEST LLP')),
-    ('COMP_NOATUM_PORTS','COMP_CLI','operator',null::numeric,null,date '2026-10-02',
+    ('COMP_CLI','operator',null::numeric,null,date '2026-10-02',
      'https://www.adportsgroup.com/en/news-and-media/2026/10/02/ad-ports-group-successfully-completes-acquisition-of-brazils-cli',
      'Noatum Ports assumed operational control of CLI at financial close.',
      jsonb_build_object('role_detail','operational_control'))
@@ -85,14 +101,15 @@ insert into public.pc_company_relationships(
   effective_from,confidence,source_url,notes,metadata
 )
 select
-  r.parent_company_key,r.child_company_key,r.relationship,r.value,r.unit,
+  ctx.entity_id,r.child_company_key,r.relationship,r.value,r.unit,
   r.effective_from,'high',r.source_url,r.notes,r.metadata
 from rel r
-where exists(select 1 from public.pc_entities e where e.entity_id=r.parent_company_key)
+cross join pc_noatum_ports_ctx ctx
+where exists(select 1 from public.pc_entities e where e.entity_id=ctx.entity_id)
   and exists(select 1 from public.pc_entities e where e.entity_id=r.child_company_key)
   and not exists (
     select 1 from public.pc_company_relationships x
-    where x.parent_company_key=r.parent_company_key
+    where x.parent_company_key=ctx.entity_id
       and x.child_company_key=r.child_company_key
       and lower(x.relationship)=lower(r.relationship)
       and coalesce(x.effective_from,date '1900-01-01')=coalesce(r.effective_from,date '1900-01-01')
@@ -496,7 +513,7 @@ insert into public.pc_company_asset_roles(
   entity_id,asset_id,asset_role,role_status,as_of,metadata
 )
 select
-  'COMP_NOATUM_PORTS',
+  ctx.entity_id,
   a.asset_id,
   'operator',
   'reported',
@@ -509,10 +526,11 @@ select
   )
 from targets t
 join public.pc_assets a on a.asset_id=t.asset_id
-where exists(select 1 from public.pc_entities e where e.entity_id='COMP_NOATUM_PORTS')
+cross join pc_noatum_ports_ctx ctx
+where exists(select 1 from public.pc_entities e where e.entity_id=ctx.entity_id)
 and not exists (
   select 1 from public.pc_company_asset_roles r
-  where r.entity_id='COMP_NOATUM_PORTS'
+  where r.entity_id=ctx.entity_id
     and r.asset_id=a.asset_id
     and r.asset_role='operator'
     and r.valid_to is null
@@ -563,8 +581,9 @@ where exists(select 1 from public.pc_entities e where e.entity_id=r.entity_id)
 -- ---------------------------------------------------------------------------
 
 update public.pc_assets a
-set operator_entity_id='COMP_NOATUM_PORTS',
+set operator_entity_id=ctx.entity_id,
     updated_at=now()
+from pc_noatum_ports_ctx ctx
 where a.asset_id in (
   'TERM_NOATUM_LUANDA','TERM_NOATUM_POINTE_NOIRE','TERM_NOATUM_SAFAGA',
   'TERM_NOATUM_ADABIYA','TERM_KGTL_KARACHI','TERM_KGTML_KARACHI',
@@ -594,7 +613,15 @@ select
   a.longitude
 from public.pc_company_asset_roles r
 join public.pc_assets a on a.asset_id=r.asset_id
-where r.entity_id='COMP_NOATUM_PORTS'
+where r.entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+)
   and r.asset_role='operator'
   and r.valid_to is null
 order by a.country,a.name;
@@ -608,7 +635,15 @@ select
   count(distinct a.asset_id) as terminal_count
 from public.pc_company_asset_roles r
 join public.pc_assets a on a.asset_id=r.asset_id
-where r.entity_id='COMP_NOATUM_PORTS'
+where r.entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+)
   and r.asset_role='operator'
   and r.valid_to is null
 group by a.country
@@ -621,7 +656,15 @@ order by terminal_count desc,a.country;
 select a.asset_id,a.name,a.country,a.region_city
 from public.pc_company_asset_roles r
 join public.pc_assets a on a.asset_id=r.asset_id
-where r.entity_id='COMP_NOATUM_PORTS'
+where r.entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+)
   and r.asset_role='operator'
   and r.valid_to is null
   and (a.latitude is null or a.longitude is null)
