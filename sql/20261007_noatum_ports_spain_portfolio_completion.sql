@@ -14,6 +14,25 @@
 
 begin;
 
+drop table if exists pg_temp.pc_noatum_ports_ctx;
+create temp table pc_noatum_ports_ctx(entity_id text primary key) on commit drop;
+
+insert into pc_noatum_ports_ctx(entity_id)
+select e.entity_id
+from public.pc_entities e
+where e.entity_id='COMP_NOATUM_PORTS'
+   or lower(trim(e.name))=lower(trim('Noatum Ports'))
+order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+         e.created_at nulls last
+limit 1;
+
+do $
+begin
+  if not exists (select 1 from pc_noatum_ports_ctx) then
+    raise exception 'Noatum Ports entity is not present; run the international core SQL first';
+  end if;
+end $;
+
 with seed(asset_id,name,region_city,latitude,longitude) as (
   values
     ('TERM_NOATUM_A_CORUNA','Noatum Ports - A Coruna','A Coruna',43.3600::numeric,-8.4000::numeric),
@@ -61,7 +80,7 @@ insert into public.pc_company_asset_roles(
   entity_id,asset_id,asset_role,role_status,as_of,metadata
 )
 select
-  'COMP_NOATUM_PORTS',
+  ctx.entity_id,
   s.asset_id,
   'operator',
   'reported',
@@ -87,20 +106,22 @@ from (
     ('TERM_NOATUM_HUELVA'),
     ('TERM_NOATUM_BARCELONA')
 ) as s(asset_id)
-where exists(select 1 from public.pc_entities e where e.entity_id='COMP_NOATUM_PORTS')
+cross join pc_noatum_ports_ctx ctx
+where exists(select 1 from public.pc_entities e where e.entity_id=ctx.entity_id)
   and exists(select 1 from public.pc_assets a where a.asset_id=s.asset_id)
   and not exists (
     select 1
     from public.pc_company_asset_roles r
-    where r.entity_id='COMP_NOATUM_PORTS'
+    where r.entity_id=ctx.entity_id
       and r.asset_id=s.asset_id
       and r.asset_role='operator'
       and r.valid_to is null
   );
 
 update public.pc_assets a
-set operator_entity_id='COMP_NOATUM_PORTS',
+set operator_entity_id=ctx.entity_id,
     updated_at=now()
+from pc_noatum_ports_ctx ctx
 where a.asset_id in (
   'TERM_NOATUM_A_CORUNA','TERM_NOATUM_FERROL','TERM_NOATUM_AVILES',
   'TERM_NOATUM_GIJON','TERM_NOATUM_BILBAO','TERM_NOATUM_PASAJES',
@@ -117,7 +138,7 @@ select
   r.role_status,r.metadata->>'confidence' as relationship_confidence
 from public.pc_company_asset_roles r
 join public.pc_assets a on a.asset_id=r.asset_id
-where r.entity_id='COMP_NOATUM_PORTS'
+where r.entity_id=ctx.entity_id
   and r.asset_role='operator'
   and a.country='Spain'
   and r.valid_to is null
