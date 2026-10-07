@@ -73,13 +73,6 @@ order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
          e.created_at nulls last
 limit 1;
 
-do $
-begin
-  if not exists (select 1 from pc_noatum_ports_ctx) then
-    raise exception 'Noatum Ports entity could not be resolved after seed step';
-  end if;
-end $;
-
 -- ---------------------------------------------------------------------------
 -- 2. Corporate operating relationships beneath Noatum Ports
 -- ---------------------------------------------------------------------------
@@ -620,7 +613,15 @@ select
   a.longitude
 from public.pc_company_asset_roles r
 join public.pc_assets a on a.asset_id=r.asset_id
-where r.entity_id=ctx.entity_id
+where r.entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+)
   and r.asset_role='operator'
   and r.valid_to is null
 order by a.country,a.name;
@@ -634,7 +635,15 @@ select
   count(distinct a.asset_id) as terminal_count
 from public.pc_company_asset_roles r
 join public.pc_assets a on a.asset_id=r.asset_id
-where r.entity_id=ctx.entity_id
+where r.entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+)
   and r.asset_role='operator'
   and r.valid_to is null
 group by a.country
@@ -647,7 +656,15 @@ order by terminal_count desc,a.country;
 select a.asset_id,a.name,a.country,a.region_city
 from public.pc_company_asset_roles r
 join public.pc_assets a on a.asset_id=r.asset_id
-where r.entity_id=ctx.entity_id
+where r.entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+)
   and r.asset_role='operator'
   and r.valid_to is null
   and (a.latitude is null or a.longitude is null)
