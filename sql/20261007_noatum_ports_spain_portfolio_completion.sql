@@ -26,13 +26,6 @@ order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
          e.created_at nulls last
 limit 1;
 
-do $
-begin
-  if not exists (select 1 from pc_noatum_ports_ctx) then
-    raise exception 'Noatum Ports entity is not present; run the international core SQL first';
-  end if;
-end $;
-
 with seed(asset_id,name,region_city,latitude,longitude) as (
   values
     ('TERM_NOATUM_A_CORUNA','Noatum Ports - A Coruna','A Coruna',43.3600::numeric,-8.4000::numeric),
@@ -112,7 +105,15 @@ where exists(select 1 from public.pc_entities e where e.entity_id=ctx.entity_id)
   and not exists (
     select 1
     from public.pc_company_asset_roles r
-    where r.entity_id=ctx.entity_id
+    where r.entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+)
       and r.asset_id=s.asset_id
       and r.asset_role='operator'
       and r.valid_to is null
@@ -138,7 +139,15 @@ select
   r.role_status,r.metadata->>'confidence' as relationship_confidence
 from public.pc_company_asset_roles r
 join public.pc_assets a on a.asset_id=r.asset_id
-where r.entity_id=ctx.entity_id
+where r.entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+)
   and r.asset_role='operator'
   and a.country='Spain'
   and r.valid_to is null
