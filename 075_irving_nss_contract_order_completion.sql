@@ -104,7 +104,7 @@ values(
   'vessels',
   'Construction of six Harry DeWolf-class Arctic and Offshore Patrol Ships for the Royal Canadian Navy by Irving Shipbuilding Inc. at Halifax Shipyard.',
   'National Shipbuilding Strategy',
-  'https://www.canada.ca/en/department-national-defence/services/procurement/arctic-offshore-patrol-ships.html',
+  'https://www.canada.ca/en/news/archive/2015/05/new-arctic-offshore-patrol-ship-naming-announcement.html',
   'https://www.canada.ca/en/department-national-defence/services/procurement/arctic-offshore-patrol-ships.html',
   'approved',
   jsonb_build_object(
@@ -582,7 +582,7 @@ with units(
     ('SHIPUNIT_CA_RCN_AOPS_01',1,'MOBILE_CA_HMCS_HARRY_DEWOLF','HMCS Harry DeWolf','delivered','2020-07-31'::date),
     ('SHIPUNIT_CA_RCN_AOPS_02',2,'MOBILE_CA_HMCS_MARGARET_BROOKE','HMCS Margaret Brooke','delivered','2021-07-15'::date),
     ('SHIPUNIT_CA_RCN_AOPS_03',3,'MOBILE_CA_HMCS_MAX_BERNAYS','HMCS Max Bernays','delivered','2022-09-02'::date),
-    ('SHIPUNIT_CA_RCN_AOPS_04',4,'MOBILE_CA_HMCS_WILLIAM_HALL','HMCS William Hall','delivered','2023-08-30'::date),
+    ('SHIPUNIT_CA_RCN_AOPS_04',4,'MOBILE_CA_HMCS_WILLIAM_HALL','HMCS William Hall','delivered','2023-08-31'::date),
     ('SHIPUNIT_CA_RCN_AOPS_05',5,'MOBILE_CA_HMCS_FREDERICK_ROLETTE','HMCS Frédérick Rolette','delivered','2024-08-29'::date),
     ('SHIPUNIT_CA_RCN_AOPS_06',6,'MOBILE_CA_HMCS_ROBERT_HAMPTON_GRAY','HMCS Robert Hampton Gray','delivered','2025-08-21'::date)
 )
