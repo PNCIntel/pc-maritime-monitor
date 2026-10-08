@@ -61,8 +61,8 @@ LENS = {
 
 OBJECTS = {
     "entity": ("pc_entities", "entity_id", "name", "Company / Organisation"),
-    "asset": ("pc_assets", "asset_id", "name", "Infrastructure Node"),
-    "mobile_asset": ("pc_mobile_assets", "mobile_asset_id", "name", "Mobile Asset"),
+    "asset": ("pc_assets", "asset_id", "name", "Facility / Infrastructure"),
+    "mobile_asset": ("pc_mobile_assets", "mobile_asset_id", "name", "Vessel / Aircraft / Vehicle"),
     "event": ("pc_events", "event_id", "title", "Development"),
     "corridor": ("pc_trade_corridors", "corridor_key", "corridor_name", "Corridor"),
 }
@@ -216,7 +216,7 @@ def _indexed_search(q: str, limit: int=60) -> list[dict]:
             "country":_clean(r.get("country")),
             "subtype":_clean(r.get("subtype")),
             "score":float(r.get("rank_score") or 0),
-            "match_reason":"terminal index",
+            "match_reason":"indexed search",
         })
     return out
 
@@ -1146,7 +1146,7 @@ def _render_map_for_asset(rec: dict):
         if not _coords_from_record(rec):
             st.caption("The selected asset has no stored coordinate; the map shows its connected locations.")
     else:
-        st.caption("No canonical coordinates are currently stored for this node or its local connected assets.")
+        st.caption("Map coordinates are not yet available for this facility or its connected locations.")
     from urllib.parse import quote
     query=" ".join(_clean(rec.get(k)) for k in ("name","region_city","country") if rec.get(k))
     if query:
@@ -1159,14 +1159,14 @@ def _render_context_header(typ: str, oid: str, rec: dict, lens: str):
     subtype = _clean(rec.get("entity_type") or rec.get("asset_type") or rec.get("event_type") or rec.get("corridor_type"))
     loc = _display_location(rec)
     st.markdown(
-        f"<div class='pc-context'><div class='pc-k'>{cfg['brand']} · selected canonical context</div>"
+        f"<div class='pc-context'><div class='pc-k'>{cfg['brand']} · overview</div>"
         f"<h2 style='margin:.15rem 0'>{name}</h2>"
         f"<div class='pc-muted'>{OBJECTS[typ][3]}{(' · '+subtype) if subtype else ''}{(' · '+loc) if loc else ''}</div></div>",
         unsafe_allow_html=True,
     )
 
 
-def _open_selector(rows: list[dict], key: str, label: str = "Open connected object"):
+def _open_selector(rows: list[dict], key: str, label: str = "Open related record"):
     if not rows:
         return
     choices = [x for x in rows if x.get("type") in OBJECTS and x.get("id")]
@@ -1320,7 +1320,7 @@ def _render_spatial_pane(typ: str, oid: str, rec: dict, lens: str):
                 "Country":x.get("country")
             } for x in local])
             st.dataframe(view,hide_index=True,use_container_width=True,height=min(360,100+28*min(len(view),9)))
-            _open_selector(local,f"spatial_local_{oid}","Open connected node")
+            _open_selector(local,f"spatial_local_{oid}","Open connected facility")
 
         connected=_linked_objects_from_relationships("asset",oid)
         if connected:
@@ -1330,7 +1330,7 @@ def _render_spatial_pane(typ: str, oid: str, rec: dict, lens: str):
             _open_selector(connected,f"spatial_links_{oid}")
 
         # Name/location-based route & corridor discovery while graph edges are still being completed.
-        for title,table in (("Routes / services","pc_transport_routes"),("Corridors","pc_trade_corridors")):
+        for title,table in (("Transport services","pc_transport_routes"),("Corridors","pc_trade_corridors")):
             rows=_related_table(table,oid,_clean(rec.get("name")),100)
             if rows:
                 st.markdown("##### "+title)
@@ -1501,7 +1501,7 @@ def _render_layer2(typ: str, oid: str, rec: dict, lens: str):
     st.markdown(f"### {LENS[lens]['layer2']}")
     if typ == "asset":
         _render_map_for_asset(rec)
-        st.markdown("#### Node profile")
+        st.markdown("#### Facility Overview")
         facts = []
         for k in ("asset_type", "subtype", "country", "region_city", "latitude", "longitude", "status", "confidence"):
             if rec.get(k) not in (None, "", [], {}):
@@ -1884,7 +1884,7 @@ def _render_intelligence_home():
     left,mid,right=st.columns([1.6,1.0,1.0],gap="medium")
     with left:
         with st.container(border=True):
-            _panel_header("Global Intelligence Picture","Infrastructure and geographic context for current developments.")
+            _panel_header("Global Intelligence Picture","Infrastructure and geographic context for recent events.")
             _dashboard_map_assets("trade")
     with mid:
         with st.container(border=True):
@@ -2314,7 +2314,7 @@ def _open_search_result(lens: str, typ: str, oid: str, name: str):
     st.session_state[f"pc_terminal_search_{lens}"] = ""
 
 def _render_search_results(results: list[dict], lens: str):
-    st.markdown("#### Best matches")
+    st.markdown("#### Search results")
     shown=results[:8]
     cols=st.columns(2, gap="medium")
     for i,x in enumerate(shown):
@@ -2324,7 +2324,7 @@ def _render_search_results(results: list[dict], lens: str):
                 meta=[x.get("kind"),x.get("subtype"),x.get("country")]
                 st.caption(" · ".join(v for v in meta if v))
                 if x.get("match_reason"):
-                    st.caption("Matched by: "+x["match_reason"])
+                    st.caption("Matched by name or alias") if x["match_reason"] not in {"terminal index", "indexed search", "record content"} else None
                 st.button(
                     "Open",
                     key=f"pc_terminal_result_{lens}_{i}_{x['type']}_{x['id']}",
@@ -3933,7 +3933,7 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
                     _render_company_transaction_cards(tx[10:],30)
     with low_right:
         with st.container(border=True):
-            st.markdown("### Evidence & Documents")
+            st.markdown("### Sources & Documents")
             st.caption("Primary sources, filings, documents and supporting evidence.")
             shown=0
             for d in docs[:12]:
@@ -4467,7 +4467,7 @@ def _render_port_operator_terminal(oid: str, rec: dict, lens: str):
                     st.dataframe(pd.DataFrame(portfolio),hide_index=True,use_container_width=True)
     with low2:
         with st.container(border=True):
-            st.markdown("### Current Developments")
+            st.markdown("### Latest Activity")
             _render_event_rows(events,"portop_events_"+_norm(oid),10)
 
     with st.container(border=True):
@@ -4763,23 +4763,23 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
                    "_project_name":asset_names.get(_clean(p.get("asset_id")), _clean(p.get("asset_id"))),
                    "_project_status":_clean(p.get("project_stage"))} for p in projects]
 
-    # Compact operational strip.  "Ecosystem nodes" is the recursively resolved
+    # Compact operational strip.  "Connected facilities" is the recursively resolved
     # physical/system scope, not merely first-hop asset relationships.
     groups={}
     for x in local:
         groups[_infrastructure_group(x)]=groups.get(_infrastructure_group(x),0)+1
     m=st.columns(6)
-    m[0].metric("Operators / owners",len(companies))
-    m[1].metric("Ecosystem nodes",len(local))
-    m[2].metric("Industrial / energy",groups.get("Industrial",0)+groups.get("Energy & Utilities",0))
-    m[3].metric("Routes / services",len(routes))
+    m[0].metric("Companies",len(companies))
+    m[1].metric("Connected facilities",len(local))
+    m[2].metric("Industry & energy",groups.get("Industrial",0)+groups.get("Energy & Utilities",0))
+    m[3].metric("Transport services",len(routes))
     m[4].metric("Projects",len(projects))
     m[5].metric("Developments",len(events))
 
     left,right=st.columns([1.0,1.4],gap="large")
     with left:
         with st.container(border=True):
-            st.markdown("### Node Profile")
+            st.markdown("### Facility Overview")
             desc=_company_display_value(rec.get("description"),rec.get("notes"),rec.get("strategic_role"))
             if desc:
                 st.write(desc)
@@ -4791,7 +4791,7 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
                 )
 
         with st.container(border=True):
-            st.markdown("### Operators, Owners & Authorities")
+            st.markdown("### Companies & Responsibilities")
             if companies:
                 for i,x in enumerate(companies[:15]):
                     cols=st.columns([3.2,1.3,1.0])
@@ -4804,16 +4804,16 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
 
         if service_companies:
             with st.container(border=True):
-                st.markdown("### Connected Companies & Services")
+                st.markdown("### Companies & Operations")
                 _render_company_relationship_cards(service_companies,f"infra_services_{_norm(oid)}",15)
 
     with right:
         with st.container(border=True):
-            st.markdown("### Spatial & Local System")
+            st.markdown("### Location & Connected Infrastructure")
             _render_map_for_asset(rec)
             if local:
-                st.markdown(f"#### Connected infrastructure ecosystem ({len(local)})")
-                st.caption("Recursive explicit graph traversal: contained port complexes, zones, docks, terminals and facilities, plus one-hop rail/pipeline/utility system links.")
+                st.markdown(f"#### Connected infrastructure ({len(local)})")
+                st.caption("Facilities and transport infrastructure connected to this location through recorded relationships.")
                 grouped={}
                 for item in local:
                     grouped.setdefault(_infrastructure_group(item),[]).append(item)
@@ -4825,11 +4825,11 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
                     with st.expander(f"{group_name} ({len(rows)})", expanded=group_name in {"Terminals","Industrial"}):
                         _render_company_asset_cards(rows,f"infra_local_{_norm(oid)}_{_norm(group_name)}",30)
             elif not _coords_from_record(rec):
-                st.caption("No mapped local network is currently stored for this node.")
+                st.caption("No verified nearby infrastructure is currently linked to this facility.")
 
         if corridors or routes:
             with st.container(border=True):
-                st.markdown("### Corridors, Routes & Services")
+                st.markdown("### Trade & Transport Connections")
                 if corridors:
                     for i,x in enumerate(corridors[:10]):
                         cols=st.columns([3.2,1.4,1.0])
@@ -4905,14 +4905,14 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
 
     with low2:
         with st.container(border=True):
-            st.markdown("### Current Developments")
+            st.markdown("### Latest Activity")
             if events:
                 _render_event_rows(events,"infra_events_"+_norm(oid),10)
             else:
                 st.caption("No linked developments recorded.")
 
     with st.container(border=True):
-        st.markdown("### Evidence & Documents")
+        st.markdown("### Sources & Documents")
         if docs:
             for i,d in enumerate(docs[:12]):
                 title=_clean(d.get("title")) or "Untitled document"
@@ -5054,7 +5054,7 @@ def _render_institution_terminal(oid: str, rec: dict, lens: str):
 
     with low2:
         with st.container(border=True):
-            st.markdown("### Current Developments")
+            st.markdown("### Latest Activity")
             if events:
                 _render_event_rows(events,"inst_events_"+_norm(oid),10)
             else:
@@ -5219,7 +5219,7 @@ def render_terminal(lens: str = "trade"):
     with st.sidebar:
         st.markdown("<div class='pc-k'>POWER & CORRIDORS INTELLIGENCE</div>", unsafe_allow_html=True)
         st.markdown("### " + cfg["brand"])
-        st.caption("Shared canonical terminal · " + cfg["deck"])
+        st.caption(cfg["deck"])
         theme = st.radio("Appearance", ["Light", "Dark"], horizontal=True,
                          index=0 if st.session_state.get("pc_terminal_theme","Light")=="Light" else 1,
                          key="pc_terminal_theme")
@@ -5324,9 +5324,9 @@ def render_terminal(lens: str = "trade"):
             if refresh_errors:
                 st.warning("Database refreshed with warnings: "+"; ".join(refresh_errors))
             else:
-                st.success("Canonical terminal relationship graph refreshed.")
+                st.success("Connections updated.")
             st.rerun()
-        st.caption("Terminal index: " + ("active" if _terminal_index_ready() else "legacy fallback"))
+        # Search engine status belongs in developer diagnostics, not the customer sidebar.
 
     _style(theme)
     if st.session_state.get('pc_uae_ofac_overlap'):
@@ -5386,7 +5386,7 @@ def render_terminal(lens: str = "trade"):
             _render_sanctions_query_report(sb)
         return
 
-    st.markdown("<div class='pc-command'><div class='pc-k'>GLOBAL COMMAND BAR</div>", unsafe_allow_html=True)
+    st.markdown("<div class='pc-command'><div class='pc-k'>GLOBAL SEARCH</div>", unsafe_allow_html=True)
     q = st.text_input(
         "Search company, vessel / IMO, port, terminal, airport, dry port, rail node, corridor, event or sanction",
         placeholder="AD Ports, Rotterdam, Jebel Ali, IMO 9251822, Tbilisi Dry Port, Hormuz…",
@@ -5399,7 +5399,7 @@ def render_terminal(lens: str = "trade"):
         if results:
             _render_search_results(results, lens)
         else:
-            st.info("No canonical object matched that search.")
+            st.info("No matching companies, facilities, vehicles or developments were found.")
 
     typ, oid, rec = _context_record()
     if not typ or not oid or not rec:

@@ -220,7 +220,7 @@ def _render_strategic_lens(oid: str, rec: dict):
     projects=list(dossier.get("projects") or []) if dossier else core._infrastructure_projects(oid, local)
 
     st.markdown("### Strategic Industry")
-    st.caption("Defence, shipbuilding, naval/coast-guard infrastructure, programmes, contracts, suppliers and industrial capacity connected to this same canonical ecosystem.")
+    st.caption("Defence, shipbuilding, naval/coast-guard infrastructure, programmes, contracts, suppliers and industrial capacity connected to this facility and its commercial network.")
     m = st.columns(5)
     m[0].metric("Shipyard / industrial facilities", len(shipyards))
     m[1].metric("Defence programmes", len(programmes))
@@ -280,7 +280,7 @@ def _render_strategic_lens(oid: str, rec: dict):
     if graph_mobile or legacy.get("orders"):
         with st.container(border=True):
             st.markdown("#### Platforms & Shipbuilding")
-            st.caption(f"{len(graph_mobile)} linked platform(s) · {len(legacy.get('orders') or [])} shipbuilding order(s) resolved through the existing canonical graph.")
+            st.caption(f"{len(graph_mobile)} linked platform(s) · {len(legacy.get('orders') or [])} shipbuilding order(s) identified through company and infrastructure records.")
             if graph_mobile:
                 rows=[{"Platform":_clean(x.get("name")),"Type":_clean(x.get("asset_type") or x.get("subtype")),"Flag":_clean(x.get("flag")),"IMO":_clean(x.get("imo"))} for x in graph_mobile[:40]]
                 st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
@@ -382,7 +382,7 @@ def _render_security_lens(oid: str, rec: dict):
     m = st.columns(4)
     m[0].metric("Linked disruptions", len(filtered))
     m[1].metric("Security operations", len(operations))
-    m[2].metric("Mapped ecosystem nodes", len(local))
+    m[2].metric("Connected facilities", len(local))
     recent = [e for e in filtered if _clean(e.get("start_date"))]
     m[3].metric("Most recent", _clean(recent[0].get("start_date"))[:10] if recent else "—")
 
@@ -404,15 +404,15 @@ def _render_cross_market_infrastructure(oid: str, rec: dict, lens: str):
     selected market query/render path.
     """
     if lens == "trade":
-        labels = ["Commercial", "Strategic Industry", "Sanctions", "Security & Disruptions"]
+        labels = ["Operations & Trade", "Strategic Industries", "Sanctions & Compliance", "Risks & Disruptions"]
         key = f"pc_trade_market_lens_{oid}"
-        selected = st.segmented_control("Market lens", labels, default="Commercial",
+        selected = st.segmented_control("Market lens", labels, default="Operations & Trade",
                                         key=key, label_visibility="collapsed")
-        if selected == "Strategic Industry":
+        if selected == "Strategic Industries":
             _render_strategic_lens(oid, rec)
-        elif selected == "Sanctions":
+        elif selected == "Sanctions & Compliance":
             _render_sanctions_lens(oid, rec)
-        elif selected == "Security & Disruptions":
+        elif selected == "Risks & Disruptions":
             _render_security_lens(oid, rec)
         else:
             _ORIGINAL_INFRASTRUCTURE_TERMINAL(oid, rec, "trade")
@@ -422,11 +422,11 @@ def _render_cross_market_infrastructure(oid: str, rec: dict, lens: str):
         # Strategic Industries is a focused industrial product, not a mirror of Trade.
         # Commercial and sanctions context remain in the canonical graph and their
         # dedicated products, while this dossier concentrates on the industrial base.
-        labels = ["Strategic Industry", "Security & Disruptions"]
+        labels = ["Strategic Industries", "Risks & Disruptions"]
         key = f"pc_strategic_market_lens_{oid}"
-        selected = st.segmented_control("Strategic view", labels, default="Strategic Industry",
+        selected = st.segmented_control("Strategic view", labels, default="Strategic Industries",
                                         key=key, label_visibility="collapsed")
-        if selected == "Security & Disruptions":
+        if selected == "Risks & Disruptions":
             _render_security_lens(oid, rec)
         else:
             _render_strategic_lens(oid, rec)
@@ -507,7 +507,7 @@ def _render_strategic_picture_home():
         with st.container(border=True):
             core._panel_header(
                 "Strategic Industrial Footprint",
-                "Shipyards, naval/coast-guard facilities and strategic industrial nodes resolved from canonical records."
+                "Shipyards, naval/coast-guard facilities and strategic industrial locations recorded in the database."
             )
             pts = []
             for a in assets:
@@ -573,7 +573,7 @@ def _render_strategic_picture_home():
             core._html_rows(core._recent_event_rows(security, 9), 9)
 
     st.markdown("### Reference Industrial Ecosystems")
-    st.caption("The same canonical records can be entered through a company, shipyard, port, programme or platform.")
+    st.caption("Explore the same information through a company, facility, programme or fleet.")
     core._featured_search_cards([
         ("EDGE", "EDGE"),
         ("Fincantieri", "Fincantieri"),
