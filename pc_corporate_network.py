@@ -13,20 +13,31 @@ def render_network(nodes, edges, root_id: str, key_prefix: str, open_callback=No
     for n in nodes:
         by_depth.setdefault(int(n.get("depth", 0)), []).append(n)
 
-    node_w, node_h, col_w, x_gap, y_gap, margin = 205, 68, 255, 42, 28, 28
+    # Spiderweb / radial layout: selected company at the centre, each
+    # relationship depth on a ring. This reads like a network rather than an
+    # org-chart column layout.
+    node_w, node_h = 190, 60
     max_depth = max(by_depth) if by_depth else 0
-    max_rows = max(len(v) for v in by_depth.values()) if by_depth else 1
-    width = max(980, margin * 2 + (max_depth + 1) * (col_w + x_gap))
-    height = max(420, margin * 2 + max_rows * (node_h + y_gap))
+    width = 1180
+    height = max(720, 660 + max_depth * 70)
+    cx, cy = width / 2, height / 2
 
     positions = {}
     for depth, items in by_depth.items():
         items = sorted(items, key=lambda x: (x.get("kind") != "company", x.get("name", "")))
-        total = len(items) * (node_h + y_gap) - y_gap
-        y0 = max(margin, (height - total) / 2)
-        x = margin + depth * (col_w + x_gap)
+        if depth == 0:
+            for n in items:
+                positions[str(n["id"])] = (cx - node_w / 2, cy - node_h / 2)
+            continue
+
+        radius = min(min(width, height) * 0.43, 150 + depth * 125)
+        count = max(1, len(items))
+        angle_offset = -1.57079632679 + (0.18 if depth % 2 else 0)
         for i, n in enumerate(items):
-            positions[str(n["id"])] = (x, y0 + i * (node_h + y_gap))
+            angle = angle_offset + (6.28318530718 * i / count)
+            nx = cx + radius * __import__("math").cos(angle) - node_w / 2
+            ny = cy + radius * __import__("math").sin(angle) - node_h / 2
+            positions[str(n["id"])] = (nx, ny)
 
     edge_parts = []
     for e in edges:
@@ -36,19 +47,19 @@ def render_network(nodes, edges, root_id: str, key_prefix: str, open_callback=No
             continue
         sx, sy = positions[source]
         tx, ty = positions[target]
-        x1, y1 = sx + node_w, sy + node_h / 2
-        x2, y2 = tx, ty + node_h / 2
-        mid = (x1 + x2) / 2
-        dash = ' stroke-dasharray="6 5"' if e.get("kind") == "asset" else ""
+        x1, y1 = sx + node_w / 2, sy + node_h / 2
+        x2, y2 = tx + node_w / 2, ty + node_h / 2
+        midx, midy = (x1 + x2) / 2, (y1 + y2) / 2
+        dash = ' stroke-dasharray="6 5"' if e.get("kind") in {"asset", "affiliation"} else ""
         edge_parts.append(
-            f'<path d="M{x1:.1f},{y1:.1f} C{mid:.1f},{y1:.1f} {mid:.1f},{y2:.1f} {x2:.1f},{y2:.1f}" '
-            f'stroke="#9aa4b2" stroke-width="1.4" fill="none"{dash}/>'
+            f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+            f'stroke="#98a2b3" stroke-width="1.35" opacity="0.78"{dash}/>'
         )
         label = html.escape(str(e.get("label") or ""))
         if label:
             edge_parts.append(
-                f'<text x="{mid:.1f}" y="{((y1+y2)/2-4):.1f}" text-anchor="middle" '
-                f'font-size="10" fill="#6b7280">{label[:48]}</text>'
+                f'<text x="{midx:.1f}" y="{(midy-4):.1f}" text-anchor="middle" '
+                f'font-size="9" fill="#667085" paint-order="stroke" stroke="#ffffff" stroke-width="3">{label[:42]}</text>'
             )
 
     node_parts = []
@@ -79,14 +90,23 @@ def render_network(nodes, edges, root_id: str, key_prefix: str, open_callback=No
             )
 
     legend = (
-        'Solid lines = ownership/control/business-unit relationships'
-        + (' · Dashed lines = linked assets' if include_assets else '')
+        'Spiderweb view · solid lines = ownership/control/business-unit relationships'
+        + (' · dashed lines = operating/asset links' if include_assets else '')
     )
+
+    ring_parts = []
+    for depth in range(1, max_depth + 1):
+        radius = min(min(width, height) * 0.43, 150 + depth * 125)
+        ring_parts.append(
+            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{radius:.1f}" '
+            f'fill="none" stroke="#eef1f5" stroke-width="1"/>'
+        )
+
     st.html(
-        f'<div style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:10px;padding:8px;background:white;">'
+        f'<div style="overflow:auto;border:1px solid #e5e7eb;border-radius:10px;padding:8px;background:white;">'
         f'<div style="font-size:12px;color:#6b7280;margin:.15rem 0 .5rem 0;">{legend}</div>'
-        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">'
-        f'{"".join(edge_parts)}{"".join(node_parts)}</svg></div>'
+        f'<svg width="100%" height="{height}" viewBox="0 0 {width} {height}" preserveAspectRatio="xMidYMid meet" '
+        f'xmlns="http://www.w3.org/2000/svg">{"".join(ring_parts)}{"".join(edge_parts)}{"".join(node_parts)}</svg></div>'
     )
 
     if open_callback:
