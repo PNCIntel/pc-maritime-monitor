@@ -57,22 +57,6 @@ where not exists (
      or lower(trim(e.name))=lower(trim(s.name))
 );
 
--- Resolve the actual Noatum Ports entity key in this database.
--- Some environments already contain Noatum Ports under an auto-generated
--- canonical ID, so do not assume COMP_NOATUM_PORTS exists just because the
--- company name is present.
-drop table if exists pg_temp.pc_noatum_ports_ctx;
-create temp table pc_noatum_ports_ctx(entity_id text primary key) on commit drop;
-
-insert into pc_noatum_ports_ctx(entity_id)
-select e.entity_id
-from public.pc_entities e
-where e.entity_id='COMP_NOATUM_PORTS'
-   or lower(trim(e.name))=lower(trim('Noatum Ports'))
-order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
-         e.created_at nulls last
-limit 1;
-
 -- ---------------------------------------------------------------------------
 -- 2. Corporate operating relationships beneath Noatum Ports
 -- ---------------------------------------------------------------------------
@@ -101,15 +85,38 @@ insert into public.pc_company_relationships(
   effective_from,confidence,source_url,notes,metadata
 )
 select
-  ctx.entity_id,r.child_company_key,r.relationship,r.value,r.unit,
+  (
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+),r.child_company_key,r.relationship,r.value,r.unit,
   r.effective_from,'high',r.source_url,r.notes,r.metadata
 from rel r
-cross join pc_noatum_ports_ctx ctx
-where exists(select 1 from public.pc_entities e where e.entity_id=ctx.entity_id)
+where exists(select 1 from public.pc_entities e where e.entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+))
   and exists(select 1 from public.pc_entities e where e.entity_id=r.child_company_key)
   and not exists (
     select 1 from public.pc_company_relationships x
-    where x.parent_company_key=ctx.entity_id
+    where x.parent_company_key=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+)
       and x.child_company_key=r.child_company_key
       and lower(x.relationship)=lower(r.relationship)
       and coalesce(x.effective_from,date '1900-01-01')=coalesce(r.effective_from,date '1900-01-01')
@@ -513,7 +520,15 @@ insert into public.pc_company_asset_roles(
   entity_id,asset_id,asset_role,role_status,as_of,metadata
 )
 select
-  ctx.entity_id,
+  (
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+),
   a.asset_id,
   'operator',
   'reported',
@@ -526,11 +541,26 @@ select
   )
 from targets t
 join public.pc_assets a on a.asset_id=t.asset_id
-cross join pc_noatum_ports_ctx ctx
-where exists(select 1 from public.pc_entities e where e.entity_id=ctx.entity_id)
+where exists(select 1 from public.pc_entities e where e.entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+))
 and not exists (
   select 1 from public.pc_company_asset_roles r
-  where r.entity_id=ctx.entity_id
+  where r.entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+)
     and r.asset_id=a.asset_id
     and r.asset_role='operator'
     and r.valid_to is null
@@ -581,9 +611,16 @@ where exists(select 1 from public.pc_entities e where e.entity_id=r.entity_id)
 -- ---------------------------------------------------------------------------
 
 update public.pc_assets a
-set operator_entity_id=ctx.entity_id,
+set operator_entity_id=(
+  select e.entity_id
+  from public.pc_entities e
+  where e.entity_id='COMP_NOATUM_PORTS'
+     or lower(trim(e.name))=lower(trim('Noatum Ports'))
+  order by case when e.entity_id='COMP_NOATUM_PORTS' then 0 else 1 end,
+           e.created_at nulls last
+  limit 1
+),
     updated_at=now()
-from pc_noatum_ports_ctx ctx
 where a.asset_id in (
   'TERM_NOATUM_LUANDA','TERM_NOATUM_POINTE_NOIRE','TERM_NOATUM_SAFAGA',
   'TERM_NOATUM_ADABIYA','TERM_KGTL_KARACHI','TERM_KGTML_KARACHI',
