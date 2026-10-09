@@ -34,6 +34,78 @@ def _details(assessment):
     )
 
 
+# Global event contracts; Hormuz is a regression case, not a regional data model.
+HORMUZ_TEST_EVENTS = {
+    "EVT_UAE_20260303_FOIZ_FIRE", "EVT_UAE_20260306_FOIZ_FIRE",
+    "EVT_UAE_20260314_FOIZ_FIRE", "EVT_UAE_20260316_FOIZ_LOADING",
+    "EVT_UAE_20260317_FOIZ_DRONE_FIRE", "EVT_UAE_20260504_FOIZ_FIRE",
+    "EVT_PC_B9129B2E020309238049", "EVT_PC_325039DD8077B8D56471",
+    "EVT_PC_443D3255C9EF186E2496", "EVT_PC_7F937F2DD46439FA434D",
+    "EVT_PC_C25E3439971AF3BC7668",
+}
+
+
+def render_hormuz_case_study(db):
+    """Case-study verification independent of the incident text-search filter."""
+    st.subheader("Hormuz + Fujairah | linked evidence")
+    st.caption("Cross-geography regression test. FOIZ is outside the Strait but within the Gulf of Oman operating system.")
+    try:
+        # Existing validated, read-only delivery view, not a new database model.
+        rows = _read(db, "pc_v_hormuz_security_evidence", "*", 150)
+    except Exception:
+        try:
+            rows = db.table("pc_events").select(
+                "event_id,title,start_date,location,verification_status,record_status,metadata"
+            ).in_("event_id", sorted(HORMUZ_TEST_EVENTS)).execute().data or []
+        except Exception as exc:
+            st.warning("Regional case-study evidence is inaccessible.")
+            st.caption(str(exc))
+            return
+    if not rows:
+        st.warning("No case-study records returned. Verify delivery-view permissions and the canonical events.")
+        return
+    # Restrict the fallback and view to the validated 11-event case study.
+    rows = [r for r in rows if r.get("event_id") in HORMUZ_TEST_EVENTS]
+    for r in rows:
+        if not r.get("exposure_dimension"):
+            r["exposure_dimension"] = (
+                "energy_infrastructure" if r["event_id"].startswith("EVT_UAE_")
+                else "maritime_incident"
+            )
+    data = pd.DataFrame(rows)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Case-study event records", len(data))
+    c2.metric("Fujairah observations", int((data["exposure_dimension"] == "energy_infrastructure").sum()))
+    c3.metric("Vessel incidents", int((data["exposure_dimension"] == "maritime_incident").sum()))
+    st.info(
+        "Map limitation: FOIZ and Strait records currently identify a geographic area/corridor, "
+        "not verified incident coordinates. They are retained in this evidence view rather "
+        "than given invented map pins."
+    )
+    dates = pd.to_datetime(
+        data["start_date"] if "start_date" in data else data.get("uae_date"),
+        errors="coerce", utc=True
+    )
+    chart = pd.DataFrame({
+        "month": dates.dt.strftime("%Y-%m").fillna("Unknown"),
+        "dimension": data["exposure_dimension"],
+    })
+    if not chart.empty:
+        counts = chart.groupby(["month", "dimension"]).size().unstack(fill_value=0)
+        st.bar_chart(counts, y_label="Evidence records (not unique verified attacks)")
+    columns = [c for c in (
+        "event_id", "start_date", "uae_date", "title", "exposure_dimension",
+        "verification_status", "record_status", "imo", "vessel_name",
+        "owner_name", "deduplication_status", "map_precision_status"
+    ) if c in data.columns]
+    st.dataframe(data[columns], hide_index=True, use_container_width=True)
+    st.caption(
+        "March FOIZ observations need source and consequence reconciliation; "
+        "five named vessel incidents have IMO corroboration. "
+        "These counts are not P&C risk scores."
+    )
+
+
 def render_global_security_risk(db, *, key="global_security_risk"):
     """Render existing risk assessments, timelines and scored components.
 
@@ -41,7 +113,7 @@ def render_global_security_risk(db, *, key="global_security_risk"):
     Missing data is shown explicitly. Assessments are grouped by provider and
     domain so third-party ratings cannot silently become P&C independent ratings.
     """
-    st.subheader("Regional risk assessments")
+    render_hormuz_case_study(db)\n    st.subheader("Regional risk assessments")
     st.caption(
         "Global risk engine · independent and third-party ratings shown separately. "
         "Incident counts do not constitute a risk rating."
@@ -75,7 +147,17 @@ def render_global_security_risk(db, *, key="global_security_risk"):
     col1, col2, col3 = st.columns([2, 1, 1])
     region = col1.selectbox("Assessment geography", regions, index=default, key=key+"_region")
     scoped = assessments[assessments["region_code"] == region].copy()
-    providers = sorted(scoped["provider"].unique())
+    # Keep proprietary assessments distinct from imported GSA/provider material.
+    pc_mask = scoped["provider"].str.contains(r"(?i)^(P&C|PC|Power.*Corridors)$", regex=True, na=False)
+    own_count = int(pc_mask.sum())
+    st.caption(
+        f"P&C-labelled assessments for this geography: {own_count}. "
+        f"Third-party/provider assessments: {len(scoped) - own_count}. "
+        "A provider rating is not an independently calculated P&C score."
+    )
+    providers = sorted(scoped["provider"].unique(),
+                       key=lambda p: (not bool(__import__("re").match(r"(?i)^(P&C|PC|Power.*Corridors)$", p)), p))
+
     provider = col2.selectbox("Assessment provider", providers, key=key+"_provider")
     scoped = scoped[scoped["provider"] == provider].copy()
     domains = sorted(scoped["domain"].unique())
