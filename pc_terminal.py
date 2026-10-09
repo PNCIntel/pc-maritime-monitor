@@ -4743,6 +4743,12 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("asset",oid)
     dossier=_asset_dossier_rpc(oid)
     local=_dossier_local(dossier) if dossier else _local_infrastructure(rec)
+    # Prefer the prepared intelligence network without discarding verified legacy links.
+    from pc_prepared_bridge import facility_network, object_developments
+    prepared_network=facility_network(_sb(), oid)
+    if prepared_network is not None:
+        present={_clean(x.get('id')) for x in local}
+        local += [x for x in prepared_network['facilities'] if _clean(x.get('id')) not in present]
     # The commercial dossier now reuses database-side entities/projects/events where
     # available; relationship-index calls remain only for corridors/service companies.
     companies=[]
@@ -4754,11 +4760,18 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
             companies.append({"id":eid,"name":_clean(e.get("name")) or eid,"role":"connected"})
     if not companies:
         companies=_asset_companies(rec)
+    if prepared_network is not None:
+        seen={_clean(x.get('id')) for x in companies}
+        companies += [x for x in prepared_network['companies'] if _clean(x.get('id')) not in seen]
     linked=_linked_objects_from_relationships("asset",oid)
     corridors=[x for x in linked if x.get("type")=="corridor"]
     company_ids={x["id"] for x in companies}
     service_companies=[x for x in linked if x.get("type")=="entity" and x.get("id") not in company_ids]
     events=(dossier.get("events") or []) if dossier else _events_for_object("asset",oid)
+    prepared_events=object_developments(_sb(),'asset',oid,include_children=True)
+    if prepared_events is not None:
+        seen_events={_clean(e.get('event_id')) for e in events}
+        events += [e for e in prepared_events if _clean(e.get('event_id')) not in seen_events]
     docs=_related_table("pc_documents",oid,name,40)
     routes=_infrastructure_routes(oid)
     projects=(dossier.get("projects") or []) if dossier else _infrastructure_projects(oid,local)
@@ -5422,6 +5435,10 @@ def render_terminal(lens: str = "trade"):
             _render_company_terminal(oid,rec,lens)
         return
     if typ=="asset":
+        if lens == "intelligence":
+            from pc_market_lenses import _render_security_lens
+            _render_security_lens(oid, rec)
+            return
         # Lazy import prevents circular startup imports while guaranteeing that Trade
         # and Strategic Industries both get the shared cross-market dossier tabs even
         # when the deployment entry point imports pc_terminal directly.

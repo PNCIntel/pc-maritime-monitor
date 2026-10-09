@@ -373,6 +373,23 @@ def _render_security_lens(oid: str, rec: dict):
 
     direct = relevant(context.direct_events)
     connected = relevant(context.connected_events)
+    from pc_prepared_bridge import facility_network, object_developments
+    prepared_network = facility_network(core._sb(), oid)
+    prepared_events = object_developments(core._sb(), 'asset', oid, include_children=True)
+    if prepared_network is not None:
+        existing = {_clean(x.get('id')) for x in context.facilities}
+        context.facilities += [x for x in prepared_network['facilities'] if _clean(x.get('id')) not in existing]
+    if prepared_events is not None:
+        direct_ids={_clean(e.get('event_id')) for e in direct}
+        connected_ids={_clean(e.get('event_id')) for e in connected}
+        for event in relevant(prepared_events):
+            eid=_clean(event.get('event_id'))
+            if event.get('direct_relationship'):
+                if eid not in direct_ids:
+                    direct.append(event);direct_ids.add(eid)
+                connected=[e for e in connected if _clean(e.get('event_id'))!=eid]
+            elif eid not in connected_ids and eid not in direct_ids:
+                connected.append(event);connected_ids.add(eid)
     st.markdown('### Risks & Disruptions')
     st.caption('Verified links to this facility and its explicitly connected infrastructure; regional events are not counted as direct impacts.')
     m = st.columns(4)
@@ -381,6 +398,18 @@ def _render_security_lens(oid: str, rec: dict):
     m[2].metric('Connected facilities', len(context.facilities))
     dates = [_clean(e.get('start_date')) for e in direct + connected if e.get('start_date')]
     m[3].metric('Most recent', max(dates)[:10] if dates else '—')
+    if prepared_network is not None:
+        mapped=[]
+        for facility in prepared_network['facilities']:
+            try:
+                lat=float(facility.get('latitude'));lon=float(facility.get('longitude'))
+                if -90<=lat<=90 and -180<=lon<=180:
+                    mapped.append({'lat':lat,'lon':lon,'name':facility.get('name')})
+            except (ValueError,TypeError):
+                pass
+        if mapped:
+            st.markdown('#### Connected infrastructure map')
+            st.map(pd.DataFrame(mapped),latitude='lat',longitude='lon',use_container_width=True)
     if direct:
         st.markdown('#### Incidents affecting this facility')
         core._render_event_rows(direct, 'risk_direct_' + core._norm(oid), 25)
