@@ -119,8 +119,12 @@ def render_global_security_risk(db, *, key="global_security_risk"):
     Missing data is shown explicitly. Assessments are grouped by provider and
     domain so third-party ratings cannot silently become P&C independent ratings.
     """
-    render_hormuz_case_study(db)
-    st.subheader("Last 30 days | global developments")
+    if not st.toggle("Load regional case study and 30-day intelligence", value=False, key=key+"_load_cases"):
+        st.caption("Open this section when needed; the incident map above remains available without these extra database queries.")
+    else:
+        render_hormuz_case_study(db)
+        _render_rolling_30day(db, key)
+    st.subheader("Recorded risk assessments")
     st.caption("Rolling time window across all regions and transport modes. Counts are records, not independent attacks.")
     try:
         recent = _read(db, "pc_v_security_30day_feed", "*", 5000)
@@ -158,6 +162,9 @@ def render_global_security_risk(db, *, key="global_security_risk"):
         st.caption(str(exc))
 
     st.subheader("External and recorded risk assessments")
+    if not st.toggle("Load assessment history and components", value=False, key=key+"_load_assessments"):
+        st.caption("Load on demand to avoid querying the full risk history at every page refresh.")
+        return
     st.caption("These ratings are displayed as attributed source material; a P&C editorial note is not a calibrated score.")
     st.caption(
         "Global risk engine · independent and third-party ratings shown separately. "
@@ -243,8 +250,9 @@ def render_global_security_risk(db, *, key="global_security_risk"):
                      hide_index=True, use_container_width=True)
 
     try:
-        comp_raw = _read(db, "pc_risk_assessment_components",
-                         "assessment_id,component,component_score,rationale", 10000)
+        comp_raw = db.table("pc_risk_assessment_components").select(
+            "assessment_id,component,component_score,rationale"
+        ).eq("assessment_id", int(latest["assessment_id"])).limit(100).execute().data or []
         comps = _frame(comp_raw)
         if not comps.empty:
             comps = comps[comps["assessment_id"].astype(str) == str(latest["assessment_id"])]
@@ -262,8 +270,9 @@ def render_global_security_risk(db, *, key="global_security_risk"):
         st.caption("Risk component data unavailable: " + str(exc))
 
     try:
-        link_rows = _read(db, "pc_risk_assessment_events",
-                          "assessment_id,event_id,relevance,weight,rationale", 10000)
+        link_rows = db.table("pc_risk_assessment_events").select(
+            "assessment_id,event_id,relevance,weight,rationale"
+        ).eq("assessment_id", int(latest["assessment_id"])).limit(500).execute().data or []
         linked = [r for r in link_rows if str(r.get("assessment_id")) == str(latest["assessment_id"])]
         with st.expander(f"Linked event evidence ({len(linked)})"):
             if linked:
