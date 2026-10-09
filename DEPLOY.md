@@ -1,28 +1,35 @@
-# P&C Trade + Security — prepared-view integration patch
+# P&C Trade + Security — Map-led Workspace v2
 
-## What this fixes
+## What is implemented
+- Replaces **home operating pictures** in Trade and Intelligence with map-led, searchable working views based on `pc_intel_trade_picture`, `pc_intel_trade_developments`, and `pc_intel_security_picture`.
+- Preserves the existing global search, selected object dossiers, supporting maps, sidebar routes and reporting.
+- Opens selected companies/facilities/events through the existing terminal's context navigation.
+- Filters Trade by business section, country and search; filters Security by event category, date and search.
+- Shows narratives and only *recorded* risk levels/trends. Does not calculate unsupported HIGH/INCREASING ratings.
+- Does not write to the database, infer vessel position, or turn regional proximity into direct impact.
 
-The previous SQL intelligence release left the old `pc_terminal_asset_dossier` in charge of the main dossiers. Its new views were rendered only in secondary expanders and selected event panes. This patch connects the main Trade facility dossier to `pc_intel_network` and `pc_intel_object_events` / `pc_intel_event_details`. It also switches **Intelligence infrastructure dossiers** to the Security presentation, rather than showing the generic commercial dossier.
+## Prerequisites
+1. Existing P&C application repository and its supporting modules (`pc_db`, `pc_drilldown`, `pc_corporate_network`, `shared/`, etc.).
+2. Prior deployed SQL migrations `20261009_delivery_views.sql` and `20261009_intelligence_layer.sql`.
+3. Working Supabase credentials in the existing Streamlit environment.
 
-No database migration or write. It needs the prior `20261009_delivery_views.sql` and `20261009_intelligence_layer.sql` migrations installed.
+## Install to TEST branch
+1. Back up current files.
+2. Overlay `pc_terminal.py`, `pc_market_lenses.py`, `pc_prepared_bridge.py`, `pc_intelligence_presentation.py` and NEW `pc_visual_workspaces.py` alongside existing Python modules.
+3. Do **not** replace the entire repo. The two launchers are provided as reference; use existing launchers unless they differ.
+4. Restart both Streamlit apps and clear Streamlit caches if necessary.
+5. Test Trade Home and Intelligence Operating Picture with a range of objects/countries, then open event/facility links to ensure existing dossiers work.
 
-## Deploy
+## Known limitations / follow-up
+- Home operating pictures are now view-fed; **other operational sidebar sections and selected-object dossier internals are not fully migrated to the prepared views.** This is not the completed 3-data-product / every-sidebar architecture.
+- `st.map` shows point geometry, not route lines or a complete interactive relationship network; full layer-control maps, source-aware line geometry and timelines are subsequent work.
+- View query failures display the existing home dashboard as a fallback rather than asserting zero data.
+- Streamlit queries are limited to 5,000 records per view, so large growing datasets need server-side filtering, pagination or tiles later.
+- Materialized refresh management, privileged subscriptions/entitlements, and automated SQL-to-UI visibility tests are not included.
 
-Copy `pc_terminal.py`, `pc_market_lenses.py`, `pc_prepared_bridge.py`, and `pc_intelligence_presentation.py` into a **test branch** of the current repository; retain all other supporting modules and secrets. Restart Trade and Intelligence. Do not deploy these files to only one app if the two apps use different revisions of the shared files.
+## Suggested checks
+`SELECT count(*) FROM public.pc_intel_trade_picture;`
+`SELECT count(*) FROM public.pc_intel_security_picture;`
+`SELECT count(*) FROM public.pc_intel_security_picture WHERE latitude_text IS NOT NULL AND longitude_text IS NOT NULL;`
 
-## Validate
-
-1. Rotterdam Trade: should retain its existing map and profiles, while including additional explicitly linked facilities and developments returned by the views.
-2. Fujairah Trade: compare `pc_intel_network WHERE object_id='PORT_UAE_PORT_OF_FUJAIRAH'` with displayed connected facilities. This patch depends on that view containing the correct relationships; it does not invent them.
-3. Fujairah Intelligence: should open **Risks & Disruptions** by default, with direct versus connected incidents distinguished. The map plots connected facilities with verified stored coordinates.
-4. Select a ReCAAP incident: confirm its prepared event view contains narrative and evidence. The event renderer uses this view through the existing dossier pane.
-
-## Constraints
-
-- This is a **targeted, incremental wiring correction**, not yet every sidebar section consuming prepared views. Trade and Security home navigation and specialist subsections still retain legacy query paths.
-- Materialized refreshes are not required for the *ordinary* SQL views used in this patch, but Streamlit caches might need clearing.
-- Missing view/connection failures retain legacy results, instead of claiming zero incident coverage.
-- Exact event relationships are deduplicated by event ID and split into direct and connected; mere geographic proximity is not counted.
-- Risk assessment levels are displayed only when present in prepared data; no synthetic HIGH or INCREASING labels.
-- The same generic code works with any selected infrastructure asset, not merely a port.
-- Run a live Supabase smoke test before production; syntax checks alone are insufficient.
+No schema changes in this patch. Test live against Supabase before production.

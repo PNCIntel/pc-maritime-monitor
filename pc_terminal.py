@@ -2274,6 +2274,10 @@ def _render_strategic_home():
 
 
 def _render_home(lens: str):
+    if lens in ('trade', 'intelligence'):
+        from pc_visual_workspaces import render_home
+        render_home(_sb(), __import__(__name__), lens)
+        return
     cfg = LENS[lens]
     st.markdown(f"<div class='pc-k'>{cfg['brand']} · terminal</div>", unsafe_allow_html=True)
     st.title(cfg["title"])
