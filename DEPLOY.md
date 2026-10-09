@@ -1,25 +1,20 @@
-# P&C Independent Risk Prototype v7
+# P&C Loader Reconciliation v8 (repair stage 1)
 
-Run the SQL file in Supabase SQL Editor on a test/staging database first. It adds two views and one date-parameterized function. It does not modify any event, third-party GSA or existing assessment records.
+Run `01_hormuz_repair.sql` in Supabase SQL editor. It creates an independent **review ledger** with 11 Hormuz assessment observations, explicitly marking five second-job records as repeated imports. Six unique source keys are distinct review cases, **not yet six independently confirmed attacks**. Three 29 September keys remain anonymous until source-to-vessel attribution is verified. This script **does not update or delete source assessments, canonical events, risk ratings or linked data**.
 
-## Inputs and scope
-- `pc_intel_event_details`, `pc_events`, `pc_v07_event_assessments`, `pc_event_locations`, `pc_event_impacts`.
-- Latest event assessment is selected by version and assessment ID.
-- P&C event significance is a **severity-derived index**, not an independently approved risk probability. Any unclear severity returns NULL; official evidence is not inferred merely from link count.
-- Regional outputs are **MODEL_DRAFT_NOT_APPROVED**. Require an explicitly recorded `region_code` in event or details rows. No string matching or guessed geography. If region codes are absent, there will be few/no region results; next step is to attach the existing curated geography graph using checked linkage.
-- Requires at least 3 recent incidents, 3 severity-scored and 2 confirmed, else `NOT_RATED`. Frequency trend requires 3 events in each comparison period and materially different counts; it describes observed incident frequency only.
-- `LOWER_OBSERVED_SEVERITY` is NOT "safe" or low regional threat. Sparse/biased reporting, severity taxonomies, attribution issues and absence of exposure denominator limit inference.
-- The Trade view passes through source-derived `commercial_impact`, `operational_impact`, `what_it_means` and `monitoring_indicators` with status labels; potential commercial effects are not confirmed losses.
-- Do not promote these preliminary scores into `pc_risk_assessments` or show them as approved public P&C ratings without calibration and human review.
+Run `02_global_repeat_review.sql` to expose database-wide repeated content candidates. The view is diagnostic and does not merge identical text from potentially distinct incidents.
 
-## Suggested QA
-1. Run read-only summary and 25-region check printed after COMMIT.
-2. Check actual severity values: `SELECT severity_label, count(*) FROM public.pc_v7_event_analytical_basis GROUP BY 1 ORDER BY 2 DESC;`
-3. Check region code coverage (must distinguish event region and company jurisdiction).
-4. Compare several dates via `SELECT * FROM public.pc_v7_independent_region_risk_at('2026-09-30');`.
-5. Manual review: UAE/Hormuz conflict, European rail strikes, ReCAAP, Black Sea. Adjust weights only with documented methodology and expert calibration; comparisons to third parties must remain attributed and separate.
+## Manual approval gate
+1. Verify the six source observations against individual incident documents, notices, vessel identities and dates. Use the link sources listed in the ledger.
+2. Check for existing canonical `pc_events` entries and linked vessel/facility records. Never create a duplicate canonical event.
+3. Only then assign `linked_event_id`, source-specific vessel identity and mark `review_status='reviewed'` in the ledger, with `reviewed_by` and `reviewed_at`. Do not edit underlying assessments unless the provenance is preserved and the source relation has been verified.
+4. Do not count unapproved review cases or repeated imports as additional incident-frequency evidence. The existing v7 scoring function is **not yet repaired** for geographic resolution or repeated source-event identity. Do not publish its output as approved regional threat ratings.
 
-## App connection
-- Security: select event basis with date/risk/verification filters; display `pc_event_scoring_status`, region function historical results, and event narrative/monitoring indicators.
-- Trade: query `pc_v7_trade_event_intelligence` for business narrative, prospective impacts, analytical indicators and source URLs. Link to company/facility/corridor graph via verified existing relationship views, never entity-name fuzzy matching.
-- This release is SQL only; the current Streamlit UI has not been modified or live-tested.
+### Expected output
+Case roles: five `repeat_import`, three `ambiguous_distinct_case`, three `primary_observation` (one 14 Sep, two other source cases). If any are missing, review the source ingestion and don't approve mappings.
+
+## Global loader hardening next
+- A durable, unique source-observation identity should use provider/document identifier, source publication reference, external source record ID where durable, and a revision fingerprint; `input:n` alone is only batch-local.
+- Separate multiple incidents within a single article by stable victim asset/date/location identifiers and preserve attribution status.
+- Keep source observation, canonical event, and versioned assessment as separate linked objects.
+- Enforce a publication gate: no assessed event can be counted in independent regional incident frequency without confirmed canonical identity, credible date and geographical evidence. Trade and Security read the same approved canonical event but show distinct facets.
