@@ -1,9 +1,23 @@
-# P&C fast workspaces v3 — test branch only
+# P&C Trade + Security release v4 (2026-10-09)
 
-Replace `pc_visual_workspaces.py` and `pc_terminal.py` in the deployed repository with these files. Keep existing shared modules, `pc_market_lenses.py`, `pc_prepared_bridge.py`, and the rest of the repository intact. No SQL changes and no new tables are required. Requires prepared views `pc_intel_trade_picture`, `pc_intel_trade_developments`, and `pc_intel_security_picture` from the earlier SQL release.
+Purpose: restore a map-led customer experience with live PostgreSQL delivery views, preserving the previous object dossiers and application entry points.
 
-Trade: loads a bounded prepared catalogue, maps facility records (not company names), defaults to **all infrastructure** and paginates results in sets of 20. Security: maps incident coordinates, deduplicates events, and paginates narratives 12 at a time. Corporate Tree: draws direct relationships first; only loads multi-hop historical network when explicitly toggled. These changes are generic across assets/companies/regions; no location-specific code.
+## Deployment order
+1. Back up the currently deployed `pc_visual_workspaces.py` and other Python files.
+2. In Supabase SQL Editor run `sql/20261009_trade_security_v4.sql` **after** the previously installed `pc_delivery` and `pc_intel` views.
+3. Validate the new views with:
+   - `SELECT name,country FROM public.pc_v4_trade_facilities WHERE name ILIKE '%Fujairah%' OR name ILIKE '%Khalifa%';`
+   - `SELECT map_precision,count(*) FROM public.pc_v4_security_geo GROUP BY map_precision;`
+   - `SELECT event_id,title,map_precision FROM public.pc_v4_security_geo WHERE title ILIKE '%Hormuz%' LIMIT 20;`
+4. Replace only `pc_visual_workspaces.py` in a **test branch** with the file in this package. Keep all your other deployed files, Streamlit secrets, and configurations unchanged.
+5. Test Trade home and Intelligence home, plus existing deep links to Rotterdam, Fujairah, AD Ports and several event dossiers.
 
-If Trade still has zero map coordinates, verify that `pc_intel_trade_picture.latitude/longitude` are populated, or inspect `pc_assets` data. Verify database view permissions and Streamlit service-role configuration. The fallback triggers when the prepared view has no asset rows, not when all existing asset rows lack coordinates.
-
-The code is syntax-checked but **not tested against live Supabase**. Scope: performance-oriented first-pass release, not the final complete sidebar migration. Store credentials server-side and secure service-role access before customer deployment.
+## Important implementation limitations
+- This is an iterative release, not a fully rewritten platform; dossiers and operational sidebar sections still use parts of the existing Python renderer.
+- Live SQL views make fresh SQL-loaded data available on subsequent queries; the client caches results for 75 seconds.
+- Infrastructure queries are server-side for search/country but map layer filtering is presently per page (clearly disclosed in UI). The first 250 matching rows are shown on each page; this is not a global completeness claim.
+- Security map markers either represent verified event coordinates (`event_location`) or linked-facility context (`linked_facility_context`), never an invented exact attack location.
+- Only records with existing documented risk fields show ratings. Neither HIGH nor INCREASING is inferred from event counts.
+- The event view chooses one linked location per event for initial plotting; richer multiple-location spatial modelling is a subsequent enhancement.
+- When Supabase view permissions/RLS or dependent views are unavailable, the application shows an error rather than a fabricated zero.
+- The corporate-tree renderer in `pc_terminal.py` is retained as-is; this release does not claim to solve all company-dossier performance issues.
