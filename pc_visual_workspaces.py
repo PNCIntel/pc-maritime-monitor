@@ -318,6 +318,26 @@ def _security(db, core):
         except Exception as exc:
             st.warning("Research inbox not ready; apply the global intake migration.")
             with st.expander("Connection details"):st.code(str(exc))
+    st.subheader("Last 30 days — intelligence review")
+    if st.toggle("Review recent global events", value=False, key="pc_recent_global_review"):
+        try:
+            mode = st.selectbox("Review mode", ["All event types", "Unverified only"],key="pc_review_mode")
+            query = db.table("pc_v_intel_30day_review").select(
+                "event_id,observed_on,headline,geography,event_type,verification_status,record_status,severity"
+            ).order("observed_on",desc=True).limit(60)
+            if mode == "Unverified only":
+                query = query.is_("verification_status","null")
+            recent = query.execute().data or []
+            st.caption(f"{len(recent)} recent records shown · latest first · maximum 60 per load")
+            for r in recent:
+                with st.container(border=True):
+                    st.markdown("**"+str(r.get("headline") or "Regional development")+"**")
+                    st.caption(str(r.get("observed_on") or "")+" · "+str(r.get("geography") or "Location under review"))
+                    if st.button("Read incident",key="pc_recent_"+str(r.get("event_id"))):
+                        _open(core,"event",r["event_id"],r.get("headline"))
+        except Exception as exc:
+            st.info("Apply the 30-day review SQL view to enable recent-event browsing.")
+            with st.expander("Technical details"):st.code(str(exc))
     st.subheader("Global incident explorer")
     st.caption("Search title, geographic description, or incident type. Results are a page of records, not a regional incident count.")
     a,b=st.columns([3,1])
