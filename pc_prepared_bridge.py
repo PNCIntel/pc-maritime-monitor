@@ -18,35 +18,59 @@ def query(db, table, eq=None, limit=1000):
         return None
 
 
+def preferred_id(db, object_type, object_id):
+    """Resolve approved aliases; retain the original selection if unavailable."""
+    result = query(db, 'pc_delivery_identity_aliases',
+                   {'object_type': object_type, 'alias_object_id': str(object_id)}, 1)
+    if result:
+        row = result[0]
+        if row.get('resolution_status') == 'reviewed':
+            return str(row.get('preferred_object_id') or object_id)
+    return str(object_id)
+
+
 def facility_network(db, object_id):
-    """None means the prepared view is unavailable; [] means query succeeded empty."""
-    rows = query(db, 'pc_intel_network', {'object_type': 'asset', 'object_id': str(object_id)}, 2000)
-    if rows is None:
+    """Combine prepared network with verified specialist hierarchy, no guessed links.
+
+    Returns None only when BOTH datasets cannot be queried successfully.
+    """
+    oid = preferred_id(db, 'asset', object_id)
+    prepared = query(db, 'pc_intel_network', {'object_type': 'asset', 'object_id': oid}, 1500)
+    hierarchy = query(db, 'pc_v5_infrastructure_connections', {'parent_asset_id': oid}, 1500)
+    roles = query(db, 'pc_v5_infrastructure_companies', {'asset_id': oid}, 800)
+    if prepared is None and hierarchy is None and roles is None:
         return None
-    facilities = {}
-    companies = {}
-    for row in rows:
-        oid = str(row.get('connected_id') or '')
-        if not oid:
-            continue
+    facilities, companies = {}, {}
+    for row in prepared or []:
         target = str(row.get('connected_type') or '')
-        if target == 'asset' and oid != str(object_id):
-            facilities[oid] = {
-                'type': 'asset', 'id': oid,
-                'name': row.get('connected_name') or oid,
-                'relationship': str(row.get('business_relationship') or '').replace('_', ' '),
-                'asset_type': row.get('connected_category'),
-                'country': row.get('country'),
-                'latitude': row.get('latitude'),
-                'longitude': row.get('longitude'),
-            }
-        elif target == 'entity':
-            companies[oid] = {
-                'id': oid,
-                'name': row.get('connected_name') or oid,
-                'role': str(row.get('business_relationship') or 'associated').replace('_', ' '),
-            }
-    return {'facilities': list(facilities.values()), 'companies': list(companies.values())}
+        dest = str(row.get('connected_id') or '')
+        if target == 'asset' and dest and dest != oid:
+            facilities[dest] = {'type':'asset','id':dest,
+                'name':row.get('connected_name') or dest,
+                'relationship':str(row.get('business_relationship') or 'Connected facility').replace('_',' '),
+                'asset_type':row.get('connected_category'), 'country':row.get('country'),
+                'latitude':row.get('latitude'), 'longitude':row.get('longitude')}
+        elif target == 'entity' and dest:
+            companies[dest] = {'id':dest,'name':row.get('connected_name') or dest,
+                               'role':str(row.get('business_relationship') or 'Connected').replace('_',' ')}
+    for row in hierarchy or []:
+        dest = str(row.get('child_asset_id') or '')
+        if dest and dest != oid:
+            facilities[dest] = {'type':'asset','id':dest,
+                'name':row.get('connected_name') or dest,
+                'relationship':'; '.join(row.get('relationship_labels') or []),
+                'asset_type':row.get('asset_type'),'subtype':row.get('subtype'),
+                'country':row.get('country'),'latitude':row.get('latitude'),
+                'longitude':row.get('longitude'),
+                'operator_entity_id':row.get('operator_entity_id'),
+                'operator_name':row.get('operator_name')}
+    for row in roles or []:
+        dest = str(row.get('entity_id') or '')
+        if dest:
+            companies[dest] = {'id':dest,'name':row.get('company_name') or dest,
+                               'role':str(row.get('role') or 'Connected').replace('_',' ')}
+    return {'facilities':list(facilities.values()), 'companies':list(companies.values()),
+            'preferred_asset_id':oid}
 
 
 def object_developments(db, object_type, object_id, *, include_children=False, limit=500):

@@ -5450,6 +5450,15 @@ def render_terminal(lens: str = "trade"):
         _render_home(lens)
         return
 
+    # Resolve reviewed aliases before ANY map, commercial or risk profile runs.
+    if typ == 'asset':
+        from pc_prepared_bridge import preferred_id
+        resolved = preferred_id(sb, 'asset', oid)
+        if resolved != oid:
+            canonical_rec = object_record('asset', resolved)
+            if canonical_rec:
+                oid, rec = resolved, canonical_rec
+
     if typ == 'document':
         from pc_document_vessels import render_document_evidence
         render_document_evidence(sb, oid, _set_context)

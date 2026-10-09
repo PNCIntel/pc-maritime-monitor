@@ -360,6 +360,12 @@ def _render_sanctions_lens(oid: str, rec: dict):
 
 def _render_security_lens(oid: str, rec: dict):
     """General security overlay for any fixed facility in any geography."""
+    from pc_prepared_bridge import preferred_id
+    resolved = preferred_id(core._sb(), 'asset', oid)
+    if resolved != oid:
+        canonical_rec = core.object_record('asset', resolved)
+        if canonical_rec:
+            oid, rec = resolved, canonical_rec
     context = resolve_object(core, 'asset', str(oid), rec)
     def relevant(events):
         out = []
