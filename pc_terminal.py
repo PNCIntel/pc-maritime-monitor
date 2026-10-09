@@ -3544,6 +3544,33 @@ def _company_network_payload(root_id: str, children: dict[str, list[dict]], incl
     return nodes,edges
 
 def _render_company_tree_view(oid: str, rec: dict, tx: list[dict] | None = None):
+    # Fast first paint: query direct, dated relationships only. Historical multi-hop
+    # graph traversal and visual rendering happen only after explicit expansion.
+    st.markdown("### Ownership & Corporate Structure")
+    st.caption("Start with direct relationships; expand the historical group network on demand.")
+    direct = _filtered_rows("pc_company_relationships", "parent_company_key", str(oid), 80)
+    reverse = _filtered_rows("pc_company_relationships", "child_company_key", str(oid), 30)
+    if direct or reverse:
+        ids = sorted({str(x) for e in direct + reverse for x in (e.get("parent_company_key"),e.get("child_company_key")) if x})
+        try:
+            name_rows = (_sb().table("pc_entities").select("entity_id,name").in_("entity_id",ids[:150]).execute().data or [])
+            names = {str(x["entity_id"]):str(x.get("name") or x["entity_id"]) for x in name_rows}
+        except Exception:
+            names = {}
+        display = []
+        for edge in direct:
+            display.append({"Organisation": names.get(_clean(edge.get("child_company_key")), _clean(edge.get("child_company_key"))),
+                "Relationship": _clean(edge.get("relationship")).replace("_", " "),
+                "Share": edge.get("value"),"From": edge.get("effective_from"),"To": edge.get("effective_to")})
+        for edge in reverse:
+            display.append({"Organisation": names.get(_clean(edge.get("parent_company_key")), _clean(edge.get("parent_company_key"))),
+                "Relationship": "Parent: " + _clean(edge.get("relationship")).replace("_", " "),
+                "Share": edge.get("value"),"From": edge.get("effective_from"),"To": edge.get("effective_to")})
+        st.dataframe(pd.DataFrame(display),hide_index=True,use_container_width=True)
+    else:
+        st.caption("No direct dated corporate relationships returned from the specialist table.")
+    if not st.toggle("Explore full historical corporate network",value=False,key="load_historical_tree_"+_norm(oid)):
+        return
     all_nodes, all_edges = _company_relationship_neighborhood(oid)
 
     if not all_edges:

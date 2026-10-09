@@ -1,35 +1,9 @@
-# P&C Trade + Security — Map-led Workspace v2
+# P&C fast workspaces v3 — test branch only
 
-## What is implemented
-- Replaces **home operating pictures** in Trade and Intelligence with map-led, searchable working views based on `pc_intel_trade_picture`, `pc_intel_trade_developments`, and `pc_intel_security_picture`.
-- Preserves the existing global search, selected object dossiers, supporting maps, sidebar routes and reporting.
-- Opens selected companies/facilities/events through the existing terminal's context navigation.
-- Filters Trade by business section, country and search; filters Security by event category, date and search.
-- Shows narratives and only *recorded* risk levels/trends. Does not calculate unsupported HIGH/INCREASING ratings.
-- Does not write to the database, infer vessel position, or turn regional proximity into direct impact.
+Replace `pc_visual_workspaces.py` and `pc_terminal.py` in the deployed repository with these files. Keep existing shared modules, `pc_market_lenses.py`, `pc_prepared_bridge.py`, and the rest of the repository intact. No SQL changes and no new tables are required. Requires prepared views `pc_intel_trade_picture`, `pc_intel_trade_developments`, and `pc_intel_security_picture` from the earlier SQL release.
 
-## Prerequisites
-1. Existing P&C application repository and its supporting modules (`pc_db`, `pc_drilldown`, `pc_corporate_network`, `shared/`, etc.).
-2. Prior deployed SQL migrations `20261009_delivery_views.sql` and `20261009_intelligence_layer.sql`.
-3. Working Supabase credentials in the existing Streamlit environment.
+Trade: loads a bounded prepared catalogue, maps facility records (not company names), defaults to **all infrastructure** and paginates results in sets of 20. Security: maps incident coordinates, deduplicates events, and paginates narratives 12 at a time. Corporate Tree: draws direct relationships first; only loads multi-hop historical network when explicitly toggled. These changes are generic across assets/companies/regions; no location-specific code.
 
-## Install to TEST branch
-1. Back up current files.
-2. Overlay `pc_terminal.py`, `pc_market_lenses.py`, `pc_prepared_bridge.py`, `pc_intelligence_presentation.py` and NEW `pc_visual_workspaces.py` alongside existing Python modules.
-3. Do **not** replace the entire repo. The two launchers are provided as reference; use existing launchers unless they differ.
-4. Restart both Streamlit apps and clear Streamlit caches if necessary.
-5. Test Trade Home and Intelligence Operating Picture with a range of objects/countries, then open event/facility links to ensure existing dossiers work.
+If Trade still has zero map coordinates, verify that `pc_intel_trade_picture.latitude/longitude` are populated, or inspect `pc_assets` data. Verify database view permissions and Streamlit service-role configuration. The fallback triggers when the prepared view has no asset rows, not when all existing asset rows lack coordinates.
 
-## Known limitations / follow-up
-- Home operating pictures are now view-fed; **other operational sidebar sections and selected-object dossier internals are not fully migrated to the prepared views.** This is not the completed 3-data-product / every-sidebar architecture.
-- `st.map` shows point geometry, not route lines or a complete interactive relationship network; full layer-control maps, source-aware line geometry and timelines are subsequent work.
-- View query failures display the existing home dashboard as a fallback rather than asserting zero data.
-- Streamlit queries are limited to 5,000 records per view, so large growing datasets need server-side filtering, pagination or tiles later.
-- Materialized refresh management, privileged subscriptions/entitlements, and automated SQL-to-UI visibility tests are not included.
-
-## Suggested checks
-`SELECT count(*) FROM public.pc_intel_trade_picture;`
-`SELECT count(*) FROM public.pc_intel_security_picture;`
-`SELECT count(*) FROM public.pc_intel_security_picture WHERE latitude_text IS NOT NULL AND longitude_text IS NOT NULL;`
-
-No schema changes in this patch. Test live against Supabase before production.
+The code is syntax-checked but **not tested against live Supabase**. Scope: performance-oriented first-pass release, not the final complete sidebar migration. Store credentials server-side and secure service-role access before customer deployment.
