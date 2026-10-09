@@ -46,65 +46,68 @@ HORMUZ_TEST_EVENTS = {
 
 
 def render_hormuz_case_study(db):
-    """Case-study verification independent of the incident text-search filter."""
-    st.subheader("Hormuz + Fujairah | linked evidence")
-    st.caption("Cross-geography regression test. FOIZ is outside the Strait but within the Gulf of Oman operating system.")
+    """Editorial case-study card, not the global geographic data model."""
+    st.subheader("Hormuz and Gulf of Oman")
+    st.caption("Regional case study · connected maritime and energy-infrastructure exposure")
     try:
-        # Existing validated, read-only delivery view, not a new database model.
-        rows = _read(db, "pc_v_hormuz_security_evidence", "*", 150)
+        cases = _read(db, "pc_v_security_hormuz_stories", "*", 150)
     except Exception:
-        try:
-            rows = db.table("pc_events").select(
-                "event_id,title,start_date,location,verification_status,record_status,metadata"
-            ).in_("event_id", sorted(HORMUZ_TEST_EVENTS)).execute().data or []
-        except Exception as exc:
-            st.warning("Regional case-study evidence is inaccessible.")
-            st.caption(str(exc))
-            return
-    if not rows:
-        st.warning("No case-study records returned. Verify delivery-view permissions and the canonical events.")
+        st.info("The editorial evidence view is not installed yet. Run the Security editorial SQL migration.")
         return
-    # Restrict the fallback and view to the validated 11-event case study.
-    rows = [r for r in rows if r.get("event_id") in HORMUZ_TEST_EVENTS]
-    for r in rows:
-        if not r.get("exposure_dimension"):
-            r["exposure_dimension"] = (
-                "energy_infrastructure" if r["event_id"].startswith("EVT_UAE_")
-                else "maritime_incident"
-            )
-    data = pd.DataFrame(rows)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Case-study event records", len(data))
-    c2.metric("Fujairah observations", int((data["exposure_dimension"] == "energy_infrastructure").sum()))
-    c3.metric("Vessel incidents", int((data["exposure_dimension"] == "maritime_incident").sum()))
-    st.info(
-        "Map limitation: FOIZ and Strait records currently identify a geographic area/corridor, "
-        "not verified incident coordinates. They are retained in this evidence view rather "
-        "than given invented map pins."
-    )
-    dates = pd.to_datetime(
-        data["start_date"] if "start_date" in data else data.get("uae_date"),
-        errors="coerce", utc=True
-    )
-    chart = pd.DataFrame({
-        "month": dates.dt.strftime("%Y-%m").fillna("Unknown"),
-        "dimension": data["exposure_dimension"],
-    })
-    if not chart.empty:
-        counts = chart.groupby(["month", "dimension"]).size().unstack(fill_value=0)
-        st.bar_chart(counts, y_label="Evidence records (not unique verified attacks)")
-    columns = [c for c in (
-        "event_id", "start_date", "uae_date", "title", "exposure_dimension",
-        "verification_status", "record_status", "imo", "vessel_name",
-        "owner_name", "deduplication_status", "map_precision_status"
-    ) if c in data.columns]
-    st.dataframe(data[columns], hide_index=True, use_container_width=True)
-    st.caption(
-        "March FOIZ observations need source and consequence reconciliation; "
-        "five named vessel incidents have IMO corroboration. "
-        "These counts are not P&C risk scores."
-    )
+    if not cases:
+        st.info("No reviewed case-study evidence was returned.")
+        return
+    try:
+        assessment = _read(db, "pc_v_security_assessment_stories", "*", 5000)
+        owned = [r for r in assessment
+                 if r.get("region_code") == "HORMUZ_GULF_OF_OMAN"
+                 and r.get("assessment_origin") == "P&C analysis"]
+    except Exception:
+        owned = []
+    if owned:
+        last = sorted(owned, key=lambda r: (r.get("assessment_date") or "", r.get("assessment_id") or 0))[-1]
+        st.markdown("#### " + str(last.get("headline") or "P&C assessment"))
+        st.write(last.get("executive_summary") or last.get("analysis") or "")
+        st.caption(last.get("qualitative_observation") or "Qualitative review in progress")
+        st.info("P&C analyst draft — no calibrated numerical rating or approved threat score.")
+    else:
+        st.warning("No independent P&C editorial assessment loaded yet. External provider ratings below are not P&C ratings.")
 
+    df = pd.DataFrame(cases)
+    m = (df["category"] == "Maritime security").sum()
+    i = (df["category"] == "Energy infrastructure").sum()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Maritime incident records", int(m))
+    c2.metric("Energy infrastructure reports", int(i))
+    c3.metric("Selected evidence records", len(df))
+    st.caption("Selected source records, not the total number of unique regional attacks.")
+    date_values = pd.to_datetime(df["occurred_on"], errors="coerce")
+    months = date_values.dt.strftime("%Y-%m")
+    timeline = pd.DataFrame({"Month": months, "Type": df["category"]})
+    timeline = timeline.dropna()
+    if not timeline.empty:
+        counts = timeline.groupby(["Month", "Type"]).size().unstack(fill_value=0)
+        st.bar_chart(counts, y_label="Published incident/evidence records")
+    categories = ["All", "Maritime security", "Energy infrastructure"]
+    pick = st.segmented_control("Explore incidents", categories, default="All",
+                                key="hormuz_editorial_category")
+    visible = df if pick == "All" else df[df["category"] == pick]
+    for _, r in visible.sort_values("occurred_on", ascending=False).iterrows():
+        with st.container(border=True):
+            st.markdown("**" + str(r.get("headline") or "Regional development") + "**")
+            st.caption(" · ".join(str(v) for v in (
+                r.get("occurred_on"), r.get("geographical_area"), r.get("category")
+            ) if pd.notna(v)))
+            st.write(str(r.get("operational_effect") or "Details under review"))
+            st.caption(str(r.get("evidence_label") or "") + " · " +
+                       str(r.get("geographical_precision") or ""))
+            if r.get("supporting_source") and pd.notna(r.get("supporting_source")):
+                st.link_button("Read source", str(r["supporting_source"]))
+            with st.expander("Evidence and relationships"):
+                st.write("Vessel: " + str(r.get("vessel") or "Not identified"))
+                st.write("Company: " + str(r.get("company") or "Not yet linked"))
+                st.caption("Canonical record: " + str(r.get("event_id") or ""))
+    st.caption("The current map only shows supported coordinate links. No location is invented for these events.")
 
 def render_global_security_risk(db, *, key="global_security_risk"):
     """Render existing risk assessments, timelines and scored components.
@@ -143,8 +146,8 @@ def render_global_security_risk(db, *, key="global_security_risk"):
     assessments["provider"] = assessments["provider"].fillna("Unknown").astype(str)
     assessments["domain"] = assessments["domain"].fillna("Unspecified").astype(str)
 
-    regions = sorted(assessments["region_code"].unique())
-    default = next((i for i, v in enumerate(regions) if "hormuz" in v.lower()), 0)
+    regions = sorted(assessments["region_code"].unique(),\n                     key=lambda v: (v != "HORMUZ_GULF_OF_OMAN", v))
+    default = next((i for i, v in enumerate(regions) if v == "HORMUZ_GULF_OF_OMAN"), 0)
     col1, col2, col3 = st.columns([2, 1, 1])
     region = col1.selectbox("Assessment geography", regions, index=default, key=key+"_region")
     scoped = assessments[assessments["region_code"] == region].copy()
