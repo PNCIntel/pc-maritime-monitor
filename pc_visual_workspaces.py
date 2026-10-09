@@ -146,61 +146,104 @@ def _trade(db, core):
                 if row.get('narrative'):st.write(str(row['narrative'])[:550])
                 if st.button('Read development',key='v4_dev_'+str(eid)):_open(core,'event',eid,row.get('title'))
 
-def _security(db,core):
-    st.caption('POWER & CORRIDORS  /  SECURITY & DISRUPTIONS')
-    st.title('Global Operating Picture')
-    st.caption('Historical incidents, mapped exposure, available risk assessments and source-backed narratives.')
-    a,b,c=st.columns([2,1,1])
-    term=a.text_input('Search incidents, locations and actors',placeholder='Hormuz, ReCAAP, port attack…',key='v4_s_search')
-    period=b.selectbox('Period',['All history','Today','Last 7 days','Last 30 days','Last 12 months','Custom dates'],key='v4_s_period')
-    category=c.text_input('Incident type (optional)',placeholder='e.g. maritime',key='v4_s_category')
+def _security(db, core):
+    """Focused intelligence workspace first; raw global discovery is secondary."""
+    st.caption("POWER & CORRIDORS / SECURITY & DISRUPTIONS")
+    st.title("Security Operating Picture")
+    st.caption("Events, vulnerabilities and company exposure · Canonical evidence, independent analysis")
+    scope = st.selectbox(
+        "Operating area",
+        ["Hormuz & Gulf of Oman | Demonstration", "Global incident explorer"],
+        key="pc_sec_operating_area",
+    )
+    if scope == "Hormuz & Gulf of Oman | Demonstration":
+        st.markdown("### Hormuz and Gulf of Oman")
+        st.caption("Vessel incidents · Fujairah energy infrastructure · linked companies")
+        try:
+            q = db.table("pc_v_security_hormuz_stories").select("*").limit(100).execute()
+            rows = q.data or []
+        except Exception as exc:
+            rows = []
+            st.warning("The Hormuz editorial data view is unavailable. Apply the v3 SQL migration.")
+            with st.expander("Technical details"): st.code(str(exc))
+        if rows:
+            df = pd.DataFrame(rows)
+            a,b,c=st.columns(3)
+            a.metric("Maritime evidence records",int((df["category"]=="Maritime security").sum()))
+            b.metric("Infrastructure observations",int((df["category"]=="Energy infrastructure").sum()))
+            c.metric("Total selected records",len(df))
+            st.caption("Evidence records, not a count of confirmed independent attacks.")
+            try:
+                note = db.table("pc_v_security_editorial_latest").select("*").eq(
+                    "region_code","HORMUZ_GULF_OF_OMAN").limit(1).execute().data or []
+            except Exception: note=[]
+            if note:
+                n=note[0]
+                with st.container(border=True):
+                    st.caption("P&C | INDEPENDENT ANALYST BRIEF")
+                    st.markdown("#### "+str(n.get("headline") or "Assessment"))
+                    st.write(n.get("executive_summary") or "Further assessment underway.")
+                    st.caption(str(n.get("observation_label") or "Unscored editorial assessment"))
+                    with st.expander("Assessment reasoning"):
+                        st.write(n.get("analysis") or "")
+            else:
+                st.info("No independent P&C editorial note accessible. External source ratings are not P&C ratings.")
+            dates=pd.to_datetime(df["occurred_on"],errors="coerce")
+            trend=pd.DataFrame({"Month":dates.dt.strftime("%Y-%m"),"Category":df["category"]})
+            trend=trend.dropna()
+            if not trend.empty:
+                st.subheader("Incident and disruption history")
+                st.bar_chart(trend.groupby(["Month","Category"]).size().unstack(fill_value=0),
+                             y_label="Evidence records")
+            st.subheader("What happened")
+            for _,r in df.sort_values("occurred_on",ascending=False).iterrows():
+                with st.container(border=True):
+                    st.markdown("**"+str(r.get("headline") or "Incident")+"**")
+                    st.caption(" · ".join(str(r.get(k) or "") for k in
+                                ("occurred_on","geographical_area","category")))
+                    st.write(str(r.get("operational_effect") or "Consequences being verified"))
+                    if r.get("supporting_source") and pd.notna(r.get("supporting_source")):
+                        st.link_button("Source and evidence",str(r["supporting_source"]))
+                    with st.expander("Related companies and evidence"):
+                        st.write("Vessel: "+str(r.get("vessel") or "Not identified"))
+                        st.write("Company: "+str(r.get("company") or "Not linked"))
+                        st.caption("Reference: "+str(r.get("event_id") or ""))
+            st.info("Exact incident pins are not available for this evidence set. The operating-area map requires validated geographic shapes or linked facilities; no false strike coordinates will be shown.")
+        else:
+            st.info("No demonstration records available yet. The global incident explorer remains accessible.")
+        with st.expander("Browse other risk assessments"):
+            if st.button("Open assessment history",key="sec_assessments"):
+                from pc_global_security_risk import render_global_security_risk
+                render_global_security_risk(db,key="sec_optional_assessment")
+        return
+
+    st.subheader("Global incident explorer")
+    st.caption("Search title, geographic description, or incident type. Results are a page of records, not a regional incident count.")
+    a,b=st.columns([3,1])
+    term=a.text_input("Search evidence",placeholder="Hormuz, Fujairah, Rotterdam, Red Sea...",key="sec_global_term")
+    period=b.selectbox("Period",["Last 30 days","Last 12 months","All history"],key="sec_global_period")
     filters=[]
     now=dt.datetime.now(dt.timezone.utc)
-    days={'Today':1,'Last 7 days':7,'Last 30 days':30,'Last 12 months':365}.get(period)
-    if days:filters.append(('occurred_at','gte',(now-dt.timedelta(days=days)).isoformat()))
-    elif period=='Custom dates':
-        d1,d2=st.columns(2)
-        start=d1.date_input('From',value=dt.date(2024,1,1),key='v4_start')
-        end=d2.date_input('To',value=now.date(),key='v4_end')
-        if start>end:st.error('Start date must be before end date.');return
-        filters += [('occurred_at','gte',start.isoformat()),('occurred_at','lte',end.isoformat()+'T23:59:59+00:00')]
-    # Retrieve events server-side (date/search filters before LIMIT); no fixed first-2,500 global slice.
-    page=st.number_input('Incident results page',min_value=1,max_value=100000,value=1,key='v4_s_page')
-    incidents,err=_load(db,'pc_v4_security_geo',filters=tuple(filters),search=term,
-                  search_columns=('title','narrative','location_label','event_type'),limit=250,offset=(page-1)*250)
-    if err:st.error('Security delivery view unavailable. Apply the v4 SQL migration.');st.caption(err);return
-    if category: incidents=[r for r in incidents if category.casefold() in str(r.get('event_type') or '').casefold()]
-    unique={r.get('event_id'):r for r in incidents if r.get('event_id')}
-    incidents=list(unique.values())
-    k1,k2,k3=st.columns(3)
-    k1.metric('Developments on page',len(incidents))
-    k2.metric('Mapped locations',sum(_coordinate(r) is not None for r in incidents))
-    k3.metric('Recorded risk assessments',sum(bool(r.get('source_risk_level') or r.get('source_risk_trend')) for r in incidents))
-    st.subheader('Incident & exposure map')
-    _security_cluster_map(incidents)
-    approx=sum(r.get('map_precision')=='linked_facility_context' and _coordinate(r) is not None for r in incidents)
-    if approx:st.caption(f'{approx} markers show the location of an explicitly linked facility, not verified incident coordinates.')
-    t1,t2=st.tabs(['Incidents & developments','Risk, trends & evidence'])
-    with t1:
-        for r in incidents[:PAGE_SIZE]:
-            with st.container(border=True):
-                st.markdown('**'+str(r.get('title') or 'Incident')+'**')
-                st.caption(' · '.join(str(v) for v in (str(r.get('occurred_at') or '')[:10],r.get('location_label'),r.get('event_type')) if v))
-                if r.get('narrative'):st.write(str(r['narrative'])[:650])
-                if r.get('map_precision')=='linked_facility_context':st.caption('Map location: linked facility context')
-                if st.button('Open full incident',key='v4_event_'+str(r.get('event_id'))):_open(core,'event',r.get('event_id'),r.get('title'))
-        if len(incidents)>PAGE_SIZE:st.caption('Showing 12 incident cards. Narrow the search or select another result page.')
-    with t2:
-        from pc_global_security_risk import render_global_security_risk
-        render_global_security_risk(db, key='v4_s_global_risk')
-        st.divider()
-        st.subheader('Event-level source ratings')
-        assessed=[r for r in incidents if r.get('source_risk_level') or r.get('source_risk_trend')]
-        if not assessed:st.info('No recorded risk/trend assessment for this selection. Incident count alone does not establish HIGH or INCREASING.')
-        for r in assessed[:20]:
-            st.markdown('**'+str(r.get('location_label') or r.get('title'))+'**')
-            st.write('Risk: '+str(r.get('source_risk_level') or 'Not assessed')+' · Trend: '+str(r.get('source_risk_trend') or 'Not assessed'))
-            st.caption('Assessment fields are shown as stored; check provenance in the full incident dossier.')
+    if period=="Last 30 days":
+        filters.append(("occurred_at","gte",(now-dt.timedelta(days=30)).isoformat()))
+    elif period=="Last 12 months":
+        filters.append(("occurred_at","gte",(now-dt.timedelta(days=365)).isoformat()))
+    page=st.number_input("Results page",min_value=1,value=1,key="sec_global_page")
+    rows,err=_load(db,"pc_v4_security_geo",filters=tuple(filters),search=term,
+                   search_columns=("title","location_label","event_type"),limit=100,offset=(page-1)*100)
+    if err:st.warning("Global evidence unavailable.");st.caption(err);return
+    rows=list({r.get("event_id"):r for r in rows if r.get("event_id")}.values())
+    st.caption(f"{len(rows)} records on this page")
+    st.subheader("Mapped and unmapped evidence")
+    _security_cluster_map(rows)
+    for r in rows[:20]:
+        with st.container(border=True):
+            st.markdown("**"+str(r.get("title") or "Development")+"**")
+            st.caption(str(r.get("occurred_at") or "")[:10]+" · "+str(r.get("location_label") or "Unlocated"))
+            st.write(str(r.get("narrative") or "")[:500])
+            if st.button("Open incident",key="sec_global_"+str(r.get("event_id"))):
+                _open(core,"event",r.get("event_id"),r.get("title"))
+
 
 def render_home(db,core,lens):
     if db is None:
