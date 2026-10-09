@@ -209,37 +209,8 @@ def _security(db, core):
         st.markdown("### Risk and threat assessment")
         st.caption("P&C's independent analyst judgment is shown separately from outside providers.")
         observation = summary.get("observation_label") or "Independent P&C assessment in progress"
-        st.markdown("**P&C assessment:** " + str(observation))
+        st.markdown("**Independent analysis:** " + str(observation))
         st.caption("Not a calibrated numeric score. The security methodology remains a draft.")
-        if st.toggle("Compare recorded external threat ratings", value=False,
-                     key="pc_sec_compare_external"):
-            try:
-                # Restrict to region codes already recorded for the Gulf case study.
-                risk_rows = db.table("pc_risk_assessments").select(
-                    "assessment_id,provider,region_code,domain,assessment_date,"
-                    "risk_level,score,trend,confidence,approval_status,explanation"
-                ).in_("region_code", ["HORMUZ_GULF_OF_OMAN","AE","GCC","HORMUZ"]).order(
-                    "assessment_date",desc=True).limit(80).execute().data or []
-                external = [r for r in risk_rows if str(r.get("provider") or "").upper()
-                            not in ("P&C","PC","POWER & CORRIDORS")]
-                if external:
-                    display = pd.DataFrame(external)
-                    display = display.rename(columns={
-                        "assessment_date":"Date","region_code":"Area",
-                        "provider":"Source","domain":"Threat dimension",
-                        "risk_level":"Source rating","trend":"Source trend",
-                        "confidence":"Confidence"
-                    })
-                    st.dataframe(display[[c for c in (
-                        "Date","Area","Threat dimension","Source","Source rating",
-                        "Source trend","Confidence"
-                    ) if c in display.columns]],hide_index=True,use_container_width=True)
-                    st.caption("External qualitative levels are not P&C scores and are not directly comparable across methodologies.")
-                else:
-                    st.info("No external ratings available for these recorded region codes.")
-            except Exception as exc:
-                st.warning("The recorded risk comparison is currently unavailable.")
-                with st.expander("Technical details"):st.code(str(exc))
         st.markdown("#### Threat drivers")
         col_a,col_b=st.columns(2)
         with col_a:
