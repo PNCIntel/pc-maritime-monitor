@@ -58,20 +58,23 @@ def render_hormuz_case_study(db):
         st.info("No reviewed case-study evidence was returned.")
         return
     try:
-        assessment = _read(db, "pc_v_security_assessment_stories", "*", 5000)
-        owned = [r for r in assessment
-                 if r.get("region_code") == "HORMUZ_GULF_OF_OMAN"
-                 and r.get("assessment_origin") == "P&C analysis"]
+        notes = _read(db, "pc_v_security_editorial_latest", "*", 100)
+        owned = [r for r in notes if r.get("region_code") == "HORMUZ_GULF_OF_OMAN"]
     except Exception:
         owned = []
     if owned:
-        last = sorted(owned, key=lambda r: (r.get("assessment_date") or "", r.get("assessment_id") or 0))[-1]
-        st.markdown("#### " + str(last.get("headline") or "P&C assessment"))
-        st.write(last.get("executive_summary") or last.get("analysis") or "")
-        st.caption(last.get("qualitative_observation") or "Qualitative review in progress")
-        st.info("P&C analyst draft — no calibrated numerical rating or approved threat score.")
+        last = owned[0]
+        with st.container(border=True):
+            st.caption("P&C INTELLIGENCE | INDEPENDENT ANALYST NOTE")
+            st.markdown("### " + str(last.get("headline") or "Regional assessment"))
+            st.write(last.get("executive_summary") or "")
+            st.caption(str(last.get("observation_label") or "Unscored draft") +
+                       " · Cut-off: " + str(last.get("cut_off_date") or "unknown"))
+            with st.expander("Analyst's reasoning and evidence basis"):
+                st.write(last.get("analysis") or "")
+                st.caption(last.get("source_basis") or "")
     else:
-        st.warning("No independent P&C editorial assessment loaded yet. External provider ratings below are not P&C ratings.")
+        st.warning("P&C editorial analysis is not loaded. External ratings below are not independent P&C scores.")
 
     df = pd.DataFrame(cases)
     m = (df["category"] == "Maritime security").sum()
@@ -117,7 +120,45 @@ def render_global_security_risk(db, *, key="global_security_risk"):
     domain so third-party ratings cannot silently become P&C independent ratings.
     """
     render_hormuz_case_study(db)
-    st.subheader("Regional risk assessments")
+    st.subheader("Last 30 days | global developments")
+    st.caption("Rolling time window across all regions and transport modes. Counts are records, not independent attacks.")
+    try:
+        recent = _read(db, "pc_v_security_30day_feed", "*", 5000)
+        recent_df = pd.DataFrame(recent)
+        if not recent_df.empty:
+            places = ["All locations"] + sorted(set(
+                str(v) for v in recent_df["recorded_region"].dropna() if str(v).strip()
+            ))
+            location = st.selectbox("Recorded region (optional)", places,
+                                    key=key+"_rolling_region")
+            if location != "All locations":
+                recent_df = recent_df[recent_df["recorded_region"] == location]
+            st.metric("Developments in selected window", len(recent_df))
+            if not recent_df.empty:
+                st.bar_chart(
+                    recent_df.groupby(["event_date", "editorial_section"]).size()
+                    .unstack(fill_value=0),
+                    y_label="Event records"
+                )
+                for _, row in recent_df.sort_values("event_date", ascending=False).head(15).iterrows():
+                    with st.container(border=True):
+                        st.markdown("**" + str(row.get("headline") or "Development") + "**")
+                        st.caption(str(row.get("event_date")) + " · " +
+                                   str(row.get("location_label")) + " · " +
+                                   str(row.get("editorial_section")))
+                        st.write(row.get("operational_effect") or "Operational implications under review.")
+                        if row.get("supporting_source"):
+                            st.link_button("Supporting source", row["supporting_source"])
+            else:
+                st.info("No events have this recorded region code in the rolling feed.")
+        else:
+            st.info("No recent event records available in the rolling window.")
+    except Exception as exc:
+        st.info("Rolling 30-day feed is not ready. Apply the v3 SQL migration.")
+        st.caption(str(exc))
+
+    st.subheader("External and recorded risk assessments")
+    st.caption("These ratings are displayed as attributed source material; a P&C editorial note is not a calibrated score.")
     st.caption(
         "Global risk engine · independent and third-party ratings shown separately. "
         "Incident counts do not constitute a risk rating."
