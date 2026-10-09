@@ -206,6 +206,48 @@ def _security(db, core):
         m2.metric("Fujairah observations",len(infrastructure))
         m3.metric("P&C numerical rating","Pending")
         st.caption("Counts refer to the eleven-record validation set; they are not total regional attacks.")
+        st.markdown("### Risk and threat assessment")
+        st.caption("P&C's independent analyst judgment is shown separately from outside providers.")
+        observation = summary.get("observation_label") or "Independent P&C assessment in progress"
+        st.markdown("**P&C assessment:** " + str(observation))
+        st.caption("Not a calibrated numeric score. The security methodology remains a draft.")
+        if st.toggle("Compare recorded external threat ratings", value=False,
+                     key="pc_sec_compare_external"):
+            try:
+                # Restrict to region codes already recorded for the Gulf case study.
+                risk_rows = db.table("pc_risk_assessments").select(
+                    "assessment_id,provider,region_code,domain,assessment_date,"
+                    "risk_level,score,trend,confidence,approval_status,explanation"
+                ).in_("region_code", ["HORMUZ_GULF_OF_OMAN","AE","GCC","HORMUZ"]).order(
+                    "assessment_date",desc=True).limit(80).execute().data or []
+                external = [r for r in risk_rows if str(r.get("provider") or "").upper()
+                            not in ("P&C","PC","POWER & CORRIDORS")]
+                if external:
+                    display = pd.DataFrame(external)
+                    display = display.rename(columns={
+                        "assessment_date":"Date","region_code":"Area",
+                        "provider":"Source","domain":"Threat dimension",
+                        "risk_level":"Source rating","trend":"Source trend",
+                        "confidence":"Confidence"
+                    })
+                    st.dataframe(display[[c for c in (
+                        "Date","Area","Threat dimension","Source","Source rating",
+                        "Source trend","Confidence"
+                    ) if c in display.columns]],hide_index=True,use_container_width=True)
+                    st.caption("External qualitative levels are not P&C scores and are not directly comparable across methodologies.")
+                else:
+                    st.info("No external ratings available for these recorded region codes.")
+            except Exception as exc:
+                st.warning("The recorded risk comparison is currently unavailable.")
+                with st.expander("Technical details"):st.code(str(exc))
+        st.markdown("#### Threat drivers")
+        col_a,col_b=st.columns(2)
+        with col_a:
+            st.markdown("**Maritime attacks and crew safety**")
+            st.write("Repeated attacks on identified tankers raise operational concerns for vessels, crews and fleet operators.")
+        with col_b:
+            st.markdown("**Export infrastructure and redundancy**")
+            st.write("Fujairah fires and loading disruptions expose the fragility of alternatives to Strait transit.")
         st.markdown("### Key developments")
         sections = (
             ("Maritime security","Merchant shipping",
@@ -251,7 +293,22 @@ def _security(db, core):
                     with st.expander("Underlying evidence"):
                         st.write("Vessel: "+str(r.get("vessel") or "Not identified"))
                         st.write("Associated company: "+str(r.get("company") or "Not yet linked"))
-                        st.caption("Record reference: "+str(r.get("event_id") or ""))
+                        event_id = r.get("event_id")
+                        if event_id and st.button("Open full incident dossier",
+                                                 key="pc_sec_dossier_"+str(event_id)):
+                            _open(core,"event",event_id,r.get("headline") or "Incident")
+                        imo = str(r.get("imo") or "").strip()
+                        if imo and imo.lower() not in ("none","nan"):
+                            if st.button("Open vessel dossier",key="pc_sec_vessel_"+str(event_id)):
+                                try:
+                                    matches=db.table("pc_mobile_assets").select(
+                                        "mobile_asset_id,name").eq("imo",imo).limit(1).execute().data or []
+                                    if matches:
+                                        _open(core,"mobile_asset",matches[0]["mobile_asset_id"],
+                                              matches[0].get("name") or imo)
+                                    else:st.warning("No canonical vessel matches the recorded IMO.")
+                                except Exception as exc:st.warning("Vessel lookup failed: "+str(exc))
+                        st.caption("Evidence reference: "+str(event_id or ""))
         st.markdown("### Monitoring priorities")
         st.write("Watch for new maritime attacks, verified transit restrictions, interruptions to Fujairah oil "
                  "loading, changes to alternative export routes, and confirmed commercial or insurance consequences.")
