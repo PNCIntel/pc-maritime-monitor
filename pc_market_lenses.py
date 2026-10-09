@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 import pc_terminal as core
+from pc_object_resolver import resolve_object
 
 # One canonical database, several market lenses.  Keep the existing terminal renderer
 # as the commercial/primary dossier and add cross-market views around the same object.
@@ -32,11 +33,12 @@ def _dossier(oid: str) -> dict:
 
 
 def _scope(oid: str, rec: dict, dossier: dict | None = None) -> tuple[set[str], list[dict]]:
-    dossier=dossier or _dossier(oid)
-    local=core._dossier_local(dossier) if dossier else core._local_infrastructure(rec)
-    ids={str(oid)}
-    ids.update(_clean(x.get("id")) for x in local if x.get("id"))
-    return ids,local
+    """Universal explicit facility scope for Trade and Strategic Industries."""
+    context = resolve_object(core, 'asset', str(oid), rec)
+    ids = {str(oid)}
+    ids.update(_clean(x.get('id')) for x in context.facilities if x.get('id'))
+    return ids, context.facilities
+
 
 def _rows_for_scope(table: str, columns: tuple[str, ...], ids: set[str], limit: int = 3000) -> list[dict]:
     out, seen = [], set()
@@ -357,42 +359,39 @@ def _render_sanctions_lens(oid: str, rec: dict):
 
 
 def _render_security_lens(oid: str, rec: dict):
-    ids, local = _scope(oid, rec)
-    events = []
-    for aid in sorted(ids):
-        events += core._events_for_object("asset", aid)
-    # De-duplicate and keep disruptions/security events only.
-    seen, filtered = set(), []
-    for e in events:
-        eid = _clean(e.get("event_id")) or repr(e)
-        if eid in seen:
-            continue
-        seen.add(eid)
-        blob = " ".join(_clean(e.get(k)) for k in ("title", "description", "event_type", "event_family", "event_category", "operational_impact"))
-        if SECURITY_RX.search(blob):
-            filtered.append(e)
-    filtered.sort(key=lambda x: _clean(x.get("start_date")), reverse=True)
+    """General security overlay for any fixed facility in any geography."""
+    context = resolve_object(core, 'asset', str(oid), rec)
+    def relevant(events):
+        out = []
+        for event in events:
+            blob = ' '.join(_clean(event.get(k)) for k in (
+                'title', 'description', 'event_type', 'event_family',
+                'event_nature', 'event_category', 'operational_impact'))
+            if SECURITY_RX.search(blob):
+                out.append(event)
+        return sorted(out, key=lambda x: _clean(x.get('start_date')), reverse=True)
 
-    operations = []
-    for aid in sorted(ids):
-        operations += core._related_table("pc_security_operations", aid, core._object_name("asset", aid), 100)
-
-    st.markdown("### Security & Disruptions")
-    st.caption("Protests, strikes, drones/UAS, attacks, sabotage, cyber, accidents, fires, closures, weather and security activity affecting this site or its connected infrastructure.")
+    direct = relevant(context.direct_events)
+    connected = relevant(context.connected_events)
+    st.markdown('### Risks & Disruptions')
+    st.caption('Verified links to this facility and its explicitly connected infrastructure; regional events are not counted as direct impacts.')
     m = st.columns(4)
-    m[0].metric("Linked disruptions", len(filtered))
-    m[1].metric("Security operations", len(operations))
-    m[2].metric("Connected facilities", len(local))
-    recent = [e for e in filtered if _clean(e.get("start_date"))]
-    m[3].metric("Most recent", _clean(recent[0].get("start_date"))[:10] if recent else "—")
-
-    if filtered:
-        core._render_event_rows(filtered, "market_security_" + core._norm(oid), 25)
-    else:
-        st.info("No linked security/disruption event is currently stored for this ecosystem.")
-    if operations:
-        with st.expander(f"Security operations ({len(operations)})"):
-            st.dataframe(pd.DataFrame(operations), hide_index=True, use_container_width=True)
+    m[0].metric('Direct incidents', len(direct))
+    m[1].metric('Connected facility incidents', len(connected))
+    m[2].metric('Connected facilities', len(context.facilities))
+    dates = [_clean(e.get('start_date')) for e in direct + connected if e.get('start_date')]
+    m[3].metric('Most recent', max(dates)[:10] if dates else '—')
+    if direct:
+        st.markdown('#### Incidents affecting this facility')
+        core._render_event_rows(direct, 'risk_direct_' + core._norm(oid), 25)
+    if connected:
+        st.markdown('#### Incidents at connected facilities')
+        core._render_event_rows(connected, 'risk_connected_' + core._norm(oid), 25)
+    if not (direct or connected):
+        st.info('No directly linked security incident was returned for this facility or its connected facilities. This is not a determination that no incident occurred.')
+    with st.expander('Coverage and verification'):
+        st.caption(f"{len(context.facilities)} explicitly connected facilities identified. Event links checked in the generic and specialist tables. Regional proximity is not interpreted as an incident link.")
+        st.caption('Records are not necessarily exhaustive; missing data or unresolved identities can reduce counts.')
 
 
 def _render_cross_market_infrastructure(oid: str, rec: dict, lens: str):
