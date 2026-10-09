@@ -112,19 +112,8 @@ def render_hormuz_case_study(db):
                 st.caption("Canonical record: " + str(r.get("event_id") or ""))
     st.caption("The current map only shows supported coordinate links. No location is invented for these events.")
 
-def render_global_security_risk(db, *, key="global_security_risk"):
-    """Render existing risk assessments, timelines and scored components.
-
-    No score is inferred from incident counts or draft methodology thresholds.
-    Missing data is shown explicitly. Assessments are grouped by provider and
-    domain so third-party ratings cannot silently become P&C independent ratings.
-    """
-    if not st.toggle("Load regional case study and 30-day intelligence", value=False, key=key+"_load_cases"):
-        st.caption("Open this section when needed; the incident map above remains available without these extra database queries.")
-    else:
-        render_hormuz_case_study(db)
-        _render_rolling_30day(db, key)
-    st.subheader("Recorded risk assessments")
+def _render_rolling_30day(db, key):
+    st.subheader("Last 30 days | global developments")
     st.caption("Rolling time window across all regions and transport modes. Counts are records, not independent attacks.")
     try:
         recent = _read(db, "pc_v_security_30day_feed", "*", 5000)
@@ -161,6 +150,20 @@ def render_global_security_risk(db, *, key="global_security_risk"):
         st.info("Rolling 30-day feed is not ready. Apply the v3 SQL migration.")
         st.caption(str(exc))
 
+
+
+def render_global_security_risk(db, *, key="global_security_risk"):
+    """Render existing risk assessments, timelines and scored components.
+
+    No score is inferred from incident counts or draft methodology thresholds.
+    Missing data is shown explicitly. Assessments are grouped by provider and
+    domain so third-party ratings cannot silently become P&C independent ratings.
+    """
+    if not st.toggle("Load regional case study and 30-day intelligence", value=False, key=key+"_load_cases"):
+        st.caption("Open this section when needed; the incident map above remains available without these extra database queries.")
+    else:
+        render_hormuz_case_study(db)
+        _render_rolling_30day(db, key)
     st.subheader("External and recorded risk assessments")
     if not st.toggle("Load assessment history and components", value=False, key=key+"_load_assessments"):
         st.caption("Load on demand to avoid querying the full risk history at every page refresh.")
