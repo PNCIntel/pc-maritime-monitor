@@ -2728,7 +2728,8 @@ def _style(theme: str):
     .stApp{{background:var(--bg);color:var(--text)}}
     [data-testid="stSidebar"]{{background:var(--panel2)!important;border-right:1px solid var(--line);min-width:225px!important}}
     [data-testid="stSidebar"] *{{color:var(--text)!important}}
-    .block-container{{max-width:1540px;padding-top:.65rem;padding-bottom:2.5rem}}
+    [data-testid="stMainBlockContainer"],.block-container{{width:100%;max-width:none;padding:1rem 2rem 2.5rem;margin-left:0;margin-right:0}}
+    @media(max-width:850px){{[data-testid="stMainBlockContainer"],.block-container{{padding-left:1rem;padding-right:1rem}}}}
     h1{{font-size:2.15rem!important;letter-spacing:-.035em;margin-bottom:.15rem!important}}
     h2{{font-size:1.35rem!important;letter-spacing:-.02em}}
     h3{{font-size:1.05rem!important}}

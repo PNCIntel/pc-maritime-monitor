@@ -11,15 +11,23 @@ import streamlit as st
 PAGE_SIZE = 12
 
 @st.cache_data(ttl=75, show_spinner=False)
-def _fetch(_db, table, *, columns='*', filters=(), search='', search_columns=('name',), limit=300, offset=0):
+def _fetch(_db, table, *, columns='*', filters=(), search='', search_columns=('name',), limit=300, offset=0, order=(), layer_terms=()):
     q = _db.table(table).select(columns)
     for column, operator, value in filters:
         if operator == 'eq': q = q.eq(column, value)
         elif operator == 'gte': q = q.gte(column, value)
         elif operator == 'lte': q = q.lte(column, value)
+    clauses=[]
+    if layer_terms:
+        clauses.append(','.join(f'{col}.ilike.%{word}%' for word in layer_terms for col in ('category', 'subtype')))
     if search:
         term = search.replace('%', '').replace(',', ' ').strip()
-        if term: q = q.or_(','.join(f'{col}.ilike.%{term}%' for col in search_columns))
+        if term: clauses.append(','.join(f'{col}.ilike.%{term}%' for col in search_columns))
+    if clauses:
+        expression=clauses[0] if len(clauses)==1 else 'and('+','.join('or('+clause+')' for clause in clauses)+')'
+        q=q.or_(expression)
+    for column, descending in order:
+        q = q.order(column, desc=descending)
     return q.range(offset, offset+limit-1).execute().data or []
 
 def _load(db, table, **kwargs):
@@ -42,7 +50,7 @@ def _geo_map(rows, *, label_key='name', height=520):
         xy = _coordinate(r)
         if xy: mapped.append({'lat':xy[0], 'lon':xy[1], 'label':str(r.get(label_key) or '')})
     if mapped:
-        st.map(pd.DataFrame(mapped), latitude='lat', longitude='lon', height=height, use_container_width=True)
+        st.map(pd.DataFrame(mapped), latitude='lat', longitude='lon', height=height, size=100, use_container_width=True)
     else:
         st.info('No verified map coordinates for this selection. Records remain available below.')
     return len(mapped)
@@ -51,32 +59,42 @@ def _trade(db, core):
     st.caption('POWER & CORRIDORS  /  TRADE & LOGISTICS')
     st.title('Global Trade Network')
     st.caption('Explore operating infrastructure, transport connections, companies and commercial developments.')
-    tabs = st.tabs(['Infrastructure map', 'Companies & operations', 'Commercial developments'])
-    with tabs[0]:
+    tabs = st.tabs(['Latest developments', 'Infrastructure map', 'Companies & operations'])
+    with tabs[1]:
         a,b,c=st.columns([2,1,1])
         term=a.text_input('Search places and facilities', placeholder='Fujairah, Khalifa, Rotterdam, airport…', key='v4_t_search')
-        country=b.text_input('Country',placeholder='United Arab Emirates',key='v4_t_country')
+        country=b.text_input('Country (blank = all)',placeholder='Enter a country',key='v4_t_country').strip()
         layer=c.selectbox('Infrastructure layer',['All facilities','Ports & terminals','Airports','Rail & intermodal','Road & logistics','Energy & industry'],key='v4_t_layer')
+        signature=(term.strip(), country, layer)
+        if st.session_state.get('v4_t_filter_signature') != signature:
+            st.session_state['v4_t_page']=1
+            st.session_state['v4_t_cards']=1
+            st.session_state['v4_t_filter_signature']=signature
+        st.caption('Country: '+(country or 'All countries')+' · '+layer)
         page=st.number_input('Map results page',min_value=1,max_value=100000,value=1,key='v4_t_page')
         f=[]
         if country: f.append(('country','eq',country))
         names={'Ports & terminals':'port,terminal,harbour,berth','Airports':'airport,aviation','Rail & intermodal':'rail,intermodal,dry port','Road & logistics':'road,warehouse,logistics','Energy & industry':'oil,gas,refin,industrial,energy,pipeline'}
         # All category filters are applied server side, not after fetching the first 1,500 rows.
         rows,err=_load(db,'pc_v4_trade_facilities',filters=tuple(f),search=term,
-                       search_columns=('name','category','subtype'),limit=250,offset=(page-1)*250)
+                       search_columns=('name','category','subtype'),limit=250,offset=(page-1)*250,
+                       order=(('is_mapped',True),('name',False),('object_id',False)),
+                       layer_terms=tuple(names[layer].split(',')) if layer != 'All facilities' else ())
         if err:
             st.error('The Trade delivery view is unavailable. Apply the v4 SQL migration and verify database permissions.');st.caption(err);return
-        if layer != 'All facilities':
-            words=names[layer].split(',')
-            rows=[r for r in rows if any(w in ' '.join(str(r.get(k)or'') for k in ('category','subtype','name')).lower() for w in words)]
-            st.caption('Layer filtering applies to this result page. Use a search term to narrow the dataset.')
         st.subheader('Infrastructure & transport map')
         mapped=_geo_map(rows,height=580)
         x,y,z=st.columns(3)
         x.metric('Facilities on page',len(rows));y.metric('Mapped facilities',mapped);z.metric('Countries represented',len({r.get('country') for r in rows if r.get('country')}))
         st.subheader('Explore the network')
         if not rows:st.info('No facilities match these filters. Try a broader search or country name.')
-        for i in range(0,min(len(rows),36),3):
+        card_signature=(signature,page)
+        if st.session_state.get('v4_t_card_signature') != card_signature:
+            st.session_state['v4_t_cards']=1
+            st.session_state['v4_t_card_signature']=card_signature
+        card_page=st.number_input('Facility cards page',min_value=1,max_value=max(1,(len(rows)+PAGE_SIZE-1)//PAGE_SIZE),key='v4_t_cards')
+        card_start=(card_page-1)*PAGE_SIZE
+        for i in range(card_start,min(len(rows),card_start+PAGE_SIZE),3):
             cells=st.columns(3)
             for col,r in zip(cells,rows[i:i+3]):
                 with col:
@@ -86,8 +104,8 @@ def _trade(db, core):
                         if r.get('operator_name'): st.caption('Operated by '+str(r['operator_name']))
                         if st.button('Explore facility',key=f'v4_fac_{page}_{i}_{r.get("object_id")}'):
                             _open(core,'asset',r.get('object_id'),r.get('name'))
-        if len(rows)>36:st.caption('Showing the first 36 facility cards from this page. Narrow your filters for more targeted results.')
-    with tabs[1]:
+        if rows:st.caption(f'Showing facilities {card_start+1}–{min(len(rows),card_start+PAGE_SIZE)} of {len(rows)} on map page {page}.')
+    with tabs[2]:
         st.subheader('Companies & operating networks')
         name=st.text_input('Find a company',key='v4_company_search',placeholder='AD Ports Group, DP World, Vopak…')
         if len(name.strip())<2:st.info('Search for a company to explore its operating footprint and corporate relationships.')
@@ -98,11 +116,17 @@ def _trade(db, core):
             for r in companies:
                 left,right=st.columns([5,1]);left.write('**'+str(r.get('name'))+'**')
                 if right.button('Explore',key='v4_company_'+str(r.get('object_id'))):_open(core,'entity',r.get('object_id'),r.get('name'))
-    with tabs[2]:
-        st.subheader('Commercial developments')
+    with tabs[0]:
+        st.subheader('Latest trade developments')
+        st.caption('Production events, newest first. Includes historical developments and links to their full dossiers.')
         term=st.text_input('Find developments',key='v4_developments_search')
-        updates,err=_load(db,'pc_intel_trade_developments',search=term,search_columns=('title','narrative'),limit=20)
-        if err:st.warning('Developments are temporarily unavailable.')
+        updates,err=_load(db,'pc_events',filters=(('trade_visible','eq',True),),search=term,
+                          search_columns=('title','description'),limit=30,
+                          order=(('start_date',True),('event_id',False)))
+        if err:
+            st.error('Recent developments could not be loaded.');st.caption(err)
+        elif not updates:
+            st.info('No visible production events match this search.')
         seen=set()
         for row in updates:
             eid=row.get('event_id')
@@ -110,8 +134,9 @@ def _trade(db, core):
             seen.add(eid)
             with st.container(border=True):
                 st.markdown('**'+str(row.get('title') or 'Development')+'**')
-                st.caption(str(row.get('occurred_at') or '')[:10])
-                if row.get('narrative'):st.write(str(row['narrative'])[:550])
+                st.caption(str(row.get('start_date') or '')[:10])
+                if row.get('description'):st.write(str(row['description'])[:550])
+                st.caption(' · '.join(str(row.get(k)) for k in ('event_domain','event_type','status') if row.get(k)))
                 if st.button('Read development',key='v4_dev_'+str(eid)):_open(core,'event',eid,row.get('title'))
 
 def _security(db,core):
