@@ -47,6 +47,38 @@ def _geo_map(rows, *, label_key='name', height=520):
         st.info('No verified map coordinates for this selection. Records remain available below.')
     return len(mapped)
 
+def _security_cluster_map(rows):
+    """Cluster identical coordinates; never manufacture an incident pin."""
+    grouped = {}
+    missing = []
+    for r in rows:
+        xy = _coordinate(r)
+        if not xy:
+            missing.append(r)
+            continue
+        bucket = grouped.setdefault(xy, {"lat":xy[0],"lon":xy[1],"count":0,"titles":[]})
+        bucket["count"] += 1
+        if len(bucket["titles"])<4:bucket["titles"].append(str(r.get("title") or "Incident"))
+    if grouped:
+        import pydeck as pdk
+        df=pd.DataFrame(list(grouped.values()))
+        df["radius"]=df["count"].pow(0.5)*12000
+        df["description"]=df["titles"].map(lambda x:" | ".join(x))
+        layer=pdk.Layer("ScatterplotLayer",data=df,get_position="[lon, lat]",
+                        get_radius="radius",radius_min_pixels=7,radius_max_pixels=30,
+                        get_fill_color=[24,110,178,175],pickable=True)
+        st.pydeck_chart(pdk.Deck(layers=[layer],initial_view_state=pdk.ViewState(
+            latitude=float(df["lat"].mean()),longitude=float(df["lon"].mean()),zoom=5),
+            tooltip={"html":"<b>{count} records</b><br/>{description}<br/>Location can be linked-facility context, not verified strike position."}),
+            use_container_width=True)
+        st.caption(f"{sum(x['count'] for x in grouped.values())} located records at {len(grouped)} distinct coordinates. Overlaps are clustered.")
+    else:st.info("No coordinate-backed incident locations available.")
+    if missing:
+        with st.expander(f"Evidence without verified coordinates ({len(missing)})"):
+            for r in missing[:40]:
+                st.write(str(r.get("title") or "Incident")+" — "+str(r.get("location_label") or "Location under review"))
+    return len(grouped)
+
 def _trade(db, core):
     st.caption('POWER & CORRIDORS  /  TRADE & LOGISTICS')
     st.title('Global Trade Network')
@@ -145,7 +177,7 @@ def _security(db,core):
     k2.metric('Mapped locations',sum(_coordinate(r) is not None for r in incidents))
     k3.metric('Recorded risk assessments',sum(bool(r.get('source_risk_level') or r.get('source_risk_trend')) for r in incidents))
     st.subheader('Incident & exposure map')
-    _geo_map(incidents,label_key='title',height=580)
+    _security_cluster_map(incidents)
     approx=sum(r.get('map_precision')=='linked_facility_context' and _coordinate(r) is not None for r in incidents)
     if approx:st.caption(f'{approx} markers show the location of an explicitly linked facility, not verified incident coordinates.')
     t1,t2=st.tabs(['Incidents & developments','Risk, trends & evidence'])
