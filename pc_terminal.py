@@ -5495,16 +5495,23 @@ def render_terminal(lens: str = "trade"):
         _render_mobile_asset_terminal(oid,rec,lens)
         return
 
-    # Persistent tactical workspace for corridors and events.
-    left, center, right = st.columns([1.0, 1.25, 1.0], gap="large")
-    with left:
-        with st.container(border=True):
-            _render_dossier_pane(typ,oid,rec,lens)
-    with center:
-        with st.container(border=True):
+    # Reader-first event dossier. Spatial context and evidence are secondary,
+    # not three equally weighted columns squeezing the account of an incident.
+    if typ == "event":
+        st.markdown("### Incident briefing")
+        _render_dossier_pane(typ,oid,rec,lens)
+        nav_a, nav_b = st.tabs(["Location and connected assets", "Sources and verification"])
+        with nav_a:
             _render_spatial_pane(typ,oid,rec,lens)
-    with right:
-        with st.container(border=True):
+        with nav_b:
+            _render_evidence_pane(typ,oid,rec,lens)
+    else:
+        left, right = st.columns([1.3, 1.0], gap="large")
+        with left:
+            _render_dossier_pane(typ,oid,rec,lens)
+        with right:
+            _render_spatial_pane(typ,oid,rec,lens)
+        with st.expander("Sources and supporting evidence"):
             _render_evidence_pane(typ,oid,rec,lens)
 
     st.divider()
