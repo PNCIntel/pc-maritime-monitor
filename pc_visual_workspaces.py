@@ -157,64 +157,106 @@ def _security(db, core):
         key="pc_sec_operating_area",
     )
     if scope == "Hormuz & Gulf of Oman | Demonstration":
-        st.markdown("### Hormuz and Gulf of Oman")
-        st.caption("Vessel incidents · Fujairah energy infrastructure · linked companies")
         try:
-            q = db.table("pc_v_security_hormuz_stories").select("*").limit(100).execute()
-            rows = q.data or []
+            rows = db.table("pc_v_security_hormuz_stories").select("*").limit(100).execute().data or []
         except Exception as exc:
-            rows = []
-            st.warning("The Hormuz editorial data view is unavailable. Apply the v3 SQL migration.")
-            with st.expander("Technical details"): st.code(str(exc))
-        if rows:
-            df = pd.DataFrame(rows)
-            a,b,c=st.columns(3)
-            a.metric("Maritime evidence records",int((df["category"]=="Maritime security").sum()))
-            b.metric("Infrastructure observations",int((df["category"]=="Energy infrastructure").sum()))
-            c.metric("Total selected records",len(df))
-            st.caption("Evidence records, not a count of confirmed independent attacks.")
-            try:
-                note = db.table("pc_v_security_editorial_latest").select("*").eq(
-                    "region_code","HORMUZ_GULF_OF_OMAN").limit(1).execute().data or []
-            except Exception: note=[]
-            if note:
-                n=note[0]
+            st.error("The regional intelligence evidence feed is unavailable.")
+            with st.expander("Connection details"): st.code(str(exc))
+            return
+        if not rows:
+            st.info("No supported evidence is available for this demonstration.")
+            return
+        df = pd.DataFrame(rows)
+        if "category" not in df.columns: df["category"] = "Other security"
+        if "occurred_on" not in df.columns: df["occurred_on"] = None
+        df["occurred_on"] = pd.to_datetime(df["occurred_on"], errors="coerce")
+        maritime = df[df["category"].eq("Maritime security")].copy()
+        infrastructure = df[df["category"].eq("Energy infrastructure")].copy()
+        try:
+            note = db.table("pc_v_security_editorial_latest").select("*").eq(
+                "region_code", "HORMUZ_GULF_OF_OMAN").limit(1).execute().data or []
+        except Exception:
+            note = []
+        summary = note[0] if note else {}
+        st.markdown("""
+        <style>
+        .pc-brief-hero {background:#152D47;color:#f1f5fb;padding:24px 27px;
+                        border-radius:12px;margin:10px 0 18px 0}
+        .pc-brief-eyebrow {font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#9ec0dd}
+        .pc-brief-heading {font-size:23px;font-weight:700;margin:9px 0;color:#fff}
+        .pc-brief-date {font-size:13px;color:#c7d7e7}
+        </style>""",unsafe_allow_html=True)
+        st.markdown('<div class="pc-brief-hero"><div class="pc-brief-eyebrow">P&C Intelligence / Regional Security</div>'
+                    '<div class="pc-brief-heading">Hormuz and Gulf of Oman</div>'
+                    '<div class="pc-brief-date">Maritime security, oil exports and connected infrastructure</div></div>',
+                    unsafe_allow_html=True)
+        st.caption("REGIONAL INTELLIGENCE BRIEF  ·  Historical evidence and analyst interpretation")
+        st.markdown("### Executive assessment")
+        st.write(summary.get("executive_summary") or
+                 "The selected evidence links attacks affecting merchant shipping with earlier "
+                 "disruptions to Fujairah's energy infrastructure. Wider regional incident and "
+                 "commercial data are needed to establish the full current threat picture.")
+        st.caption("P&C independent editorial analysis · Formal numerical threat rating not yet approved")
+        if summary.get("analysis"):
+            with st.expander("Why this matters — assessment reasoning"):
+                st.write(summary["analysis"])
+        st.markdown("#### Evidence at a glance")
+        m1,m2,m3=st.columns(3)
+        m1.metric("Affected vessel records",len(maritime))
+        m2.metric("Fujairah observations",len(infrastructure))
+        m3.metric("P&C numerical rating","Pending")
+        st.caption("Counts refer to the eleven-record validation set; they are not total regional attacks.")
+        st.markdown("### Key developments")
+        sections = (
+            ("Maritime security","Merchant shipping",
+             "Repeated vessel incidents bring crew safety, vessel availability and exposure of connected fleets into focus.",maritime),
+            ("Energy infrastructure","Fujairah and alternative export routes",
+             "Disruption at Fujairah threatens operations outside the Strait and can reduce supply-chain resilience.",infrastructure),
+        )
+        for kind,heading,interpretation,part in sections:
+            with st.container(border=True):
+                st.markdown("#### "+heading)
+                st.write(interpretation)
+                if not part.empty:
+                    latest = part.sort_values("occurred_on",ascending=False).iloc[0]
+                    st.caption("Most recent case-study record: "+str(latest.get("headline") or kind)
+                               +" · "+str(latest["occurred_on"].date()) if pd.notna(latest["occurred_on"]) else str(latest.get("headline") or kind))
+                st.caption(str(len(part))+" selected evidence records; open the chronology for details")
+        st.markdown("### Historical pattern")
+        timeline=df.dropna(subset=["occurred_on"]).copy()
+        if not timeline.empty:
+            timeline["Month"]=timeline["occurred_on"].dt.strftime("%b %Y")
+            chart=timeline.groupby(["Month","category"]).size().unstack(fill_value=0)
+            st.bar_chart(chart,y_label="Evidence records")
+        st.caption("Recorded observations by month, not a calibrated risk index.")
+        with st.expander("Incident chronology and sources",expanded=False):
+            category=st.selectbox("Evidence category",["All","Maritime security","Energy infrastructure"],
+                                  key="pc_sec_case_category")
+            visible=df if category=="All" else df[df["category"]==category]
+            for _,r in visible.sort_values("occurred_on",ascending=False).iterrows():
                 with st.container(border=True):
-                    st.caption("P&C | INDEPENDENT ANALYST BRIEF")
-                    st.markdown("#### "+str(n.get("headline") or "Assessment"))
-                    st.write(n.get("executive_summary") or "Further assessment underway.")
-                    st.caption(str(n.get("observation_label") or "Unscored editorial assessment"))
-                    with st.expander("Assessment reasoning"):
-                        st.write(n.get("analysis") or "")
-            else:
-                st.info("No independent P&C editorial note accessible. External source ratings are not P&C ratings.")
-            dates=pd.to_datetime(df["occurred_on"],errors="coerce")
-            trend=pd.DataFrame({"Month":dates.dt.strftime("%Y-%m"),"Category":df["category"]})
-            trend=trend.dropna()
-            if not trend.empty:
-                st.subheader("Incident and disruption history")
-                st.bar_chart(trend.groupby(["Month","Category"]).size().unstack(fill_value=0),
-                             y_label="Evidence records")
-            st.subheader("What happened")
-            for _,r in df.sort_values("occurred_on",ascending=False).iterrows():
-                with st.container(border=True):
-                    st.markdown("**"+str(r.get("headline") or "Incident")+"**")
-                    st.caption(" · ".join(str(r.get(k) or "") for k in
-                                ("occurred_on","geographical_area","category")))
-                    st.write(str(r.get("operational_effect") or "Consequences being verified"))
-                    if r.get("supporting_source") and pd.notna(r.get("supporting_source")):
-                        st.link_button("Source and evidence",str(r["supporting_source"]))
-                    with st.expander("Related companies and evidence"):
+                    st.markdown("**"+str(r.get("headline") or "Regional incident")+"**")
+                    date=r.get("occurred_on")
+                    st.caption((date.strftime("%d %b %Y") if pd.notna(date) else "Date under review")
+                               +" · "+str(r.get("geographical_area") or "Regional location")
+                               +" · "+str(r.get("category") or "Security"))
+                    effect=str(r.get("operational_effect") or "")
+                    if effect and effect.lower() not in ("nan","none"):
+                        st.write(effect)
+                    else:
+                        st.write("Consequences remain under investigation.")
+                    source=r.get("supporting_source")
+                    if isinstance(source,str) and source.startswith(("https://","http://")):
+                        st.link_button("View source",source)
+                    with st.expander("Underlying evidence"):
                         st.write("Vessel: "+str(r.get("vessel") or "Not identified"))
-                        st.write("Company: "+str(r.get("company") or "Not linked"))
-                        st.caption("Reference: "+str(r.get("event_id") or ""))
-            st.info("Exact incident pins are not available for this evidence set. The operating-area map requires validated geographic shapes or linked facilities; no false strike coordinates will be shown.")
-        else:
-            st.info("No demonstration records available yet. The global incident explorer remains accessible.")
-        with st.expander("Browse other risk assessments"):
-            if st.button("Open assessment history",key="sec_assessments"):
-                from pc_global_security_risk import render_global_security_risk
-                render_global_security_risk(db,key="sec_optional_assessment")
+                        st.write("Associated company: "+str(r.get("company") or "Not yet linked"))
+                        st.caption("Record reference: "+str(r.get("event_id") or ""))
+        st.markdown("### Monitoring priorities")
+        st.write("Watch for new maritime attacks, verified transit restrictions, interruptions to Fujairah oil "
+                 "loading, changes to alternative export routes, and confirmed commercial or insurance consequences.")
+        st.caption("These monitoring priorities are analyst prompts, not automatically met escalation thresholds.")
+        st.info("Incident positions are not plotted as exact strike locations unless supported by verified coordinates. A regional infrastructure/corridor map is a separate development task.")
         return
 
     st.subheader("Global incident explorer")
