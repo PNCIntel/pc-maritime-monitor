@@ -81,52 +81,94 @@ def render_market_highlights(db, product):
 
 
 def render_event_profile(db, event_id: str, product: str) -> bool:
-    """Present full source-backed event profile in the existing application."""
-    rows,err=_query(db,'pc_intel_event_details',eq={'event_id':event_id},limit=1)
+    """Full-width event briefing; relationship/evidence details are opt-in."""
+    rows, err = _query(db, "pc_intel_event_details", eq={"event_id": event_id}, limit=1)
     if err or not rows:
-        return False  # Preserve existing working fallback.
-    e=rows[0]
-    st.caption('SECURITY & DISRUPTIONS' if product=='intelligence' else 'DEVELOPMENT & OPERATIONAL CONTEXT')
-    st.title(e.get('title') or 'Development')
-    c1,c2,c3=st.columns(3)
-    c1.metric('Reported date',str(e.get('occurred_at') or 'Not recorded')[:10])
-    c2.metric('Classification',str(e.get('event_family') or 'Not classified').replace('_',' '))
-    c3.metric('Record status',str(e.get('record_status') or 'Not specified').replace('_',' ').title())
-    risk=e.get('source_risk_level');trend=e.get('source_risk_trend')
-    if risk or trend:
-        st.info('Recorded assessment: '+' · '.join(x for x in [f'Risk: {risk}' if risk else '', f'Trend: {trend}' if trend else ''] if x))
-    st.subheader('What happened')
-    narrative=e.get('narrative')
+        return False
+    e = rows[0]
+    title = str(e.get("title") or "Incident report")
+    st.caption("P&C INTELLIGENCE / INCIDENT BRIEF")
+    st.title(title)
+    occurred = str(e.get("occurred_at") or "")[:10] or "Date under review"
+    location = str(e.get("location_label") or "Location under review")
+    family = str(e.get("event_family") or "Security development").replace("_", " ").title()
+    st.caption(" · ".join([occurred, location, family]))
+    narrative = e.get("narrative")
     if narrative:
+        st.markdown("### What happened")
         st.write(narrative)
     else:
-        st.info('A narrative has not been returned by the delivery view. The original record remains available for review.')
-    st.subheader('Location and operational context')
-    _map([e],latitude='latitude_text',longitude='longitude_text')
-    if e.get('location_label'):
-        st.caption('Recorded location: '+str(e['location_label']))
-    links,_=_query(db,'pc_intel_object_events', 'object_type,object_id,link_sources',eq={'event_id':event_id},limit=100)
-    if links:
-        st.subheader('Affected or associated assets')
-        st.caption('Explicit record links only; relationship roles and exposure require verification.')
-        # Display types but never call every linked record 'affected'.
-        for x in links[:25]:
-            st.write(f"{str(x.get('object_type') or '').replace('_',' ').title()}: {x.get('object_id')}")
-    evidence=e.get('evidence') or []
-    st.subheader('Sources and evidence')
-    if evidence:
-        for ev in evidence:
-            st.write(ev.get('claim') or 'Source entry')
-            st.caption('Verification: '+str(ev.get('verification') or 'Not classified'))
-            url=ev.get('url')
-            if isinstance(url,str) and url.startswith(('https://','http://')):
-                st.link_button('Read original source',url)
-    else:
-        st.caption('No event evidence rows returned. This does not establish that no source exists.')
-    # Optional prepared intelligence / trade layer; existing event dossier stays primary.
+        st.info("A verified account is not yet available for this record.")
+
+    tabs = st.tabs(["Impact and exposure", "Location and connections", "Sources"])
+    with tabs[0]:
+        st.markdown("#### Operational significance")
+        st.write(e.get("operational_impact") or
+                 "Operational effects have not yet been established from recorded evidence.")
+        st.markdown("#### Commercial implications")
+        st.write(e.get("commercial_impact") or
+                 "Commercial consequences remain under review.")
+        risk = e.get("source_risk_level")
+        trend = e.get("source_risk_trend")
+        if risk or trend:
+            with st.expander("Attributed external assessment"):
+                st.caption("An external source's classification is not an independent P&C threat rating.")
+                st.write("Recorded source level: " + str(risk or "Not available"))
+                st.write("Recorded source trend: " + str(trend or "Not available"))
+        else:
+            st.caption("No separately validated P&C incident risk rating is currently linked.")
+    with tabs[1]:
+        st.markdown("#### Reported geographic context")
+        st.write(location)
+        _map([e], latitude="latitude_text", longitude="longitude_text")
+        st.caption("Mapped points may represent a linked facility rather than a verified strike position.")
+        linked, link_error = _query(db, "pc_intel_object_events",
+                                   "object_type,object_id,link_sources",
+                                   eq={"event_id":event_id},limit=60)
+        if linked:
+            st.markdown("#### Linked vessels, companies and facilities")
+            for ix,x in enumerate(linked):
+                kind = str(x.get("object_type") or "").lower()
+                identifier = str(x.get("object_id") or "")
+                table, id_column, label_column = {
+                    "mobile_asset": ("pc_mobile_assets","mobile_asset_id","name"),
+                    "entity": ("pc_entities","entity_id","name"),
+                    "asset": ("pc_assets","asset_id","name"),
+                }.get(kind, (None,None,None))
+                if not table or not identifier:
+                    continue
+                found,_ = _query(db,table,f"{id_column},{label_column}",
+                                 eq={id_column:identifier},limit=1)
+                display = (found[0].get(label_column) if found else None) or kind.replace("_"," ").title()
+                col1,col2 = st.columns([4,1])
+                col1.write("**"+str(display)+"** · "+kind.replace("_"," ").title())
+                if col2.button("Explore",key=f"event_related_{event_id}_{ix}"):
+                    try:
+                        from pc_terminal import _set_context
+                        _set_context(kind,identifier,str(display))
+                        st.rerun()
+                    except Exception:
+                        st.warning("This linked record could not be opened.")
+        elif link_error:
+            st.caption("Related-object lookup unavailable.")
+        else:
+            st.caption("No explicit linked objects in this delivery view.")
+    with tabs[2]:
+        evidence = e.get("evidence") or []
+        if evidence:
+            for i, item in enumerate(evidence):
+                st.write(item.get("claim") or "Supporting observation")
+                source = item.get("url")
+                if isinstance(source,str) and source.startswith(("https://","http://")):
+                    st.link_button("Open source "+str(i+1),source)
+        else:
+            st.caption("No evidence rows returned in this view. Check the original incident dossier for further provenance.")
+        with st.expander("Technical details"):
+            st.caption("Internal canonical reference: "+str(event_id))
     try:
         from pc_event_dual_lens import render_event_lens
-        render_event_lens(db, event_id, product)
+        with st.expander("Additional analytical views"):
+            render_event_lens(db,event_id,product)
     except ImportError:
         pass
     return True
