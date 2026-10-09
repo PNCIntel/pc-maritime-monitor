@@ -1199,6 +1199,10 @@ def _asset_chip(aid: str) -> str:
     return _object_name("asset",aid) if aid else ""
 
 def _render_dossier_pane(typ: str, oid: str, rec: dict, lens: str):
+    if typ == "event":
+        from pc_intelligence_presentation import render_event_profile
+        if render_event_profile(_sb(), oid, lens):
+            return
     st.markdown("### Dossier & Ownership")
     st.caption("Canonical identity, control, portfolio and commercial structure.")
 
@@ -2279,6 +2283,8 @@ def _render_home(lens: str):
         _render_trade_home()
         return
     if lens=="intelligence":
+        from pc_intelligence_presentation import render_market_highlights
+        render_market_highlights(_sb(), "intelligence")
         _render_intelligence_home()
         return
     if lens=="sanctions":
@@ -5212,15 +5218,8 @@ def render_terminal(lens: str = "trade"):
         st.error("P&C database connection is not configured.")
         st.stop()
 
-    # Delivery-view workspaces: existing specialized interface remains available.
-    from pc_delivery_ui import sidebar as delivery_sidebar, render as delivery_render
-    with st.sidebar:
-        mode=st.radio('Workspace', ['Data Views', 'Existing Dashboard'],
-                      key=f'pc_delivery_mode_{lens}', horizontal=True)
-    if mode == 'Data Views':
-        section=delivery_sidebar(lens)
-        delivery_render(sb,lens,section)
-        return
+    # Customer-facing application is always primary. Prepared SQL views are
+    # queried inside the screens; never expose a raw-data workspace.
 
     # Restore deep-link context before drawing navigation so Home is never shown
     # as active while an object dossier is open.

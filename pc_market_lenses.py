@@ -593,6 +593,9 @@ _ORIGINAL_HOME = core._render_home
 
 
 def _render_market_home(lens: str):
+    if lens == "trade":
+        from pc_intelligence_presentation import render_market_highlights
+        render_market_highlights(core._sb(), "trade")
     # Avoid the old double Strategic Industries header and replace its generic KPI
     # dashboard with the connected industrial-base picture.
     if lens == "strategic":
