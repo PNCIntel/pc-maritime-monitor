@@ -1,23 +1,11 @@
-# P&C Delivery Network v5 — Trade + Security
+# P&C Dual Security and Trade Event Lenses — v6
 
-## Scope
-Additive SQL plus targeted Python changes to the **existing** richly formatted dossiers. No new raw-record UI. Applies to **all fixed infrastructure**, not one port. Uses reviewed identity aliases and preserves original record IDs. v5 connected edges draw from generic asset relationships and specialist parent-terminal relationships; company roles from existing asset/entity graph and direct operator fields. **No location guessing**; missing coordinates remain missing.
+1. Back up working repository modules. Use a test branch.
+2. Apply `sql/20261009_dual_event_lenses.sql` in Supabase after existing `pc_intel_event_details` and related views.
+3. Add `pc_event_dual_lens.py` alongside existing modules and replace `pc_intelligence_presentation.py` with included version. Leave other modules intact.
+4. Restart Trade and Intelligence and clear their cached results. Open a known event dossier in each product.
+5. Verify a dated `pc_risk_assessments` record linked by `pc_risk_assessment_events` produces a displayed risk level ONLY if `approval_status` is approved/published; otherwise it shows Not assessed.
+6. Verify a strike or port attack with `pc_logistics_event_impacts` shows operational effects in Trade without changing its event identity.
+7. Verify missing impact data displays 'not recorded', not 'no commercial impact'.
 
-## Deploy
-1. Run `sql/20261009_network_delivery_v5.sql` in Supabase **after** preferred identity functions and earlier v4 intelligence views.
-2. In a **test branch**, overlay `pc_terminal.py`, `pc_market_lenses.py` and `pc_prepared_bridge.py`. Other files in this package are baseline references; retain all other repository modules (`pc_drilldown`, `pc_corporate_network`, `shared.pc_db`, etc.).
-3. Restart both Streamlit applications and clear their cached data.
-4. Search Fujairah / `PORTG0046` and the verified Port of Fujairah. Both should display the preferred enriched profile; repeat for unrelated ports and a rail/airport to ensure no accidental port-only assumptions.
-5. Verify with SQL below. Expect six terminal child IDs plus **additional commercial connections** when present. Six terminal records are not necessarily six distinct physical terminals.
-
-```sql
-SELECT child_asset_id, connected_name, relationship_labels
-FROM public.pc_v5_infrastructure_connections
-WHERE parent_asset_id = 'PORT_UAE_PORT_OF_FUJAIRAH'
-ORDER BY connected_name;
-SELECT company_name, role FROM public.pc_v5_infrastructure_companies
-WHERE asset_id = 'PORT_UAE_PORT_OF_FUJAIRAH';
-```
-
-## Known limits
-This is an integration fix, not a completed network visualization. Parent asset coordinates are absent in current Fujairah records. Event linkage only uses existing linked evidence. Generic asset links may include adjacent independent facilities, which are labelled by original relationship and **must not be counted as owned terminals**. Live Supabase integration not tested. The corporate-network performance work is not in scope.
+**Scope:** This integrates a dual-lens panel in existing event dossiers and creates reusable SQL views. It does not yet migrate all home and sidebar sections. SQL was composed against supplied table and column names; live database compilation is unverified. If a schema error arises, return the exact error rather than applying guessed fixes. Existing models are not modified.

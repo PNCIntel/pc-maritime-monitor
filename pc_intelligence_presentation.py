@@ -123,4 +123,10 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
                 st.link_button('Read original source',url)
     else:
         st.caption('No event evidence rows returned. This does not establish that no source exists.')
+    # Optional prepared intelligence / trade layer; existing event dossier stays primary.
+    try:
+        from pc_event_dual_lens import render_event_lens
+        render_event_lens(db, event_id, product)
+    except ImportError:
+        pass
     return True
