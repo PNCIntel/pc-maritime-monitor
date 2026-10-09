@@ -159,6 +159,10 @@ def _security(db,core):
                 if st.button('Open full incident',key='v4_event_'+str(r.get('event_id'))):_open(core,'event',r.get('event_id'),r.get('title'))
         if len(incidents)>PAGE_SIZE:st.caption('Showing 12 incident cards. Narrow the search or select another result page.')
     with t2:
+        from pc_global_security_risk import render_global_security_risk
+        render_global_security_risk(db, key='v4_s_global_risk')
+        st.divider()
+        st.subheader('Event-level source ratings')
         assessed=[r for r in incidents if r.get('source_risk_level') or r.get('source_risk_trend')]
         if not assessed:st.info('No recorded risk/trend assessment for this selection. Incident count alone does not establish HIGH or INCREASING.')
         for r in assessed[:20]:
