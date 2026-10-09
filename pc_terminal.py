@@ -5212,6 +5212,16 @@ def render_terminal(lens: str = "trade"):
         st.error("P&C database connection is not configured.")
         st.stop()
 
+    # Delivery-view workspaces: existing specialized interface remains available.
+    from pc_delivery_ui import sidebar as delivery_sidebar, render as delivery_render
+    with st.sidebar:
+        mode=st.radio('Workspace', ['Data Views', 'Existing Dashboard'],
+                      key=f'pc_delivery_mode_{lens}', horizontal=True)
+    if mode == 'Data Views':
+        section=delivery_sidebar(lens)
+        delivery_render(sb,lens,section)
+        return
+
     # Restore deep-link context before drawing navigation so Home is never shown
     # as active while an object dossier is open.
     _restore_context()
@@ -5295,16 +5305,7 @@ def render_terminal(lens: str = "trade"):
                 args=args,
             )
         st.divider()
-        if lens in ('sanctions','trade','intelligence') and st.button('UAE / OFAC vessel overlap', use_container_width=True):
-            _clear_context()
-            st.session_state['pc_document_browser'] = False
-            st.session_state['pc_uae_ofac_overlap'] = True
-            st.rerun()
-        if st.button("Documents & vessel restrictions", use_container_width=True):
-            _clear_context()
-            st.session_state['pc_uae_ofac_overlap'] = False
-            st.session_state['pc_document_browser'] = True
-            st.rerun()
+        # Former UAE/OFAC diagnostic and document restriction buttons are not customer navigation.
         if st.button("Home / clear selection", use_container_width=True):
             _home_nav(lens)
             st.rerun()

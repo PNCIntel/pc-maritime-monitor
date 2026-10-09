@@ -225,4 +225,11 @@ def render(market: str):
     if _db() is None:
         st.warning('The shared Supabase database connection is unavailable. Configure the existing pc_db client and Streamlit secrets before deploying.')
         return
+    from pc_delivery_ui import sidebar as delivery_sidebar, render as delivery_render
+    with st.sidebar:
+        mode=st.radio('Workspace', ['Data Views', 'Existing Dashboard'], key=f'pc_delivery_mode_{market}', horizontal=True)
+    if mode == 'Data Views':
+        section=delivery_sidebar(market)
+        delivery_render(_db(),market,section)
+        return
     {'capital':capital,'commodities':commodities,'markets':markets}[market]()

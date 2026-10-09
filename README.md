@@ -1,37 +1,30 @@
-# Power & Corridors — Seven Applications Foundation
+# P&C Data Delivery v1 — SQL-first visibility
 
-One Supabase data model; seven Streamlit entry points. No migrations or database writes.
+## Install (test branch first)
+1. Keep the existing project, `shared/pc_db.py`, `pc_drilldown.py`, `pc_corporate_network.py`, `pc_document_vessels.py`, secrets and deployment config unchanged.
+2. Run `sql/20261009_delivery_views.sql` using Supabase SQL Editor. **Read the SQL first**; it is additive, creates/replaces only `pc_delivery_*` and `pc_app_*` views, never writes to production entity/asset/event tables.
+3. Copy this bundle's `.py` files into the existing repository at its root, including new `pc_delivery_ui.py`. Preserve other files in repository.
+4. Restart each Streamlit app. It defaults to `Data Views`; `Existing Dashboard` preserves the former interface, search, dossiers and reports.
+5. Test select navigation for Trade, Intelligence, and the other five. New SQL records should appear in views on next query; no materialized refresh required. Query limit and Streamlit cache still apply to other legacy UI.
 
-## Existing application entry points (preserved)
+## Seven business app views
+`pc_app_trade_records`, `pc_app_security_records`, `pc_app_strategic_records`, `pc_app_sanctions_records`, `pc_app_capital_records`, `pc_app_commodities_records`, `pc_app_markets_records`. These provide first-pass section routing from established `pc_entities`, `pc_assets`, `pc_mobile_assets`, and `pc_events`. `pc_delivery_direct_incidents` and `pc_delivery_facility_children` provide explicit evidence-linked relations.
 
-- PC_Trade_Regional_Dashboard.py → pc_market_lenses.render_market_terminal("trade")
-- PC_Strategic_Industries_app.py → pc_market_lenses.render_market_terminal("strategic")
-- PC_Sanctions_app.py → pc_terminal.render_terminal("sanctions")
-- PC_Intelligence_Regional_Dashboard.py → pc_terminal.render_terminal("intelligence")
+## Important limits (do not mistake scaffolding for completion)
+* **This is an initial live-data delivery layer, not finished seven-domain analytical SQL packages.** The capital, sanctions, markets and commodity menus show discoverable objects but do **not yet** implement dedicated portfolios, sanctions designations, benchmark rates, commodity flows, time-aware contract lookups or full graph relationship traversal. Add specialist delivery views incrementally using real schema.
+* The row tables are intentionally **live ordinary views**, not materialized: newly SQL-loaded data appears without a refresh. Once data contracts stabilize, expensive overview aggregates can be materialized and refreshed from admin.
+* Direct incidents are read from `pc_event_asset_links`, `pc_event_links` and `pc_v_event_vessel_links`; they are not automatically 'security' events. Validate event categories before using them for threat analytics.
+* Underlying PostgREST permissions/RLS policies still control access to SQL views; **do not deploy service-role credentials to untrusted public users**. Some existing apps use a privileged shared client; this package does not solve subscription entitlements or row-level access. Harden before public release.
+* The original 'UAE / OFAC vessel overlap' and 'Documents & vessel restrictions' sidebar buttons are removed from legacy navigation; underlying sources/views and routines are kept. The diagnostic code still exists but is not linked in customer-facing nav.
+* Tests are syntax and mocked data-client checks only; no live Supabase verification possible from this environment.
 
-These require the deployment's original `pc_market_lenses.py` and `pc_terminal.py`, which were not among the uploads. **Their internal UI labels have not yet been modified.**
+## Visibility smoke tests
+```sql
+SELECT section,count(*) FROM public.pc_app_trade_records GROUP BY section ORDER BY section;
+SELECT section,count(*) FROM public.pc_app_security_records GROUP BY section ORDER BY section;
+SELECT * FROM public.pc_delivery_facility_children WHERE parent_object_id='PORT_UAE_PORT_OF_FUJAIRAH';
+SELECT * FROM public.pc_delivery_direct_incidents WHERE object_id='VESSEL_00092';
+```
 
-## New application foundations
-
-- PC_Capital_Ownership_app.py
-- PC_Commodities_Resources_app.py
-- PC_Markets_Freight_app.py
-
-Each offers business terminology, common navigation, responsive Streamlit page sections and optional read-only global search against the existing `pc_entities`, `pc_assets` and `pc_mobile_assets` via `supabase-py`. These are starter shells, **not completed market dashboards**. No invented market metrics or ownership links.
-
-## Integration
-
-1. Add `pc_portfolio.py` plus seven entry points to your application repository. **Back up the existing four launcher files before replacing them.** Keep your existing renderer modules intact.
-2. For the three new market apps, configure `SUPABASE_URL` and `SUPABASE_ANON_KEY` in Streamlit secrets; enable the applicable RLS policies. Do not place privileged service-role credentials in a public UI.
-3. Install `streamlit` and `supabase` in the application environment (e.g. requirements.txt).
-4. Start each entry point independently using `streamlit run <filename>.py`; configure each deployment entry point accordingly.
-5. To complete the business-facing UI redesign of existing dashboards, supply `pc_market_lenses.py` and `pc_terminal.py`, plus their imported UI helpers. The present launcher files contain no actual search/profile renderer implementation.
-
-## Design rules
-
-- Show user-friendly names, hide canonical IDs by default.
-- Distinguish fixed facilities, moving assets and companies.
-- Preserve source URLs and observed-vs-effective date semantics.
-- Use dedicated asset-specific profile sections: ports, airports, rail terminals, industrial sites, vessels and aircraft.
-- Respect separate jurisdictions and ownership/operator/charter/service-provider roles.
-- Share UI and model, but give each market a meaningful specialist landing page.
+### Subsequent stage
+Add source-grounded specialist `view`/RPC contracts behind each operational left-menu section; migrate high-value existing dossier components to those contracts. Reporting intentionally stays in `Existing Dashboard` for now.
