@@ -113,7 +113,8 @@ def render_global_security_risk(db, *, key="global_security_risk"):
     Missing data is shown explicitly. Assessments are grouped by provider and
     domain so third-party ratings cannot silently become P&C independent ratings.
     """
-    render_hormuz_case_study(db)\n    st.subheader("Regional risk assessments")
+    render_hormuz_case_study(db)
+    st.subheader("Regional risk assessments")
     st.caption(
         "Global risk engine · independent and third-party ratings shown separately. "
         "Incident counts do not constitute a risk rating."
