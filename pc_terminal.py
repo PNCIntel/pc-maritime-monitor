@@ -3861,13 +3861,17 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     # canonical records, not a separate dataset.
     company_view = st.radio(
         "Company view",
-        ["Overview", "Corporate Tree"],
+        ["Overview", "Corporate Tree", "Network & Evidence"],
         horizontal=True,
         label_visibility="collapsed",
         key=f"company_view_{_norm(oid)}",
     )
     if company_view == "Corporate Tree":
         _render_company_tree_view(oid, rec, tx)
+        return
+    if company_view == "Network & Evidence":
+        from pc_company_network_ui import render_company_network
+        render_company_network(__import__(__name__), oid, rec)
         return
 
     # Executive company strip.
