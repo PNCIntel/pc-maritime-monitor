@@ -69,7 +69,7 @@ def render_company_network(entity_id: str, rec: dict) -> None:
             left, right = st.columns([5, 1])
             left.write(c.get("name") or cid)
             if right.button("Open", key=f"network_entity_{core._norm(eid)}_{core._norm(cid)}"):
-                core._open_object("entity", cid)
+                core._set_context("entity", cid, c.get("name") or cid)
     if asset_ids:
         st.markdown("#### Open linked assets")
         for typ in ("asset", "mobile_asset"):
@@ -79,4 +79,4 @@ def render_company_network(entity_id: str, rec: dict) -> None:
                 left, right = st.columns([5, 1])
                 left.write(node.get("name") or aid)
                 if right.button("Open", key=f"network_asset_{core._norm(eid)}_{core._norm(typ)}_{core._norm(aid)}"):
-                    core._open_object(typ, aid)
+                    core._set_context(typ, aid, node.get("name") or aid)
