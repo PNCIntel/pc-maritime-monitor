@@ -4,6 +4,7 @@ Read-only; no implied risk ratings, positions, sanctions, or regional impacts.
 Requires SQL 20261009_intelligence_layer.sql.
 """
 from __future__ import annotations
+import re
 import pandas as pd
 import streamlit as st
 
@@ -89,7 +90,7 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
     st.caption('SECURITY & DISRUPTIONS' if product=='intelligence' else 'DEVELOPMENT & OPERATIONAL CONTEXT')
     st.title(e.get('title') or 'Development')
     c1,c2=st.columns(2)
-    c1.metric('Reported date',str(e.get('occurred_at') or 'Not recorded')[:10])
+    c1.metric('Event date',str(e.get('occurred_at') or 'Not recorded')[:10])
     c2.metric('Classification',str(e.get('event_family') or 'Not classified').replace('_',' '))
     risk=e.get('source_risk_level');trend=e.get('source_risk_trend')
     if risk or trend:
@@ -105,10 +106,24 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
     if e.get('location_label'):
         st.caption('Recorded location: '+str(e['location_label']))
     links,_=_query(db,'pc_intel_object_events', 'object_type,object_id,link_sources',eq={'event_id':event_id},limit=100)
+    direct,_=_query(db,'pc_event_links',eq={'event_id':event_id},limit=100)
+    existing={(x.get('object_type'),str(x.get('object_id'))) for x in links}
+    for link in direct:
+        key=(link.get('linked_type'),str(link.get('linked_id')))
+        if key not in existing:
+            links.append({'object_type':key[0],'object_id':key[1]}); existing.add(key)
+    # Resolve an explicitly named subject when its event link has not been indexed.
+    subject=re.match(r'^([A-Z][\w &.,()\-]+?)\s+(?:consolidates|announces|announced|plans|has|will|is|targets|reports)\b',str(e.get('narrative') or ''))
+    if subject:
+        named,_=_query(db,'pc_entities',eq={'name':subject.group(1).strip()},limit=2)
+        if len(named)==1:
+            company=named[0];key=('entity',str(company['entity_id']))
+            if key not in existing:
+                links.append({'object_type':'entity','object_id':key[1]});existing.add(key)
+                direct.append({'linked_type':'entity','linked_id':key[1],'linked_name':company['name'],'relationship':'mentioned company'})
     if links:
         st.subheader('Affected or associated assets')
         st.caption('Explicit record links only; relationship roles and exposure require verification.')
-        direct,_=_query(db,'pc_event_links',eq={'event_id':event_id},limit=100)
         by_object={(r.get('linked_type'),str(r.get('linked_id'))):r for r in direct}
         tables={'entity':('pc_entities','entity_id','Company'),
                 'asset':('pc_assets','asset_id','Facility'),
@@ -134,6 +149,21 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
                 from pc_terminal import _set_context
                 _set_context(typ,oid,name)
                 st.rerun()
+    companies=[x for x in links if x.get('object_type')=='entity']
+    if companies:
+        from pc_terminal import _linked_objects_from_relationships, _set_context, _object_name
+        st.subheader('Corporate relationships')
+        for company in companies[:8]:
+            company_id=str(company['object_id'])
+            name=_object_name('entity',company_id)
+            corporate=[x for x in _linked_objects_from_relationships('entity',company_id) if x.get('type')=='entity']
+            with st.expander(name+' — corporate network',expanded=len(companies)==1):
+                if not corporate:
+                    st.caption('No corporate relationships returned for this company.')
+                for i,item in enumerate(corporate[:20]):
+                    st.markdown('**'+item['name']+'**')
+                    st.caption(str(item.get('relationship') or 'Related company').replace('_',' '))
+                    st.button('Open '+item['name'],key=f"event_corporate_{event_id}_{company_id}_{i}",on_click=_set_context,args=('entity',item['id'],item['name']))
     evidence=e.get('evidence') or []
     st.subheader('Sources and evidence')
     if evidence:

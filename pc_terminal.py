@@ -1035,8 +1035,13 @@ def _event_spatial_context(rec: dict, oid: str) -> tuple[list[dict],list[dict]]:
     if xy:
         pts.append({"lat":xy[0],"lon":xy[1],"name":_clean(rec.get("title")) or "Event location","type":"event"})
 
-    # First: explicit 059/event links.
-    for l in _indexed_links("event",str(oid),500) or []:
+    # Canonical event links are available before the delivery index refreshes.
+    event_edges=list(_relationships("event",str(oid)) or [])
+    for link in _filtered_rows("pc_event_links","event_id",str(oid),500):
+        event_edges.append({"source_type":"event","source_id":str(oid),
+            "target_type":link.get("linked_type"),"target_id":link.get("linked_id"),
+            "target_name":link.get("linked_name"),"relationship_type":link.get("relationship")})
+    for l in event_edges:
         is_src=_clean(l.get("source_type"))=="event" and _clean(l.get("source_id"))==str(oid)
         typ=_clean(l.get("target_type") if is_src else l.get("source_type")).casefold()
         lid=_clean(l.get("target_id") if is_src else l.get("source_id"))
@@ -1046,7 +1051,7 @@ def _event_spatial_context(rec: dict, oid: str) -> tuple[list[dict],list[dict]]:
         k=(typ,lid)
         if k not in seen:
             seen.add(k)
-            objs.append({"type":typ,"id":lid,"name":name or lid,"relationship":_clean(l.get("relation_type"))})
+            objs.append({"type":typ,"id":lid,"name":name or _object_name(typ,lid),"relationship":_clean(l.get("relationship_type") or l.get("relation_type"))})
         if typ=="asset":
             p=_asset_point(lid)
             if p: pts.append(p)
@@ -1060,40 +1065,18 @@ def _event_spatial_context(rec: dict, oid: str) -> tuple[list[dict],list[dict]]:
                     p=_asset_point(ci)
                     if p: pts.append(p)
 
-    # Second: event location/title terms against terminal index.
+    # Named places provide context, not inferred infrastructure exposure.
     loc=_display_location(rec)
-    title=_clean(rec.get("title"))
-    searches=[]
-    if loc: searches.append(loc)
-    # Useful geographic fragments; avoid treating the whole article headline as a place.
-    for textv in (loc,title):
-        if not textv: continue
-        for token in re.split(r"[,;/]|\bat\b|\bin\b|\bnear\b|\boff\b",textv,flags=re.I):
-            token=token.strip()
-            if 4<=len(token)<=80 and token.casefold() not in {"germany","united states","united arab emirates"}:
-                searches.append(token)
-    checked=set()
+    searches=[x.strip() for x in re.split(r"[,;/]",loc) if x.strip()]
     for q in searches[:8]:
-        nq=_norm(q)
-        if not nq or nq in checked: continue
-        checked.add(nq)
         for x in _indexed_search(q,12):
-            if x.get("type") not in {"asset","corridor"}:
+            if x.get("type")!="asset" or _norm(x.get("name"))!=_norm(q):
                 continue
             k=(x.get("type"),x.get("id"))
             if k in seen: continue
-            seen.add(k); objs.append({**x,"relationship":"location/system match"})
-            if x.get("type")=="asset":
-                p=_asset_point(x.get("id"))
-                if p: pts.append(p)
-            elif x.get("type")=="corridor":
-                for cl in _indexed_links("corridor",x.get("id"),200):
-                    cs=_clean(cl.get("source_type"))=="corridor" and _clean(cl.get("source_id"))==x.get("id")
-                    ct=_clean(cl.get("target_type") if cs else cl.get("source_type")).casefold()
-                    ci=_clean(cl.get("target_id") if cs else cl.get("source_id"))
-                    if ct=="asset" and ci:
-                        p=_asset_point(ci)
-                        if p: pts.append(p)
+            seen.add(k); objs.append({**x,"relationship":"named location"})
+            p=_asset_point(x.get("id"))
+            if p: pts.append(p)
 
     # De-dupe coordinates/ids.
     final=[]; pseen=set()
@@ -1117,16 +1100,19 @@ def _render_event_system_map(rec: dict, oid: str):
     else:
         st.caption("No geographic context has been resolved for this event yet.")
 
+    if loc:
+        from urllib.parse import quote
+        for i,place in enumerate(x.strip() for x in re.split(r"[,;/]",loc) if x.strip()):
+            st.link_button("View "+place+" on map","https://www.google.com/maps/search/?api=1&query="+quote(place),key=f"event_place_{oid}_{i}")
     spatial=[x for x in objs if x.get("type") in {"asset","corridor"}]
     if spatial:
-        st.markdown("##### Connected geography / infrastructure")
-        view=pd.DataFrame([{
-            "Object":x.get("name"),
-            "Type":x.get("type"),
-            "Relationship":x.get("relationship") or x.get("match_reason"),
-        } for x in spatial[:20]])
-        st.dataframe(view,hide_index=True,use_container_width=True,height=min(360,100+28*len(view)))
-        _open_selector(spatial[:30],f"event_spatial_{oid}","Open mapped / connected object")
+        st.markdown("##### Places & connected infrastructure")
+        for i,x in enumerate(spatial[:20]):
+            name=x.get("name") or _object_name(x["type"],x["id"])
+            with st.container(border=True):
+                st.markdown("**"+name+"**")
+                st.caption((_clean(x.get("relationship")) or "Connected infrastructure").replace("_"," "))
+                st.button("Open "+name,key=f"event_spatial_card_{oid}_{i}",on_click=_set_context,args=(x["type"],x["id"],name))
 
 def _render_map_for_asset(rec: dict):
     pts = []
