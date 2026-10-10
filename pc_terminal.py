@@ -3900,13 +3900,17 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     # canonical records, not a separate dataset.
     company_view = st.radio(
         "Company view",
-        ["Overview", "Corporate Tree"],
+        ["Overview", "Corporate Tree", "Network & Evidence"],
         horizontal=True,
         label_visibility="collapsed",
         key=f"company_view_{_norm(oid)}",
     )
     if company_view == "Corporate Tree":
         _render_company_tree_view(oid, rec, tx)
+        return
+    if company_view == "Network & Evidence":
+        from pc_company_network_ui import render_company_network
+        render_company_network(oid, rec)
         return
 
     # Executive company strip.
@@ -4475,13 +4479,17 @@ def _render_port_operator_terminal(oid: str, rec: dict, lens: str):
     # generic company renderer.
     company_view = st.radio(
         "Company view",
-        ["Overview", "Corporate Tree"],
+        ["Overview", "Corporate Tree", "Network & Evidence"],
         horizontal=True,
         label_visibility="collapsed",
         key=f"company_view_{_norm(oid)}",
     )
     if company_view == "Corporate Tree":
         _render_company_tree_view(oid, rec, tx)
+        return
+    if company_view == "Network & Evidence":
+        from pc_company_network_ui import render_company_network
+        render_company_network(oid, rec)
         return
 
     m=st.columns(6)
@@ -5063,13 +5071,17 @@ def _render_institution_terminal(oid: str, rec: dict, lens: str):
     # corporate-tree view as operating companies.
     company_view = st.radio(
         "Company view",
-        ["Overview", "Corporate Tree"],
+        ["Overview", "Corporate Tree", "Network & Evidence"],
         horizontal=True,
         label_visibility="collapsed",
         key=f"company_view_{_norm(oid)}",
     )
     if company_view == "Corporate Tree":
         _render_company_tree_view(oid, rec, None)
+        return
+    if company_view == "Network & Evidence":
+        from pc_company_network_ui import render_company_network
+        render_company_network(oid, rec)
         return
 
     m=st.columns(6)
