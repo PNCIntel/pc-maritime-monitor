@@ -109,9 +109,32 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
     if links:
         st.subheader('Affected or associated assets')
         st.caption('Explicit record links only; relationship roles and exposure require verification.')
-        # Display types but never call every linked record 'affected'.
+        direct,_=_query(db,'pc_event_links',eq={'event_id':event_id},limit=100)
+        by_object={(r.get('linked_type'),str(r.get('linked_id'))):r for r in direct}
+        tables={'entity':('pc_entities','entity_id','Company'),
+                'asset':('pc_assets','asset_id','Facility'),
+                'mobile_asset':('pc_mobile_assets','mobile_asset_id','Vessel / mobile asset')}
         for x in links[:25]:
-            st.write(f"{str(x.get('object_type') or '').replace('_',' ').title()}: {x.get('object_id')}")
+            typ=x.get('object_type'); oid=str(x.get('object_id') or '')
+            link=by_object.get((typ,oid),{})
+            name=link.get('linked_name')
+            record={}
+            if typ in tables:
+                table,pk,label=tables[typ]
+                found,_=_query(db,table,eq={pk:oid},limit=1)
+                record=found[0] if found else {}
+                name=record.get('name') or name
+            else:
+                label=str(typ or 'Record').replace('_',' ').title()
+            st.write(f"{label}: {name or 'Name unavailable'}")
+            details=[]
+            if record.get('imo'): details.append('IMO '+str(record['imo']))
+            if link.get('relationship'): details.append(str(link['relationship']).replace('_',' '))
+            if details: st.caption(' · '.join(details))
+            if typ in tables and name and st.button('Open '+str(name),key=f'event_profile_{event_id}_{typ}_{oid}'):
+                from pc_terminal import _set_context
+                _set_context(typ,oid,name)
+                st.rerun()
     evidence=e.get('evidence') or []
     st.subheader('Sources and evidence')
     if evidence:
@@ -122,7 +145,17 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
             if isinstance(url,str) and url.startswith(('https://','http://')):
                 st.link_button('Read original source',url)
     else:
-        st.caption('No event evidence rows returned. This does not establish that no source exists.')
+        canonical,_=_query(db,'pc_events',eq={'event_id':event_id},limit=1)
+        source_id=canonical[0].get('source_id') if canonical else None
+        sources,_=_query(db,'pc_sources',eq={'source_id':source_id},limit=1) if source_id else ([],None)
+        if sources:
+            source=sources[0]
+            st.write(source.get('source_name') or source.get('publisher') or 'Original source')
+            url=source.get('url')
+            if isinstance(url,str) and url.startswith(('https://','http://')):
+                st.link_button('Read original source',url)
+        else:
+            st.caption('Source details are unavailable for this event.')
     # Optional prepared intelligence / trade layer; existing event dossier stays primary.
     try:
         from pc_event_dual_lens import render_event_lens

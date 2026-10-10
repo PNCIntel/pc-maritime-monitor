@@ -27,7 +27,7 @@ def _fetch(_db, table, *, columns='*', filters=(), search='', search_columns=('n
         expression=clauses[0] if len(clauses)==1 else 'and('+','.join('or('+clause+')' for clause in clauses)+')'
         q=q.or_(expression)
     for column, descending in order:
-        q = q.order(column, desc=descending)
+        q = q.order(column, desc=descending, nullsfirst=False)
     return q.range(offset, offset+limit-1).execute().data or []
 
 def _load(db, table, **kwargs):

@@ -922,10 +922,13 @@ def _object_name(typ: str, oid: str) -> str:
 
 
 def _linked_objects_from_relationships(typ: str, oid: str) -> list[dict]:
+    identity_ids={str(oid)}
+    if typ=='entity':
+        identity_ids.update(str(x) for x in (_entity_identity_bundle(str(oid)).get('ids') or []))
     out = []
     for r in _relationships(typ, oid):
         src = _clean(r.get("source_id"))
-        is_src = src == str(oid)
+        is_src = src in identity_ids and _clean(r.get('source_type')).casefold()==typ
         ot = _clean(r.get("target_type") if is_src else r.get("source_type")).casefold()
         oi = _clean(r.get("target_id") if is_src else r.get("source_id"))
         if ot == "vessel":
@@ -3805,6 +3808,34 @@ def _render_company_tree_view(oid: str, rec: dict, tx: list[dict] | None = None)
         st.caption("No dated corporate changes recorded yet.")
 
 
+def _company_transactions(entity_id: str) -> list[dict]:
+    """Read explicit transaction participants across the dossier's known identities."""
+    ids=_entity_identity_bundle(str(entity_id)).get('ids') or [str(entity_id)]
+    out=[]; seen=set()
+    for column in ('buyer_entity_id','seller_entity_id','target_entity_id'):
+        for row in _multi_filtered_rows('pc_transactions',column,ids,150):
+            key=_clean(row.get('transaction_id'))
+            if key and key not in seen:
+                seen.add(key); out.append(row)
+    return sorted(out,key=lambda r:_clean(r.get('announced_date')),reverse=True)
+
+
+def _company_transaction_counterparties(transactions: list[dict], entity_id: str) -> list[dict]:
+    identities={str(entity_id)}|{str(x) for x in (_entity_identity_bundle(str(entity_id)).get('ids') or [])}
+    out=[]; seen=set()
+    for tx in transactions:
+        for column,role in (('buyer_entity_id','buyer'),('seller_entity_id','seller')):
+            other=_clean(tx.get(column))
+            if not other or other in identities: continue
+            key=(other,role,_clean(tx.get('transaction_id')))
+            if key in seen: continue
+            seen.add(key)
+            label=role+' · '+_clean(tx.get('transaction_type')).replace('_',' ')
+            if tx.get('status'):label+=' · '+_clean(tx['status'])
+            out.append({'type':'entity','id':other,'name':_object_name('entity',other),'relationship':label})
+    return out
+
+
 def _render_company_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("entity",oid)
     bundle=_entity_identity_bundle(str(oid))
@@ -3826,7 +3857,8 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
 
     corridors=_company_corridors(oid)
     portfolio=_portfolio(oid)
-    tx=_related_table("pc_transactions",oid,name,150)
+    tx=_company_transactions(oid)
+    transaction_companies=_company_transaction_counterparties(tx,oid)
     events=_events_for_object("entity",oid)
     strategic_data=_strategic_company_bundle(oid,name)
     strategic_events=strategic_data.get("events") or []
@@ -3920,6 +3952,10 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
             if len(corporate)>12:
                 with st.expander(f"Show {len(corporate)-12} more relationships"):
                     _render_company_relationship_cards(corporate[12:],f"company_network_more_{_norm(oid)}",30)
+            if transaction_companies:
+                st.markdown('#### Transaction counterparties')
+                st.caption('Companies connected through recorded transactions; deal roles are separate from ownership.')
+                _render_company_relationship_cards(transaction_companies,f'company_counterparties_{_norm(oid)}',12)
 
         with st.container(border=True):
             st.markdown("### Capital & Portfolio")
@@ -5496,18 +5532,14 @@ def render_terminal(lens: str = "trade"):
         _render_mobile_asset_terminal(oid,rec,lens)
         return
 
-    # Persistent tactical workspace for corridors and events.
-    left, center, right = st.columns([1.0, 1.25, 1.0], gap="large")
+    # Event sources remain in the dossier; avoid a duplicate intelligence sidebar.
+    left, center = st.columns([1.15, 1.0], gap="large")
     with left:
         with st.container(border=True):
             _render_dossier_pane(typ,oid,rec,lens)
     with center:
         with st.container(border=True):
             _render_spatial_pane(typ,oid,rec,lens)
-    with right:
-        with st.container(border=True):
-            _render_evidence_pane(typ,oid,rec,lens)
-
     st.divider()
     st.markdown("### Chronological Development & Event Ticker")
     _render_timeline(typ,oid)
