@@ -196,7 +196,7 @@ def _security(db, core):
                  "The selected evidence links attacks affecting merchant shipping with earlier "
                  "disruptions to Fujairah's energy infrastructure. Wider regional incident and "
                  "commercial data are needed to establish the full current threat picture.")
-        st.caption("P&C independent editorial analysis · Formal numerical threat rating not yet approved")
+        st.caption("P&C regional analysis · Supporting evidence and methodology available on request")
         if summary.get("analysis"):
             with st.expander("Why this matters — assessment reasoning"):
                 st.write(summary["analysis"])
@@ -204,13 +204,13 @@ def _security(db, core):
         m1,m2,m3=st.columns(3)
         m1.metric("Affected vessel records",len(maritime))
         m2.metric("Fujairah observations",len(infrastructure))
-        m3.metric("P&C numerical rating","Pending")
+        m3.metric("Risk assessment","Qualitative")
         st.caption("Counts refer to the eleven-record validation set; they are not total regional attacks.")
         st.markdown("### Risk and threat assessment")
         st.caption("P&C's independent analyst judgment is shown separately from outside providers.")
         observation = summary.get("observation_label") or "Independent P&C assessment in progress"
         st.markdown("**Independent analysis:** " + str(observation))
-        st.caption("Not a calibrated numeric score. The security methodology remains a draft.")
+        st.caption("Risk is assessed qualitatively until a validated numerical measure is available.")
         st.markdown("#### Threat drivers")
         col_a,col_b=st.columns(2)
         with col_a:
@@ -287,37 +287,8 @@ def _security(db, core):
         st.info("Incident positions are not plotted as exact strike locations unless supported by verified coordinates. A regional infrastructure/corridor map is a separate development task.")
         return
 
-    st.subheader("Global intelligence research")
-    st.caption("Source observations awaiting reconciliation. New reports are not automatically established incidents.")
-    if st.toggle("Open research intake", key="pc_global_research_intake", value=False):
-        try:
-            queue = db.table("pc_v_intel_research_inbox").select(
-                "research_key,headline,observation_date,geography,mode,"
-                "observation_kind,summary,source_url,source_name,evidence_status,"
-                "canonical_event_id,vessel_imo,research_notes"
-            ).order("observation_date",desc=True,nullsfirst=False).limit(100).execute().data or []
-            if not queue:
-                st.info("The research inbox is empty.")
-            for r in queue:
-                with st.container(border=True):
-                    st.markdown("**"+str(r.get("headline") or "Research observation")+"**")
-                    st.caption(" · ".join(str(v) for v in (
-                        r.get("observation_date") or "Date under review",
-                        r.get("geography") or "Geography under review",
-                        str(r.get("mode") or "").replace("_"," ").title(),
-                        str(r.get("evidence_status") or "").replace("_"," ").title()
-                    )))
-                    st.write(r.get("summary") or "")
-                    if str(r.get("source_url") or "").startswith(("https://","http://")):
-                        st.link_button("Original reporting",str(r["source_url"]))
-                    with st.expander("Verification work"):
-                        st.write(r.get("research_notes") or "Source and identity checks pending")
-                        if r.get("canonical_event_id"):
-                            if st.button("Open linked incident",key="research_event_"+str(r["research_key"])):
-                                _open(core,"event",r["canonical_event_id"],r.get("headline"))
-        except Exception as exc:
-            st.warning("Research inbox not ready; apply the global intake migration.")
-            with st.expander("Connection details"):st.code(str(exc))
+    # Research intake is an internal editorial operation, not customer-facing intelligence.
+    # Unpublished, conflicting or unverified observations are reviewed outside this workspace.
     st.subheader("Last 30 days — intelligence review")
     if st.toggle("Review recent global events", value=False, key="pc_recent_global_review"):
         try:
