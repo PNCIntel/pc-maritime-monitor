@@ -183,6 +183,30 @@ def render_company_network(entity_id: str, rec: dict) -> None:
                 st.button("Open dossier", key=f"network_go_{core._norm(eid)}",
                           on_click=core._set_context,
                           args=(obj_type, item["ID"], item["Connected record"]), use_container_width=True)
+            if obj_type in ("asset", "mobile_asset"):
+                record = core.object_record(obj_type, item["ID"]) or {}
+                meta = core._meta(record)
+                st.markdown("**Asset snapshot**")
+                fields = (("Country", "country"), ("Location", "region_city"),
+                          ("Asset type", "asset_type"), ("Subtype", "subtype"),
+                          ("IMO", "imo"), ("Flag", "flag"), ("MMSI", "mmsi"),
+                          ("DWT", "dwt"), ("GT", "gross_tonnage"),
+                          ("Length (m)", "length_m"), ("Depth (m)", "depth_max_m"),
+                          ("Berth length (m)", "berthing_line_m"),
+                          ("Area (m²)", "total_area_sqm"),
+                          ("Annual TEU potential", "annual_container_potential_teu"))
+                snapshot = []
+                for label, field in fields:
+                    value = record.get(field)
+                    if value in (None, ""):
+                        value = meta.get(field)
+                    if value not in (None, ""):
+                        snapshot.append((label, value))
+                if snapshot:
+                    st.dataframe(pd.DataFrame(snapshot, columns=["Metric", "Recorded value"]),
+                                 hide_index=True, use_container_width=True)
+                else:
+                    st.caption("No operational specifications recorded on this asset yet. Open its dossier for related data.")
             st.write("**Relationship:** " + item["Relationship"])
             st.write("**Recorded status:** " + (item["Status"] or "Not supplied"))
             if item["Source"]:
