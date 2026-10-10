@@ -88,10 +88,9 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
     e=rows[0]
     st.caption('SECURITY & DISRUPTIONS' if product=='intelligence' else 'DEVELOPMENT & OPERATIONAL CONTEXT')
     st.title(e.get('title') or 'Development')
-    c1,c2,c3=st.columns(3)
+    c1,c2=st.columns(2)
     c1.metric('Reported date',str(e.get('occurred_at') or 'Not recorded')[:10])
     c2.metric('Classification',str(e.get('event_family') or 'Not classified').replace('_',' '))
-    c3.metric('Record status',str(e.get('record_status') or 'Not specified').replace('_',' ').title())
     risk=e.get('source_risk_level');trend=e.get('source_risk_trend')
     if risk or trend:
         st.info('Recorded assessment: '+' · '.join(x for x in [f'Risk: {risk}' if risk else '', f'Trend: {trend}' if trend else ''] if x))

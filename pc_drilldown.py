@@ -25,7 +25,7 @@ OBJECTS = {
 }
 
 VISIBLE_KEYS = {
-    "entity":["name","entity_type","subtype","hq_country","hq_location","country","status","record_status","data_quality","notes"],
+    "entity":["name","entity_type","subtype","hq_country","hq_location","country","status","data_quality","notes"],
     "asset":["name","asset_type","subtype","country","region_city","status","confidence","owner_entity_id","operator_entity_id","notes"],
     "mobile_asset":["name","asset_type","subtype","imo","mmsi","call_sign_or_registration","flag","build_year","gross_tonnage","dwt","length_m","beam_m","owner_entity_id","operator_entity_id","manager_entity_id","status","notes"],
     "event":["title","start_date","end_date","event_nature","event_domain","event_family","event_type","severity","status","mode","countries","location","description","operational_impact","commercial_impact","confidence","trade_relevance","intelligence_relevance","alert_worthy"],
