@@ -612,6 +612,26 @@ def _token_match(query_tokens: list[str], text: str) -> bool:
 
 def _search_objects(q: str, lens: str, limit: int = 80) -> list[dict]:
     indexed=_indexed_search(q,limit)
+    # A bulk canonical load can precede refresh of the derived terminal index.
+    # Check live names so stale fuzzy hits cannot hide newly loaded identities.
+    live=[]
+    sb=_sb()
+    if sb is not None and len(_norm(q))>=2:
+        for typ in ("entity","asset","mobile_asset"):
+            table,pk,name_col,label=OBJECTS[typ]
+            try:
+                records=sb.table(table).select("*").ilike(name_col,"%"+q.strip().replace("%","").replace("_","")+"%").limit(30).execute().data or []
+            except Exception:
+                records=[]
+            for r in records:
+                name=_clean(r.get(name_col)); oid=_clean(r.get(pk))
+                if not oid or not _token_match(_norm(q).split(),name):
+                    continue
+                score=2000 if _norm(name)==_norm(q) else 1800 if _norm(name).startswith(_norm(q)) else 1600
+                live.append(dict(type=typ,id=oid,name=name,kind=label,country=_clean(r.get("hq_country") or r.get("country") or r.get("flag")),subtype=_clean(r.get("subtype")),score=score,match_reason="current canonical name"))
+    if live:
+        seen={(x["type"],x["id"]) for x in live}
+        indexed=live+[x for x in indexed if (x["type"],x["id"]) not in seen]
     if indexed:
         # Lens weighting without destroying shared index ranking.
         for x in indexed:
