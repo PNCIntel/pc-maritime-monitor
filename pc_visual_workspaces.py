@@ -151,6 +151,27 @@ def _assessment_freshness(row):
     except (ValueError,TypeError):
         return 'VALIDITY UNRECORDED'
 
+
+def _airport_display(value):
+    names={
+        'OERK':'Riyadh — King Khalid International Airport',
+        'OEDF':'Dammam — King Fahd International Airport',
+        'OEJN':'Jeddah — King Abdulaziz International Airport',
+        'OEAB':'Abha International Airport',
+        'OEGN':'Jazan — King Abdullah bin Abdulaziz Airport',
+        'OENG':'Najran Airport',
+        'OEKM':'Khamis Mushait — King Khalid Air Base',
+        'OETF':'Taif International Airport',
+        'OEYN':'Yanbu — Prince Abdul Mohsin bin Abdulaziz Airport',
+        'OYAA':'Aden International Airport',
+        'OMAA':'Abu Dhabi — Zayed International Airport',
+        'LLBG':'Tel Aviv — Ben Gurion Airport',
+    }
+    return names.get(str(value or '').upper(),'Airport name unavailable')
+
+def _business_label(value):
+    return str(value or 'Not recorded').replace('_',' ').strip().capitalize()
+
 def _render_pc_assessments(db,core,term):
     st.subheader('P&C risk briefing')
     st.caption('Independent qualitative judgments. Assessment scope and validity are separate from the incident date filter.')
@@ -223,7 +244,7 @@ def _render_pc_assessments(db,core,term):
                 if not companies:
                     st.write('No airport-company links documented for this assessment scope.')
                 else:
-                    exposure=pd.DataFrame([{'Company':c.get('company'),'Airport':c.get('airport'),'Relationship':c.get('role'),'Evidence status':c.get('status')} for c in companies]).drop_duplicates()
+                    exposure=pd.DataFrame([{'Company':c.get('company'),'Airport':_airport_display(c.get('airport')),'Relationship':_business_label(c.get('role')),'Evidence status':_business_label(c.get('status'))} for c in companies]).drop_duplicates()
                     chart,listing=st.columns([1,2])
                     with chart:
                         st.markdown('**Documented relationships by role**')
@@ -233,14 +254,14 @@ def _render_pc_assessments(db,core,term):
                     with listing:
                         st.dataframe(exposure,hide_index=True,use_container_width=True)
                         options=list(range(len(companies)))
-                        idx=st.selectbox('Company dossier',options,format_func=lambda i:str(companies[i].get('company'))+' · '+str(companies[i].get('airport')),key='pc_company_select_'+aid)
+                        idx=st.selectbox('Company dossier',options,format_func=lambda i:str(companies[i].get('company'))+' · '+_airport_display(companies[i].get('airport')),key='pc_company_select_'+aid)
                         c=companies[idx]
                         if st.button('Explore selected company',key='pc_company_open_'+aid):
                             _open(core,'entity',c.get('entity_id'),c.get('company'))
                 st.caption('A documented operating relationship establishes exposure; it does not establish company damage or financial loss.')
             with st.expander('Supporting chronology and sources'):
                 for i,e in enumerate(row.get('evidence') or []):
-                    st.write(str(e.get('title') or e.get('event_id')))
+                    st.write(str(e.get('title') or 'Supporting incident'))
                     url=e.get('source_url')
                     if isinstance(url,str) and url.startswith(('https://','http://')):
                         st.link_button('Supporting source',url)
