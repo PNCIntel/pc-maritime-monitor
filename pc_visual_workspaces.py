@@ -296,8 +296,39 @@ def _security(db,core):
     t2,t1,tmap=st.tabs(['Risk briefing','Incidents & developments','Incident map'])
     with tmap:
         st.subheader('Incident & exposure map')
-        _geo_map(incidents,label_key='title',height=580)
-        st.caption('Map covers the current incident results page. Facility context markers do not establish an exact impact location.')
+        airport_term=st.text_input('Find airport infrastructure',value='Riyadh',placeholder='Riyadh, King Khalid, Abha…',key='pc_map_airport_search')
+        airports,airport_error=_load(db,'pc_v4_trade_facilities',search=airport_term,
+            search_columns=('name','category','subtype'),layer_terms=('airport','aviation'),
+            order=(('is_mapped',True),('name',False),('object_id',False)),limit=100)
+        if airport_error:
+            st.warning('Airport infrastructure could not be loaded.')
+            with st.expander('Airport connection details'): st.caption(airport_error)
+        points=[]
+        for r in incidents:
+            xy=_coordinate(r)
+            if xy:
+                points.append({'latitude':xy[0],'longitude':xy[1],'name':r.get('title'),
+                    'layer':'Linked facility context' if r.get('map_precision')=='linked_facility_context' else 'Incident location','colour':'#cf594e'})
+        for r in airports:
+            xy=_coordinate(r)
+            if xy:
+                points.append({'latitude':xy[0],'longitude':xy[1],'name':r.get('name'),'layer':'Airport infrastructure','colour':'#468c9b'})
+        if points:
+            st.map(pd.DataFrame(points),latitude='latitude',longitude='longitude',color='colour',size=120,height=580,use_container_width=True)
+            st.dataframe(pd.DataFrame(points)[['name','layer']],hide_index=True,use_container_width=True)
+        else:
+            st.info('No usable coordinates in these incident or airport results. Try another airport search.')
+        st.caption('Teal: airport infrastructure matching the airport search. Red: incident locations or linked facility context on the current incident page. Infrastructure markers do not establish an exact strike location.')
+        st.caption(f'{len(airports)} airport records loaded · {sum(_coordinate(r) is not None for r in airports)} with coordinates. Airport search is independent of incident pagination.')
+        if airports:
+            choices={str(r['object_id']):r for r in airports if r.get('object_id')}
+            if choices:
+                if st.session_state.get('pc_map_airport_choice') not in choices:
+                    st.session_state['pc_map_airport_choice']=next(iter(choices))
+                chosen=st.selectbox('Airport dossier',list(choices),format_func=lambda key:str(choices[key].get('name')),key='pc_map_airport_choice')
+                if st.button('Explore airport',key='pc_map_open_airport'):
+                    _open(core,'asset',chosen,choices[chosen].get('name'))
+
     with t1:
         for r in incidents[:PAGE_SIZE]:
             with st.container(border=True):
