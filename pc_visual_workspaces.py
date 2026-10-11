@@ -140,6 +140,73 @@ def _trade(db, core):
                 st.caption(' · '.join(str(row.get(k)) for k in ('event_domain','event_type','status') if row.get(k)))
                 if st.button('Read development',key='v4_dev_'+str(eid)):_open(core,'event',eid,row.get('title'))
 
+
+def _assessment_freshness(row):
+    """Expiry is not evidence of improvement or service resumption."""
+    try:
+        expiry=dt.datetime.fromisoformat(str(row.get('valid_until')).replace('Z','+00:00'))
+        if expiry.tzinfo is None: expiry=expiry.replace(tzinfo=dt.timezone.utc)
+        return 'REVIEW DUE' if expiry <= dt.datetime.now(dt.timezone.utc) else 'CURRENT'
+    except (ValueError,TypeError):
+        return 'VALIDITY UNRECORDED'
+
+def _render_pc_assessments(db,core,term):
+    st.subheader('P&C assessments')
+    st.caption('Independent qualitative judgments. Assessment scope and validity are separate from the incident date filter.')
+    rows,error=_load(db,'pc_v_security_pc_assessments',search=term,
+        search_columns=('geography','headline','region_code','explanation'),
+        order=(('as_known_at',True),('assessment_id',False)),limit=100)
+    if error:
+        st.warning('The P&C assessment feed is unavailable. Load the assessment SQL update and refresh the database.')
+        with st.expander('Assessment connection details'): st.caption(error)
+        return
+    if not rows:
+        st.info('No published P&C assessment matches this search.')
+        return
+    regions=list(dict.fromkeys(str(r.get('geography') or r.get('region_code')) for r in rows))
+    area=st.selectbox('Assessment area',['All matching areas']+regions,key='pc_assessment_area')
+    selected=[r for r in rows if area=='All matching areas' or str(r.get('geography') or r.get('region_code'))==area]
+    st.caption(f'{len(selected)} published assessments shown · ratings are not numerical probabilities.')
+    for row in selected:
+        aid=str(row['assessment_id'])
+        with st.container(border=True):
+            st.markdown('#### '+str(row.get('headline') or row.get('geography')))
+            st.caption('P&C analysis · '+str(row.get('assessment_date'))+' · '+_assessment_freshness(row))
+            x,y,z=st.columns(3)
+            x.metric('Risk / disruption',row.get('risk_level') or 'INSUFFICIENT EVIDENCE')
+            y.metric('Trend',row.get('trend') or 'UNDETERMINED')
+            z.metric('Confidence',str(row.get('confidence') or 'Unassigned').capitalize())
+            st.write(row.get('executive_summary') or row.get('explanation') or '')
+            st.caption('Valid until '+str(row.get('valid_until') or 'Unrecorded')+' · Coverage: '+str(row.get('coverage_status') or 'Unrecorded'))
+            if _assessment_freshness(row)!='CURRENT':
+                st.warning('Review due: this is an earlier assessment snapshot. It does not establish current conditions.')
+            with st.expander('Reasoning, threat drivers and scope'):
+                st.write(row.get('explanation') or '')
+                for driver in row.get('threat_drivers') or []: st.markdown('- '+str(driver))
+                st.caption(row.get('scope_note') or '')
+                st.caption(row.get('methodology_notice') or '')
+            with st.expander('Companies and operating exposure'):
+                companies=row.get('company_exposure') or []
+                if not companies: st.write('No airport-company links documented for this assessment scope.')
+                for i,c in enumerate(companies):
+                    st.write(str(c.get('company'))+' · '+str(c.get('airport'))+' · '+str(c.get('role'))+' ('+str(c.get('status'))+')')
+                    if st.button('Explore company',key=f'pc_assess_company_{aid}_{i}'):
+                        _open(core,'entity',c.get('entity_id'),c.get('company'))
+                st.caption('A documented operating relationship establishes exposure; it does not establish company damage or financial loss.')
+            with st.expander('Supporting chronology and sources'):
+                for i,e in enumerate(row.get('evidence') or []):
+                    st.write(str(e.get('title') or e.get('event_id')))
+                    url=e.get('source_url')
+                    if isinstance(url,str) and url.startswith(('https://','http://')):
+                        st.link_button('Supporting source',url)
+                    if st.button('Open evidence dossier',key=f'pc_assess_event_{aid}_{i}'):
+                        _open(core,'event',e.get('event_id'),e.get('title'))
+            with st.expander('Monitoring priorities and review triggers'):
+                st.markdown('**Monitoring priorities**')
+                for value in row.get('monitoring_priorities') or []: st.markdown('- '+str(value))
+                st.markdown('**Review triggers**')
+                for value in row.get('review_triggers') or []: st.markdown('- '+str(value))
+
 def _security(db,core):
     st.caption('POWER & CORRIDORS  /  SECURITY & DISRUPTIONS')
     st.title('Global Operating Picture')
@@ -180,7 +247,7 @@ def _security(db,core):
     k1,k2,k3=st.columns(3)
     k1.metric('Developments on page',len(incidents))
     k2.metric('Mapped locations',sum(_coordinate(r) is not None for r in incidents))
-    k3.metric('Recorded risk assessments',sum(bool(r.get('source_risk_level') or r.get('source_risk_trend')) for r in incidents))
+    k3.metric('Outside rating fields on page',sum(bool(r.get('source_risk_level') or r.get('source_risk_trend')) for r in incidents))
     st.subheader('Incident & exposure map')
     _geo_map(incidents,label_key='title',height=580)
     approx=sum(r.get('map_precision')=='linked_facility_context' and _coordinate(r) is not None for r in incidents)
@@ -199,8 +266,10 @@ def _security(db,core):
         elif incidents:st.caption('End of matching results.')
         else:st.info('No incidents on this page. Return to page 1 or change the filters.')
     with t2:
+        _render_pc_assessments(db,core,term)
+        st.subheader('Outside assessments recorded on incident cards')
         assessed=[r for r in incidents if r.get('source_risk_level') or r.get('source_risk_trend')]
-        if not assessed:st.info('No recorded risk/trend assessment for this selection. Incident count alone does not establish HIGH or INCREASING.')
+        if not assessed:st.info('No outside risk/trend fields on this incident page. P&C assessments are shown separately above.')
         for r in assessed[:20]:
             st.markdown('**'+str(r.get('location_label') or r.get('title'))+'**')
             st.write('Risk: '+str(r.get('source_risk_level') or 'Not assessed')+' · Trend: '+str(r.get('source_risk_trend') or 'Not assessed'))
