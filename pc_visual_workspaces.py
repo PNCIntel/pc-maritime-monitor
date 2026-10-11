@@ -169,7 +169,7 @@ def _render_pc_assessments(db,core,term):
     selected=[r for r in rows if area=='All matching areas' or str(r.get('geography') or r.get('region_code'))==area]
     st.markdown("""<style>
 .pc-brief-hero{background:#142b42;color:#fff;padding:24px 28px;border-radius:12px;margin:12px 0 20px;border-left:5px solid #c9a461}
-.pc-brief-hero h3{color:#fff!important;margin:0 0 8px}.pc-brief-hero p{color:#e0e8ef;margin:0}
+.pc-brief-hero h3,.pc-brief-hero h3 *{color:#fff!important;-webkit-text-fill-color:#fff!important;margin:0 0 8px}.pc-brief-hero p,.pc-brief-hero p *{color:#e0e8ef!important;-webkit-text-fill-color:#e0e8ef!important;margin:0}
 .pc-risk-grid{width:100%;border-collapse:collapse;margin:12px 0 22px;font-size:.92rem}
 .pc-risk-grid th{text-align:left;padding:12px;border-bottom:2px solid #c9a461}
 .pc-risk-grid td{padding:12px;border-bottom:1px solid #8193a544;vertical-align:top}
