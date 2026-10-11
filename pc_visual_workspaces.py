@@ -17,6 +17,7 @@ def _fetch(_db, table, *, columns='*', filters=(), search='', search_columns=('n
         if operator == 'eq': q = q.eq(column, value)
         elif operator == 'gte': q = q.gte(column, value)
         elif operator == 'lte': q = q.lte(column, value)
+        elif operator == 'ilike': q = q.ilike(column, value)
     clauses=[]
     if layer_terms:
         clauses.append(','.join(f'{col}.ilike.%{word}%' for word in layer_terms for col in ('category', 'subtype')))
@@ -157,12 +158,23 @@ def _security(db,core):
         end=d2.date_input('To',value=now.date(),key='v4_end')
         if start>end:st.error('Start date must be before end date.');return
         filters += [('occurred_at','gte',start.isoformat()),('occurred_at','lte',end.isoformat()+'T23:59:59+00:00')]
-    # Retrieve events server-side (date/search filters before LIMIT); no fixed first-2,500 global slice.
+    if category.strip():
+        filters.append(('event_type','ilike','%'+category.strip().replace('%','').replace('_','\\_')+'%'))
+    # Reset pagination when the selection changes, before creating the page widget.
+    selection=(term,period,category,str(start) if period=='Custom dates' else '',
+               str(end) if period=='Custom dates' else '')
+    if st.session_state.get('v4_s_selection') != selection:
+        st.session_state['v4_s_page']=1
+        st.session_state['v4_s_selection']=selection
+    # Fetch one card page plus a lookahead, with stable newest-first ordering.
     page=st.number_input('Incident results page',min_value=1,max_value=100000,value=1,key='v4_s_page')
     incidents,err=_load(db,'pc_v4_security_geo',filters=tuple(filters),search=term,
-                  search_columns=('title','narrative','location_label','event_type'),limit=250,offset=(page-1)*250)
+                  search_columns=('title','narrative','location_label','event_type'),
+                  order=(('occurred_at',True),('event_id',False)),
+                  limit=PAGE_SIZE+1,offset=(page-1)*PAGE_SIZE)
     if err:st.error('Security delivery view unavailable. Apply the v4 SQL migration.');st.caption(err);return
-    if category: incidents=[r for r in incidents if category.casefold() in str(r.get('event_type') or '').casefold()]
+    has_more=len(incidents)>PAGE_SIZE
+    incidents=incidents[:PAGE_SIZE]
     unique={r.get('event_id'):r for r in incidents if r.get('event_id')}
     incidents=list(unique.values())
     k1,k2,k3=st.columns(3)
@@ -172,6 +184,7 @@ def _security(db,core):
     st.subheader('Incident & exposure map')
     _geo_map(incidents,label_key='title',height=580)
     approx=sum(r.get('map_precision')=='linked_facility_context' and _coordinate(r) is not None for r in incidents)
+    st.caption('Map and counts cover the current results page. Incidents are ordered newest first.')
     if approx:st.caption(f'{approx} markers show the location of an explicitly linked facility, not verified incident coordinates.')
     t1,t2=st.tabs(['Incidents & developments','Risk, trends & evidence'])
     with t1:
@@ -182,7 +195,9 @@ def _security(db,core):
                 if r.get('narrative'):st.write(str(r['narrative'])[:650])
                 if r.get('map_precision')=='linked_facility_context':st.caption('Map location: linked facility context')
                 if st.button('Open full incident',key='v4_event_'+str(r.get('event_id'))):_open(core,'event',r.get('event_id'),r.get('title'))
-        if len(incidents)>PAGE_SIZE:st.caption('Showing 12 incident cards. Narrow the search or select another result page.')
+        if has_more:st.caption('More incidents available — increase Incident results page to continue.')
+        elif incidents:st.caption('End of matching results.')
+        else:st.info('No incidents on this page. Return to page 1 or change the filters.')
     with t2:
         assessed=[r for r in incidents if r.get('source_risk_level') or r.get('source_risk_trend')]
         if not assessed:st.info('No recorded risk/trend assessment for this selection. Incident count alone does not establish HIGH or INCREASING.')
