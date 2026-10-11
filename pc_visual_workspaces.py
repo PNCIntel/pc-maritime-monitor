@@ -19,6 +19,7 @@ def _fetch(_db, table, *, columns='*', filters=(), search='', search_columns=('n
         elif operator == 'gte': q = q.gte(column, value)
         elif operator == 'lte': q = q.lte(column, value)
         elif operator == 'ilike': q = q.ilike(column, value)
+        elif operator == 'in': q = q.in_(column, list(value))
     clauses=[]
     if layer_terms:
         clauses.append(','.join(f'{col}.ilike.%{word}%' for word in layer_terms for col in ('category', 'subtype')))
@@ -338,6 +339,88 @@ def _render_related_below(db,core):
             if st.button('Show connected record below',key='pc_related_next'):
                 x=choices[idx];_open_below(x['type'],x['id'],x['name'])
 
+
+def _weekly_frame(rows):
+    unique={str(r['event_id']):r for r in rows if r.get('event_id')}
+    records=[]
+    for r in unique.values():
+        when=pd.to_datetime(r.get('start_date'),utc=True,errors='coerce')
+        if pd.isna(when):continue
+        status=str(r.get('verification_status') or 'unrecorded').lower()
+        evidence={'verified':'Verified in database','confirmed':'Confirmed in database','reported':'Reported','claimed':'Claimed','unverified':'Unverified'}.get(status,'Other / unrecorded')
+        records.append({'Date':when.date(),'Development':str(r.get('title') or 'Development'),
+            'Category':_business_label(r.get('event_type')),'Evidence':evidence,
+            'event_id':str(r['event_id']),'description':str(r.get('description') or '')})
+    return pd.DataFrame(records,columns=['Date','Development','Category','Evidence','event_id','description'])
+
+def _render_weekly(db,core):
+    st.subheader('Weekly developments & escalation')
+    st.caption('Compare recorded activity, operational restrictions and warning changes across two equal seven-day windows.')
+    a,b=st.columns([1,2])
+    today=dt.datetime.now(dt.timezone(dt.timedelta(hours=4))).date()
+    end=a.date_input('Week ending',value=today,key='pc_week_end')
+    scope=b.selectbox('Weekly coverage',['Saudi aviation & energy research','All published intelligence'],key='pc_week_scope')
+    term=st.text_input('Filter the weekly timeline',placeholder='Optional: Riyadh, Abha, airline…',key='pc_week_search')
+    start=end-dt.timedelta(days=6)
+    previous=start-dt.timedelta(days=7)
+    filters=[('intelligence_visible','eq',True),('start_date','gte',previous.isoformat()+'T00:00:00+04:00'),
+        ('start_date','lte',end.isoformat()+'T23:59:59.999999+04:00')]
+    if scope=='Saudi aviation & energy research':
+        filters.append(('metadata->>research_package','in',('saudi_aviation_20261011','saudi_aviation_live02_20261011')))
+    rows=[]
+    for offset in range(0,5000,500):
+        batch,error=_load(db,'pc_events',columns='event_id,title,start_date,event_type,verification_status,description',
+            filters=tuple(filters),search=term,search_columns=('title','description'),
+            order=(('start_date',False),('event_id',False)),limit=500,offset=offset)
+        if error:
+            st.warning('The weekly event feed could not be loaded.')
+            with st.expander('Weekly connection details'):st.caption(error)
+            return
+        rows.extend(batch)
+        if len(batch)<500:break
+    if len(rows)>=5000:st.warning('The comparison is limited to 5,000 records. Narrow the selection for complete totals.')
+    frame=_weekly_frame(rows)
+    # Display calendar dates in the same UAE timezone as the query windows.
+    dates={str(r['event_id']):pd.to_datetime(r['start_date'],utc=True).tz_convert('Asia/Dubai').date() for r in rows if r.get('event_id') and r.get('start_date')}
+    if not frame.empty:frame['Date']=frame['event_id'].map(dates)
+    current=frame[(frame['Date']>=start)&(frame['Date']<=end)]
+    prior=frame[(frame['Date']>=previous)&(frame['Date']<start)]
+    st.caption(f'Current: {start:%d %b}–{end:%d %b %Y} · Comparison: {previous:%d %b}–{(start-dt.timedelta(days=1)):%d %b %Y} · UAE calendar dates')
+    x,y,z=st.columns(3)
+    x.metric('Recorded developments this week',len(current),delta=f'{len(current)-len(prior):+d} versus previous week',delta_color='off')
+    y.metric('Previous week',len(prior))
+    z.metric('Active reporting days',current['Date'].nunique())
+    st.info('These are counts of database event records, not attacks or munitions. A warning, cancellation notice or multi-airport report is one record. More reporting alone does not establish escalation. Verification of an event does not confirm attribution.')
+    if current.empty:st.info('No recorded developments in this week and selection.');return
+    chart,context=st.columns([2,1])
+    with chart:
+        st.markdown('#### Daily developments by category')
+        daily=current.groupby(['Date','Category']).size().unstack(fill_value=0)
+        daily=daily.reindex([start+dt.timedelta(days=i) for i in range(7)],fill_value=0)
+        st.bar_chart(daily)
+    with context:
+        st.markdown('#### Evidence status this week')
+        st.bar_chart(current.groupby('Evidence').size().rename('Records'),horizontal=True,color='#468c9b')
+    st.markdown('#### What changed between the weeks')
+    comparison=pd.concat([prior.groupby('Category').size().rename('Previous week'),
+        current.groupby('Category').size().rename('This week')],axis=1).fillna(0).astype(int)
+    comparison['Change in records']=comparison['This week']-comparison['Previous week']
+    st.dataframe(comparison.reset_index(),hide_index=True,use_container_width=True)
+    st.caption('Assess escalation through consequences and geography as well as frequency: casualties, damage, new targets, wider restrictions and official warning changes. Current P&C judgments are in Risk briefing; these charts do not generate a risk score.')
+    st.markdown('#### Weekly chronology')
+    timeline=current.sort_values(['Date','event_id'],ascending=[False,False])
+    st.dataframe(timeline[['Date','Development','Category','Evidence']],hide_index=True,use_container_width=True)
+    options=timeline.to_dict('records')
+    signature=(str(end),scope,term)
+    if st.session_state.get('pc_week_signature')!=signature:
+        st.session_state['pc_week_evidence_choice']=0
+        st.session_state['pc_week_signature']=signature
+    idx=st.selectbox('Read a development',list(range(len(options))),format_func=lambda i:str(options[i]['Date'])+' · '+options[i]['Development'],key='pc_week_evidence_choice')
+    item=options[idx]
+    if item['description']:st.write(item['description'])
+    if st.button('Show evidence below briefing',key='pc_week_open'):
+        _open_below('event',item['event_id'],item['Development'])
+
 def _security(db,core):
     st.caption('POWER & CORRIDORS  /  SECURITY & DISRUPTIONS')
     st.title('Global Operating Picture')
@@ -379,7 +462,9 @@ def _security(db,core):
     k1.metric('Developments on page',len(incidents))
     k2.metric('Mapped incident locations on page',sum(_coordinate(r) is not None for r in incidents))
     k3.metric('Outside rating fields on page',sum(bool(r.get('source_risk_level') or r.get('source_risk_trend')) for r in incidents))
-    t2,t1,tmap=st.tabs(['Risk briefing','Incidents & developments','Incident map'])
+    t2,tweek,t1,tmap=st.tabs(['Risk briefing','Weekly escalation','Incidents & developments','Incident map'])
+    with tweek:
+        _render_weekly(db,core)
     with tmap:
         st.subheader('Incident & exposure map')
         airport_term=st.text_input('Find airport infrastructure',value='Riyadh',placeholder='Riyadh, King Khalid, Abha…',key='pc_map_airport_search')
