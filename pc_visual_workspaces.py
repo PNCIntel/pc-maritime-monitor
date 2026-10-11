@@ -257,7 +257,7 @@ def _render_pc_assessments(db,core,term):
                         idx=st.selectbox('Company dossier',options,format_func=lambda i:str(companies[i].get('company'))+' · '+_airport_display(companies[i].get('airport')),key='pc_company_select_'+aid)
                         c=companies[idx]
                         if st.button('Explore selected company',key='pc_company_open_'+aid):
-                            _open(core,'entity',c.get('entity_id'),c.get('company'))
+                            _open_below('entity',c.get('entity_id'),c.get('company'))
                 st.caption('A documented operating relationship establishes exposure; it does not establish company damage or financial loss.')
             with st.expander('Supporting chronology and sources'):
                 for i,e in enumerate(row.get('evidence') or []):
@@ -266,12 +266,77 @@ def _render_pc_assessments(db,core,term):
                     if isinstance(url,str) and url.startswith(('https://','http://')):
                         st.link_button('Supporting source',url)
                     if st.button('Open evidence dossier',key=f'pc_assess_event_{aid}_{i}'):
-                        _open(core,'event',e.get('event_id'),e.get('title'))
+                        _open_below('event',e.get('event_id'),e.get('title'))
             with st.expander('Monitoring priorities and review triggers'):
                 st.markdown('**Monitoring priorities**')
                 for value in row.get('monitoring_priorities') or []: st.markdown('- '+str(value))
                 st.markdown('**Review triggers**')
                 for value in row.get('review_triggers') or []: st.markdown('- '+str(value))
+
+
+def _open_below(typ,oid,title):
+    current=st.session_state.get('pc_brief_related')
+    if current and (current['type'],current['id'])!=(str(typ),str(oid)):
+        history=st.session_state.setdefault('pc_brief_related_history',[])
+        history.append(current)
+        del history[:-30]
+    st.session_state['pc_brief_related']={'type':str(typ),'id':str(oid),'title':str(title or 'Related record')}
+    st.rerun()
+
+def _render_related_below(db,core):
+    current=st.session_state.get('pc_brief_related')
+    if not current:return
+    st.divider()
+    st.subheader('Explore below the briefing')
+    back,close=st.columns(2)
+    if back.button('← Back',key='pc_related_back'):
+        history=st.session_state.get('pc_brief_related_history') or []
+        st.session_state['pc_brief_related']=history.pop() if history else None
+        st.session_state['pc_brief_related_history']=history
+        st.rerun()
+    if close.button('Close details · return to briefing',key='pc_related_close'):
+        st.session_state.pop('pc_brief_related',None)
+        st.session_state.pop('pc_brief_related_history',None)
+        st.rerun()
+    typ,oid=current['type'],current['id']
+    rec=core.object_record(typ,oid) or {}
+    st.markdown('### '+str(rec.get('name') or rec.get('title') or current['title']))
+    st.caption('Your briefing and assessment selection remain above.')
+    overview,related=st.tabs(['Overview','Connected records'])
+    with overview:
+        text=rec.get('description') or rec.get('summary') or rec.get('notes')
+        if text:st.write(text)
+        facts=[]
+        for key,label in [('country','Country'),('hq_country','Headquarters country'),('region_city','Location'),('entity_type','Organisation type'),('asset_type','Infrastructure type'),('status','Status')]:
+            if rec.get(key):facts.append({'Detail':label,'Value':_business_label(rec[key]) if key.endswith('_type') or key=='status' else str(rec[key])})
+        if facts:st.dataframe(pd.DataFrame(facts),hide_index=True,use_container_width=True)
+        if not rec:st.info('The overview record could not be retrieved. The full dossier may have additional detail.')
+        url=rec.get('website') or rec.get('source_url')
+        if isinstance(url,str) and url.startswith(('https://','http://')):st.link_button('Visit supporting website',url)
+        if st.button('Open full dossier',key='pc_related_full'):
+            _open(core,typ,oid,current['title'])
+    with related:
+        links=core._relationships(typ,oid)
+        choices=[]
+        seen=set()
+        for link in links:
+            side='target' if str(link.get('source_id'))==oid else 'source'
+            other_id=link.get(side+'_id');other_type=link.get(side+'_type')
+            if not other_id or not other_type or (other_type,other_id) in seen:continue
+            seen.add((other_type,other_id))
+            name=link.get(side+'_name') or core._object_name(other_type,other_id)
+            if not name or str(name)==str(other_id):name='Related '+_business_label(other_type).lower()
+            choices.append({'id':other_id,'type':other_type,'name':name,'relationship':_business_label(link.get('relationship_type'))})
+        if not choices:st.info('No connected records are available in this relationship view. Use the full dossier for specialist services and facilities.')
+        else:
+            st.dataframe(pd.DataFrame([{'Name':x['name'],'Relationship':x['relationship']} for x in choices]),hide_index=True,use_container_width=True)
+            signature=(typ,oid)
+            if st.session_state.get('pc_related_signature')!=signature:
+                st.session_state['pc_related_choice']=0
+                st.session_state['pc_related_signature']=signature
+            idx=st.selectbox('Explore another connected record',list(range(len(choices))),format_func=lambda i:choices[i]['name'],key='pc_related_choice')
+            if st.button('Show connected record below',key='pc_related_next'):
+                x=choices[idx];_open_below(x['type'],x['id'],x['name'])
 
 def _security(db,core):
     st.caption('POWER & CORRIDORS  /  SECURITY & DISRUPTIONS')
@@ -348,7 +413,7 @@ def _security(db,core):
                     st.session_state['pc_map_airport_choice']=next(iter(choices))
                 chosen=st.selectbox('Airport dossier',list(choices),format_func=lambda key:str(choices[key].get('name')),key='pc_map_airport_choice')
                 if st.button('Explore airport',key='pc_map_open_airport'):
-                    _open(core,'asset',chosen,choices[chosen].get('name'))
+                    _open_below('asset',chosen,choices[chosen].get('name'))
 
     with t1:
         for r in incidents[:PAGE_SIZE]:
@@ -370,6 +435,8 @@ def _security(db,core):
             st.markdown('**'+str(r.get('location_label') or r.get('title'))+'**')
             st.write('Risk: '+str(r.get('source_risk_level') or 'Not assessed')+' · Trend: '+str(r.get('source_risk_trend') or 'Not assessed'))
             st.caption('Assessment fields are shown as stored; check provenance in the full incident dossier.')
+
+    _render_related_below(db,core)
 
 def render_home(db,core,lens):
     if db is None:
