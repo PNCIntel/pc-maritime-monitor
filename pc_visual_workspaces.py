@@ -377,15 +377,17 @@ def _security(db,core):
     incidents=list(unique.values())
     k1,k2,k3=st.columns(3)
     k1.metric('Developments on page',len(incidents))
-    k2.metric('Mapped locations',sum(_coordinate(r) is not None for r in incidents))
+    k2.metric('Mapped incident locations on page',sum(_coordinate(r) is not None for r in incidents))
     k3.metric('Outside rating fields on page',sum(bool(r.get('source_risk_level') or r.get('source_risk_trend')) for r in incidents))
     t2,t1,tmap=st.tabs(['Risk briefing','Incidents & developments','Incident map'])
     with tmap:
         st.subheader('Incident & exposure map')
         airport_term=st.text_input('Find airport infrastructure',value='Riyadh',placeholder='Riyadh, King Khalid, Abha…',key='pc_map_airport_search')
-        airports,airport_error=_load(db,'pc_v4_trade_facilities',search=airport_term,
-            search_columns=('name','category','subtype'),layer_terms=('airport','aviation'),
-            order=(('is_mapped',True),('name',False),('object_id',False)),limit=100)
+        airports,airport_error=_load(db,'pc_assets',search=airport_term,
+            search_columns=('name','region_city','subtype'),
+            filters=(('asset_type','ilike','%airport%'),),
+            order=(('name',False),('asset_id',False)),limit=100)
+        airports=[dict(r,object_id=r.get('asset_id')) for r in airports]
         if airport_error:
             st.warning('Airport infrastructure could not be loaded.')
             with st.expander('Airport connection details'): st.caption(airport_error)
