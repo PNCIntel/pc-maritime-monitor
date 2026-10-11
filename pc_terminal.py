@@ -4918,7 +4918,7 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
                 grouped={}
                 for item in local:
                     grouped.setdefault(_infrastructure_group(item),[]).append(item)
-                for group_name in ("Terminals","Industrial","Energy & Utilities","Rail & Intermodal",
+                for group_name in ("Terminals","Berths & Quays","Industrial","Energy & Utilities","Rail & Intermodal",
                                    "Marine Services","Port Infrastructure","Ro-Ro / Cruise","Other Infrastructure"):
                     rows=grouped.get(group_name) or []
                     if not rows:
@@ -5292,6 +5292,8 @@ def _infrastructure_group(item: dict) -> str:
         _clean(item.get("subtype")),
         _clean(item.get("name")),
     ]).casefold()
+    if re.search(r"\\bberth\\b|\\bberths\\b|\\bquay\\b|\\bquays\\b|quaywall|quay wall|jetty|jetties|mooring", text):
+        return "Berths & Quays"
     if re.search(r"rail|intermodal|marshalling|line 11|freight line", text):
         return "Rail & Intermodal"
     if re.search(r"pipeline|hydrogen|co2|steam|utility|energy|lng|ammonia|shore power", text):
