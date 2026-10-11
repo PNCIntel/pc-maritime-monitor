@@ -5,6 +5,7 @@ No hypothetical threat ratings, vessel locations, or geographic event pins.
 """
 from __future__ import annotations
 import datetime as dt
+from html import escape
 import pandas as pd
 import streamlit as st
 
@@ -151,7 +152,7 @@ def _assessment_freshness(row):
         return 'VALIDITY UNRECORDED'
 
 def _render_pc_assessments(db,core,term):
-    st.subheader('P&C assessments')
+    st.subheader('P&C risk briefing')
     st.caption('Independent qualitative judgments. Assessment scope and validity are separate from the incident date filter.')
     rows,error=_load(db,'pc_v_security_pc_assessments',search=term,
         search_columns=('geography','headline','region_code','explanation'),
@@ -166,8 +167,40 @@ def _render_pc_assessments(db,core,term):
     regions=list(dict.fromkeys(str(r.get('geography') or r.get('region_code')) for r in rows))
     area=st.selectbox('Assessment area',['All matching areas']+regions,key='pc_assessment_area')
     selected=[r for r in rows if area=='All matching areas' or str(r.get('geography') or r.get('region_code'))==area]
-    st.caption(f'{len(selected)} published assessments shown · ratings are not numerical probabilities.')
-    for row in selected:
+    st.markdown("""<style>
+.pc-brief-hero{background:#142b42;color:#fff;padding:24px 28px;border-radius:12px;margin:12px 0 20px;border-left:5px solid #c9a461}
+.pc-brief-hero h3{color:#fff!important;margin:0 0 8px}.pc-brief-hero p{color:#e0e8ef;margin:0}
+.pc-risk-grid{width:100%;border-collapse:collapse;margin:12px 0 22px;font-size:.92rem}
+.pc-risk-grid th{text-align:left;padding:12px;border-bottom:2px solid #c9a461}
+.pc-risk-grid td{padding:12px;border-bottom:1px solid #8193a544;vertical-align:top}
+.pc-pill{display:inline-block;padding:4px 9px;border-radius:5px;font-weight:700;font-size:.78rem;white-space:nowrap}
+.pc-high{background:#fce8e6;color:#922b21}.pc-medium{background:#fff1d6;color:#805400}.pc-low{background:#e1f2ec;color:#17654a}.pc-unknown{background:#e7edf3;color:#40556a}
+</style>""",unsafe_allow_html=True)
+    st.markdown('<div class="pc-brief-hero"><h3>Operating risk briefing</h3><p>Read the judgments across locations, then explore the reasoning, commercial exposure and evidence behind each assessment.</p></div>',unsafe_allow_html=True)
+    counts=st.columns(3)
+    counts[0].metric('Published assessments',len(selected))
+    counts[1].metric('Require review',sum(_assessment_freshness(r)!='CURRENT' for r in selected))
+    counts[2].metric('Linked companies',len({c.get('entity_id') for r in selected for c in (r.get('company_exposure') or []) if c.get('entity_id')}))
+    st.markdown('#### Risk at a glance')
+    def badge(value):
+        value=str(value or 'INSUFFICIENT EVIDENCE')
+        tone={'HIGH':'high','SEVERE':'high','CRITICAL':'high','MODERATE':'medium','MEDIUM':'medium','LOW':'low'}.get(value.upper(),'unknown')
+        return '<span class="pc-pill pc-'+tone+'">'+escape(value)+'</span>'
+    table='<table class="pc-risk-grid"><thead><tr><th>Assessment</th><th>Risk / disruption</th><th>Direction</th><th>Confidence</th><th>Review status</th></tr></thead><tbody>'
+    for r in selected:
+        table+='<tr><td>'+escape(str(r.get('headline') or r.get('geography')))+'</td><td>'+badge(r.get('risk_level'))+'</td><td>'+escape(str(r.get('trend') or 'UNDETERMINED'))+'</td><td>'+escape(str(r.get('confidence') or 'Unassigned').capitalize())+'</td><td>'+escape(_assessment_freshness(r))+'</td></tr>'
+    st.markdown(table+'</tbody></table>',unsafe_allow_html=True)
+    st.caption('Qualitative judgments, not numerical probabilities. Undetermined direction and insufficient evidence remain explicit. Assessment dates are independent of incident filters.')
+    with st.expander('Key judgments across this selection',expanded=True):
+        for r in selected:
+            st.markdown('**'+str(r.get('headline') or r.get('geography'))+'**')
+            st.write(r.get('executive_summary') or r.get('explanation') or '')
+    st.markdown('#### Explore an assessment')
+    choices={str(r['assessment_id']):str(r.get('headline') or r.get('geography')) for r in selected}
+    if st.session_state.get('pc_brief_detail') not in choices:
+        st.session_state['pc_brief_detail']=next(iter(choices))
+    chosen=st.selectbox('Detailed briefing',list(choices),format_func=lambda aid:choices[aid],key='pc_brief_detail')
+    for row in [r for r in selected if str(r['assessment_id'])==chosen]:
         aid=str(row['assessment_id'])
         with st.container(border=True):
             st.markdown('#### '+str(row.get('headline') or row.get('geography')))
@@ -185,13 +218,25 @@ def _render_pc_assessments(db,core,term):
                 for driver in row.get('threat_drivers') or []: st.markdown('- '+str(driver))
                 st.caption(row.get('scope_note') or '')
                 st.caption(row.get('methodology_notice') or '')
-            with st.expander('Companies and operating exposure'):
+            with st.expander('Companies and operating exposure',expanded=True):
                 companies=row.get('company_exposure') or []
-                if not companies: st.write('No airport-company links documented for this assessment scope.')
-                for i,c in enumerate(companies):
-                    st.write(str(c.get('company'))+' · '+str(c.get('airport'))+' · '+str(c.get('role'))+' ('+str(c.get('status'))+')')
-                    if st.button('Explore company',key=f'pc_assess_company_{aid}_{i}'):
-                        _open(core,'entity',c.get('entity_id'),c.get('company'))
+                if not companies:
+                    st.write('No airport-company links documented for this assessment scope.')
+                else:
+                    exposure=pd.DataFrame([{'Company':c.get('company'),'Airport':c.get('airport'),'Relationship':c.get('role'),'Evidence status':c.get('status')} for c in companies]).drop_duplicates()
+                    chart,listing=st.columns([1,2])
+                    with chart:
+                        st.markdown('**Documented relationships by role**')
+                        role_counts=exposure.groupby('Relationship',dropna=False).size().rename('Relationships')
+                        st.bar_chart(role_counts,color='#468c9b',horizontal=True)
+                        st.caption('Counts of recorded links; they do not measure financial exposure.')
+                    with listing:
+                        st.dataframe(exposure,hide_index=True,use_container_width=True)
+                        options=list(range(len(companies)))
+                        idx=st.selectbox('Company dossier',options,format_func=lambda i:str(companies[i].get('company'))+' · '+str(companies[i].get('airport')),key='pc_company_select_'+aid)
+                        c=companies[idx]
+                        if st.button('Explore selected company',key='pc_company_open_'+aid):
+                            _open(core,'entity',c.get('entity_id'),c.get('company'))
                 st.caption('A documented operating relationship establishes exposure; it does not establish company damage or financial loss.')
             with st.expander('Supporting chronology and sources'):
                 for i,e in enumerate(row.get('evidence') or []):
@@ -248,12 +293,11 @@ def _security(db,core):
     k1.metric('Developments on page',len(incidents))
     k2.metric('Mapped locations',sum(_coordinate(r) is not None for r in incidents))
     k3.metric('Outside rating fields on page',sum(bool(r.get('source_risk_level') or r.get('source_risk_trend')) for r in incidents))
-    st.subheader('Incident & exposure map')
-    _geo_map(incidents,label_key='title',height=580)
-    approx=sum(r.get('map_precision')=='linked_facility_context' and _coordinate(r) is not None for r in incidents)
-    st.caption('Map and counts cover the current results page. Incidents are ordered newest first.')
-    if approx:st.caption(f'{approx} markers show the location of an explicitly linked facility, not verified incident coordinates.')
-    t1,t2=st.tabs(['Incidents & developments','Risk, trends & evidence'])
+    t2,t1,tmap=st.tabs(['Risk briefing','Incidents & developments','Incident map'])
+    with tmap:
+        st.subheader('Incident & exposure map')
+        _geo_map(incidents,label_key='title',height=580)
+        st.caption('Map covers the current incident results page. Facility context markers do not establish an exact impact location.')
     with t1:
         for r in incidents[:PAGE_SIZE]:
             with st.container(border=True):
@@ -281,3 +325,4 @@ def render_home(db,core,lens):
     if lens=='trade':return _trade(db,core)
     if lens=='intelligence':return _security(db,core)
     raise ValueError('Unsupported P&C workspace '+str(lens))
+
