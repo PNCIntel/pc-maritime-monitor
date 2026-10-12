@@ -429,14 +429,18 @@ def _render_related_below(db,core):
         if facts:st.dataframe(pd.DataFrame(facts),hide_index=True,use_container_width=True)
         if typ=='asset':
             _render_airport_infrastructure(db,oid)
-            # Global infrastructure dossiers: only actual graph-linked airport events.
+            # Shared canonical event timeline for both parent ports and airports.
+            # Keep airport-specific runway and facility data in the existing renderer above.
             asset_kind=str(rec.get('asset_type') or '').lower()
-            if 'airport' in asset_kind and 'facility' not in asset_kind:
+            is_airport=('airport' in asset_kind and 'facility' not in asset_kind)
+            is_parent_port=(asset_kind in ('port','seaport','commercial_port','port / harbour','harbour','harbor')
+                            or ('port / ' in asset_kind and 'terminal' not in asset_kind))
+            if is_airport or is_parent_port:
                 try:
-                    from pc_airport_event_dossier import render_airport_event_dossier
-                    render_airport_event_dossier(db,oid)
+                    from pc_infrastructure_incident_dossier import render_infrastructure_incident_dossier
+                    render_infrastructure_incident_dossier(db,oid,rec.get('name'),navigate=_open_below)
                 except Exception as exc:
-                    st.caption('Airport event dossier unavailable: '+str(exc))
+                    st.caption('Infrastructure event dossier unavailable: '+str(exc))
         if not rec:st.info('The overview record could not be retrieved. The full dossier may have additional detail.')
         url=rec.get('website') or rec.get('source_url')
         if isinstance(url,str) and url.startswith(('https://','http://')):st.link_button('Visit supporting website',url)

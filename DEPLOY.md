@@ -1,9 +1,18 @@
-# P&C Riyadh canonical data + UI integrated repair
+# P&C Infrastructure Incident Dossier — 12 October 2026
 
-1. Run `01_riyadh_graph_quality_ONE_RUN.sql` in Supabase and inspect its JSON report. No destructive merge, no new airport.
-2. Copy four `.py` files alongside the existing application modules, replacing the three same-named modules. Preserve your entry point and `pc_terminal.py`.
-3. Redeploy Streamlit. In Intelligence or Trade, open the canonical airport `PC_SA26_AP_OERK` through an explicit linked-event facility Open control.
-4. In its embedded dossier, inspect dated operational and security developments, then toggle the airport event lens. The three global Intelligence lenses remain unchanged.
-5. Confirm historical incidents, restriction notices and 12 Oct airline exposure remain *separate* events. Check NOTAM expiry is labelled reported, not reopening. The duplicate-looking ASSET_8DCF... remains subject to stewardship.
+Replace the four existing same-named modules together:
+- pc_visual_workspaces.py
+- pc_intelligence_presentation.py
+- pc_event_navigation.py
+- pc_airport_event_dossier.py
 
-Caveats: Query-based UI tested by syntax compilation only, not live Streamlit. The UI's event lens is a presentation grouping over source-labelled event types, not a new canonical classification. Existing metadata attribution for GSA remains confidential: do not expose the original report beyond authorised viewers. This package does not perform database-wide deduplication or reconcile secondary airport record into the canonical id.
+Add the fifth module:
+- pc_infrastructure_incident_dossier.py
+
+Do not overwrite pc_terminal.py or pc_market_lenses.py. No SQL changes are needed.
+
+This is a shared event-to-asset timeline for canonical airport and parent-port records, rendered from pc_event_asset_links and pc_events. The airport-only runway, facility and aviation observations remain intact. No headline-only inference creates an event-to-asset relationship; records must already be explicitly linked in the database. The user can filter category and evidence relationship, and use Open event dossier.
+
+After deploy: open a Riyadh event, navigate to King Khalid Airport, then open a port with existing attack links. Confirm each gets the same generic incident history and that unlinked incidents are not added. The UI uses relationship labels rather than interpreting every `directly_affected` link as confirmed damage.
+
+Static Python compile passed. Runtime integration and port coverage are NOT yet validated against live Streamlit/Supabase.
