@@ -895,6 +895,18 @@ def _entity_identity_bundle(entity_id: str) -> dict:
                     score+=len(_filtered_rows(table,col,rid,80))*weight
                 except Exception:
                     pass
+            # Prefer evidenced network coverage over an arbitrary generated ID format.
+            # This does not merge legally distinct entities or change canonical records.
+            outgoing=_filtered_rows("pc_relationships","source_id",rid,150)
+            incoming=_filtered_rows("pc_relationships","target_id",rid,150)
+            edge_ids={
+                _clean(x.get("relationship_id"))
+                for x in outgoing+incoming
+                if (_clean(x.get("source_type")).casefold()=="entity" and _clean(x.get("source_id"))==rid)
+                or (_clean(x.get("target_type")).casefold()=="entity" and _clean(x.get("target_id"))==rid)
+            }
+            score+=12*min(len(edge_ids),100)
+            score+=5*len(_filtered_rows("pc_event_entity_links","entity_id",rid,80))
             ranked.append((score,rid,r))
         ranked.sort(key=lambda x:(x[0],x[1]),reverse=True)
 
@@ -1254,7 +1266,8 @@ def _render_dossier_pane(typ: str, oid: str, rec: dict, lens: str):
                 st.dataframe(pd.DataFrame(facts),hide_index=True,use_container_width=True)
 
         rels=_linked_objects_from_relationships("entity",oid)
-        corporate=[x for x in rels if x.get("type")=="entity"]
+        corporate=[x for x in rels if x.get("type")=="entity" and x.get("id") not in ids]
+    corporate=list({str(x.get("id")):x for x in corporate if x.get("id")}.values())
         if corporate:
             st.markdown("##### Corporate network")
             st.dataframe(pd.DataFrame([{"Company":x["name"],"Relationship":x["relationship"]} for x in corporate]),
@@ -3924,6 +3937,23 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
             assets.append({"type":"asset","id":aid,"name":_asset_chip(aid),"relationship":_clean(r.get("asset_role"))})
         elif mid:
             assets.append({"type":"mobile_asset","id":mid,"name":_object_name("mobile_asset",mid),"relationship":_clean(r.get("asset_role"))})
+
+    # Generic canonical entity-to-asset and vessel relationships are first-class
+    # operating exposures even when specialist pc_company_asset_roles is empty.
+    # Proposed purchases remain separate from operating or chartered assets.
+    existing_asset_keys={(x.get("type"),str(x.get("id"))) for x in assets}
+    for link in rels:
+        obj_type=link.get("type")
+        role=_clean(link.get("relationship")).casefold().replace(" ","_")
+        key=(obj_type,str(link.get("id")))
+        if obj_type not in {"asset","mobile_asset"} or not link.get("id"):
+            continue
+        if role in {"agreed_acquirer","planned_acquisition","proposed_acquisition",
+                    "planned_purchase","agreed_to_acquire"}:
+            continue
+        if key not in existing_asset_keys:
+            assets.append(link)
+            existing_asset_keys.add(key)
 
     corridors=_company_corridors(oid)
     portfolio=_portfolio(oid)
