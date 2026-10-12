@@ -284,6 +284,63 @@ def _open_below(typ,oid,title):
     st.session_state['pc_brief_related']={'type':str(typ),'id':str(oid),'title':str(title or 'Related record')}
     st.rerun()
 
+
+def _render_airport_infrastructure(db,oid):
+    airports,error=_load(db,'pc_airports',filters=(('asset_id','eq',oid),),limit=1)
+    if error or not airports:return
+    ap=airports[0]
+    st.markdown('#### Airport infrastructure')
+    st.caption('Published physical infrastructure is separate from current runway availability and flight status.')
+    x,y,z=st.columns(3)
+    x.metric('IATA / ICAO',str(ap.get('iata_code') or '—')+' / '+str(ap.get('icao_code') or '—'))
+    y.metric('Published runway count',ap.get('runway_count') if ap.get('runway_count') is not None else 'Unrecorded')
+    z.metric('Elevation (ft)',ap.get('elevation_ft') if ap.get('elevation_ft') is not None else 'Unrecorded')
+    runways,err=_load(db,'pc_airport_runways',filters=(('airport_id','eq',oid),),order=(('runway_ident',False),),limit=50)
+    if err:st.warning('Runway records could not be loaded.')
+    elif runways:
+        table=[]
+        for rw in runways:
+            table.append({'Runway':rw.get('runway_ident'),'Length (m)':rw.get('length_m'),
+                'Width (m)':rw.get('width_m'),'Surface':_business_label(rw.get('surface')),
+                'Pavement classification':rw.get('pavement_classification') or 'Not recorded'})
+        st.dataframe(pd.DataFrame(table),hide_index=True,use_container_width=True)
+        with st.expander('Runway ends and declared distances'):
+            ends=[];distances=[];source_urls=set()
+            for rw in runways:
+                for side in ('le','he'):
+                    ends.append({'Runway end':rw.get(side+'_ident'),'True heading':rw.get(side+'_heading_deg_true'),
+                        'Latitude':rw.get(side+'_latitude'),'Longitude':rw.get(side+'_longitude'),'Elevation (ft)':rw.get(side+'_elevation_ft')})
+                published=rw.get('declared_distances') or {}
+                if isinstance(published,dict):
+                    for end,vals in published.items():
+                        if isinstance(vals,dict):
+                            distances.append({'Runway end':end,'TORA (m)':vals.get('tora_m'),
+                                'TODA (m)':vals.get('toda_m'),'ASDA (m)':vals.get('asda_m'),'LDA (m)':vals.get('lda_m')})
+                meta=rw.get('metadata') or {}
+                for value in meta.values():
+                    if isinstance(value,dict) and value.get('source_url'):source_urls.add(value['source_url'])
+            st.dataframe(pd.DataFrame(ends),hide_index=True,use_container_width=True)
+            if distances:st.dataframe(pd.DataFrame(distances),hide_index=True,use_container_width=True)
+            st.caption('TORA: takeoff run; TODA: takeoff distance; ASDA: accelerate-stop distance; LDA: landing distance. Publication snapshots do not confirm present availability.')
+            for url in sorted(source_urls):
+                if str(url).startswith(('https://','http://')):st.link_button('Published aeronautical source',url)
+    else:st.info('No runway records are available for this airport.')
+    facilities,ferr=_load(db,'pc_airport_facilities',filters=(('airport_id','eq',oid),),limit=100)
+    if facilities:
+        st.markdown('#### Terminals and facilities')
+        st.dataframe(pd.DataFrame([{'Facility':f.get('facility_name'),'Type':_business_label(f.get('facility_type')),
+            'Recorded status':_business_label(f.get('status')),'Warehouse area (m²)':f.get('warehouse_area_sqm'),
+            'Annual capacity (tonnes)':f.get('annual_capacity_tonnes')} for f in facilities]),hide_index=True,use_container_width=True)
+    if ferr:st.caption('Facility records are temporarily unavailable.')
+    services,serr=_load(db,'pc_air_services',filters=(('destination_airport_key','eq',oid),),
+        order=(('observed_at',True),),limit=100)
+    if services:
+        st.markdown('#### Airline and cargo observations')
+        st.dataframe(pd.DataFrame([{'Service / observation':v.get('service_name'),
+            'Recorded status':_business_label(v.get('route_status')),'Observed':str(v.get('observed_at') or '')[:10]} for v in services]),hide_index=True,use_container_width=True)
+        st.caption('Dated observations may describe cancellations or restrictions; they do not establish a complete current timetable.')
+    if serr:st.caption('Air service observations are temporarily unavailable.')
+
 def _render_related_below(db,core):
     current=st.session_state.get('pc_brief_related')
     if not current:return
@@ -311,6 +368,7 @@ def _render_related_below(db,core):
         for key,label in [('country','Country'),('hq_country','Headquarters country'),('region_city','Location'),('entity_type','Organisation type'),('asset_type','Infrastructure type'),('status','Status')]:
             if rec.get(key):facts.append({'Detail':label,'Value':_business_label(rec[key]) if key.endswith('_type') or key=='status' else str(rec[key])})
         if facts:st.dataframe(pd.DataFrame(facts),hide_index=True,use_container_width=True)
+        if typ=='asset':_render_airport_infrastructure(db,oid)
         if not rec:st.info('The overview record could not be retrieved. The full dossier may have additional detail.')
         url=rec.get('website') or rec.get('source_url')
         if isinstance(url,str) and url.startswith(('https://','http://')):st.link_button('Visit supporting website',url)
@@ -359,14 +417,14 @@ def _render_weekly(db,core):
     a,b=st.columns([1,2])
     today=dt.datetime.now(dt.timezone(dt.timedelta(hours=4))).date()
     end=a.date_input('Week ending',value=today,key='pc_week_end')
-    scope=b.selectbox('Weekly coverage',['Saudi aviation & energy research','All published intelligence'],key='pc_week_scope')
+    scope=b.selectbox('Weekly coverage',['Saudi airports & Yemen campaign research','All published intelligence'],key='pc_week_scope')
     term=st.text_input('Filter the weekly timeline',placeholder='Optional: Riyadh, Abha, airline…',key='pc_week_search')
     start=end-dt.timedelta(days=6)
     previous=start-dt.timedelta(days=7)
     filters=[('intelligence_visible','eq',True),('start_date','gte',previous.isoformat()+'T00:00:00+04:00'),
         ('start_date','lte',end.isoformat()+'T23:59:59.999999+04:00')]
     if scope=='Saudi aviation & energy research':
-        filters.append(('metadata->>research_package','in',('saudi_aviation_20261011','saudi_aviation_live02_20261011')))
+        filters.append(('metadata->>research_package','in',('saudi_aviation_20261011','saudi_aviation_live02_20261011','saudi_aviation_update04_20261012')))
     rows=[]
     for offset in range(0,5000,500):
         batch,error=_load(db,'pc_events',columns='event_id,title,start_date,event_type,verification_status,description',
@@ -408,7 +466,8 @@ def _render_weekly(db,core):
     st.dataframe(comparison.reset_index(),hide_index=True,use_container_width=True)
     st.caption('Assess escalation through consequences and geography as well as frequency: casualties, damage, new targets, wider restrictions and official warning changes. Current P&C judgments are in Risk briefing; these charts do not generate a risk score.')
     st.markdown('#### Weekly chronology')
-    timeline=current.sort_values(['Date','event_id'],ascending=[False,False])
+    include_previous=st.checkbox('Include the previous week in the chronology',value=True,key='pc_week_include_previous')
+    timeline=(frame if include_previous else current).sort_values(['Date','event_id'],ascending=[False,False])
     st.dataframe(timeline[['Date','Development','Category','Evidence']],hide_index=True,use_container_width=True)
     options=timeline.to_dict('records')
     signature=(str(end),scope,term)
