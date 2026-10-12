@@ -473,7 +473,10 @@ def _render_weekly(db,core):
     a,b=st.columns([1,2])
     today=dt.datetime.now(dt.timezone(dt.timedelta(hours=4))).date()
     end=a.date_input('Week ending',value=today,key='pc_week_end')
-    scope=b.selectbox('Weekly coverage',['Saudi airports & Yemen campaign research','All published intelligence'],key='pc_week_scope')
+    if not st.session_state.get('pc_global_week_v1'):
+        st.session_state['pc_week_scope']='All published intelligence'
+        st.session_state['pc_global_week_v1']=True
+    scope=b.selectbox('Weekly coverage',['All published intelligence','Saudi airports & Yemen campaign research'],key='pc_week_scope')
     term=st.text_input('Filter the weekly timeline',placeholder='Optional: Riyadh, Abha, airline…',key='pc_week_search')
     start=end-dt.timedelta(days=6)
     previous=start-dt.timedelta(days=7)
@@ -555,11 +558,156 @@ def _airport_choices(rows, airport_details):
         if existing is None or rank>existing[0]:grouped[key]=(rank,candidate)
     return [value[1] for value in grouped.values()]
 
+def _featured_defaults(rows, count):
+    """Round-robin across stories/places; dated updates from one storm share a group."""
+    groups={}
+    for row in rows:
+        if not row.get('event_id'):continue
+        meta=row.get('metadata') or {}
+        group=meta.get('feature_group') or row.get('parent_event_id') or (
+            str(row.get('countries') or row.get('location') or 'Other'),
+            str(row.get('event_domain') or row.get('event_family') or row.get('event_type') or 'Development'))
+        groups.setdefault(str(group),[]).append(row)
+    selected=[]
+    # Headline stories win over their own granular updates, without special country rules.
+    for entries in groups.values():
+        lead=next((x for x in entries if x.get('alert_worthy') and not x.get('parent_event_id')),entries[0])
+        selected.append(lead['event_id'])
+        if len(selected)==count:return selected
+    for row in rows:
+        if row.get('event_id') and row['event_id'] not in selected:selected.append(row['event_id'])
+        if len(selected)==count:break
+    return selected
+
+def _render_feature_detail(db, row):
+    eid=row['event_id']
+    st.markdown('### '+str(row.get('title') or 'Development'))
+    if row.get('description'):st.write(row['description'])
+    if row.get('operational_impact'):st.markdown('**Why it matters:** '+str(row['operational_impact']))
+    summary=[]
+    if row.get('event_domain')=='weather':
+        root_id=row.get('parent_event_id') or eid
+        stories,err=_load(db,'pc_v_weather_infrastructure_alerts',filters=(('event_id','eq',root_id),),limit=1)
+        if stories:
+            story=stories[0]
+            summary=story.get('developments') or []
+            if story.get('qualitative_disruption_level'):
+                st.caption('P&C disruption judgment: '+str(story['qualitative_disruption_level'])+' · '+_business_label(story.get('recovery_direction')))
+            st.caption('Research snapshot: '+str(story.get('as_known_at') or 'date unrecorded')+'. Check current notices before relying on operating status.')
+            if story.get('monitoring_priorities'):
+                with st.expander('What to watch next',expanded=True):
+                    for item in story['monitoring_priorities']:st.write('• '+str(item))
+        elif err:st.caption('The consolidated weather briefing will appear after the weather SQL package is loaded.')
+    ids=tuple(dict.fromkeys([eid]+[x['event_id'] for x in summary if x.get('event_id')]))
+    links,lerr=_load(db,'pc_event_asset_links',filters=(('event_id','in',ids),),limit=500)
+    assets=[]
+    asset_ids=tuple(dict.fromkeys(x['asset_id'] for x in links if x.get('asset_id')))
+    if asset_ids:assets,aerr=_load(db,'pc_assets',filters=(('asset_id','in',asset_ids),),limit=500)
+    entities,cerr=_load(db,'pc_event_entity_links',filters=(('event_id','in',ids),),limit=300)
+    companies=[]
+    entity_ids=tuple(dict.fromkeys(x['entity_id'] for x in entities if x.get('entity_id')))
+    if entity_ids:companies,nerr=_load(db,'pc_entities',columns='entity_id,name',filters=(('entity_id','in',entity_ids),),limit=300)
+    evidence,eerr=_load(db,'pc_event_evidence',filters=(('event_id','in',ids),),order=(('published_at',True),),limit=500)
+    if lerr or cerr or eerr:st.caption('Some linked details are temporarily unavailable.')
+    x,y=st.columns(2)
+    x.metric('Linked facilities',len(assets));y.metric('Linked organisations',len(companies))
+    if companies:st.write('**Organisations:** '+', '.join(str(c.get('name')) for c in companies if c.get('name')))
+    if summary:
+        with st.expander('What changed — dated updates'):
+            for change in summary:
+                stamp=pd.to_datetime(change.get('date'),utc=True,errors='coerce')
+                date=stamp.tz_convert('Asia/Dubai').strftime('%d %b %Y') if not pd.isna(stamp) else 'Date unrecorded'
+                st.markdown('**'+date+' · '+str(change.get('title') or 'Update')+'**')
+                st.write(change.get('description') or '')
+                if change.get('operational_impact'):st.caption(change['operational_impact'])
+                url=change.get('source_url')
+                if isinstance(url,str) and url.startswith(('http://','https://')):st.link_button('Read this update’s source',url)
+        observations,werr=_load(db,'pc_weather_observations',filters=(('event_id','in',ids),),order=(('observed_at',False),),limit=100)
+        production=[]
+        for obs in observations:
+            metrics=obs.get('metrics') or {}
+            if metrics.get('oil_shutin_percent') is not None:
+                when=pd.to_datetime(obs.get('observed_at'),utc=True,errors='coerce')
+                if not pd.isna(when):production.append({'Date':when,'Oil shut in (%)':metrics['oil_shutin_percent'],'Gas shut in (%)':metrics.get('gas_shutin_percent')})
+        if len(production)>1:
+            st.markdown('#### Offshore production recovery')
+            st.line_chart(pd.DataFrame(production).set_index('Date'))
+            st.caption('Daily regional survey snapshots; percentages are not cumulative losses or damage rates.')
+    if assets:
+        with st.expander('Ports, airports and other infrastructure',expanded=True):
+            st.dataframe(pd.DataFrame([{'Facility':a.get('name'),'Type':_business_label(a.get('asset_type')),'Location':a.get('region_city') or a.get('country')} for a in assets]),hide_index=True,use_container_width=True)
+            choices={a['asset_id']:a for a in assets}
+            signature=tuple(choices)
+            if st.session_state.get('pc_feature_asset_signature')!=signature:
+                st.session_state['pc_feature_asset']=next(iter(choices));st.session_state['pc_feature_asset_signature']=signature
+            selected=st.selectbox('Explore a facility',list(choices),format_func=lambda key:str(choices[key].get('name')),key='pc_feature_asset')
+            if st.button('Show facility below',key='pc_feature_asset_open'):_open_below('asset',selected,choices[selected].get('name'))
+            mapped=[dict(a,name=a.get('name')) for a in assets if _coordinate(a)]
+            if mapped:
+                _geo_map(mapped,height=320)
+                st.caption('Verified facility reference points. These markers do not identify storm damage locations.')
+    with st.expander('Evidence and source links'):
+        for observation in evidence:
+            st.write(observation.get('claim') or '')
+            st.caption(_business_label(observation.get('verification_status'))+' · '+str(observation.get('published_at') or 'Date unrecorded')[:10])
+        urls=list(dict.fromkeys(str(e['original_url']) for e in evidence if str(e.get('original_url') or '').startswith(('http://','https://'))))
+        main_url=(row.get('metadata') or {}).get('source_url')
+        if isinstance(main_url,str) and main_url.startswith(('http://','https://')) and main_url not in urls:urls.insert(0,main_url)
+        for i,url in enumerate(urls):st.link_button('Source '+str(i+1),url)
+        if not urls:st.caption('No source links recorded yet.')
+    if st.button('Open complete event dossier below',key='pc_feature_full_event'):_open_below('event',eid,row.get('title'))
+
+def _render_happening_now(db, filters, term):
+    st.subheader('Happening now')
+    st.caption('Choose the developments you want to follow across regions, security, weather and operating disruptions.')
+    rows,error=_load(db,'pc_events',filters=tuple(filters),search=term,
+        search_columns=('title','description','location','countries','event_type'),
+        order=(('start_date',True),('event_id',False)),limit=80)
+    if error:st.warning('The event panels could not be loaded.');return
+    if not rows:st.info('No published developments match these filters. Try a broader time window or search.');return
+    rows=list({r['event_id']:r for r in rows if r.get('event_id')}.values())
+    count=st.radio('Events on the board',[2,4],index=1,horizontal=True,key='pc_feature_count')
+    choices={r['event_id']:r for r in rows}
+    signature=(tuple(choices),count)
+    if st.session_state.get('pc_feature_signature')!=signature:
+        old=st.session_state.get('pc_feature_choices') or []
+        kept=[key for key in old if key in choices][:count]
+        defaults=_featured_defaults(rows,count)
+        st.session_state['pc_feature_choices']=(kept+[key for key in defaults if key not in kept])[:count]
+        st.session_state['pc_feature_signature']=signature
+    chosen=st.multiselect('Choose events for your board',list(choices),format_func=lambda key:str(choices[key].get('title'))+' · '+str(choices[key].get('countries') or choices[key].get('location') or ''),key='pc_feature_choices')
+    if len(chosen)>count:st.info(f'The board displays your first {count} selections. Remove a selection to replace it, or switch to four panels.')
+    chosen=chosen[:count]
+    if not chosen:st.info('Select one or more developments to build your board.');return
+    for offset in range(0,len(chosen),2):
+        cols=st.columns(2)
+        for col,key in zip(cols,chosen[offset:offset+2]):
+            row=choices[key];meta=row.get('metadata') or {}
+            tone='#bd862f' if row.get('event_domain')=='weather' else '#468c9b'
+            with col:
+                with st.container(border=True):
+                    st.markdown('<div style="border-top:4px solid '+tone+';padding-top:8px"><strong>'+escape(str(row.get('countries') or row.get('location') or 'Global'))+'</strong></div>',unsafe_allow_html=True)
+                    st.markdown('### '+str(row.get('title') or 'Development'))
+                    stamp=pd.to_datetime(row.get('start_date'),utc=True,errors='coerce')
+                    date=stamp.tz_convert('Asia/Dubai').strftime('%d %b %Y') if not pd.isna(stamp) else 'Date unrecorded'
+                    st.caption(date+' · '+_business_label(row.get('event_type')))
+                    text=meta.get('executive_summary') or row.get('description') or ''
+                    st.write(text if len(text)<=380 else text[:377].rsplit(' ',1)[0]+'…')
+                    st.caption('Evidence: '+_business_label(row.get('verification_status')))
+                    if st.button('Read this briefing',key='pc_feature_read_'+key):st.session_state['pc_feature_detail']=key
+    if st.session_state.get('pc_feature_detail') not in chosen:st.session_state['pc_feature_detail']=chosen[0]
+    st.divider()
+    selected=st.selectbox('Briefing shown below',chosen,format_func=lambda key:str(choices[key].get('title')),key='pc_feature_detail')
+    _render_feature_detail(db,choices[selected])
+    st.caption('Board choices come from the newest 80 matching published records. Older developments remain available in the full feed.')
+
+
 def _security(db,core):
     st.caption('POWER & CORRIDORS  /  SECURITY & DISRUPTIONS')
     st.title('Global Operating Picture')
     st.caption('Published intelligence, operational consequences and supporting evidence. Recent developments appear first.')
-    a,b,c=st.columns([2,1,1])
+    a,b,c,d=st.columns([2,1,1,1])
+    country=d.text_input('Country (blank = all)',placeholder='Mexico, United States…',key='pc_intel_country').strip()
     term=a.text_input('Search incidents, locations and actors',placeholder='Hormuz, ReCAAP, port attack…',key='v4_s_search')
     if not st.session_state.get('pc_current_feed_v2'):
         st.session_state['v4_s_period']='Last 7 days'
@@ -581,8 +729,10 @@ def _security(db,core):
         filters += [('start_date','gte',start.isoformat()+'T00:00:00+04:00'),('start_date','lte',end.isoformat()+'T23:59:59.999999+04:00')]
     if category.strip():
         filters.append(('event_type','ilike','%'+category.strip().replace('%','').replace('_','\\_')+'%'))
+    if country:
+        filters.append(('countries','ilike','%'+country.replace('%','').replace('_','\\_')+'%'))
     # Reset pagination when the selection changes, before creating the page widget.
-    selection=(term,period,category,str(start) if period=='Custom dates' else '',
+    selection=(term,period,category,country,str(start) if period=='Custom dates' else '',
                str(end) if period=='Custom dates' else '')
     if st.session_state.get('v4_s_selection') != selection:
         st.session_state['v4_s_page']=1
@@ -614,12 +764,14 @@ def _security(db,core):
     k1.metric('Developments on page',len(incidents))
     k2.metric('Mapped incident locations on page',sum(_coordinate(r) is not None for r in incidents))
     k3.metric('Linked vessels on page',len({r.get('mobile_asset_id') for r in vessel_links if r.get('mobile_asset_id')}))
-    t2,tweek,t1,tmap=st.tabs(['Risk briefing','Weekly escalation','Incidents & developments','Incident map'])
+    tnow,t2,tweek,t1,tmap=st.tabs(['Happening now','Risk briefing','Weekly escalation','Incidents & developments','Incident map'])
+    with tnow:
+        _render_happening_now(db,filters,term)
     with tweek:
         _render_weekly(db,core)
     with tmap:
         st.subheader('Incident & exposure map')
-        airport_term=st.text_input('Find airport infrastructure',value='Riyadh',placeholder='Riyadh, King Khalid, Abha…',key='pc_map_airport_search')
+        airport_term=st.text_input('Find airport infrastructure',value='',placeholder='Puerto Vallarta, Pensacola, Riyadh…',key='pc_map_airport_search')
         airports,airport_error=_load(db,'pc_assets',search=airport_term,
             search_columns=('name','region_city','subtype'),
             filters=(('asset_type','ilike','%airport%'),),
@@ -708,5 +860,6 @@ def render_home(db,core,lens):
     if lens=='trade':return _trade(db,core)
     if lens=='intelligence':return _security(db,core)
     raise ValueError('Unsupported P&C workspace '+str(lens))
+
 
 
