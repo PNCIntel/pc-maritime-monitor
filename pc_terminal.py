@@ -3579,7 +3579,7 @@ def _render_company_tree_view(oid: str, rec: dict, tx: list[dict] | None = None)
         st.dataframe(pd.DataFrame(display),hide_index=True,use_container_width=True)
     else:
         st.caption("No direct dated corporate relationships returned from the specialist table.")
-    if not st.toggle("Explore full historical corporate network",value=False,key="load_historical_tree_"+_norm(oid)):
+    if not st.toggle("Show group ownership history",value=False,key="load_historical_tree_"+_norm(oid)):
         return
     all_nodes, all_edges = _company_relationship_neighborhood(oid)
 
@@ -3602,8 +3602,8 @@ def _render_company_tree_view(oid: str, rec: dict, tx: list[dict] | None = None)
 
     st.markdown("### Corporate Tree")
     st.caption(
-        "Ownership, control, business units and portfolio relationships reconstructed from temporal corporate edges. "
-        "Change the year to see how the group evolved."
+        "See the companies in the group and their recorded ownership links. "
+        "Choose a year to explore how ownership changed."
     )
 
     control_left, control_right = st.columns([2.0, 1.0], gap="large")
@@ -3617,7 +3617,7 @@ def _render_company_tree_view(oid: str, rec: dict, tx: list[dict] | None = None)
             key=f"company_tree_year_{_norm(oid)}",
         )
     with control_right:
-        st.metric("Known corporate nodes", max(1, len(all_nodes)))
+        st.metric("Companies in this ownership view", max(1, len(all_nodes)))
 
     cutoff = now if year == current_year else pd.Timestamp(year=year, month=12, day=31)
 
@@ -3692,7 +3692,7 @@ def _render_company_tree_view(oid: str, rec: dict, tx: list[dict] | None = None)
                     args=("entity", pid, pname),
                 )
 
-    hierarchy_tab, network_tab = st.tabs(["Hierarchy", "Network"])
+    hierarchy_tab, network_tab = st.tabs(["Company hierarchy", "Ownership diagram"])
 
     with hierarchy_tab:
         with st.container(border=True):
@@ -3763,7 +3763,7 @@ def _render_company_tree_view(oid: str, rec: dict, tx: list[dict] | None = None)
             horizontal=True,
             key=f"company_network_mode_{_norm(oid)}",
         )
-        st.caption("Visual view of the same year-filtered corporate graph.")
+        st.caption("Ownership connections for the selected year. Open Network & Evidence for the wider operating network.")
         network_nodes, network_edges = _company_network_payload(
             str(oid), children,
             include_assets=(network_mode == "Companies + assets"),
