@@ -423,7 +423,7 @@ def _render_weekly(db,core):
     previous=start-dt.timedelta(days=7)
     filters=[('intelligence_visible','eq',True),('start_date','gte',previous.isoformat()+'T00:00:00+04:00'),
         ('start_date','lte',end.isoformat()+'T23:59:59.999999+04:00')]
-    if scope=='Saudi aviation & energy research':
+    if scope=='Saudi airports & Yemen campaign research':
         filters.append(('metadata->>research_package','in',('saudi_aviation_20261011','saudi_aviation_live02_20261011','saudi_aviation_update04_20261012')))
     rows=[]
     for offset in range(0,5000,500):
@@ -483,21 +483,27 @@ def _render_weekly(db,core):
 def _security(db,core):
     st.caption('POWER & CORRIDORS  /  SECURITY & DISRUPTIONS')
     st.title('Global Operating Picture')
-    st.caption('Historical incidents, mapped exposure, available risk assessments and source-backed narratives.')
+    st.caption('Published intelligence, operational consequences and supporting evidence. Recent developments appear first.')
     a,b,c=st.columns([2,1,1])
     term=a.text_input('Search incidents, locations and actors',placeholder='Hormuz, ReCAAP, port attack…',key='v4_s_search')
-    period=b.selectbox('Period',['All history','Today','Last 7 days','Last 30 days','Last 12 months','Custom dates'],key='v4_s_period')
+    if not st.session_state.get('pc_current_feed_v2'):
+        st.session_state['v4_s_period']='Last 7 days'
+        st.session_state['pc_current_feed_v2']=True
+    period=b.selectbox('Period',['Last 7 days','Today','Last 30 days','Last 12 months','All history','Custom dates'],key='v4_s_period')
     category=c.text_input('Incident type (optional)',placeholder='e.g. maritime',key='v4_s_category')
-    filters=[]
     now=dt.datetime.now(dt.timezone.utc)
+    filters=[('intelligence_visible','eq',True),('start_date','lte',now.isoformat())]
     days={'Today':1,'Last 7 days':7,'Last 30 days':30,'Last 12 months':365}.get(period)
-    if days:filters.append(('occurred_at','gte',(now-dt.timedelta(days=days)).isoformat()))
+    if days:
+        boundary=(now.astimezone(dt.timezone(dt.timedelta(hours=4))).replace(hour=0,minute=0,second=0,microsecond=0)
+                  if period=='Today' else now-dt.timedelta(days=days))
+        filters.append(('start_date','gte',boundary.isoformat()))
     elif period=='Custom dates':
         d1,d2=st.columns(2)
         start=d1.date_input('From',value=dt.date(2024,1,1),key='v4_start')
         end=d2.date_input('To',value=now.date(),key='v4_end')
         if start>end:st.error('Start date must be before end date.');return
-        filters += [('occurred_at','gte',start.isoformat()),('occurred_at','lte',end.isoformat()+'T23:59:59+00:00')]
+        filters += [('start_date','gte',start.isoformat()+'T00:00:00+04:00'),('start_date','lte',end.isoformat()+'T23:59:59.999999+04:00')]
     if category.strip():
         filters.append(('event_type','ilike','%'+category.strip().replace('%','').replace('_','\\_')+'%'))
     # Reset pagination when the selection changes, before creating the page widget.
@@ -508,19 +514,31 @@ def _security(db,core):
         st.session_state['v4_s_selection']=selection
     # Fetch one card page plus a lookahead, with stable newest-first ordering.
     page=st.number_input('Incident results page',min_value=1,max_value=100000,value=1,key='v4_s_page')
-    incidents,err=_load(db,'pc_v4_security_geo',filters=tuple(filters),search=term,
-                  search_columns=('title','narrative','location_label','event_type'),
-                  order=(('occurred_at',True),('event_id',False)),
+    incidents,err=_load(db,'pc_events',filters=tuple(filters),search=term,
+                  search_columns=('title','description','location','countries','event_type'),
+                  order=(('start_date',True),('event_id',False)),
                   limit=PAGE_SIZE+1,offset=(page-1)*PAGE_SIZE)
-    if err:st.error('Security delivery view unavailable. Apply the v4 SQL migration.');st.caption(err);return
+    if err:st.error('Published intelligence could not be loaded.');st.caption(err);return
     has_more=len(incidents)>PAGE_SIZE
     incidents=incidents[:PAGE_SIZE]
     unique={r.get('event_id'):r for r in incidents if r.get('event_id')}
     incidents=list(unique.values())
+    event_ids=tuple(str(r['event_id']) for r in incidents)
+    evidence=[]; vessel_links=[]
+    if event_ids:
+        geo,geo_error=_load(db,'pc_v4_security_geo',filters=(('event_id','in',event_ids),),limit=100)
+        geo_by_id={r['event_id']:r for r in geo}
+        evidence,evidence_error=_load(db,'pc_event_evidence',filters=(('event_id','in',event_ids),),limit=300)
+        vessel_links,vessel_error=_load(db,'pc_v_event_vessel_links',filters=(('event_id','in',event_ids),),limit=100)
+        if geo_error:st.caption('Incident coordinates are temporarily unavailable.')
+        if evidence_error:st.caption('Supporting evidence is temporarily unavailable.')
+        if vessel_error:st.caption('Vessel associations are temporarily unavailable.')
+        incidents=[dict(geo_by_id.get(r['event_id'],{}),**r,occurred_at=r.get('start_date'),
+            narrative=r.get('description'),location_label=r.get('location') or r.get('countries')) for r in incidents]
     k1,k2,k3=st.columns(3)
     k1.metric('Developments on page',len(incidents))
     k2.metric('Mapped incident locations on page',sum(_coordinate(r) is not None for r in incidents))
-    k3.metric('Outside rating fields on page',sum(bool(r.get('source_risk_level') or r.get('source_risk_trend')) for r in incidents))
+    k3.metric('Linked vessels on page',len({r.get('mobile_asset_id') for r in vessel_links if r.get('mobile_asset_id')}))
     t2,tweek,t1,tmap=st.tabs(['Risk briefing','Weekly escalation','Incidents & developments','Incident map'])
     with tweek:
         _render_weekly(db,core)
@@ -562,13 +580,33 @@ def _security(db,core):
                     _open_below('asset',chosen,choices[chosen].get('name'))
 
     with t1:
+        st.caption('Published intelligence through the present. Future calendar entries are excluded. Dates are shown in UAE time.')
         for r in incidents[:PAGE_SIZE]:
             with st.container(border=True):
                 st.markdown('**'+str(r.get('title') or 'Incident')+'**')
-                st.caption(' · '.join(str(v) for v in (str(r.get('occurred_at') or '')[:10],r.get('location_label'),r.get('event_type')) if v))
-                if r.get('narrative'):st.write(str(r['narrative'])[:650])
+                stamp=pd.to_datetime(r.get('start_date'),utc=True,errors='coerce')
+                shown_date=stamp.tz_convert('Asia/Dubai').strftime('%d %b %Y') if not pd.isna(stamp) else 'Date unrecorded'
+                st.caption(' · '.join(str(v) for v in (shown_date,r.get('location_label'),_business_label(r.get('event_type'))) if v))
+                st.caption('Evidence: '+_business_label(r.get('verification_status'))+' · Confidence: '+_business_label(r.get('confidence')))
+                if r.get('narrative'):st.write(str(r['narrative']))
+                impact=r.get('operational_impact') or r.get('commercial_impact') or r.get('expected_disruption')
+                if impact:st.markdown('**Operational consequence:** '+str(impact))
+                else:st.caption('Operational consequence has not yet been assessed for this record.')
+                linked=[v for v in vessel_links if v.get('event_id')==r['event_id']]
+                for v in linked:
+                    st.markdown('**Vessel:** '+str(v.get('vessel_name') or 'Name unavailable')+' · IMO '+str(v.get('imo') or 'Unrecorded')+' · '+_business_label(v.get('vessel_type')))
+                sources=[e for e in evidence if e.get('event_id')==r['event_id']]
+                urls=list(dict.fromkeys(str(e['original_url']) for e in sources if str(e.get('original_url') or '').startswith(('http://','https://'))))
+                source_url=(r.get('metadata') or {}).get('source_url')
+                if isinstance(source_url,str) and source_url.startswith(('http://','https://')) and source_url not in urls:urls.append(source_url)
+                with st.expander('Evidence and source links · '+str(len(sources))+' observations'):
+                    for e in sources:
+                        st.write(e.get('claim') or '')
+                        st.caption(_business_label(e.get('verification_status'))+' · Published '+str(e.get('published_at') or 'date unrecorded')[:10])
+                    for i,url in enumerate(urls):st.link_button('Read source '+str(i+1),url)
+                    if not sources and not urls:st.write('No supporting evidence is linked yet.')
                 if r.get('map_precision')=='linked_facility_context':st.caption('Map location: linked facility context')
-                if st.button('Open full incident',key='v4_event_'+str(r.get('event_id'))):_open(core,'event',r.get('event_id'),r.get('title'))
+                if st.button('Explore development below',key='v4_event_'+str(r.get('event_id'))):_open_below('event',r.get('event_id'),r.get('title'))
         if has_more:st.caption('More incidents available — increase Incident results page to continue.')
         elif incidents:st.caption('End of matching results.')
         else:st.info('No incidents on this page. Return to page 1 or change the filters.')
@@ -590,4 +628,5 @@ def render_home(db,core,lens):
     if lens=='trade':return _trade(db,core)
     if lens=='intelligence':return _security(db,core)
     raise ValueError('Unsupported P&C workspace '+str(lens))
+
 
