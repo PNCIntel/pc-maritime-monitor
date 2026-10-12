@@ -182,12 +182,23 @@ def render_actor_workspace(db,core):
     if not actors:st.info('No readable actor profiles are available.');return
     if truncated:st.warning('The directory is limited to the first 10,000 readable records.')
     query=st.text_input('Find an actor',placeholder='Houthis, Ansar Allah, Saudi Armed Forces…',key='pc_actor_search')
+    scope=st.radio('Actor scope',['All actors','State actors','Non-state actors','Other / unclassified'],horizontal=True,key='pc_actor_scope')
+    state_classes={'state','state_actor','state_security','government','government_agency'}
+    national_forces={'Pakistan Armed Forces','Russian Armed Forces','Saudi Armed Forces','Turkish Armed Forces'}
+    nonstate_classes={'armed_group','armed_network'}
+    def actor_scope(actor):
+        kind=str(actor.get('actor_class') or '').lower()
+        if kind in state_classes or actor.get('canonical_name') in national_forces:return 'State actors'
+        if kind in nonstate_classes:return 'Non-state actors'
+        return 'Other / unclassified'
+    directory=actors
+    if scope!='All actors':actors=[actor for actor in actors if actor_scope(actor)==scope]
     classes=['All']+sorted({str(a.get('actor_class')) for a in actors if a.get('actor_class')})
     actor_class=st.selectbox('Actor class',classes,format_func=lambda value:value.replace('_',' ').title(),key='pc_actor_class')
     candidates=[a for a in actors if (actor_class=='All' or a.get('actor_class')==actor_class) and (not query.strip() or query.lower().strip() in ' '.join([str(a.get('canonical_name') or ''),str(a.get('short_name') or ''),' '.join(a.get('aliases') or [])]).lower())]
     request=st.session_state.pop('pc_actor_requested',None)
     if request:
-        candidate=next((a for a in actors if str(a['actor_id'])==request),None)
+        candidate=next((a for a in directory if str(a['actor_id'])==request),None)
         if candidate and candidate not in candidates:
             st.info('The actor linked from the briefing is included below despite the directory filters.');candidates.append(candidate)
     choices={str(a['actor_id']):a for a in sorted(candidates,key=lambda a:str(a.get('canonical_name') or ''))}
