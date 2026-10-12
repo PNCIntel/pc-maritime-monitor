@@ -4823,6 +4823,57 @@ def _infrastructure_projects(oid: str, local: list[dict]) -> list[dict]:
     )
 
 
+def _render_global_specialist_infrastructure(oid: str, rec: dict):
+    """Show canonical specialist profiles worldwide, independent of graph traversal.
+
+    A specialist fact is not represented as an inferred company or physical link.
+    Coordinates, ownership and service relationships remain authoritative in their own tables.
+    """
+    terminal = _filtered_rows("pc_terminal_details", "asset_id", str(oid), 1)
+    berth = _filtered_rows("pc_berth_details", "asset_id", str(oid), 1)
+    berths = _filtered_rows("pc_berth_details", "terminal_asset_id", str(oid), 100)
+    # Some ports have terminal children but no explicit asset-to-asset graph edge yet.
+    terminal_children = _filtered_rows("pc_terminal_details", "parent_port_asset_id", str(oid), 300)
+    if not (terminal or berth or berths or terminal_children):
+        return
+    st.markdown("### Physical infrastructure & technical profile")
+    st.caption("Global specialist records. An attached berth is not automatically owned by the terminal operator; missing fields remain unverified.")
+    if terminal:
+        t=terminal[0]
+        facts=[]
+        for k in ("terminal_type","berth_count","annual_capacity_tonnes","capacity_tonnes","storage_capacity_tonnes","area_ha","rail_connected","parent_port_asset_id"):
+            v=t.get(k)
+            if v not in (None,"",[],{}):
+                if k=="parent_port_asset_id":
+                    v=_object_name("asset",str(v))
+                facts.append({"Attribute":k.replace("_"," ").capitalize(),"Recorded value":_clean(v)})
+        if facts:
+            st.dataframe(pd.DataFrame(facts),hide_index=True,use_container_width=True)
+        if t.get("source_id"):
+            source=_filtered_rows("pc_sources","source_id",str(t["source_id"]),1)
+            url=_clean(source[0].get("url")) if source else ""
+            if url.startswith(("https://","http://")):
+                st.link_button("Terminal evidence",url,key="specialist_source_"+_norm(oid))
+    if berth:
+        b=berth[0]
+        st.caption("Selected object is a berth in " + _object_name("asset",str(b.get("terminal_asset_id"))) if b.get("terminal_asset_id") else "Selected object has an individual berth profile.")
+    if berths:
+        st.markdown("#### Individual berths")
+        rows=[]
+        for b in sorted(berths,key=lambda x:_clean(x.get("berth_code"))):
+            rows.append({"Berth":_object_name("asset",str(b.get("asset_id"))),"Code":_clean(b.get("berth_code")),"Type":_clean(b.get("berth_type")),"Depth (m)":b.get("depth_m"),"Length (m)":b.get("length_m"),"Status":_clean(b.get("status")),"Source ID":_clean(b.get("source_id"))})
+        st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+        st.caption("Dimensions and operating status are shown only as stored, not inferred from neighbouring facilities.")
+    if terminal_children:
+        st.markdown("#### Specialist terminal inventory")
+        rows=[]
+        for t in terminal_children:
+            aid=_clean(t.get("asset_id"))
+            rows.append({"Terminal":_object_name("asset",aid),"Type":_clean(t.get("terminal_type")),"Berths":t.get("berth_count"),"Asset ID":aid})
+        st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+        st.caption("These records have an explicit parent-port specialist reference, independent of generic relationship-index refresh.")
+
+
 def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("asset",oid)
     dossier=_asset_dossier_rpc(oid)
@@ -4878,6 +4929,8 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     m[3].metric("Transport services",len(routes))
     m[4].metric("Projects",len(projects))
     m[5].metric("Developments",len(events))
+
+    _render_global_specialist_infrastructure(oid, rec)
 
     left,right=st.columns([1.0,1.4],gap="large")
     with left:
