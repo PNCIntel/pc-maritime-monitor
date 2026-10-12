@@ -1,229 +1,59 @@
-"""Reusable presentation-friendly company network; no company-specific identities."""
+"""Company operating network with source-backed relationships and navigable dossiers."""
 from __future__ import annotations
-
-import html
-import math
-import re
-from urllib.parse import urlparse
-
 import pandas as pd
 import streamlit as st
+from pc_company_footprint import collect_network, render_graph
 
-
-def _s(value):
-    return str(value) if value is not None else ""
-
-
-def _urls(value):
-    if isinstance(value, str):
-        return [value] if value.startswith(("https://", "http://")) else []
-    if isinstance(value, list):
-        result = []
-        for item in value:
-            result += _urls(item)
-        return result
-    if isinstance(value, dict):
-        result = []
-        for key in ("evidence_url", "source_url", "url", "research_sources", "source_urls"):
-            result += _urls(value.get(key))
-        return result
-    return []
-
-
-def _category(relation, target_type):
-    if target_type in ("asset", "mobile_asset"):
-        return "Physical assets"
-    label = _s(relation).lower().replace("_", " ")
-    if re.search(r"owns|owned|equity|share|subsidiary|parent|control|majority|minority|stake", label):
-        return "Corporate structure"
-    if re.search(r"business unit|part of|operat|manag|charter|service|joint venture|partnership", label):
-        return "Operating connections"
-    return "Other connections"
-
-
-def _network_svg(root_id, root_name, entries):
-    """Static SVG is safe in st.html; node navigation is handled by Streamlit below."""
-    nodes = {root_id: {"name": root_name, "type": "root"}}
-    for e in entries:
-        nodes[e["ID"]] = {"name": e["Connected record"] or e["ID"], "type": e["Type"]}
-    peers = sorted((nid for nid in nodes if nid != root_id),
-                   key=lambda nid: (nodes[nid]["type"] != "entity", nodes[nid]["name"].casefold()))
-    width = 1100
-    height = max(630, 540 + (len(peers) // 16) * 160)
-    cx, cy = width / 2, height / 2
-    radius = min(245, height * .36)
-    positions = {root_id: (cx, cy)}
-    # Max 28 visible nodes; the full network remains available in the register.
-    shown = peers[:28]
-    for i, nid in enumerate(shown):
-        theta = -math.pi / 2 + 2 * math.pi * i / max(1, len(shown))
-        positions[nid] = (cx + radius * math.cos(theta), cy + radius * math.sin(theta))
-    parts = [f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Network of {html.escape(root_name)}" '
-             'style="width:100%;height:auto;display:block" xmlns="http://www.w3.org/2000/svg">',
-             f'<circle cx="{cx}" cy="{cy}" r="{radius}" fill="none" stroke="#DCE4ED" stroke-dasharray="3 7"/>']
-    for e in entries:
-        nid = e["ID"]
-        if nid not in positions:
-            continue
-        x, y = positions[nid]
-        color = {"Corporate structure": "#AD843D", "Operating connections": "#397F9A",
-                 "Physical assets": "#4E987B", "Other connections": "#8793A4"}[e["Category"]]
-        dash = ' stroke-dasharray="5 5"' if e["Category"] != "Corporate structure" else ""
-        parts.append(f'<line x1="{cx}" y1="{cy}" x2="{x}" y2="{y}" stroke="{color}" '
-                     f'stroke-width="1.5" opacity=".52"{dash}/>')
-    for nid in shown:
-        x, y = positions[nid]
-        item = nodes[nid]
-        is_company = item["type"] == "entity"
-        fill = "#EFF4FA" if is_company else "#EAF5EF"
-        stroke = "#6688A4" if is_company else "#4E987B"
-        label = html.escape(item["name"][:25] + ("…" if len(item["name"]) > 25 else ""))
-        parts += [f'<circle cx="{x}" cy="{y}" r="30" fill="{fill}" stroke="{stroke}" stroke-width="1.6"/>',
-                  f'<text x="{x}" y="{y+44}" text-anchor="middle" font-size="11" fill="#27374B" '
-                  f'font-family="Arial,sans-serif">{label}</text>']
-    parts += [f'<circle cx="{cx}" cy="{cy}" r="52" fill="#FBF1DE" stroke="#AD843D" stroke-width="2.5"/>',
-              f'<text x="{cx}" y="{cy+4}" text-anchor="middle" font-size="13" font-weight="bold" '
-              f'fill="#453719" font-family="Arial,sans-serif">{html.escape(root_name[:21])}</text>', '</svg>']
-    return ('<div style="background:#fff;border:1px solid #d9e2ec;border-radius:12px;'
-            'padding:14px;"><div style="font:12px Arial;color:#526171">'
-            'Gold: corporate · Blue: operational · Green: assets · dashed: non-ownership'
-            '</div>' + "".join(parts) + '</div>')
-
-
-def render_company_network(entity_id: str, rec: dict) -> None:
+def render_company_network(entity_id,rec):
     import pc_terminal as core
-    eid = str(entity_id)
-    company_name = _s(rec.get("name")) or core._object_name("entity", eid)
-    st.markdown("### Connected Network")
-    st.caption("Explore the organisation's recorded relationships, businesses and infrastructure. "
-               "Only directly connected records are included here; operating involvement is not necessarily ownership.")
-    graph = core._entity_graph_neighborhood(eid, depth=1)
-    graph_nodes = {(n.get("type"), _s(n.get("id"))): n for n in graph.get("nodes") or []}
-    rows = []
-    seen = set()
-
-    def add(other_id, other_type, other_name, relation, direction, confidence, provenance, metadata=None, source_id=""):
-        other_id = _s(other_id)
-        if not other_id or other_id == eid:
-            return
-        other_type = _s(other_type).lower()
-        category = _category(relation, other_type)
-        link_urls = _urls(provenance) + _urls(metadata)
-        if source_id and not link_urls:
-            source_rows = core._filtered_rows("pc_sources", "source_id", source_id, 1)
-            for source in source_rows:
-                link_urls += _urls(source)
-        url = next((u for u in link_urls if urlparse(u).scheme in ("http", "https")), "")
-        item = {"Connected record": _s(other_name) or other_id, "ID": other_id, "Type": other_type,
-                "Relationship": _s(relation).replace("_", " ").strip().title(), "Category": category,
-                "Direction": direction, "Status": _s(confidence), "Source": url}
-        key = (other_id, other_type, item["Relationship"], direction)
-        if key not in seen:
-            seen.add(key)
-            rows.append(item)
-
-    for edge in graph.get("edges") or []:
-        src, dst = _s(edge.get("source_id")), _s(edge.get("target_id"))
-        if eid not in (src, dst):
-            continue
-        forward = src == eid
-        typ = edge.get("target_type") if forward else edge.get("source_type")
-        oid = dst if forward else src
-        name = edge.get("target_name") if forward else edge.get("source_name")
-        if not name:
-            name = (graph_nodes.get((typ, oid)) or {}).get("name", "")
-        metadata = edge.get("metadata") or {}
-        add(oid, typ, name, edge.get("relationship"),
-            "From selected organisation" if forward else "To selected organisation",
-            edge.get("confidence"), edge.get("evidence_url"), metadata,
-            _s(metadata.get("evidence_source_id") or metadata.get("source_id")) if isinstance(metadata, dict) else "")
-
-    for col, role in (("operator_entity_id", "Recorded operator"), ("owner_entity_id", "Recorded owner")):
-        for asset in core._filtered_rows("pc_assets", col, eid, 1000):
-            add(asset.get("asset_id"), "asset", asset.get("name"), role,
-                "From selected organisation", asset.get("record_status"), asset,
-                asset.get("metadata"), asset.get("source_id"))
-
-    company_ids = {r["ID"] for r in rows if r["Type"] == "entity"}
-    asset_ids = {(r["Type"], r["ID"]) for r in rows if r["Type"] in ("asset", "mobile_asset")}
-    sourced = {r["Source"] for r in rows if r["Source"]}
-    metrics = st.columns(4)
-    metrics[0].metric("Connected organisations", len(company_ids))
-    metrics[1].metric("Linked assets", len(asset_ids))
-    metrics[2].metric("Recorded connections", len(rows))
-    metrics[3].metric("Connections with source URL", sum(bool(r["Source"]) for r in rows))
-    st.caption("Counts describe direct relationships for the selected record, not the complete consolidated group. "
-               "A missing link or source URL means the current view has not resolved it.")
-
-    available = ["Corporate structure", "Operating connections", "Physical assets", "Other connections"]
-    selected = st.multiselect("Show network layers", available, default=available[:3],
-                              key=f"network_layers_{core._norm(eid)}")
-    filtered = [r for r in rows if r["Category"] in selected]
-    focus = {}
-    for r in filtered:
-        focus.setdefault(r["ID"], r)
-    graph_col, side_col = st.columns([2.1, 1], gap="large")
-    with graph_col:
-        st.markdown("#### Relationship map")
-        if focus:
-            st.html(_network_svg(eid, company_name, list(focus.values())))
-            if len(focus) > 28:
-                st.caption(f"Showing 28 of {len(focus)} connected records in the diagram. All records remain below.")
-        else:
-            st.info("No direct links in the selected layers.")
-    with side_col:
-        st.markdown("#### Explore a connection")
-        options = list(sorted(focus.values(), key=lambda r: (r["Category"], r["Connected record"].casefold())))
-        labels = [f'{r["Connected record"]} · {r["Category"]} · {r["ID"]}' for r in options]
-        choice = st.selectbox("Connected record", [""] + labels, key=f"network_choice_{core._norm(eid)}")
-        if choice:
-            item = options[labels.index(choice)]
-            obj_type = item["Type"]
-            if obj_type in ("entity", "asset", "mobile_asset"):
-                st.button("Open dossier", key=f"network_go_{core._norm(eid)}",
-                          on_click=core._set_context,
-                          args=(obj_type, item["ID"], item["Connected record"]), use_container_width=True)
-            if obj_type in ("asset", "mobile_asset"):
-                record = core.object_record(obj_type, item["ID"]) or {}
-                meta = core._meta(record)
-                st.markdown("**Asset snapshot**")
-                fields = (("Country", "country"), ("Location", "region_city"),
-                          ("Asset type", "asset_type"), ("Subtype", "subtype"),
-                          ("IMO", "imo"), ("Flag", "flag"), ("MMSI", "mmsi"),
-                          ("DWT", "dwt"), ("GT", "gross_tonnage"),
-                          ("Length (m)", "length_m"), ("Depth (m)", "depth_max_m"),
-                          ("Berth length (m)", "berthing_line_m"),
-                          ("Area (m²)", "total_area_sqm"),
-                          ("Annual TEU potential", "annual_container_potential_teu"))
-                snapshot = []
-                for label, field in fields:
-                    value = record.get(field)
-                    if value in (None, ""):
-                        value = meta.get(field)
-                    if value not in (None, ""):
-                        snapshot.append((label, value))
-                if snapshot:
-                    st.dataframe(pd.DataFrame(snapshot, columns=["Metric", "Recorded value"]),
-                                 hide_index=True, use_container_width=True)
-                else:
-                    st.caption("No operational specifications recorded on this asset yet. Open its dossier for related data.")
-            st.write("**Relationship:** " + item["Relationship"])
-            st.write("**Recorded status:** " + (item["Status"] or "Not supplied"))
-            if item["Source"]:
-                st.link_button("Open source", item["Source"], use_container_width=True)
-            else:
-                st.caption("No source URL resolved for this connection.")
-
-    st.markdown("#### Connection register")
-    st.caption("Detailed traceability is available below the map, including distinct relationship observations.")
-    if filtered:
-        frame = pd.DataFrame(filtered)
-        st.dataframe(frame.drop(columns=["ID"]).rename(columns={"Source":"Source URL"}),
-                     hide_index=True, use_container_width=True,
-                     column_config={"Source URL": st.column_config.LinkColumn("Source URL")})
-        st.download_button("Export filtered connections (CSV)",
-                           frame.to_csv(index=False).encode("utf-8"),
-                           file_name=f"company_network_{core._norm(eid).replace(' ', '_')}.csv",
-                           mime="text/csv", key=f"network_export_{core._norm(eid)}")
-    else:
-        st.caption("No connections to export for the selected layers.")
+    root=str(entity_id);name=rec.get('name') or core._object_name('entity',root)
+    st.markdown('### Company operating network')
+    st.caption('Follow connections from the group through its businesses to ports, facilities and vessels. An operating link does not necessarily mean ownership.')
+    graph=collect_network(core,root)
+    nodes=graph['nodes'];edges=graph['edges'];records=graph['records'];by_id={n['id']:n for n in nodes}
+    metrics=st.columns(4)
+    metrics[0].metric('Group companies',max(0,len(graph['members'])-1))
+    metrics[1].metric('Linked infrastructure',sum(n['type']=='asset' for n in nodes))
+    metrics[2].metric('Linked vessels',sum(n['type']=='mobile_asset' for n in nodes))
+    metrics[3].metric('Recorded relationships',len(edges))
+    if graph['truncated']:st.warning('The group traversal reached its limit. These counts may be incomplete.')
+    layers=st.multiselect('Show in the network',['Companies','Infrastructure','Vessels'],default=['Companies','Infrastructure','Vessels'],key='company_network_layers_'+root)
+    types={'Companies':'entity','Infrastructure':'asset','Vessels':'mobile_asset'}
+    allowed={types[x] for x in layers}
+    visible=[n for n in nodes if n['type'] in allowed or n['id']==root]
+    limit=st.slider('Maximum nodes in diagram',20,150,80,step=10,key='company_network_limit_'+root)
+    # Preserve company hubs so displayed assets stay attached to their real operating entities.
+    visible=sorted(visible,key=lambda n:(n['id']!=root,n['type']!='entity',n['type']=='mobile_asset',n.get('depth',0),n['name']))
+    shown=visible[:limit];ids={n['id'] for n in shown};shown_edges=[e for e in edges if e['source'] in ids and e['target'] in ids]
+    st.markdown('#### Explore the network')
+    if shown:
+        render_graph(shown,shown_edges,root)
+        st.caption(f'{len(shown)} of {len(visible)} matching records shown. The list below contains all matching records.')
+    else:st.info('No linked records match the selected layers.')
+    options=sorted([n for n in visible if n['id']!=root],key=lambda n:(n['type'],n['name']))
+    if options:
+        choice=st.selectbox('Open a company, facility or vessel',range(len(options)),
+            format_func=lambda i:options[i]['name']+' · '+{'entity':'Company','asset':'Infrastructure','mobile_asset':'Vessel'}[options[i]['type']],key='company_network_record_'+root)
+        selected=options[choice]
+        if st.button('Open selected dossier',key='company_network_go_'+root):
+            core._set_context(selected['type'],selected['id'],selected['name']);st.rerun()
+        related=[e for e in edges if selected['id'] in (e['source'],e['target'])]
+        with st.expander('Connections and sources for '+selected['name']):
+            for i,e in enumerate(related):
+                st.write(by_id[e['source']]['name']+' → '+e['label'].replace('_',' ')+' → '+by_id[e['target']]['name'])
+                url=e.get('source_url') or (e.get('metadata') or {}).get('source_url')
+                if not url and e.get('source_id'):
+                    sources=core._filtered_rows('pc_sources','source_id',e['source_id'],1)
+                    url=sources[0].get('url') if sources else None
+                if isinstance(url,str) and url.startswith(('https://','http://')):st.link_button('Read source',url,key=f'network_source_{root}_{i}')
+                if e.get('confidence'):st.caption('Evidence confidence: '+str(e['confidence']).capitalize())
+    st.markdown('#### All connections')
+    matching={n['id'] for n in visible}
+    rows=[{'From':by_id[e['source']]['name'],'Connection':e['label'].replace('_',' '),'To':by_id[e['target']]['name'],
+           'Evidence confidence':e.get('confidence') or 'Not recorded','Source':e.get('source_url') or ''}
+          for e in edges if e['source'] in matching and e['target'] in matching]
+    if rows:
+        df=pd.DataFrame(rows).drop_duplicates()
+        st.dataframe(df,hide_index=True,use_container_width=True,column_config={'Source':st.column_config.LinkColumn('Source')})
+        st.download_button('Download connections',df.to_csv(index=False).encode(),file_name='company_connections.csv',mime='text/csv',key='company_network_csv_'+root)
+    else:st.info('No connections in the selected layers.')
