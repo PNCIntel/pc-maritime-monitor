@@ -454,6 +454,8 @@ def _render_sanctions_lens(oid: str, rec: dict):
             b.dataframe(pd.DataFrame(matches), hide_index=True, use_container_width=True)
     if not (designations or links or cases or matches):
         st.info("No sanctions, restriction or screening record is currently resolved to this ecosystem. This is not a clearance determination.")
+    from pc_shared_infrastructure_risks import render_designated_actor_context
+    render_designated_actor_context(core, oid)
 
 
 def _render_security_lens(oid: str, rec: dict):
@@ -514,12 +516,8 @@ def _render_security_lens(oid: str, rec: dict):
         if mapped:
             st.markdown('#### Connected infrastructure map')
             st.map(pd.DataFrame(mapped),latitude='lat',longitude='lon',use_container_width=True)
-    if direct:
-        st.markdown('#### Incidents affecting this facility')
-        core._render_event_rows(direct, 'risk_direct_' + core._norm(oid), 25)
-    if connected:
-        st.markdown('#### Incidents at connected facilities')
-        core._render_event_rows(connected, 'risk_connected_' + core._norm(oid), 25)
+    from pc_shared_infrastructure_risks import render_incident_evidence
+    render_incident_evidence(core, oid, direct, connected, st.session_state.get('pc_product_lens') or 'intelligence')
     if not (direct or connected):
         st.info('No directly linked security incident was returned for this facility or its connected facilities. This is not a determination that no incident occurred.')
     with st.expander('Coverage and verification'):
@@ -535,6 +533,7 @@ def _render_cross_market_infrastructure(oid: str, rec: dict, lens: str):
     the selected tab.  A segmented control keeps the same UX but only executes the
     selected market query/render path.
     """
+    st.session_state["pc_product_lens"] = lens
     if lens == "trade":
         labels = ["Operations & Trade", "Strategic Industries", "Sanctions & Compliance", "Risks & Disruptions"]
         key = f"pc_trade_market_lens_{oid}"

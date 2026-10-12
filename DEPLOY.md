@@ -1,18 +1,11 @@
-# P&C Infrastructure Incident Dossier — 12 October 2026
+# P&C Shared Infrastructure Risks — Trade / Intelligence / Sanctions
 
-Replace the four existing same-named modules together:
-- pc_visual_workspaces.py
-- pc_intelligence_presentation.py
-- pc_event_navigation.py
-- pc_airport_event_dossier.py
+Replace `pc_market_lenses.py` and add `pc_shared_infrastructure_risks.py` **in both deployed app repositories** if Trade and Intelligence are separate deployments. Keep existing `pc_terminal.py`, `pc_object_resolver.py`, and all other modules unchanged. Restart/redeploy Streamlit.
 
-Add the fifth module:
-- pc_infrastructure_incident_dossier.py
+Existing **Risks & Disruptions** renderer replaces the flat list with dated, expandable evidence panels while preserving the current counts, connected infrastructure map, and graph resolution. Works through both the Intelligence asset dossier and Trade's Risks & Disruptions selector. Trade's Operations & Trade view is not altered.
 
-Do not overwrite pc_terminal.py or pc_market_lenses.py. No SQL changes are needed.
+Existing Sanctions & Compliance view gains a contextual actor panel derived strictly from existing `pc_event_entity_links`. It is **not** a designation screen and does not assert that an actor is legally sanctioned. The existing designations/screening UI remains. A Houthi/IRGC designation must have its own sourced legal designation with jurisdiction and dates; attack responsibility must be separately sourced.
 
-This is a shared event-to-asset timeline for canonical airport and parent-port records, rendered from pc_event_asset_links and pc_events. The airport-only runway, facility and aviation observations remain intact. No headline-only inference creates an event-to-asset relationship; records must already be explicitly linked in the database. The user can filter category and evidence relationship, and use Open event dossier.
+**No SQL necessary.** Four live cases to test: `PC_SA26_AP_OERK` (RUH), `ASSET_A136EB0EEC4A78BA0AF3` (DXB), `ASSET014` (Jebel Ali), `ASSET_E593175E79E03FACB9B0` (FOTT). Compare existing direct/connected counts and validate that opening each row goes to its event.
 
-After deploy: open a Riyadh event, navigate to King Khalid Airport, then open a port with existing attack links. Confirm each gets the same generic incident history and that unlinked incidents are not added. The UI uses relationship labels rather than interpreting every `directly_affected` link as confirmed damage.
-
-Static Python compile passed. Runtime integration and port coverage are NOT yet validated against live Streamlit/Supabase.
+Caution: this patch intentionally does not create an independent Sanctions app router or update `pc_visual_workspaces.py` briefing-level navigation. It extends the existing shared asset market-lens module. Python compile tested; production DB/UI not executed here.
