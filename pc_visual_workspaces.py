@@ -457,6 +457,34 @@ def _render_related_below(db,core):
                 x=choices[idx];_open_below(x['type'],x['id'],x['name'])
 
 
+# Presentation lens only: the single canonical event graph remains unchanged.
+INTEL_LENSES=('Security & Disruption','Strategic Exposure','All Connected Developments')
+_SECURITY_TYPES=frozenset(('ballistic_missile_launch','missile_launch','air_defence_interception','airspace_advisory',
+ 'armed_attack','attack','strike','drone_attack','maritime_attack','security_incident','military_activity',
+ 'sanctions','sanctions_designation','civil_unrest','protest','strike_action','industrial_action',
+ 'weather_disruption','flood','flash_flood','landslide','natural_disaster','port_disruption',
+ 'airport_disruption','operational_disruption','infrastructure_disruption','road_infrastructure_disruption',
+ 'transport_infrastructure_disruption','logistics_disruption','rail_disruption','derailment',
+ 'supply_chain_disruption','transport_disruption','incident'))
+_STRATEGIC_TYPES=frozenset(('strategic_infrastructure','strategic_investment','foreign_investment_review',
+ 'national_security_review','critical_infrastructure_acquisition','supply_risk','commodity_supply_risk'))
+
+def _intel_class(row):
+    metadata=row.get('metadata') or {}
+    # Explicit, reviewable editorial classification takes precedence over event-type defaults.
+    explicit=str(metadata.get('intelligence_lens') or metadata.get('intelligence_classification') or '').strip().lower().replace('_',' ')
+    if explicit in ('security','security & disruption','security and disruption','disruption'):return INTEL_LENSES[0]
+    if explicit in ('strategic','strategic exposure'):return INTEL_LENSES[1]
+    if explicit in ('commercial','trade','capital','not intelligence','excluded'):return 'Other / unclassified'
+    typ=str(row.get('event_type') or '').strip().lower()
+    if typ in _SECURITY_TYPES:return INTEL_LENSES[0]
+    if typ in _STRATEGIC_TYPES:return INTEL_LENSES[1]
+    return 'Other / unclassified'
+
+def _intel_match(row,lens):
+    if lens==INTEL_LENSES[2]:return True
+    return _intel_class(row)==lens
+
 def _weekly_frame(rows):
     unique={str(r['event_id']):r for r in rows if r.get('event_id')}
     records=[]
@@ -470,7 +498,7 @@ def _weekly_frame(rows):
             'event_id':str(r['event_id']),'description':str(r.get('description') or '')})
     return pd.DataFrame(records,columns=['Date','Development','Category','Evidence','event_id','description'])
 
-def _render_weekly(db,core):
+def _render_weekly(db,core,lens):
     st.subheader('Weekly developments & escalation')
     st.caption('Compare recorded activity, operational restrictions and warning changes across two equal seven-day windows.')
     a,b=st.columns([1,2])
@@ -489,7 +517,7 @@ def _render_weekly(db,core):
         filters.append(('metadata->>research_package','in',('saudi_aviation_20261011','saudi_aviation_live02_20261011','saudi_aviation_update04_20261012')))
     rows=[]
     for offset in range(0,5000,500):
-        batch,error=_load(db,'pc_events',columns='event_id,title,start_date,event_type,verification_status,description',
+        batch,error=_load(db,'pc_events',columns='event_id,title,start_date,event_type,verification_status,description,metadata',
             filters=tuple(filters),search=term,search_columns=('title','description'),
             order=(('start_date',False),('event_id',False)),limit=500,offset=offset)
         if error:
@@ -499,6 +527,7 @@ def _render_weekly(db,core):
         rows.extend(batch)
         if len(batch)<500:break
     if len(rows)>=5000:st.warning('The comparison is limited to 5,000 records. Narrow the selection for complete totals.')
+    rows=[r for r in rows if _intel_match(r,lens)]
     frame=_weekly_frame(rows)
     # Display calendar dates in the same UAE timezone as the query windows.
     dates={str(r['event_id']):pd.to_datetime(r['start_date'],utc=True).tz_convert('Asia/Dubai').date() for r in rows if r.get('event_id') and r.get('start_date')}
@@ -532,7 +561,7 @@ def _render_weekly(db,core):
     timeline=(frame if include_previous else current).sort_values(['Date','event_id'],ascending=[False,False])
     st.dataframe(timeline[['Date','Development','Category','Evidence']],hide_index=True,use_container_width=True)
     options=timeline.to_dict('records')
-    signature=(str(end),scope,term)
+    signature=(str(end),scope,term,lens)
     if st.session_state.get('pc_week_signature')!=signature:
         st.session_state['pc_week_evidence_choice']=0
         st.session_state['pc_week_signature']=signature
@@ -623,17 +652,7 @@ def _render_feature_detail(db, row):
         if actor_ids:actors,actor_names_error=_load(db,'pc_actors',filters=(('actor_id','in',actor_ids),),limit=300)
         st.caption('Actor delivery view is not available yet. Run the actor display SQL to make published actor details readable by the app.')
     vessels,vessel_error=_load(db,'pc_v_event_vessel_links',filters=(('event_id','in',ids),),limit=100)
-    # Cruise imports store canonical mobile-asset links in the generic event layer.
-    mobile_links,mobile_error=_load(db,'pc_event_links',filters=(('event_id','in',ids),('linked_type','eq','mobile_asset')),limit=500)
-    mobile_ids=tuple(dict.fromkeys(str(l['linked_id']) for l in mobile_links if l.get('linked_id')))
-    ships=[];ship_error=None
-    if mobile_ids:ships,ship_error=_load(db,'pc_mobile_assets',filters=(('mobile_asset_id','in',mobile_ids),),limit=500)
-    vessel_by_id={str(v.get('mobile_asset_id') or v.get('vessel_id') or v.get('imo') or v.get('vessel_name')):v for v in vessels}
-    for ship in ships:
-        vessel_by_id[str(ship['mobile_asset_id'])]=dict(ship,vessel_name=ship.get('name'),vessel_type=ship.get('subtype') or ship.get('asset_type'))
-    vessels=list(vessel_by_id.values())
-    x,y,z,w=st.columns(4)
-    w.metric('Linked vessels',len(vessels) if not mobile_error and not ship_error else 'Unavailable')
+    x,y,z=st.columns(3)
     x.metric('Linked infrastructure',len(assets) if not lerr and not aerr else 'Unavailable')
     y.metric('Linked organisations',len(companies) if not cerr and not nerr else 'Unavailable')
     z.metric('Linked actors',len(actors) if not actor_error and not actor_names_error else 'Unavailable')
@@ -672,12 +691,6 @@ def _render_feature_detail(db, row):
     if vessels:
         st.markdown('#### Linked vessels')
         st.dataframe(pd.DataFrame([{'Vessel':v.get('vessel_name'),'IMO':v.get('imo'),'Type':_business_label(v.get('vessel_type'))} for v in vessels]),hide_index=True,use_container_width=True)
-        for ship in ships:
-            if st.button('Open '+str(ship.get('name') or 'ship')+' · IMO '+str(ship.get('imo') or 'not recorded'),key='pc_feature_ship_'+eid+'_'+str(ship['mobile_asset_id'])):
-                _open_below('mobile_asset',ship['mobile_asset_id'],ship.get('name'))
-    elif mobile_error or ship_error:
-        st.caption('Linked vessel details are temporarily unavailable.')
-
     if summary:
         with st.expander('What changed — dated updates'):
             for change in summary:
@@ -725,15 +738,19 @@ def _render_feature_detail(db, row):
         if not urls:st.caption('No source links recorded yet.')
     if st.button('Open complete event dossier below',key='pc_feature_full_event'):_open_below('event',eid,row.get('title'))
 
-def _render_happening_now(db, filters, term):
+def _render_happening_now(db, filters, term, lens):
     st.subheader('Happening now')
     st.caption('Choose the developments you want to follow across regions, security, weather and operating disruptions.')
-    rows,error=_load(db,'pc_events',filters=tuple(filters),search=term,
-        search_columns=('title','description','location','countries','event_type'),
-        order=(('start_date',True),('event_id',False)),limit=80)
-    if error:st.warning('The event panels could not be loaded.');return
-    if not rows:st.info('No published developments match these filters. Try a broader time window or search.');return
-    rows=list({r['event_id']:r for r in rows if r.get('event_id')}.values())
+    rows=[]
+    for offset in range(0,5000,500):
+        batch,error=_load(db,'pc_events',filters=tuple(filters),search=term,
+            search_columns=('title','description','location','countries','event_type'),
+            order=(('start_date',True),('event_id',False)),limit=500,offset=offset)
+        if error:st.warning('The event panels could not be loaded.');return
+        rows.extend(r for r in batch if _intel_match(r,lens))
+        if len(rows)>=80 or len(batch)<500:break
+    if not rows:st.info('No developments match this lens. Switch to All Connected Developments to inspect unclassified records.');return
+    rows=list({r['event_id']:r for r in rows if r.get('event_id')}.values())[:80]
     count=st.radio('Events on the board',[2,4],index=1,horizontal=True,key='pc_feature_count')
     choices={r['event_id']:r for r in rows}
     signature=(tuple(choices),count)
@@ -754,7 +771,7 @@ def _render_happening_now(db, filters, term):
             tone='#bd862f' if row.get('event_domain')=='weather' else '#468c9b'
             with col:
                 with st.container(border=True):
-                    st.markdown('<div style="border-top:4px solid '+tone+';padding-top:8px"><strong>'+escape(str(meta.get('ship_name') or ('Onboard health incident' if 'outbreak' in str(row.get('event_type') or row.get('title') or '').lower() else row.get('countries') or row.get('location') or 'Global')))+'</strong></div>',unsafe_allow_html=True)
+                    st.markdown('<div style="border-top:4px solid '+tone+';padding-top:8px"><strong>'+escape(str(row.get('countries') or row.get('location') or 'Global'))+'</strong></div>',unsafe_allow_html=True)
                     st.markdown('### '+str(row.get('title') or 'Development'))
                     stamp=pd.to_datetime(row.get('start_date'),utc=True,errors='coerce')
                     date=stamp.tz_convert('Asia/Dubai').strftime('%d %b %Y') if not pd.isna(stamp) else 'Date unrecorded'
@@ -774,6 +791,8 @@ def _security(db,core):
     st.caption('POWER & CORRIDORS  /  SECURITY & DISRUPTIONS')
     st.title('Global Operating Picture')
     st.caption('Published intelligence, operational consequences and supporting evidence. Recent developments appear first.')
+    lens=st.radio('Intelligence lens',INTEL_LENSES,horizontal=True,index=0,key='pc_intel_lens')
+    st.caption('Only explicit editorial metadata or recognised event types enter the first two lenses. Other records remain visible under All Connected Developments.')
     a,b,c,d=st.columns([2,1,1,1])
     country=d.text_input('Country (blank = all)',placeholder='Mexico, United States…',key='pc_intel_country').strip()
     term=a.text_input('Search incidents, locations and actors',placeholder='Hormuz, ReCAAP, port attack…',key='v4_s_search')
@@ -800,22 +819,26 @@ def _security(db,core):
     if country:
         filters.append(('countries','ilike','%'+country.replace('%','').replace('_','\\_')+'%'))
     # Reset pagination when the selection changes, before creating the page widget.
-    selection=(term,period,category,country,str(start) if period=='Custom dates' else '',
+    selection=(term,period,category,country,lens,str(start) if period=='Custom dates' else '',
                str(end) if period=='Custom dates' else '')
     if st.session_state.get('v4_s_selection') != selection:
         st.session_state['v4_s_page']=1
         st.session_state['v4_s_selection']=selection
-    # Fetch one card page plus a lookahead, with stable newest-first ordering.
+    # Filter BEFORE pagination so every page, its counts, and map use the selected lens.
     page=st.number_input('Incident results page',min_value=1,max_value=100000,value=1,key='v4_s_page')
-    incidents,err=_load(db,'pc_events',filters=tuple(filters),search=term,
-                  search_columns=('title','description','location','countries','event_type'),
-                  order=(('start_date',True),('event_id',False)),
-                  limit=PAGE_SIZE+1,offset=(page-1)*PAGE_SIZE)
-    if err:st.error('Published intelligence could not be loaded.');st.caption(err);return
-    has_more=len(incidents)>PAGE_SIZE
-    incidents=incidents[:PAGE_SIZE]
-    unique={r.get('event_id'):r for r in incidents if r.get('event_id')}
-    incidents=list(unique.values())
+    matching=[]; exhausted=False
+    for offset in range(0,5000,500):
+        batch,err=_load(db,'pc_events',filters=tuple(filters),search=term,
+            search_columns=('title','description','location','countries','event_type'),
+            order=(('start_date',True),('event_id',False)),limit=500,offset=offset)
+        if err:st.error('Published intelligence could not be loaded.');st.caption(err);return
+        matching.extend(r for r in batch if _intel_match(r,lens))
+        if len(batch)<500:exhausted=True;break
+        if len(matching)>page*PAGE_SIZE:break
+    if not exhausted and len(matching)<=page*PAGE_SIZE:
+        st.caption('The selected result set may extend beyond the 5,000-record retrieval limit. Narrow the period.')
+    has_more=len(matching)>page*PAGE_SIZE
+    incidents=list({r['event_id']:r for r in matching[(page-1)*PAGE_SIZE:page*PAGE_SIZE] if r.get('event_id')}.values())
     event_ids=tuple(str(r['event_id']) for r in incidents)
     evidence=[]; vessel_links=[]
     if event_ids:
@@ -834,9 +857,9 @@ def _security(db,core):
     k3.metric('Linked vessels on page',len({r.get('mobile_asset_id') for r in vessel_links if r.get('mobile_asset_id')}))
     tnow,t2,tweek,t1,tmap=st.tabs(['Happening now','Risk briefing','Weekly escalation','Incidents & developments','Incident map'])
     with tnow:
-        _render_happening_now(db,filters,term)
+        _render_happening_now(db,filters,term,lens)
     with tweek:
-        _render_weekly(db,core)
+        _render_weekly(db,core,lens)
     with tmap:
         st.subheader('Incident & exposure map')
         airport_term=st.text_input('Find airport infrastructure',value='',placeholder='Puerto Vallarta, Pensacola, Riyadh…',key='pc_map_airport_search')

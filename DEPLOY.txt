@@ -1,11 +1,7 @@
-P&C GLOBAL EVENT NAVIGATION / TRADE FEED FIX
-Replace these three files together in the same repository directory:
- pc_visual_workspaces.py
- pc_intelligence_presentation.py
- pc_event_navigation.py (new)
-Keep the current pc_terminal.py and pc_market_lenses.py; do not revert Dossier 2.0 or Strategic Industries upgrades.
-Restart/redeploy both Trade and Intelligence Streamlit apps, then clear Streamlit cache if the feed appears stale.
-Trade: Latest developments / Commercial & infrastructure should include all trade_visible events, including the Chattogram concession even if its event_type is not commercial_development.
-Click 'Open connected companies and infrastructure' on development cards, and on Intelligence Happening now selected detail or complete event profile. Navigation opens existing canonical dossiers using actual production link IDs; names in story narratives never create identity links.
-'Article-only in this relationship layer' means the general event-entity and event-asset tables returned zero; specialised sanctions traversal remains separate.
-Checked with python -m py_compile. Database and live Streamlit rendering not executed here. No SQL/database changes.
+P&C Intelligence lenses — 12 October 2026
+Replace the same-named root application files together: pc_visual_workspaces.py, pc_event_navigation.py, pc_intelligence_presentation.py.
+Preserves previous event-navigation fix. No SQL/data changes. Restart/redeploy Streamlit.
+Default Security & Disruption. Strategic Exposure and All Connected Developments are deliberate alternatives.
+Explicit pc_events.metadata.intelligence_lens or intelligence_classification can classify a record as security, strategic, or commercial; fallback uses exact event_type allowlists. Unknown types appear only under All Connected Developments until editorial review.
+Weekly and operating-picture feeds both filter BEFORE calculations. Happening Now uses same lens. No title/description keyword heuristics. Retrieval cap 5000 per view; narrow time window if cap reached.
+Syntax checked; live deployment and Supabase execution not tested.
