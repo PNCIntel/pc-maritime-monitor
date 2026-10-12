@@ -134,7 +134,8 @@ def _trade(db, core):
             filters.append(('start_date','lte',now.isoformat()))
             days={'Last 30 days':30,'Last 7 days':7,'Last 12 months':365}.get(period)
             if days:filters.append(('start_date','gte',(now-dt.timedelta(days=days)).isoformat()))
-            if coverage=='Commercial & infrastructure':filters.append(('event_type','eq','commercial_development'))
+            # Trade-visible concessions, investments and projects may carry specialist event types.
+            # Do not silently omit them from the commercial feed.
         signature=(term,coverage,period)
         if st.session_state.get('pc_trade_feed_signature')!=signature:
             st.session_state['pc_trade_feed_page']=1
@@ -160,6 +161,7 @@ def _trade(db, core):
         x.metric('Developments on page',len(updates))
         y.metric('Linked companies',len(names))
         z.metric('Linked vessels',len({v.get('mobile_asset_id') for v in vessels if v.get('mobile_asset_id')}))
+        if coverage=='Commercial & infrastructure':st.caption('All trade-visible developments, including concessions and projects recorded under specialist event types.')
         if coverage=='Upcoming milestones':st.caption('Scheduled dates over the next 90 days. These are future milestones, not completed developments; the time-window selector applies to historical coverage.')
         else:st.caption('Current and historical developments through today. Future calendar dates are available under Upcoming milestones.')
         if not updates:st.info('No developments match this selection. Try All trade developments or a wider time window.')
@@ -179,7 +181,8 @@ def _trade(db, core):
                         st.markdown('**Why it matters**')
                         st.write(impact or 'Commercial implications have not yet been assessed.')
                         linked_names=list(dict.fromkeys(names[x['entity_id']] for x in company_links if x.get('event_id')==eid and names.get(x.get('entity_id'))))
-                        if linked_names:st.markdown('**Companies:** '+', '.join(linked_names))
+                        from pc_event_navigation import render_event_connections
+                        render_event_connections(db,eid,lambda typ,oid,title: _open_below(typ,oid,title),key_prefix='trade_dev',compact=True)
                         linked_vessels=[v for v in vessels if v.get('event_id')==eid]
                         for v in linked_vessels:
                             st.caption('Vessel: '+str(v.get('vessel_name') or 'Name unavailable')+' · IMO '+str(v.get('imo') or 'Unrecorded'))
@@ -624,7 +627,8 @@ def _render_feature_detail(db, row):
     x.metric('Linked infrastructure',len(assets) if not lerr and not aerr else 'Unavailable')
     y.metric('Linked organisations',len(companies) if not cerr and not nerr else 'Unavailable')
     z.metric('Linked actors',len(actors) if not actor_error and not actor_names_error else 'Unavailable')
-    if companies:st.write('**Organisations:** '+', '.join(str(c.get('name')) for c in companies if c.get('name')))
+    from pc_event_navigation import render_event_connections
+    render_event_connections(db,eid,lambda typ,oid,title: _open_below(typ,oid,title),key_prefix='intel_board',compact=False)
     if not assets and not lerr and not aerr:st.caption('No infrastructure links are recorded for this development. This does not mean there are no facilities in the area.')
     if actors:
         with st.expander('Actors, roles and attribution',expanded=True):

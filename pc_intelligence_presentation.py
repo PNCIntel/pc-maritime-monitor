@@ -105,65 +105,15 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
     _map([e],latitude='latitude_text',longitude='longitude_text')
     if e.get('location_label'):
         st.caption('Recorded location: '+str(e['location_label']))
-    links,_=_query(db,'pc_intel_object_events', 'object_type,object_id,link_sources',eq={'event_id':event_id},limit=100)
-    direct,_=_query(db,'pc_event_links',eq={'event_id':event_id},limit=100)
-    existing={(x.get('object_type'),str(x.get('object_id'))) for x in links}
-    for link in direct:
-        key=(link.get('linked_type'),str(link.get('linked_id')))
-        if key not in existing:
-            links.append({'object_type':key[0],'object_id':key[1]}); existing.add(key)
-    # Resolve an explicitly named subject when its event link has not been indexed.
-    subject=re.match(r'^([A-Z][\w &.,()\-]+?)\s+(?:consolidates|announces|announced|plans|has|will|is|targets|reports)\b',str(e.get('narrative') or ''))
-    if subject:
-        named,_=_query(db,'pc_entities',eq={'name':subject.group(1).strip()},limit=2)
-        if len(named)==1:
-            company=named[0];key=('entity',str(company['entity_id']))
-            if key not in existing:
-                links.append({'object_type':'entity','object_id':key[1]});existing.add(key)
-                direct.append({'linked_type':'entity','linked_id':key[1],'linked_name':company['name'],'relationship':'mentioned company'})
-    if links:
-        st.subheader('Affected or associated assets')
-        st.caption('Explicit record links only; relationship roles and exposure require verification.')
-        by_object={(r.get('linked_type'),str(r.get('linked_id'))):r for r in direct}
-        tables={'entity':('pc_entities','entity_id','Company'),
-                'asset':('pc_assets','asset_id','Facility'),
-                'mobile_asset':('pc_mobile_assets','mobile_asset_id','Vessel / mobile asset')}
-        for x in links[:25]:
-            typ=x.get('object_type'); oid=str(x.get('object_id') or '')
-            link=by_object.get((typ,oid),{})
-            name=link.get('linked_name')
-            record={}
-            if typ in tables:
-                table,pk,label=tables[typ]
-                found,_=_query(db,table,eq={pk:oid},limit=1)
-                record=found[0] if found else {}
-                name=record.get('name') or name
-            else:
-                label=str(typ or 'Record').replace('_',' ').title()
-            st.write(f"{label}: {name or 'Name unavailable'}")
-            details=[]
-            if record.get('imo'): details.append('IMO '+str(record['imo']))
-            if link.get('relationship'): details.append(str(link['relationship']).replace('_',' '))
-            if details: st.caption(' · '.join(details))
-            if typ in tables and name and st.button('Open '+str(name),key=f'event_profile_{event_id}_{typ}_{oid}'):
-                from pc_terminal import _set_context
-                _set_context(typ,oid,name)
-                st.rerun()
-    companies=[x for x in links if x.get('object_type')=='entity']
-    if companies:
-        from pc_terminal import _linked_objects_from_relationships, _set_context, _object_name
-        st.subheader('Corporate relationships')
-        for company in companies[:8]:
-            company_id=str(company['object_id'])
-            name=_object_name('entity',company_id)
-            corporate=[x for x in _linked_objects_from_relationships('entity',company_id) if x.get('type')=='entity']
-            with st.expander(name+' — corporate network',expanded=len(companies)==1):
-                if not corporate:
-                    st.caption('No corporate relationships returned for this company.')
-                for i,item in enumerate(corporate[:20]):
-                    st.markdown('**'+item['name']+'**')
-                    st.caption(str(item.get('relationship') or 'Related company').replace('_',' '))
-                    st.button('Open '+item['name'],key=f"event_corporate_{event_id}_{company_id}_{i}",on_click=_set_context,args=('entity',item['id'],item['name']))
+    # The production event-link tables are authoritative. Never fabricate an
+    # event-to-company edge by parsing the opening words of a narrative.
+    from pc_event_navigation import render_event_connections
+    from pc_terminal import _set_context
+    def open_dossier(typ, oid, title):
+        _set_context(typ, oid, title)
+        st.rerun()
+    st.subheader('Connected organisations and infrastructure')
+    render_event_connections(db,event_id,open_dossier,key_prefix='event_profile',compact=False)
     evidence=e.get('evidence') or []
     st.subheader('Sources and evidence')
     if evidence:
