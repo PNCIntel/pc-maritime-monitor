@@ -638,6 +638,9 @@ def _render_feature_detail(db, row):
                 st.session_state['pc_feature_actor']=next(iter(choices));st.session_state['pc_feature_actor_signature']=signature
             selected_actor=st.selectbox('Read an actor profile',list(choices),format_func=lambda key:str(names[key]),key='pc_feature_actor')
             actor=choices[selected_actor]
+            if st.button('Open full actor profile, timeline and network',key='pc_feature_actor_full'):
+                from pc_actor_workspace import open_actor_workspace
+                open_actor_workspace(selected_actor)
             if actor.get('description'):st.write(actor['description'])
             st.caption(_business_label(actor.get('actor_class'))+' · '+str(actor.get('primary_country') or ''))
             if 'aliases' in actor:
