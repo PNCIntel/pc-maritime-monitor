@@ -160,6 +160,75 @@ def _network(rows,actor_id):
     st.caption('Recorded relationships only. Read the connections below for direction, dates and evidence. A shared supporter does not establish an alliance between groups.')
 
 
+
+def _open_connected(core,typ,oid,name):
+    st.session_state['pc_terminal_workspace_intelligence']=''
+    core._set_context(typ,oid,name)
+    st.rerun()
+
+
+def _facility_data(db,event_ids):
+    """Resolve explicit event links only; proximity and actor affiliation add no impacts."""
+    from pc_visual_workspaces import _load
+    links=[];assets={};failed=False
+    for start in range(0,len(event_ids),100):
+        rows,err,cap=_pages(db,'pc_event_asset_links',filters=(('event_id','in',event_ids[start:start+100]),),order=(('asset_id',False),))
+        failed=failed or bool(err) or cap
+        if not err:links.extend(rows)
+    ids=sorted({l['asset_id'] for l in links if l.get('asset_id')})
+    for start in range(0,len(ids),100):
+        rows,err=_load(db,'pc_assets',filters=(('asset_id','in',ids[start:start+100]),),limit=100)
+        failed=failed or bool(err)
+        if not err:assets.update({r['asset_id']:r for r in rows})
+    return links,assets,failed
+
+
+def _facility_label(link):
+    role={'directly_affected':'Directly affected','targeted':'Named target / threat',
+          'nearby':'Nearby','other':'Context','exposed':'Exposure'}.get(link.get('relation_type'),str(link.get('relation_type') or 'Connection').replace('_',' ').capitalize())
+    return role+' · '+str(link.get('impact_status') or 'status not recorded').replace('_',' ').capitalize()
+
+
+def _render_actor_facilities(db,core,selected,events,links,assets,failed):
+    if failed:st.warning('Some facility connections could not be read. Counts and map may be incomplete.')
+    if not assets:
+        st.info('No readable infrastructure links in these published reports.')
+        return
+    st.caption('Facilities connected to the reports in this view. A threat, nearby incident or contextual link does not establish damage.')
+    titles={e['event_id']:e.get('title') for e in events}
+    st.dataframe(pd.DataFrame([{'Facility':assets[l['asset_id']].get('name'),
+        'Report':titles.get(l['event_id']),'Connection':_facility_label(l)}
+        for l in links if l.get('asset_id') in assets]),hide_index=True,use_container_width=True)
+    mapped=[]
+    for asset in assets.values():
+        try:
+            lat=float(asset.get('latitude'));lon=float(asset.get('longitude'))
+            if math.isfinite(lat) and math.isfinite(lon) and -90<=lat<=90 and -180<=lon<=180:
+                mapped.append({'latitude':lat,'longitude':lon,'Facility':asset.get('name')})
+        except (TypeError,ValueError):pass
+    if mapped:
+        st.map(pd.DataFrame(mapped),latitude='latitude',longitude='longitude')
+        st.caption('Stored facility reference points, not exact strike locations. '+str(len(mapped))+' of '+str(len(assets))+' facilities have usable coordinates.')
+    else:st.caption('No usable stored coordinates for these facilities; no locations have been inferred.')
+    options={aid:r for aid,r in sorted(assets.items(),key=lambda item:str(item[1].get('name') or ''))}
+    aid=st.selectbox('Explore infrastructure',list(options),format_func=lambda k:str(options[k].get('name')),key='pc_actor_facility_'+selected)
+    asset=options[aid]
+    if st.button('Open facility, infrastructure and companies',key='pc_actor_facility_open_'+selected):
+        _open_connected(core,'asset',aid,asset.get('name'))
+    organisations={}
+    for field in ('owner_entity_id','operator_entity_id'):
+        if asset.get(field):organisations[str(asset[field])]=field
+    from pc_visual_workspaces import _load
+    if organisations:
+        companies,err=_load(db,'pc_entities',filters=(('entity_id','in',list(organisations)),),limit=100)
+        if err:st.caption('Facility company details are temporarily unavailable.')
+        else:
+            for company in companies:
+                label=('Operator' if organisations[company['entity_id']]=='operator_entity_id' else 'Owner')+': '+str(company.get('name'))
+                if st.button(label,key='pc_actor_facility_company_'+selected+'_'+company['entity_id']):
+                    _open_connected(core,'entity',company['entity_id'],company.get('name'))
+
+
 def render_actor_workspace(db,core):
     from pc_visual_workspaces import _load
     st.title('Actors & Networks')
@@ -211,23 +280,43 @@ def render_actor_workspace(db,core):
     st.caption(' · '.join(str(actor.get(k)).replace('_',' ') for k in ('actor_class','actor_subtype','primary_country') if actor.get(k)))
     if actor.get('description'):st.write(actor['description'])
     if actor.get('aliases'):st.write('Also known as: '+', '.join(actor['aliases']))
-    links,error,limited=_pages(db,'pc_v_intelligence_actor_details',filters=(('actor_id','eq',selected),),order=(('event_actor_link_id',False),))
+    included=[selected]
+    selected_profiles={selected:actor}
+    if str(actor.get('canonical_name') or '').casefold() in ('iran','islamic republic of iran'):
+        related=[r for r in directory if str(r.get('actor_id'))!=selected and
+            (str(r.get('primary_country') or '').casefold()=='iran' or
+             str(r.get('canonical_name') or '')=='Islamic Revolutionary Guard Corps')]
+        if related:
+            choices_related={str(r['actor_id']):r for r in related}
+            chosen_related=st.multiselect('Include other Iran-based actor profiles',list(choices_related),
+                default=[k for k,r in choices_related.items() if r.get('canonical_name')=='Islamic Revolutionary Guard Corps'],
+                format_func=lambda k:str(choices_related[k].get('canonical_name')),key='pc_actor_related_'+selected)
+            included.extend(chosen_related)
+            selected_profiles.update({k:choices_related[k] for k in chosen_related})
+            st.caption('Combined coverage keeps each report’s recorded actor, role and attribution. Iran-based profiles are not treated as the same organisation; proxy groups are not added automatically.')
+    links,error,limited=_pages(db,'pc_v_intelligence_actor_details',filters=(('actor_id','in',included),),order=(('event_actor_link_id',False),))
     if error:st.warning('Linked event activity could not be read.');links=[]
+    if limited:st.warning('Linked report coverage reached the loading limit and may be incomplete.')
     event_ids=sorted({l['event_id'] for l in links});events=[]
     for start in range(0,len(event_ids),100):
         rows,err=_load(db,'pc_events',filters=(('event_id','in',event_ids[start:start+100]),),limit=100)
         if err:st.warning('Some event details could not be loaded.');continue
         events.extend(rows)
+    events=[e for e in events if e.get('intelligence_visible') and e.get('record_status') in ('approved','verified')]
+    event_ids=[e['event_id'] for e in events]
+    links=[l for l in links if l.get('event_id') in set(event_ids)]
+    facility_links,facilities,facility_error=_facility_data(db,event_ids)
     events=_exposure_domains(db,events)
     activity=_activity_frame(events,links)
     if not activity.empty:activity=activity.sort_values('_date',ascending=False,na_position='last')
-    profile,charts,network,designations=st.tabs(['Profile & events','Activity & domains','Network','Designations'])
+    profile,charts,infrastructure,network,designations=st.tabs(['Profile & events','Activity & domains','Facilities & companies','Network','Designations'])
     with profile:
-        x,y=st.columns(2)
-        x.metric('Reports in our coverage',len(activity))
+        x,y,z=st.columns(3)
+        x.metric('Distinct linked reports',len(activity))
+        z.metric('Connected facilities',len(facilities) if not facility_error else 'Incomplete')
         latest=activity['_date'].max() if not activity.empty else None
-        y.metric('Latest report',_date_label(latest) if latest is not None else 'No dated reports')
-        st.caption('A mention or contextual association does not establish responsibility for an incident.')
+        y.metric('Latest report in selected profiles' if len(included)>1 else 'Latest directly linked report',_date_label(latest) if latest is not None else 'No dated reports')
+        st.caption('Coverage: '+', '.join(str(r.get('canonical_name')) for r in selected_profiles.values())+'. A mention or contextual association does not establish responsibility for an incident.')
         if not activity.empty:
             st.subheader('Recent developments')
             for _,event_row in activity.head(6).iterrows():
@@ -237,7 +326,17 @@ def render_actor_workspace(db,core):
                     if _display(event_row.get('description'),''):st.write(event_row['description'])
                     if _display(event_row.get('operational_impact'),''):st.markdown('**Why it matters:** '+str(event_row['operational_impact']))
                     attributions=', '.join(_attribution_label(v.strip()) for v in str(event_row.get('Attribution') or '').split(',') if v.strip())
-                    st.caption('Actor connection: '+_display(event_row.get('Roles'))+' · '+attributions)
+                    for link in links:
+                        if link.get('event_id')==event_row['event_id']:
+                            linked_actor=selected_profiles.get(str(link.get('actor_id')),{})
+                            st.caption(str(linked_actor.get('canonical_name') or link.get('canonical_name') or 'Actor')+': '+_role_label(link.get('actor_role'))+' · '+_attribution_label(link.get('attribution_status')))
+                    for link in facility_links:
+                        aid=link.get('asset_id')
+                        if link.get('event_id')==event_row['event_id'] and aid in facilities:
+                            asset=facilities[aid]
+                            st.caption(str(asset.get('name'))+' — '+_facility_label(link))
+                            if st.button('Explore '+str(asset.get('name')),key='pc_actor_event_facility_'+selected+'_'+str(event_row['event_id'])+'_'+str(aid)+'_'+str(link.get('relation_type'))):
+                                _open_connected(core,'asset',aid,asset.get('name'))
                     meta=event_row.get('metadata') or {};url=meta.get('source_url')
                     if isinstance(url,str) and url.startswith(('http://','https://')):st.link_button('Read source',url)
             with st.expander('All reports — dates and attribution'):
@@ -251,6 +350,8 @@ def render_actor_workspace(db,core):
             if st.button('Open event dossier',key='pc_actor_event_open'):
                 st.session_state['pc_terminal_workspace_intelligence']='';core._set_context('event',event,options[event].get('title'));st.rerun()
         else:st.info('No readable published event activity for this actor.')
+    with infrastructure:
+        _render_actor_facilities(db,core,selected,events,facility_links,facilities,facility_error)
     with charts:
         a,b,c=st.columns(3)
         coverage=a.selectbox('Reports to chart',['All linked reports','Attack-related reports'],key='pc_actor_chart_scope')
