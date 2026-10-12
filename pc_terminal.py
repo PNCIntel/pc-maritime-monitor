@@ -629,6 +629,24 @@ def _search_objects(q: str, lens: str, limit: int = 80) -> list[dict]:
                     continue
                 score=2000 if _norm(name)==_norm(q) else 1800 if _norm(name).startswith(_norm(q)) else 1600
                 live.append(dict(type=typ,id=oid,name=name,kind=label,country=_clean(r.get("hq_country") or r.get("country") or r.get("flag")),subtype=_clean(r.get("subtype")),score=score,match_reason="current canonical name"))
+    # Events must be searchable immediately after approval, before index refresh.
+    if sb is not None and len(_norm(q))>=2:
+        event_rows={}
+        pattern="%"+re.sub(r"[%_*]", "", q.strip())+"%"
+        try:
+            for column in ("title","description","location","countries"):
+                request=sb.table("pc_events").select("*").ilike(column,pattern)
+                if lens in ("trade","intelligence"):
+                    request=request.eq(lens+"_visible",True).in_("record_status",["approved","verified"])
+                for r in request.order("start_date",desc=True).limit(limit).execute().data or []:
+                    if r.get("event_id"):event_rows[str(r["event_id"])]=r
+            for oid,r in event_rows.items():
+                live.append(dict(type="event",id=oid,name=_clean(r.get("title")) or "Development",
+                    kind="Development",country=_clean(r.get("countries")),subtype=_clean(r.get("event_type")),
+                    score=1700 if _token_match(_norm(q).split(),r.get("title") or "") else 1500,
+                    match_reason="published event"))
+        except Exception:
+            st.warning("Current event search is temporarily unavailable. Indexed results may be incomplete.")
     if live:
         seen={(x["type"],x["id"]) for x in live}
         indexed=live+[x for x in indexed if (x["type"],x["id"]) not in seen]
@@ -5619,6 +5637,7 @@ def render_terminal(lens: str = "trade"):
                 ("Regional / Chokepoints","corridor"),("Security & Maritime","maritime security"),
                 ("Disruptions","disruption"),("Sanctions","sanction"),
                 ("Monitoring & Indicators","monitoring"),
+                ("Actors & Networks","__actors__"),
                 ("Report Studio","__report_studio__"),
                 ("Brief Builder","__brief_builder__"),
                 ("Report Library","__report_library__"),
@@ -5747,7 +5766,11 @@ def render_terminal(lens: str = "trade"):
 
     workspace=st.session_state.get(f"pc_terminal_workspace_{lens}","")
     if workspace:
-        if workspace=="__report_studio__":
+        if workspace=="__actors__":
+            from pc_actor_workspace import render_actor_workspace
+            import sys
+            render_actor_workspace(sb,sys.modules[__name__])
+        elif workspace=="__report_studio__":
             _render_publication_workspace(sb,lens,"studio")
         elif workspace=="__brief_builder__":
             _render_publication_workspace(sb,lens,"brief")
