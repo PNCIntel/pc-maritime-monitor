@@ -5548,6 +5548,7 @@ def render_terminal(lens: str = "trade"):
             "intelligence":[
                 ("Operating Picture",""),("Priority Intelligence","security"),
                 ("Regional / Chokepoints","corridor"),("Security & Maritime","maritime security"),
+                ("Actors & Networks","__actors__"),
                 ("Disruptions","disruption"),("Sanctions","sanction"),
                 ("Monitoring & Indicators","monitoring"),
                 ("Report Studio","__report_studio__"),
@@ -5686,6 +5687,10 @@ def render_terminal(lens: str = "trade"):
             _render_publication_workspace(sb,lens,"library")
         elif workspace=="__sanctions_report__":
             _render_sanctions_query_report(sb)
+        elif workspace=="__actors__":
+            from pc_actor_workspace import render_actor_workspace
+            import sys
+            render_actor_workspace(sb,sys.modules[__name__])
         return
 
     st.markdown("<div class='pc-command'><div class='pc-k'>GLOBAL SEARCH</div>", unsafe_allow_html=True)
