@@ -5176,6 +5176,29 @@ def _v2_nav(rows: list[dict], label: str, key: str, typ: str="asset"):
 def _v2_infrastructure(oid: str, rec: dict):
     st.markdown("#### Physical infrastructure")
     _render_global_specialist_infrastructure(oid,rec)
+    # A terminal lot may use a shared complex whose berths and rail reception belong
+    # to the consortium, not exclusively to the lot operator. Resolve by explicit ID.
+    own_details=_filtered_rows("pc_terminal_details","asset_id",oid,1)
+    if own_details:
+        meta=own_details[0].get("metadata") or {}
+        shared_id=meta.get("tegram_shared_terminal_asset_id") if isinstance(meta,dict) else None
+        if shared_id and shared_id != oid:
+            shared_details=_filtered_rows("pc_terminal_details","asset_id",str(shared_id),1)
+            if shared_details:
+                st.markdown("#### Connected shared operating infrastructure")
+                st.caption("Documented consortium infrastructure; not exclusively owned by the selected operating company.")
+                st.write(_object_name("asset",str(shared_id)))
+                cap=shared_details[0].get("capacity") or {}
+                if cap: st.json(cap,expanded=False)
+                shared_berths=_filtered_rows("pc_berth_details","terminal_asset_id",str(shared_id),100)
+                if shared_berths:
+                    st.dataframe(pd.DataFrame([{"Berth":_object_name("asset",str(b.get("asset_id"))),"Code":b.get("berth_code"),"Relationship":"Shared consortium berth"} for b in shared_berths]),hide_index=True,use_container_width=True)
+                    _v2_nav(shared_berths,"Explore shared berth",f"v2_shared_berth_{_norm(oid)}")
+                shared_meta=shared_details[0].get("metadata") or {}
+                rail_id=shared_meta.get("shared_rail_node_asset_id") if isinstance(shared_meta,dict) else None
+                if rail_id:
+                    st.caption("Shared rail reception: "+_object_name("asset",str(rail_id))+" (no track ownership or rail operator inferred)")
+                _v2_nav([{"asset_id":shared_id}],"Explore shared terminal complex",f"v2_shared_terminal_{_norm(oid)}")
     # A parent port's children are authoritative even when graph materialisation lags.
     terminals=_filtered_rows("pc_terminal_details","parent_port_asset_id",oid,500)
     if terminals:
