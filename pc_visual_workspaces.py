@@ -623,7 +623,17 @@ def _render_feature_detail(db, row):
         if actor_ids:actors,actor_names_error=_load(db,'pc_actors',filters=(('actor_id','in',actor_ids),),limit=300)
         st.caption('Actor delivery view is not available yet. Run the actor display SQL to make published actor details readable by the app.')
     vessels,vessel_error=_load(db,'pc_v_event_vessel_links',filters=(('event_id','in',ids),),limit=100)
-    x,y,z=st.columns(3)
+    # Cruise imports store canonical mobile-asset links in the generic event layer.
+    mobile_links,mobile_error=_load(db,'pc_event_links',filters=(('event_id','in',ids),('linked_type','eq','mobile_asset')),limit=500)
+    mobile_ids=tuple(dict.fromkeys(str(l['linked_id']) for l in mobile_links if l.get('linked_id')))
+    ships=[];ship_error=None
+    if mobile_ids:ships,ship_error=_load(db,'pc_mobile_assets',filters=(('mobile_asset_id','in',mobile_ids),),limit=500)
+    vessel_by_id={str(v.get('mobile_asset_id') or v.get('vessel_id') or v.get('imo') or v.get('vessel_name')):v for v in vessels}
+    for ship in ships:
+        vessel_by_id[str(ship['mobile_asset_id'])]=dict(ship,vessel_name=ship.get('name'),vessel_type=ship.get('subtype') or ship.get('asset_type'))
+    vessels=list(vessel_by_id.values())
+    x,y,z,w=st.columns(4)
+    w.metric('Linked vessels',len(vessels) if not mobile_error and not ship_error else 'Unavailable')
     x.metric('Linked infrastructure',len(assets) if not lerr and not aerr else 'Unavailable')
     y.metric('Linked organisations',len(companies) if not cerr and not nerr else 'Unavailable')
     z.metric('Linked actors',len(actors) if not actor_error and not actor_names_error else 'Unavailable')
@@ -662,6 +672,12 @@ def _render_feature_detail(db, row):
     if vessels:
         st.markdown('#### Linked vessels')
         st.dataframe(pd.DataFrame([{'Vessel':v.get('vessel_name'),'IMO':v.get('imo'),'Type':_business_label(v.get('vessel_type'))} for v in vessels]),hide_index=True,use_container_width=True)
+        for ship in ships:
+            if st.button('Open '+str(ship.get('name') or 'ship')+' · IMO '+str(ship.get('imo') or 'not recorded'),key='pc_feature_ship_'+eid+'_'+str(ship['mobile_asset_id'])):
+                _open_below('mobile_asset',ship['mobile_asset_id'],ship.get('name'))
+    elif mobile_error or ship_error:
+        st.caption('Linked vessel details are temporarily unavailable.')
+
     if summary:
         with st.expander('What changed — dated updates'):
             for change in summary:
@@ -738,7 +754,7 @@ def _render_happening_now(db, filters, term):
             tone='#bd862f' if row.get('event_domain')=='weather' else '#468c9b'
             with col:
                 with st.container(border=True):
-                    st.markdown('<div style="border-top:4px solid '+tone+';padding-top:8px"><strong>'+escape(str(row.get('countries') or row.get('location') or 'Global'))+'</strong></div>',unsafe_allow_html=True)
+                    st.markdown('<div style="border-top:4px solid '+tone+';padding-top:8px"><strong>'+escape(str(meta.get('ship_name') or ('Onboard health incident' if 'outbreak' in str(row.get('event_type') or row.get('title') or '').lower() else row.get('countries') or row.get('location') or 'Global')))+'</strong></div>',unsafe_allow_html=True)
                     st.markdown('### '+str(row.get('title') or 'Development'))
                     stamp=pd.to_datetime(row.get('start_date'),utc=True,errors='coerce')
                     date=stamp.tz_convert('Asia/Dubai').strftime('%d %b %Y') if not pd.isna(stamp) else 'Date unrecorded'
