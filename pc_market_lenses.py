@@ -164,6 +164,60 @@ def _strategic_existing_graph(seed_entity_ids: set[str]) -> dict:
     }
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def _global_strategic_ecosystem(asset_id: str, city: str, country: str, direct_ids: tuple[str, ...]) -> dict:
+    """Global, evidence-aware discovery. Geography creates CONTEXT, never ownership.
+
+    Match exact structured city/country only; then traverse explicit shipyard ->
+    participant -> programme -> contract records. No substring company matching.
+    """
+    direct=set(direct_ids)
+    norm=lambda x: core._norm(x or "")
+    city_key,country_key=norm(city),norm(country)
+    candidates=[]
+    if city_key and country_key:
+        # Geography is a separate scope, not evidence of port membership.
+        for a in core._filtered_rows("pc_assets","country",country,5000):
+            aid=_clean(a.get("asset_id"))
+            if aid and aid not in direct and norm(a.get("region_city"))==city_key:
+                candidates.append(a)
+    # Specialist table establishes that a candidate actually is a shipyard.
+    facilities=[]; profiles=[]; seen=set()
+    for a in candidates:
+        aid=_clean(a.get("asset_id"))
+        details=core._filtered_rows("pc_shipyard_details","asset_id",aid,3)
+        if not details and not re.search(r"shipyard|graving dock|naval repair", " ".join(_clean(a.get(k)) for k in ("asset_type","subtype")),re.I):
+            continue
+        if aid in seen: continue
+        seen.add(aid)
+        facilities.append(a)
+        profiles.extend(details)
+    participants=[]; programmes=[]; contracts=[]; capacities=[]
+    for a in facilities:
+        aid=_clean(a.get("asset_id"))
+        participants += core._filtered_rows("pc_defence_programme_participants","shipyard_asset_id",aid,300)
+        capacities += core._filtered_rows("pc_shipyard_capacity_history","shipyard_asset_id",aid,100)
+    # Link programme IDs only from explicit participant rows.
+    programme_ids={_clean(p.get("defence_programme_id")) for p in participants if p.get("defence_programme_id")}
+    for pid in sorted(programme_ids):
+        programmes += core._filtered_rows("pc_defence_programmes","defence_programme_id",pid,3)
+    # Contract linkage must be explicit; do not infer from shipyard/company names.
+    for p in programmes:
+        cid=_clean(p.get("contract_id"))
+        if cid: contracts += core._filtered_rows("pc_contracts","contract_id",cid,3)
+    def uniq(rows,key):
+        out=[];seen=set()
+        for r in rows:
+            k=_clean(r.get(key)) or repr(sorted(r.items(),key=lambda x:x[0]))
+            if k not in seen:out.append(r);seen.add(k)
+        return out
+    return dict(facilities=facilities,profiles=profiles,
+                participants=uniq(participants,"programme_participant_id"),
+                programmes=uniq(programmes,"defence_programme_id"),
+                contracts=uniq(contracts,"contract_id"),
+                capacity=uniq(capacities,"shipyard_capacity_history_id"))
+
+
 def _render_strategic_lens(oid: str, rec: dict):
     dossier=_dossier(oid)
     ids, local = _scope(oid, rec, dossier)
@@ -221,6 +275,23 @@ def _render_strategic_lens(oid: str, rec: dict):
 
     projects=list(dossier.get("projects") or []) if dossier else core._infrastructure_projects(oid, local)
 
+    # Independently discover documented industrial facilities in the SAME structured
+    # locality. They remain geographic/strategic CONTEXT, never port-owned assets.
+    city=_clean(rec.get("region_city"))
+    # Many imported parent ports store the locality in their canonical name.
+    # Only the explicit "Port of X" pattern is used; no loose text proximity.
+    if not city and _clean(rec.get("asset_type")).casefold() in {"port", "port / harbour", "commercial_port"}:
+        match=re.fullmatch(r"Port of ([A-Za-z][A-Za-z .'-]+)",_clean(rec.get("name")).strip(),re.I)
+        if match: city=match.group(1).strip()
+    ecosystem=_global_strategic_ecosystem(str(oid),city,
+                _clean(rec.get("country")),tuple(sorted(ids)))
+    direct_shipyard_ids={_clean(x.get("asset_id")) for x in shipyards}
+    local_programme_ids={_clean(x.get("defence_programme_id")) for x in programmes}
+    local_contract_ids={_clean(x.get("contract_id")) for x in contracts}
+    outside_facilities=[a for a in ecosystem["facilities"] if _clean(a.get("asset_id")) not in ids]
+    outside_programmes=[p for p in ecosystem["programmes"] if _clean(p.get("defence_programme_id")) not in local_programme_ids]
+    outside_contracts=[c for c in ecosystem["contracts"] if _clean(c.get("contract_id")) not in local_contract_ids]
+
     st.markdown("### Strategic Industry")
     st.caption("Defence, shipbuilding, naval/coast-guard infrastructure, programmes, contracts, suppliers and industrial capacity connected to this facility and its commercial network.")
     m = st.columns(5)
@@ -230,6 +301,33 @@ def _render_strategic_lens(oid: str, rec: dict):
     m[3].metric("Contracts", len(contracts))
     m[4].metric("Capacity observations", len(capacity))
 
+    st.caption("Counters above describe the resolved direct/corporate dossier; neighbouring industry is separate and is not automatically port-owned.")
+    if outside_facilities:
+        with st.container(border=True):
+            st.markdown("#### Connected regional industrial ecosystem")
+            st.caption("Matched on recorded country and city, then verified against a shipyard profile or industrial asset classification. Geographic proximity is context, not ownership, operation or port jurisdiction.")
+            st.metric("Additional industrial facilities in recorded locality",len(outside_facilities))
+            for a in outside_facilities[:25]:
+                aid=_clean(a.get("asset_id"))
+                st.markdown("**"+(_clean(a.get("name")) or aid)+"**")
+                st.caption("Relationship to selected asset: geographic context (same recorded city/country); not an established port dependency")
+                st.button("Open facility dossier",key="strat_geo_"+core._norm(oid)+"_"+core._norm(aid),on_click=core._set_context,args=("asset",aid,_clean(a.get("name"))))
+            if outside_programmes:
+                st.markdown("**Programmes linked through explicit shipyard participation**")
+                for p in outside_programmes[:25]:
+                    pid=_clean(p.get("defence_programme_id"))
+                    related=[x for x in ecosystem["participants"] if _clean(x.get("defence_programme_id"))==pid]
+                    names=[_clean(next((a.get("name") for a in outside_facilities if _clean(a.get("asset_id"))==_clean(x.get("shipyard_asset_id"))),x.get("shipyard_asset_id"))) for x in related]
+                    st.markdown("**"+(_clean(p.get("programme_name")) or pid)+"**")
+                    st.caption("Evidence path: recorded locality → " + ", ".join(sorted(set(names))) + " → programme participant → programme. Not counted as a direct port programme.")
+                    _source_button(p,"strat_geo_prog_"+core._norm(oid)+"_"+core._norm(pid))
+            if outside_contracts:
+                with st.expander(f"Explicitly programme-linked contracts ({len(outside_contracts)})"):
+                    for c in outside_contracts[:25]:
+                        st.markdown("**"+(_clean(c.get("contract_name") or c.get("title")) or _clean(c.get("contract_id")))+"**")
+                        st.caption("Contextual contract via an explicitly linked industry programme; not a port contract")
+                        _source_button(c,"strat_geo_contract_"+core._norm(oid)+"_"+core._norm(c.get("contract_id")))
+    # Never present a corporate-wide vessel as physically local to the selected port.
     left, right = st.columns([1.1, 1.0], gap="large")
     with left:
         with st.container(border=True):
@@ -282,7 +380,7 @@ def _render_strategic_lens(oid: str, rec: dict):
     if graph_mobile or legacy.get("orders"):
         with st.container(border=True):
             st.markdown("#### Platforms & Shipbuilding")
-            st.caption(f"{len(graph_mobile)} linked platform(s) · {len(legacy.get('orders') or [])} shipbuilding order(s) identified through company and infrastructure records.")
+            st.caption(f"{len(graph_mobile)} platforms in the extended corporate/strategic graph · {len(legacy.get('orders') or [])} shipbuilding orders. These are NOT necessarily located at, built at, or operated from the selected facility; open a vessel dossier to verify its explicit relationship path.")
             if graph_mobile:
                 rows=[{"Platform":_clean(x.get("name")),"Type":_clean(x.get("asset_type") or x.get("subtype")),"Flag":_clean(x.get("flag")),"IMO":_clean(x.get("imo"))} for x in graph_mobile[:40]]
                 st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
