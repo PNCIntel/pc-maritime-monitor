@@ -1456,6 +1456,15 @@ def _render_evidence_pane(typ: str, oid: str, rec: dict, lens: str):
         except Exception as exc:
             st.caption('Sanctions links unavailable: ' + str(exc)[:140])
 
+    if typ == 'event':
+        connected=_pc_event_graph_objects(oid)
+        vessels=[x for x in connected if x['type']=='mobile_asset']
+        if vessels:
+            st.markdown('##### Directly designated vessels')
+            st.caption('Individual designation links from the sanctions model; not inferred physical event impacts.')
+            st.dataframe(pd.DataFrame([{'Vessel':x['name'],'Asset ID':x['id'],'Relationship':x['relationship']} for x in vessels]),hide_index=True,use_container_width=True)
+            _open_selector(vessels,f'event_sanctions_{oid}','Open vessel')
+
     events=_events_for_object(typ,oid)
     if lens=="strategic":
         events=[e for e in events if STRATEGIC_RX.search(_record_text(e))] or events
@@ -1596,21 +1605,18 @@ def _render_layer2(typ: str, oid: str, rec: dict, lens: str):
             st.dataframe(pd.DataFrame([{k:v for k,v in x.items() if k not in ("type","id")} for x in rows]), hide_index=True, use_container_width=True)
             _open_selector(rows, f"l2_corridor_companies_{oid}")
     elif typ == "event":
-        links = _event_links("event", oid)
-        rows = []
-        for l in links:
-            lt = _clean(l.get("linked_type")).casefold()
-            if lt == "vessel":
-                lt = "mobile_asset"
-            lid = _clean(l.get("linked_id"))
-            if lt in OBJECTS and lid:
-                rows.append({"type":lt,"id":lid,"name":_object_name(lt,lid),"relationship":_clean(l.get("relationship"))})
+        rows = _pc_event_graph_objects(oid)
         if rows:
-            st.markdown("#### Affected / involved objects")
-            st.dataframe(pd.DataFrame([{k:v for k,v in x.items() if k not in ("type","id")} for x in rows]), hide_index=True, use_container_width=True)
-            _open_selector(rows, f"l2_event_links_{oid}")
+            st.markdown("#### Verified connected objects")
+            counts = {}
+            for x in rows: counts[x['type']] = counts.get(x['type'],0)+1
+            st.caption(' · '.join(str(n)+' '+typ.replace('_',' ') for typ,n in counts.items()))
+            st.dataframe(pd.DataFrame([{'Object':x['name'],'Type':x['type'],
+                       'Relationship':x['relationship'],'Evidence ID':x['evidence']} for x in rows]),
+                       hide_index=True,use_container_width=True)
+            _open_selector(rows, f"l2_event_graph_{oid}", "Open connected object")
         else:
-            st.caption("No canonical object links are recorded for this event yet.")
+            st.caption("No directly linked canonical objects are recorded. This does not imply no geographic exposure.")
 
 
 def _render_layer3(typ: str, oid: str, rec: dict, lens: str):
@@ -2781,6 +2787,44 @@ def _display_location(row: dict) -> str:
             return _clean(v)
     return ""
 
+def _pc_event_graph_objects(event_id: str) -> list[dict]:
+    """Global production event links + specialist sanctions graph (no inferred edges)."""
+    out=[]; seen=set()
+    def add(typ, oid, relationship, evidence=''):
+        if not oid or (typ,oid,relationship) in seen: return
+        seen.add((typ,oid,relationship))
+        out.append({'type':typ,'id':oid,'name':_object_name(typ,oid),
+                    'relationship':relationship,'evidence':evidence})
+    for l in _filtered_rows('pc_event_entity_links','event_id',event_id,500):
+        details=(l.get('metadata') or {}).get('specific_relationship') or l.get('role') or 'participant'
+        add('entity',_clean(l.get('entity_id')),details,_clean(l.get('source_id')))
+    for l in _filtered_rows('pc_event_asset_links','event_id',event_id,500):
+        details=(l.get('metadata') or {}).get('specific_relationship') or l.get('relation_type') or 'linked asset'
+        add('asset',_clean(l.get('asset_id')),details,_clean(l.get('source_id')))
+    # The roster lives in pc_mobile_assets and sanctions tables, not pc_assets.
+    rec=object_record('event',event_id) or {}
+    meta=_meta(rec)
+    roster_prefix=meta.get('sanctions_roster_prefix')
+    if event_id == 'EV_JP_35_VESSEL_SANCTIONS_20261002':
+        roster_prefix='JP-MOFA-20261002-IMO-'
+    if roster_prefix:
+        try:
+            q=_sb().table('pc_sanctions_designations').select('sanctions_designation_id,source_external_id,source_id').like('source_external_id',str(roster_prefix)+'%').limit(500).execute().data or []
+            for d in q:
+                for l in _filtered_rows('pc_sanctions_links','sanctions_designation_id',d['sanctions_designation_id'],20):
+                    if l.get('linked_type')=='mobile_asset' and l.get('is_direct_designation') is True:
+                        add('mobile_asset',_clean(l.get('linked_id')),'direct sanctions designation',_clean(l.get('source_id') or d.get('source_id')))
+        except Exception as exc:
+            st.caption('Sanctions roster lookup unavailable: '+str(exc)[:130])
+    # Preserve legacy links when present, without mistaking an index for ownership.
+    for l in _filtered_rows('pc_event_links','event_id',event_id,500):
+        typ=_clean(l.get('linked_type')).lower()
+        if typ=='vessel': typ='mobile_asset'
+        if typ in OBJECTS:
+            add(typ,_clean(l.get('linked_id')),_clean(l.get('relationship')) or 'legacy event link',_clean(l.get('source_id')))
+    return out
+
+
 def _event_links(typ: str, oid: str) -> list[dict]:
     linked_type = "mobile_asset" if typ == "mobile_asset" else typ
     if typ == "event":
@@ -2788,35 +2832,37 @@ def _event_links(typ: str, oid: str) -> list[dict]:
     return _filtered_rows("pc_event_links", "linked_id", str(oid), 500)
 
 def _events_for_object(typ: str, oid: str) -> list[dict]:
-    if typ == "event":
-        rec = object_record("event", oid)
+    """Resolve event exposure from both current production links and the legacy index."""
+    if typ == 'event':
+        rec=object_record('event',oid)
         return [rec] if rec else []
-    if typ=="entity":
-        bundle=_entity_identity_bundle(str(oid))
-        links=[]
-        seen_links=set()
-        for eid in bundle.get("ids") or [str(oid)]:
-            for l in _event_links("entity",eid):
-                lk=_clean(l.get("event_link_id")) or repr((l.get("event_id"),l.get("linked_id"),l.get("relationship")))
-                if lk not in seen_links:
-                    seen_links.add(lk); links.append(l)
-    else:
-        links = _event_links(typ, oid)
-    out = []
-    seen = set()
-    for l in links:
-        if _norm(l.get("linked_type")) not in {_norm(typ), "vessel" if typ == "mobile_asset" else _norm(typ)}:
-            continue
-        eid = _clean(l.get("event_id"))
-        if not eid or eid in seen:
-            continue
-        seen.add(eid)
-        ev = object_record("event", eid)
+    ids=(_entity_identity_bundle(str(oid)).get('ids') or [str(oid)]) if typ=='entity' else [str(oid)]
+    found={}
+    def put(eid,rel):
+        if not eid or eid in found: return
+        ev=object_record('event',eid)
         if ev:
-            e = dict(ev)
-            e["_relationship"] = l.get("relationship")
-            out.append(e)
-    return sorted(out, key=lambda x: _clean(x.get("start_date")), reverse=True)
+            found[eid]={**ev,'_relationship':rel}
+    for item_id in ids:
+        table,column=(('pc_event_entity_links','entity_id') if typ=='entity' else
+                      ('pc_event_asset_links','asset_id') if typ=='asset' else (None,None))
+        if table:
+            for l in _filtered_rows(table,column,item_id,500):
+                detail=(l.get('metadata') or {}).get('specific_relationship') or l.get('role') or l.get('relation_type')
+                put(_clean(l.get('event_id')),detail)
+        for l in _event_links(typ,item_id):
+            if _norm(l.get('linked_type')) not in {_norm(typ),'vessel' if typ=='mobile_asset' else _norm(typ)}: continue
+            put(_clean(l.get('event_id')),_clean(l.get('relationship')))
+        # Vessel-level sanction designations have their own table and are not pc_assets.
+        if typ=='mobile_asset':
+            try:
+                for l in _filtered_rows('pc_sanctions_links','linked_id',item_id,500):
+                    if l.get('linked_type')!='mobile_asset' or l.get('is_direct_designation') is not True: continue
+                    d=_filtered_rows('pc_sanctions_designations','sanctions_designation_id',l.get('sanctions_designation_id'),1)
+                    if d and _clean(d[0].get('source_external_id')).startswith('JP-MOFA-20261002-IMO-'):
+                        put('EV_JP_35_VESSEL_SANCTIONS_20261002','individual Japanese sanctions designation')
+            except Exception: pass
+    return sorted(found.values(),key=lambda x:_clean(x.get('start_date')),reverse=True)
 
 def _relationships(typ: str, oid: str) -> list[dict]:
     """Read canonical edges first; supplement them with specialist index links."""
@@ -5548,7 +5594,6 @@ def render_terminal(lens: str = "trade"):
             "intelligence":[
                 ("Operating Picture",""),("Priority Intelligence","security"),
                 ("Regional / Chokepoints","corridor"),("Security & Maritime","maritime security"),
-                ("Actors & Networks","__actors__"),
                 ("Disruptions","disruption"),("Sanctions","sanction"),
                 ("Monitoring & Indicators","monitoring"),
                 ("Report Studio","__report_studio__"),
@@ -5687,10 +5732,6 @@ def render_terminal(lens: str = "trade"):
             _render_publication_workspace(sb,lens,"library")
         elif workspace=="__sanctions_report__":
             _render_sanctions_query_report(sb)
-        elif workspace=="__actors__":
-            from pc_actor_workspace import render_actor_workspace
-            import sys
-            render_actor_workspace(sb,sys.modules[__name__])
         return
 
     st.markdown("<div class='pc-command'><div class='pc-k'>GLOBAL SEARCH</div>", unsafe_allow_html=True)
