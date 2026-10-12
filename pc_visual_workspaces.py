@@ -609,10 +609,16 @@ def _render_feature_detail(db, row):
     if entity_ids:companies,nerr=_load(db,'pc_entities',columns='entity_id,name',filters=(('entity_id','in',entity_ids),),limit=300)
     evidence,eerr=_load(db,'pc_event_evidence',filters=(('event_id','in',ids),),order=(('published_at',True),),limit=500)
     if lerr or cerr or eerr:st.caption('Some linked details are temporarily unavailable.')
-    actor_links,actor_error=_load(db,'pc_event_actor_links',filters=(('event_id','in',ids),),limit=300)
-    actor_ids=tuple(dict.fromkeys(x['actor_id'] for x in actor_links if x.get('actor_id')))
+    delivered,delivery_error=_load(db,'pc_v_intelligence_actor_details',filters=(('event_id','in',ids),),limit=300)
     actors=[];actor_names_error=None
-    if actor_ids:actors,actor_names_error=_load(db,'pc_actors',filters=(('actor_id','in',actor_ids),),limit=300)
+    if not delivery_error:
+        actor_links=delivered;actor_error=None
+        actors=list({a['actor_id']:a for a in delivered if a.get('actor_id')}.values())
+    else:
+        actor_links,actor_error=_load(db,'pc_event_actor_links',filters=(('event_id','in',ids),),limit=300)
+        actor_ids=tuple(dict.fromkeys(x['actor_id'] for x in actor_links if x.get('actor_id')))
+        if actor_ids:actors,actor_names_error=_load(db,'pc_actors',filters=(('actor_id','in',actor_ids),),limit=300)
+        st.caption('Actor delivery view is not available yet. Run the actor display SQL to make published actor details readable by the app.')
     vessels,vessel_error=_load(db,'pc_v_event_vessel_links',filters=(('event_id','in',ids),),limit=100)
     x,y,z=st.columns(3)
     x.metric('Linked infrastructure',len(assets) if not lerr and not aerr else 'Unavailable')
@@ -634,10 +640,18 @@ def _render_feature_detail(db, row):
             actor=choices[selected_actor]
             if actor.get('description'):st.write(actor['description'])
             st.caption(_business_label(actor.get('actor_class'))+' · '+str(actor.get('primary_country') or ''))
-            aliases,alias_error=_load(db,'pc_actor_aliases',filters=(('actor_id','eq',selected_actor),),limit=50)
-            if aliases:st.write('Also known as: '+', '.join(str(a.get('alias')) for a in aliases if a.get('alias')))
+            if 'aliases' in actor:
+                aliases=actor.get('aliases') or []
+            else:
+                alias_rows,alias_error=_load(db,'pc_actor_aliases',filters=(('actor_id','eq',selected_actor),),limit=50)
+                aliases=[a.get('alias') for a in alias_rows if a.get('alias')]
+            if aliases:st.write('Also known as: '+', '.join(str(a) for a in aliases))
+    elif actor_error or actor_names_error:
+        st.info('Actor details could not be read for this briefing. The database links may still exist.')
     elif meta.get('actor_names'):
         st.caption('Actors mentioned in the record: '+', '.join(str(n) for n in meta['actor_names'])+'. Canonical actor links require review.')
+    else:
+        st.caption('No actors are linked to this briefing. Weather and commercial briefings may have companies and facilities without security actors.')
     if vessels:
         st.markdown('#### Linked vessels')
         st.dataframe(pd.DataFrame([{'Vessel':v.get('vessel_name'),'IMO':v.get('imo'),'Type':_business_label(v.get('vessel_type'))} for v in vessels]),hide_index=True,use_container_width=True)
