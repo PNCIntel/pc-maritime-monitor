@@ -585,39 +585,69 @@ def _render_feature_detail(db, row):
     if row.get('description'):st.write(row['description'])
     if row.get('operational_impact'):st.markdown('**Why it matters:** '+str(row['operational_impact']))
     summary=[]
-    if row.get('event_domain')=='weather':
-        root_id=row.get('parent_event_id') or eid
-        stories,err=_load(db,'pc_v_weather_infrastructure_alerts',filters=(('event_id','eq',root_id),),limit=1)
+    root_id=row.get('parent_event_id') or eid
+    meta=row.get('metadata') or {}
+    if meta.get('briefing') or row.get('event_domain')=='weather':
+        view='pc_v_operating_briefings' if meta.get('briefing') else 'pc_v_weather_infrastructure_alerts'
+        stories,err=_load(db,view,filters=(('event_id','eq',root_id),),limit=1)
         if stories:
-            story=stories[0]
-            summary=story.get('developments') or []
-            if story.get('qualitative_disruption_level'):
-                st.caption('P&C disruption judgment: '+str(story['qualitative_disruption_level'])+' · '+_business_label(story.get('recovery_direction')))
-            st.caption('Research snapshot: '+str(story.get('as_known_at') or 'date unrecorded')+'. Check current notices before relying on operating status.')
-            if story.get('monitoring_priorities'):
-                with st.expander('What to watch next',expanded=True):
-                    for item in story['monitoring_priorities']:st.write('• '+str(item))
-        elif err:st.caption('The consolidated weather briefing will appear after the weather SQL package is loaded.')
-    ids=tuple(dict.fromkeys([eid]+[x['event_id'] for x in summary if x.get('event_id')]))
+            story=stories[0];summary=story.get('developments') or []
+            st.caption('Research snapshot: '+str(story.get('as_known_at') or 'date unrecorded')+'. Dates and operating status remain specific to each notice.')
+        elif err:st.caption('Linked briefing updates will appear after the corresponding SQL package is loaded.')
+    priorities=meta.get('monitoring_priorities') or (story.get('monitoring_priorities') if 'story' in locals() else [])
+    if priorities:
+        with st.expander('What would change this assessment?',expanded=True):
+            for item in priorities:st.write('• '+str(item))
+    ids=tuple(dict.fromkeys([root_id,eid]+[x['event_id'] for x in summary if x.get('event_id')]))
     links,lerr=_load(db,'pc_event_asset_links',filters=(('event_id','in',ids),),limit=500)
-    assets=[]
+    assets=[];aerr=None
     asset_ids=tuple(dict.fromkeys(x['asset_id'] for x in links if x.get('asset_id')))
     if asset_ids:assets,aerr=_load(db,'pc_assets',filters=(('asset_id','in',asset_ids),),limit=500)
     entities,cerr=_load(db,'pc_event_entity_links',filters=(('event_id','in',ids),),limit=300)
-    companies=[]
+    companies=[];nerr=None
     entity_ids=tuple(dict.fromkeys(x['entity_id'] for x in entities if x.get('entity_id')))
     if entity_ids:companies,nerr=_load(db,'pc_entities',columns='entity_id,name',filters=(('entity_id','in',entity_ids),),limit=300)
     evidence,eerr=_load(db,'pc_event_evidence',filters=(('event_id','in',ids),),order=(('published_at',True),),limit=500)
     if lerr or cerr or eerr:st.caption('Some linked details are temporarily unavailable.')
-    x,y=st.columns(2)
-    x.metric('Linked facilities',len(assets));y.metric('Linked organisations',len(companies))
+    actor_links,actor_error=_load(db,'pc_event_actor_links',filters=(('event_id','in',ids),),limit=300)
+    actor_ids=tuple(dict.fromkeys(x['actor_id'] for x in actor_links if x.get('actor_id')))
+    actors=[];actor_names_error=None
+    if actor_ids:actors,actor_names_error=_load(db,'pc_actors',filters=(('actor_id','in',actor_ids),),limit=300)
+    vessels,vessel_error=_load(db,'pc_v_event_vessel_links',filters=(('event_id','in',ids),),limit=100)
+    x,y,z=st.columns(3)
+    x.metric('Linked infrastructure',len(assets) if not lerr and not aerr else 'Unavailable')
+    y.metric('Linked organisations',len(companies) if not cerr and not nerr else 'Unavailable')
+    z.metric('Linked actors',len(actors) if not actor_error and not actor_names_error else 'Unavailable')
     if companies:st.write('**Organisations:** '+', '.join(str(c.get('name')) for c in companies if c.get('name')))
+    if not assets and not lerr and not aerr:st.caption('No infrastructure links are recorded for this development. This does not mean there are no facilities in the area.')
+    if actors:
+        with st.expander('Actors, roles and attribution',expanded=True):
+            names={a['actor_id']:a.get('canonical_name') or a.get('short_name') for a in actors}
+            st.dataframe(pd.DataFrame([{'Actor':names.get(link.get('actor_id'),'Name unavailable'),'Role':_business_label(link.get('actor_role')),
+                'Attribution':_business_label(link.get('attribution_status')),'Basis':link.get('link_basis')} for link in actor_links]),hide_index=True,use_container_width=True)
+            st.caption('A referenced or associated actor is not a confirmed perpetrator. Attribution is shown for each link.')
+            choices={a['actor_id']:a for a in actors}
+            signature=tuple(choices)
+            if st.session_state.get('pc_feature_actor_signature')!=signature:
+                st.session_state['pc_feature_actor']=next(iter(choices));st.session_state['pc_feature_actor_signature']=signature
+            selected_actor=st.selectbox('Read an actor profile',list(choices),format_func=lambda key:str(names[key]),key='pc_feature_actor')
+            actor=choices[selected_actor]
+            if actor.get('description'):st.write(actor['description'])
+            st.caption(_business_label(actor.get('actor_class'))+' · '+str(actor.get('primary_country') or ''))
+            aliases,alias_error=_load(db,'pc_actor_aliases',filters=(('actor_id','eq',selected_actor),),limit=50)
+            if aliases:st.write('Also known as: '+', '.join(str(a.get('alias')) for a in aliases if a.get('alias')))
+    elif meta.get('actor_names'):
+        st.caption('Actors mentioned in the record: '+', '.join(str(n) for n in meta['actor_names'])+'. Canonical actor links require review.')
+    if vessels:
+        st.markdown('#### Linked vessels')
+        st.dataframe(pd.DataFrame([{'Vessel':v.get('vessel_name'),'IMO':v.get('imo'),'Type':_business_label(v.get('vessel_type'))} for v in vessels]),hide_index=True,use_container_width=True)
     if summary:
         with st.expander('What changed — dated updates'):
             for change in summary:
                 stamp=pd.to_datetime(change.get('date'),utc=True,errors='coerce')
                 date=stamp.tz_convert('Asia/Dubai').strftime('%d %b %Y') if not pd.isna(stamp) else 'Date unrecorded'
-                st.markdown('**'+date+' · '+str(change.get('title') or 'Update')+'**')
+                scheduled=(change.get('metadata') or {}).get('status')=='scheduled'
+                st.markdown('**'+('Scheduled: ' if scheduled else '')+date+' · '+str(change.get('title') or 'Update')+'**')
                 st.write(change.get('description') or '')
                 if change.get('operational_impact'):st.caption(change['operational_impact'])
                 url=change.get('source_url')
@@ -635,7 +665,8 @@ def _render_feature_detail(db, row):
             st.caption('Daily regional survey snapshots; percentages are not cumulative losses or damage rates.')
     if assets:
         with st.expander('Ports, airports and other infrastructure',expanded=True):
-            st.dataframe(pd.DataFrame([{'Facility':a.get('name'),'Type':_business_label(a.get('asset_type')),'Location':a.get('region_city') or a.get('country')} for a in assets]),hide_index=True,use_container_width=True)
+            st.dataframe(pd.DataFrame([{'Facility':a.get('name'),'Type':_business_label(a.get('asset_type')),'Location':a.get('region_city') or a.get('country'),
+                'Link to this briefing':'; '.join(dict.fromkeys('Regional context — no facility impact established' if (l.get('metadata') or {}).get('location_basis')=='regional_context' else _business_label(l.get('relation_type'))+' / '+_business_label(l.get('impact_status')) for l in links if l.get('asset_id')==a['asset_id']))} for a in assets]),hide_index=True,use_container_width=True)
             choices={a['asset_id']:a for a in assets}
             signature=tuple(choices)
             if st.session_state.get('pc_feature_asset_signature')!=signature:
@@ -645,7 +676,7 @@ def _render_feature_detail(db, row):
             mapped=[dict(a,name=a.get('name')) for a in assets if _coordinate(a)]
             if mapped:
                 _geo_map(mapped,height=320)
-                st.caption('Verified facility reference points. These markers do not identify storm damage locations.')
+                st.caption('Verified facility reference points. These markers do not establish incident impact locations.')
     with st.expander('Evidence and source links'):
         for observation in evidence:
             st.write(observation.get('claim') or '')
@@ -860,6 +891,7 @@ def render_home(db,core,lens):
     if lens=='trade':return _trade(db,core)
     if lens=='intelligence':return _security(db,core)
     raise ValueError('Unsupported P&C workspace '+str(lens))
+
 
 
 
