@@ -4874,7 +4874,7 @@ def _render_global_specialist_infrastructure(oid: str, rec: dict):
         st.caption("These records have an explicit parent-port specialist reference, independent of generic relationship-index refresh.")
 
 
-def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
+def _render_infrastructure_legacy(oid: str, rec: dict, lens: str):
     name=_object_name("asset",oid)
     dossier=_asset_dossier_rpc(oid)
     local=_dossier_local(dossier) if dossier else _local_infrastructure(rec)
@@ -5098,6 +5098,154 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
 
     with st.expander("Structured data / developer view"):
         st.json(rec)
+
+
+
+
+# GLOBAL INFRASTRUCTURE DOSSIER 2.0. Same canonical model for every geography.
+def _v2_source_url(row: dict) -> str:
+    """Do not present a metadata URL as a registered source ID."""
+    url = _clean(row.get("source_url") or _meta(row).get("source_url") or _meta(row).get("location_source_url"))
+    if not url and row.get("source_id"):
+        found = _filtered_rows("pc_sources", "source_id", str(row["source_id"]), 1)
+        if found: url = _clean(found[0].get("url"))
+    return url if url.startswith(("https://", "http://")) else ""
+
+
+def _v2_nav(rows: list[dict], label: str, key: str, typ: str="asset"):
+    if not rows: st.caption("Not recorded in the currently linked dataset."); return
+    options=[]; seen=set()
+    for r in rows:
+        oid=_clean(r.get("asset_id") or r.get("id") or r.get("entity_id") or r.get("mobile_asset_id"))
+        if not oid or oid in seen: continue
+        seen.add(oid)
+        nm=_clean(r.get("name")) or _object_name(typ,oid)
+        options.append((oid,nm))
+    if not options: st.caption("No navigable canonical identities resolved."); return
+    choice=st.selectbox(label,range(len(options)),format_func=lambda i:options[i][1],key=key)
+    if st.button("Open dossier",key=key+"_go"):
+        oid,nm=options[choice]; _set_context(typ,oid,nm); st.rerun()
+
+
+def _v2_infrastructure(oid: str, rec: dict):
+    st.markdown("#### Physical infrastructure")
+    _render_global_specialist_infrastructure(oid,rec)
+    # A parent port's children are authoritative even when graph materialisation lags.
+    terminals=_filtered_rows("pc_terminal_details","parent_port_asset_id",oid,500)
+    if terminals:
+        st.markdown("#### Terminal directory")
+        data=[]
+        for t in terminals:
+            aid=_clean(t.get("asset_id"))
+            data.append({"Terminal":_object_name("asset",aid),"Type":_clean(t.get("terminal_type")),"Berths":t.get("berth_count"),"ID":aid})
+        st.dataframe(pd.DataFrame(data),hide_index=True,use_container_width=True)
+        _v2_nav([{"asset_id":t.get("asset_id")} for t in terminals],"Explore terminal",f"v2_child_{_norm(oid)}")
+    berths=_filtered_rows("pc_berth_details","terminal_asset_id",oid,200)
+    if berths:
+        _v2_nav([{"asset_id":b.get("asset_id")} for b in berths],"Explore berth",f"v2_berth_{_norm(oid)}")
+    if not terminals and not berths and not _filtered_rows("pc_terminal_details","asset_id",oid,1) and not _filtered_rows("pc_berth_details","asset_id",oid,1):
+        st.info("Specialist physical profile not recorded yet; this is a coverage gap, not confirmation of zero facilities.")
+
+
+def _v2_network(oid: str, rec: dict):
+    st.markdown("#### Geographic and operational connections")
+    _render_map_for_asset(rec)
+    linked=_linked_objects_from_relationships("asset",oid)
+    local=_local_infrastructure(rec)
+    links=[]; seen=set()
+    for x in local+linked:
+        k=(x.get("type"),x.get("id"),x.get("relationship"))
+        if k in seen: continue
+        seen.add(k)
+        links.append({"Record":_clean(x.get("name")),"Type":_clean(x.get("type")),"Recorded relationship":_clean(x.get("relationship") or x.get("family")) or "Not specified","Canonical ID":_clean(x.get("id"))})
+    if links:
+        st.dataframe(pd.DataFrame(links),hide_index=True,use_container_width=True)
+        _v2_nav([x for x in local+linked if x.get("type")=="asset"],"Explore infrastructure",f"v2_net_{_norm(oid)}")
+    else: st.caption("No explicit connected infrastructure returned; geographic proximity alone is not treated as a relationship.")
+    routes=_infrastructure_routes(oid)
+    if routes:
+        st.markdown("#### Recorded transport routes / services")
+        _render_infrastructure_routes(routes,oid)
+    else: st.caption("No route/service linked in the current read path; not a claim that transport services do not exist.")
+
+
+def _v2_companies(oid: str, rec: dict):
+    st.markdown("#### Ownership, operation and capital")
+    companies=_asset_companies(rec)
+    if companies:
+        st.dataframe(pd.DataFrame([{"Company":c["name"],"Recorded role":c.get("role") or "Linked","ID":c["id"]} for c in companies]),hide_index=True,use_container_width=True)
+        _v2_nav([{"entity_id":c["id"],"name":c["name"]} for c in companies],"Explore organisation",f"v2_company_{_norm(oid)}",typ="entity")
+    else: st.info("No owner/operator relationship is resolved in the current graph. Do not interpret this as unowned.")
+    st.caption("Ownership, management, operation, concession and investment must remain distinct; nearby companies are not inferred owners.")
+
+
+def _v2_projects(oid: str, rec: dict):
+    st.markdown("#### Capacity, projects and time-valid observations")
+    facts=_facility_fact_rows(rec)
+    if facts is not None and len(facts): st.dataframe(facts,hide_index=True,use_container_width=True)
+    projects=_infrastructure_projects(oid,_local_infrastructure(rec))
+    if projects:
+        rows=[]
+        for p in projects:
+            rows.append({"Project":_clean(p.get("_project_name") or p.get("name") or p.get("scope_description"))[:140],"Stage":_clean(p.get("project_stage")),"Completion target":_clean(p.get("expected_completion_date")),"Source":_v2_source_url(p)})
+        st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True,column_config={"Source":st.column_config.LinkColumn("Source")})
+    elif facts is None or not len(facts): st.info("Capacity/projects not recorded. Missing coverage is shown as 'Not recorded', not zero.")
+
+
+def _v2_developments(oid: str, rec: dict):
+    st.markdown("#### Developments and risk")
+    events=_events_for_object("asset",oid)
+    if events: _render_event_rows(events,"v2_development_"+_norm(oid),20)
+    else: st.info("No directly linked developments returned. This is not a determination that no incident occurred.")
+    st.caption("A nearby incident is contextual unless an explicit impact relationship links it to this asset.")
+
+
+def _v2_evidence(oid: str, rec: dict):
+    st.markdown("#### Evidence and identity")
+    fields={"Canonical ID":oid,"Asset type":_clean(rec.get("asset_type")),"Subtype":_clean(rec.get("subtype")),"Record status":_clean(rec.get("record_status")),"Data quality":_clean(rec.get("data_quality")),"Source ID":_clean(rec.get("source_id")),"Updated":_clean(rec.get("updated_at"))}
+    st.dataframe(pd.DataFrame([{"Field":k,"Recorded value":v or "Not recorded"} for k,v in fields.items()]),hide_index=True,use_container_width=True)
+    url=_v2_source_url(rec)
+    if url: st.link_button("Open asset evidence",url)
+    docs=_related_table("pc_documents",oid,_object_name("asset",oid),40)
+    for i,d in enumerate(docs):
+        st.markdown("**"+(_clean(d.get("title")) or "Document")+"**")
+        u=_v2_source_url(d)
+        if u: st.link_button("Open source",u,key=f"v2_docs_{_norm(oid)}_{i}")
+    if not docs: st.caption("No additional linked documents found in this read path.")
+    with st.expander("Canonical record / developer view"): st.json(rec)
+
+
+def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
+    """Global adaptive Trade dossier; retain prior renderer as a rollback option."""
+    kind=_clean(rec.get("asset_type") or "Infrastructure").replace("_"," ").title()
+    st.caption("GLOBAL INFRASTRUCTURE DOSSIER 2.0 · " + kind)
+    options=["Overview","Infrastructure","Network & Services","Companies & Capital","Projects & History","Developments & Risk","Evidence","Classic dossier"]
+    section=st.selectbox("Explore dossier", options, key="pc_global_dossier_v2_"+_norm(oid), help="Only the selected section runs its specialist queries.")
+    if section=="Classic dossier": return _render_infrastructure_legacy(oid,rec,lens)
+    if section=="Overview":
+        left,right=st.columns([1,1.15],gap="large")
+        with left:
+            st.markdown("#### Identity and operating purpose")
+            facts=_asset_fact_pairs(rec)
+            if facts: st.dataframe(pd.DataFrame(facts,columns=["Attribute","Recorded value"]),hide_index=True,use_container_width=True)
+            desc=_company_display_value(rec.get("description"),rec.get("notes"),rec.get("strategic_role"))
+            if desc: st.write(desc)
+            companies=_asset_companies(rec)
+            st.markdown("#### Responsible organisations")
+            if companies: st.write(" · ".join(c["name"]+" ("+_clean(c.get("role") or "linked")+")" for c in companies[:8]))
+            else: st.caption("Not recorded in the current relationship path.")
+        with right:
+            st.markdown("#### Location")
+            _render_map_for_asset(rec)
+        st.markdown("#### Technical profile")
+        _render_global_specialist_infrastructure(oid,rec)
+        st.caption("Open the sections above for full berth inventory, connectivity, companies, projects and evidence. Unrecorded fields are not counted as confirmed zeros.")
+    elif section=="Infrastructure": _v2_infrastructure(oid,rec)
+    elif section=="Network & Services": _v2_network(oid,rec)
+    elif section=="Companies & Capital": _v2_companies(oid,rec)
+    elif section=="Projects & History": _v2_projects(oid,rec)
+    elif section=="Developments & Risk": _v2_developments(oid,rec)
+    elif section=="Evidence": _v2_evidence(oid,rec)
 
 
 def _render_institution_terminal(oid: str, rec: dict, lens: str):
