@@ -4452,19 +4452,19 @@ def _render_port_operator_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("entity",oid)
     profiles=_company_profile_rows(oid)
     p=profiles[0] if profiles else {}
-    roles=_company_asset_roles(oid)
+    from pc_company_footprint import collect_network
+    network=collect_network(__import__('pc_terminal'),oid)
     footprint=[]
-    for r in roles:
-        aid=_clean(r.get("asset_id"))
-        if not aid: continue
-        arec=object_record("asset",aid) or {}
-        blob=" ".join([_clean(arec.get("asset_type")),_clean(arec.get("subtype")),_clean(arec.get("name"))]).casefold()
-        if any(t in blob for t in ("port","terminal","berth","dry port","container","harbour","harbor","jetty","wharf")):
-            footprint.append({
-                "type":"asset","id":aid,"name":_asset_chip(aid),
-                "relationship":_clean(r.get("asset_role")),
-                "country":_clean(arec.get("country")),"region":_clean(arec.get("region_city")),
-            })
+    for node in network['nodes']:
+        if node['type']!='asset':continue
+        aid=node['id'];arec=network['records'].get(('asset',aid),{})
+        blob=" ".join(str(arec.get(k) or '') for k in ('asset_type','subtype','name')).casefold()
+        if any(t in blob for t in ('port','terminal','berth','harbour','harbor','jetty','wharf')):
+            links=[e for e in network['edges'] if e['target']==aid and e['source_type']=='entity']
+            via=list(dict.fromkeys((network['records'].get(('entity',e['source']),{}).get('name') or '') for e in links))
+            footprint.append({'type':'asset','id':aid,'name':node['name'],
+                'relationship':', '.join(x for x in via if x) or 'Linked infrastructure',
+                'country':arec.get('country') or '', 'region':arec.get('region_city') or ''})
     corporate=[x for x in _linked_objects_from_relationships("entity",oid) if x.get("type")=="entity"]
     corridors=_company_corridors(oid)
     portfolio=_portfolio(oid)
@@ -4495,21 +4495,23 @@ def _render_port_operator_terminal(oid: str, rec: dict, lens: str):
     m=st.columns(6)
     m[0].metric("Ports / terminals",len(footprint))
     m[1].metric("Countries",len(countries))
-    m[2].metric("Corridors",len(corridors))
-    m[3].metric("Portfolio positions",len(portfolio))
-    m[4].metric("Capital actions",len(tx))
+    m[2].metric("Linked vessels",sum(n['type']=='mobile_asset' for n in network['nodes']))
+    m[3].metric("Group companies",max(0,len(network['members'])-1))
+    m[4].metric("Corridors",len(corridors))
     m[5].metric("Developments",len(events))
+    st.caption("Recorded footprint across the company and its linked subsidiaries. Counts describe our database coverage, not the group's published global totals.")
+    if network['truncated']:st.warning("The company traversal reached its limit; the footprint shown may be incomplete.")
 
     left,right=st.columns([1.0,1.45],gap="large")
     with left:
         with st.container(border=True):
-            st.markdown("### Operator Profile")
+            st.markdown("### About the company")
             desc=_company_display_value(p.get("business_description"),rec.get("description"))
             if desc: st.write(desc)
             facts=[
                 ("Sector / role",_company_display_value(p.get("sector"),rec.get("sector"),rec.get("entity_type"))),
                 ("Headquarters",", ".join(x for x in [_clean(rec.get("hq_city")),_clean(rec.get("hq_country"))] if x)),
-                ("Countries in mapped footprint",", ".join(countries[:12])),
+                ("Countries with linked infrastructure",", ".join(countries[:12])),
                 ("Website",_company_display_value(p.get("website_url"),rec.get("website_url"))),
             ]
             for label,value in facts:
@@ -4520,12 +4522,12 @@ def _render_port_operator_terminal(oid: str, rec: dict, lens: str):
                         unsafe_allow_html=True
                     )
         with st.container(border=True):
-            st.markdown("### Corporate / Concession Network")
+            st.markdown("### Companies and partnerships")
             _render_company_relationship_cards(corporate,f"portop_network_{_norm(oid)}",12)
 
     with right:
         with st.container(border=True):
-            st.markdown("### Port & Terminal Footprint")
+            st.markdown("### Ports and terminals across the group")
             mapped=[]
             for x in footprint:
                 pnt=_asset_point(x.get("id"))
@@ -4536,7 +4538,7 @@ def _render_port_operator_terminal(oid: str, rec: dict, lens: str):
 
         if corridors:
             with st.container(border=True):
-                st.markdown("### Corridor Exposure")
+                st.markdown("### Connected trade corridors")
                 for i,r in enumerate(corridors[:12]):
                     ck=_clean(r.get("corridor_key")); nm=_object_name("corridor",ck)
                     cols=st.columns([3.2,1.4,1.0])
@@ -5565,3 +5567,4 @@ def render_terminal(lens: str = "trade"):
     with st.expander("Developer / raw canonical record"):
         st.caption("Internal diagnostic view. Normal analyst workflow should not require raw IDs or JSON.")
         st.json(rec)
+
