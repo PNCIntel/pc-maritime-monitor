@@ -102,18 +102,15 @@ def render_network(nodes, edges, root_id: str, key_prefix: str, open_callback=No
             f'fill="none" stroke="#eef1f5" stroke-width="1"/>'
         )
 
-    st.html(
-        f'<div style="overflow:auto;border:1px solid #e5e7eb;border-radius:10px;padding:8px;background:white;">'
-        f'<div style="font-size:12px;color:#6b7280;margin:.15rem 0 .5rem 0;">{legend}</div>'
-        f'<svg width="100%" height="{height}" viewBox="0 0 {width} {height}" preserveAspectRatio="xMidYMid meet" '
-        f'xmlns="http://www.w3.org/2000/svg">{"".join(ring_parts)}{"".join(edge_parts)}{"".join(node_parts)}</svg></div>'
-    )
+    from pc_company_footprint import render_graph
+    display_nodes=[dict(n,type='entity' if n.get('kind')=='company' else 'asset') for n in nodes]
+    render_graph(display_nodes,edges,root_id,height=680)
 
     if open_callback:
         company_nodes = [n for n in nodes if n.get("kind") == "company" and str(n["id"]) != str(root_id)]
         if company_nodes:
             labels = {f"{n['name']} · {n.get('subtype') or 'company'}": str(n["id"]) for n in company_nodes}
-            selected = st.selectbox("Open company from visual network", [""] + list(labels.keys()), key=f"{key_prefix}_select")
+            selected = st.selectbox("Choose a company to explore", [""] + list(labels.keys()), key=f"{key_prefix}_select")
             if selected:
                 target = labels[selected]
                 target_node = next(n for n in company_nodes if str(n["id"]) == target)
@@ -123,3 +120,4 @@ def render_network(nodes, edges, root_id: str, key_prefix: str, open_callback=No
                     on_click=open_callback,
                     args=("entity", target, target_node.get("name") or target),
                 )
+
