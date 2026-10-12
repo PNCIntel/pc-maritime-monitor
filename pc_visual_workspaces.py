@@ -120,27 +120,83 @@ def _trade(db, core):
                 left,right=st.columns([5,1]);left.write('**'+str(r.get('name'))+'**')
                 if right.button('Explore',key='v4_company_'+str(r.get('object_id'))):_open(core,'entity',r.get('object_id'),r.get('name'))
     with tabs[0]:
-        st.subheader('Latest trade developments')
-        st.caption('Production events, newest first. Includes historical developments and links to their full dossiers.')
-        term=st.text_input('Find developments',key='v4_developments_search')
-        updates,err=_load(db,'pc_events',filters=(('trade_visible','eq',True),),search=term,
-                          search_columns=('title','description'),limit=30,
-                          order=(('start_date',True),('event_id',False)))
-        if err:
-            st.error('Recent developments could not be loaded.');st.caption(err)
-        elif not updates:
-            st.info('No visible production events match this search.')
-        seen=set()
-        for row in updates:
-            eid=row.get('event_id')
-            if not eid or eid in seen:continue
-            seen.add(eid)
-            with st.container(border=True):
-                st.markdown('**'+str(row.get('title') or 'Development')+'**')
-                st.caption(str(row.get('start_date') or '')[:10])
-                if row.get('description'):st.write(str(row['description'])[:550])
-                st.caption(' · '.join(str(row.get(k)) for k in ('event_domain','event_type','status') if row.get(k)))
-                if st.button('Read development',key='v4_dev_'+str(eid)):_open(core,'event',eid,row.get('title'))
+        st.subheader('Commercial developments')
+        st.caption('Follow infrastructure investment, shipping transactions and changes to operating capacity.')
+        find,scope_col,period_col=st.columns([2,2,1])
+        term=find.text_input('Find developments',key='v4_developments_search',placeholder='Paranagua, methanol, Star Bulk…')
+        coverage=scope_col.selectbox('Coverage',['Commercial & infrastructure','All trade developments','Upcoming milestones'],key='pc_trade_feed_scope')
+        period=period_col.selectbox('Time window',['Last 30 days','Last 7 days','Last 12 months','All history'],key='pc_trade_feed_period')
+        now=dt.datetime.now(dt.timezone.utc)
+        filters=[('trade_visible','eq',True)]
+        if coverage=='Upcoming milestones':
+            filters.extend([('start_date','gte',now.isoformat()),('start_date','lte',(now+dt.timedelta(days=90)).isoformat())])
+        else:
+            filters.append(('start_date','lte',now.isoformat()))
+            days={'Last 30 days':30,'Last 7 days':7,'Last 12 months':365}.get(period)
+            if days:filters.append(('start_date','gte',(now-dt.timedelta(days=days)).isoformat()))
+            if coverage=='Commercial & infrastructure':filters.append(('event_type','eq','commercial_development'))
+        signature=(term,coverage,period)
+        if st.session_state.get('pc_trade_feed_signature')!=signature:
+            st.session_state['pc_trade_feed_page']=1
+            st.session_state['pc_trade_feed_signature']=signature
+        page=st.number_input('Developments page',min_value=1,max_value=100000,key='pc_trade_feed_page')
+        updates,err=_load(db,'pc_events',filters=tuple(filters),search=term,
+            search_columns=('title','description','location','countries'),limit=PAGE_SIZE+1,offset=(page-1)*PAGE_SIZE,
+            order=(('start_date',coverage!='Upcoming milestones'),('event_id',False)))
+        if err:st.error('Commercial developments could not be loaded.');st.caption(err);return
+        has_more=len(updates)>PAGE_SIZE
+        updates=list({r['event_id']:r for r in updates[:PAGE_SIZE] if r.get('event_id')}.values())
+        ids=tuple(r['event_id'] for r in updates)
+        evidence=[];vessels=[];company_links=[];companies=[]
+        if ids:
+            evidence,eerr=_load(db,'pc_event_evidence',filters=(('event_id','in',ids),),limit=300)
+            vessels,verr=_load(db,'pc_v_event_vessel_links',filters=(('event_id','in',ids),),limit=100)
+            company_links,cerr=_load(db,'pc_event_entity_links',filters=(('event_id','in',ids),),limit=300)
+            company_ids=tuple({x['entity_id'] for x in company_links if x.get('entity_id')})
+            if company_ids:companies,nerr=_load(db,'pc_entities',columns='entity_id,name',filters=(('entity_id','in',company_ids),),limit=300)
+            if eerr or verr or cerr:st.caption('Some supporting details could not be retrieved.')
+        names={r['entity_id']:r.get('name') for r in companies}
+        x,y,z=st.columns(3)
+        x.metric('Developments on page',len(updates))
+        y.metric('Linked companies',len(names))
+        z.metric('Linked vessels',len({v.get('mobile_asset_id') for v in vessels if v.get('mobile_asset_id')}))
+        if coverage=='Upcoming milestones':st.caption('Scheduled dates over the next 90 days. These are future milestones, not completed developments; the time-window selector applies to historical coverage.')
+        else:st.caption('Current and historical developments through today. Future calendar dates are available under Upcoming milestones.')
+        if not updates:st.info('No developments match this selection. Try All trade developments or a wider time window.')
+        for i in range(0,len(updates),2):
+            cells=st.columns(2)
+            for cell,row in zip(cells,updates[i:i+2]):
+                eid=row['event_id'];meta=row.get('metadata') or {}
+                with cell:
+                    with st.container(border=True):
+                        stamp=pd.to_datetime(row.get('start_date'),utc=True,errors='coerce')
+                        date=stamp.tz_convert('Asia/Dubai').strftime('%d %b %Y') if not pd.isna(stamp) else 'Date unrecorded'
+                        stage=meta.get('stage') or row.get('status')
+                        st.caption(date+(' · '+_business_label(stage) if stage else ''))
+                        st.markdown('### '+str(row.get('title') or 'Development'))
+                        if row.get('description'):st.write(row['description'])
+                        impact=row.get('commercial_impact') or row.get('operational_impact')
+                        st.markdown('**Why it matters**')
+                        st.write(impact or 'Commercial implications have not yet been assessed.')
+                        linked_names=list(dict.fromkeys(names[x['entity_id']] for x in company_links if x.get('event_id')==eid and names.get(x.get('entity_id'))))
+                        if linked_names:st.markdown('**Companies:** '+', '.join(linked_names))
+                        linked_vessels=[v for v in vessels if v.get('event_id')==eid]
+                        for v in linked_vessels:
+                            st.caption('Vessel: '+str(v.get('vessel_name') or 'Name unavailable')+' · IMO '+str(v.get('imo') or 'Unrecorded'))
+                        st.caption('Evidence: '+_business_label(row.get('verification_status')))
+                        observations=[e for e in evidence if e.get('event_id')==eid]
+                        urls=list(dict.fromkeys(str(e['original_url']) for e in observations if str(e.get('original_url') or '').startswith(('http://','https://'))))
+                        if not urls and str(meta.get('source_url') or '').startswith(('http://','https://')):urls=[meta['source_url']]
+                        if urls:st.link_button('Read principal source',urls[0])
+                        with st.expander('Evidence and additional sources'):
+                            for e in observations:
+                                st.write(e.get('claim') or '')
+                                st.caption(_business_label(e.get('verification_status')))
+                            for j,url in enumerate(urls[1:]):st.link_button('Additional source '+str(j+1),url)
+                            if not observations:st.write('No separate evidence observations recorded.')
+                        if st.button('Explore development below',key='v4_dev_'+str(eid)):_open_below('event',eid,row.get('title'))
+        if has_more:st.caption('More developments available on the next page.')
+        _render_related_below(db,core)
 
 
 def _assessment_freshness(row):
