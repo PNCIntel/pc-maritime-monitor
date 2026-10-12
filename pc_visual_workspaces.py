@@ -536,6 +536,25 @@ def _render_weekly(db,core):
     if st.button('Show evidence below briefing',key='pc_week_open'):
         _open_below('event',item['event_id'],item['Development'])
 
+def _airport_choices(rows, airport_details):
+    """Collapse display duplicates; preserve distinct ICAO identities and all database records."""
+    codes={str(r.get('asset_id')):str(r.get('icao_code') or '').strip().upper() for r in airport_details}
+    grouped={}
+    for row in rows:
+        meta=row.get('metadata') or {}
+        canonical=meta.get('canonicalization') or {}
+        if canonical.get('action') in ('merged_alias','merged','alias'):continue
+        if canonical.get('canonical_asset_id') and str(canonical['canonical_asset_id'])!=str(row.get('asset_id')):continue
+        code=codes.get(str(row.get('asset_id'))) or str(meta.get('icao_code') or '').strip().upper()
+        name=''.join(c for c in str(row.get('name') or '').casefold() if c.isalnum())
+        key=('icao',code) if code else ('name',str(row.get('country') or '').casefold(),name)
+        rank=(canonical.get('action')=='survivor',_coordinate(row) is not None,
+              row.get('record_status')=='approved',bool(code),bool(row.get('source_id')))
+        candidate=dict(row,icao_code=code)
+        existing=grouped.get(key)
+        if existing is None or rank>existing[0]:grouped[key]=(rank,candidate)
+    return [value[1] for value in grouped.values()]
+
 def _security(db,core):
     st.caption('POWER & CORRIDORS  /  SECURITY & DISRUPTIONS')
     st.title('Global Operating Picture')
@@ -605,7 +624,12 @@ def _security(db,core):
             search_columns=('name','region_city','subtype'),
             filters=(('asset_type','ilike','%airport%'),),
             order=(('name',False),('asset_id',False)),limit=100)
-        airports=[dict(r,object_id=r.get('asset_id')) for r in airports]
+        loaded_airports=len(airports)
+        airport_ids=tuple(str(r['asset_id']) for r in airports if r.get('asset_id'))
+        details=[]
+        if airport_ids:
+            details,detail_error=_load(db,'pc_airports',columns='asset_id,icao_code',filters=(('asset_id','in',airport_ids),),limit=100)
+        airports=[dict(r,object_id=r.get('asset_id')) for r in _airport_choices(airports,details)]
         if airport_error:
             st.warning('Airport infrastructure could not be loaded.')
             with st.expander('Airport connection details'): st.caption(airport_error)
@@ -625,13 +649,13 @@ def _security(db,core):
         else:
             st.info('No usable coordinates in these incident or airport results. Try another airport search.')
         st.caption('Teal: airport infrastructure matching the airport search. Red: incident locations or linked facility context on the current incident page. Infrastructure markers do not establish an exact strike location.')
-        st.caption(f'{len(airports)} airport records loaded · {sum(_coordinate(r) is not None for r in airports)} with coordinates. Airport search is independent of incident pagination.')
+        st.caption(f'{len(airports)} distinct airports · {sum(_coordinate(r) is not None for r in airports)} with coordinates. Airport search is independent of incident pagination.')
         if airports:
             choices={str(r['object_id']):r for r in airports if r.get('object_id')}
             if choices:
                 if st.session_state.get('pc_map_airport_choice') not in choices:
                     st.session_state['pc_map_airport_choice']=next(iter(choices))
-                chosen=st.selectbox('Airport dossier',list(choices),format_func=lambda key:str(choices[key].get('name')),key='pc_map_airport_choice')
+                chosen=st.selectbox('Airport dossier',list(choices),format_func=lambda key:str(choices[key].get('name'))+(' · '+choices[key]['icao_code'] if choices[key].get('icao_code') else ''),key='pc_map_airport_choice')
                 if st.button('Explore airport',key='pc_map_open_airport'):
                     _open_below('asset',chosen,choices[chosen].get('name'))
 
