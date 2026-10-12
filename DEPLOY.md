@@ -1,20 +1,9 @@
-# P&C Loader Reconciliation v8 (repair stage 1)
+# P&C Riyadh canonical data + UI integrated repair
 
-Run `01_hormuz_repair.sql` in Supabase SQL editor. It creates an independent **review ledger** with 11 Hormuz assessment observations, explicitly marking five second-job records as repeated imports. Six unique source keys are distinct review cases, **not yet six independently confirmed attacks**. Three 29 September keys remain anonymous until source-to-vessel attribution is verified. This script **does not update or delete source assessments, canonical events, risk ratings or linked data**.
+1. Run `01_riyadh_graph_quality_ONE_RUN.sql` in Supabase and inspect its JSON report. No destructive merge, no new airport.
+2. Copy four `.py` files alongside the existing application modules, replacing the three same-named modules. Preserve your entry point and `pc_terminal.py`.
+3. Redeploy Streamlit. In Intelligence or Trade, open the canonical airport `PC_SA26_AP_OERK` through an explicit linked-event facility Open control.
+4. In its embedded dossier, inspect dated operational and security developments, then toggle the airport event lens. The three global Intelligence lenses remain unchanged.
+5. Confirm historical incidents, restriction notices and 12 Oct airline exposure remain *separate* events. Check NOTAM expiry is labelled reported, not reopening. The duplicate-looking ASSET_8DCF... remains subject to stewardship.
 
-Run `02_global_repeat_review.sql` to expose database-wide repeated content candidates. The view is diagnostic and does not merge identical text from potentially distinct incidents.
-
-## Manual approval gate
-1. Verify the six source observations against individual incident documents, notices, vessel identities and dates. Use the link sources listed in the ledger.
-2. Check for existing canonical `pc_events` entries and linked vessel/facility records. Never create a duplicate canonical event.
-3. Only then assign `linked_event_id`, source-specific vessel identity and mark `review_status='reviewed'` in the ledger, with `reviewed_by` and `reviewed_at`. Do not edit underlying assessments unless the provenance is preserved and the source relation has been verified.
-4. Do not count unapproved review cases or repeated imports as additional incident-frequency evidence. The existing v7 scoring function is **not yet repaired** for geographic resolution or repeated source-event identity. Do not publish its output as approved regional threat ratings.
-
-### Expected output
-Case roles: five `repeat_import`, three `ambiguous_distinct_case`, three `primary_observation` (one 14 Sep, two other source cases). If any are missing, review the source ingestion and don't approve mappings.
-
-## Global loader hardening next
-- A durable, unique source-observation identity should use provider/document identifier, source publication reference, external source record ID where durable, and a revision fingerprint; `input:n` alone is only batch-local.
-- Separate multiple incidents within a single article by stable victim asset/date/location identifiers and preserve attribution status.
-- Keep source observation, canonical event, and versioned assessment as separate linked objects.
-- Enforce a publication gate: no assessed event can be counted in independent regional incident frequency without confirmed canonical identity, credible date and geographical evidence. Trade and Security read the same approved canonical event but show distinct facets.
+Caveats: Query-based UI tested by syntax compilation only, not live Streamlit. The UI's event lens is a presentation grouping over source-labelled event types, not a new canonical classification. Existing metadata attribution for GSA remains confidential: do not expose the original report beyond authorised viewers. This package does not perform database-wide deduplication or reconcile secondary airport record into the canonical id.

@@ -427,7 +427,16 @@ def _render_related_below(db,core):
         for key,label in [('country','Country'),('hq_country','Headquarters country'),('region_city','Location'),('entity_type','Organisation type'),('asset_type','Infrastructure type'),('status','Status')]:
             if rec.get(key):facts.append({'Detail':label,'Value':_business_label(rec[key]) if key.endswith('_type') or key=='status' else str(rec[key])})
         if facts:st.dataframe(pd.DataFrame(facts),hide_index=True,use_container_width=True)
-        if typ=='asset':_render_airport_infrastructure(db,oid)
+        if typ=='asset':
+            _render_airport_infrastructure(db,oid)
+            # Global infrastructure dossiers: only actual graph-linked airport events.
+            asset_kind=str(rec.get('asset_type') or '').lower()
+            if 'airport' in asset_kind and 'facility' not in asset_kind:
+                try:
+                    from pc_airport_event_dossier import render_airport_event_dossier
+                    render_airport_event_dossier(db,oid)
+                except Exception as exc:
+                    st.caption('Airport event dossier unavailable: '+str(exc))
         if not rec:st.info('The overview record could not be retrieved. The full dossier may have additional detail.')
         url=rec.get('website') or rec.get('source_url')
         if isinstance(url,str) and url.startswith(('https://','http://')):st.link_button('Visit supporting website',url)
