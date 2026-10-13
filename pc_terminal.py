@@ -1068,6 +1068,18 @@ def _coords_from_record(rec: dict) -> tuple[float,float] | None:
 def _asset_point(asset_id: str) -> dict | None:
     rec=object_record("asset",asset_id) or {}
     xy=_coords_from_record(rec)
+    if not xy and _clean(rec.get("asset_type"))=="airport":
+        meta=_meta(rec)
+        for key in ("pc_uae_facilities_20261012","saudi_aviation_update04_20261012","pc_aviation_profile_20261013"):
+            profile=meta.get(key) or {}
+            if not isinstance(profile,dict): continue
+            xy=_coords_from_record(profile)
+            if not xy and isinstance(profile.get("published_arp"),list) and len(profile["published_arp"])==2:
+                try:
+                    lat,lon=map(float,profile["published_arp"])
+                    if -90<=lat<=90 and -180<=lon<=180: xy=(lat,lon)
+                except (TypeError,ValueError): pass
+            if xy: break
     if not xy:
         return None
     return {
@@ -1114,6 +1126,19 @@ def _event_spatial_context(rec: dict, oid: str) -> tuple[list[dict],list[dict]]:
                 if ct=="asset" and ci:
                     p=_asset_point(ci)
                     if p: pts.append(p)
+
+    # Production event-to-asset edges may exist before the generic relationship index refreshes.
+    for link in _filtered_rows("pc_event_asset_links","event_id",str(oid),500):
+        aid=_clean(link.get("asset_id"))
+        if not aid: continue
+        meta=link.get("metadata") or {}
+        role=_clean(meta.get("aviation_role") or meta.get("specific_relationship") or link.get("relation_type"))
+        k=("asset",aid)
+        if k not in seen:
+            seen.add(k)
+            objs.append({"type":"asset","id":aid,"name":_object_name("asset",aid),"relationship":role})
+        p=_asset_point(aid)
+        if p: pts.append(p)
 
     # Named places provide context, not inferred infrastructure exposure.
     loc=_display_location(rec)
