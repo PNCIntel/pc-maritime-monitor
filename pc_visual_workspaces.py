@@ -335,12 +335,9 @@ def _render_pc_assessments(db,core,term):
 
 
 def _open_below(typ,oid,title):
-    current=st.session_state.get('pc_brief_related')
-    if current and (current['type'],current['id'])!=(str(typ),str(oid)):
-        history=st.session_state.setdefault('pc_brief_related_history',[])
-        history.append(current)
-        del history[:-30]
-    st.session_state['pc_brief_related']={'type':str(typ),'id':str(oid),'title':str(title or 'Related record')}
+    """Open the actual canonical dossier at the top, not an appended bottom panel."""
+    from pc_terminal import _set_context
+    _set_context(str(typ),str(oid),str(title or 'Related record'))
     st.rerun()
 
 
@@ -870,34 +867,35 @@ def _security(db,core):
     k1.metric('Developments on page',len(incidents))
     k2.metric('Mapped incident locations on page',sum(_coordinate(r) is not None for r in incidents))
     k3.metric('Linked vessels on page',len({r.get('mobile_asset_id') for r in vessel_links if r.get('mobile_asset_id')}))
-    # Situation-level discovery reads canonical events, not the manually selected board.
-    if lens in (INTEL_LENSES[0],INTEL_LENSES[2]):
-        with st.expander('India electoral-roll protests · related events',expanded=False):
-            sid='SIT-IND-ELECTORAL-ROLL-PROTESTS-202610'
-            st.caption('Related by reviewed situation metadata; this does not imply shared organisers or operational coordination.')
-            ids=(
-                'EV_IN_MUMBAI_ELECTORAL_ROLL_PROTEST_20261002',
-                'EV_IN_BENGALURU_ELECTORAL_ROLL_PROTEST_20261008',
-                'EV_IN_DELHI_ELECTORAL_ROLL_DETENTIONS_20261010',
-                'EV_CA_MONTREAL_INDIA_SOLIDARITY_20261010',
-                'EV_CA_VANCOUVER_INDIA_SOLIDARITY_20261011',
-                'EV_IN_DELHI_VOTER_ROLL_PROTEST_20261012',
-            )
-            related,error=_load(db,'pc_events',filters=(('event_id','in',ids),),limit=50)
+    # Situation discovery is generic, not a permanently pinned country-specific card.
+    with st.expander('Explore linked situations',expanded=False):
+        situation_rows=[]
+        for offset in range(0,3000,500):
+            batch,error=_load(db,'pc_events',
+                filters=(('intelligence_visible','eq',True),),
+                order=(('start_date',True),('event_id',False)),limit=500,offset=offset)
             if error:
-                st.warning('Situation members could not be loaded.')
-            else:
-                members=sorted((r for r in related if (r.get('metadata') or {}).get('situation_id')==sid),
-                    key=lambda r:str(r.get('start_date') or ''))
-                st.caption(str(len(members))+' source-backed canonical events linked to this situation.')
-                for i,r in enumerate(members):
-                    a,b=st.columns([6,1])
-                    a.markdown('**'+str(r.get('start_date') or '')[:10]+' · '+str(r.get('title') or 'Development')+'**')
-                    a.caption(str(r.get('record_status') or 'Unclassified')+' · '+str(r.get('verification_status') or 'Verification pending'))
-                    if b.button('Open',key='india_situation_'+str(i)):
-                        _open_below('event',r['event_id'],r.get('title'))
-                if not members:
-                    st.info('No reviewed situation membership is currently returned by the database.')
+                st.caption('Situation index is temporarily unavailable.')
+                break
+            situation_rows.extend(r for r in batch if isinstance(r.get('metadata'),dict) and r['metadata'].get('situation_id'))
+            if len(batch)<500:break
+        situations={}
+        for entry in situation_rows:
+            sid=str(entry['metadata']['situation_id'])
+            situations.setdefault(sid,[]).append(entry)
+        if situations:
+            selected=st.selectbox('Situation',sorted(situations),
+                key='pc_intel_situation_selection')
+            members=sorted(situations[selected],key=lambda r:str(r.get('start_date') or ''))
+            st.caption(str(len(members))+' linked canonical records. Shared situation membership does not establish common organisers or coordination.')
+            for i,item in enumerate(members):
+                left,right=st.columns([6,1])
+                left.markdown('**'+str(item.get('start_date') or '')[:10]+' · '+str(item.get('title') or 'Development')+'**')
+                left.caption(str(item.get('record_status') or 'Unclassified')+' · '+str(item.get('verification_status') or 'Verification pending'))
+                if right.button('Open dossier',key='pc_situation_member_'+str(i)):
+                    _open(core,'event',item['event_id'],item.get('title'))
+        else:
+            st.caption('No linked situations were returned in the current index.')
     tnow,t2,tweek,t1,tmap=st.tabs(['Happening now','Risk briefing','Weekly escalation','Incidents & developments','Incident map'])
     with tnow:
         _render_happening_now(db,filters,term,lens)
