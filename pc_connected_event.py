@@ -146,14 +146,14 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         st.write(headline)
     st.caption(
         f"Event verification: {_label(record.get('verification_status'))} · "
-        f"Canonical status: {_label(record.get('record_status'))} · "
+        f"Record status: {_label(record.get('record_status'))} · "
         "Source and claim review are distinct from identity resolution."
     )
 
     left, right = st.columns([1.2, 1], gap="large")
     with left:
-        st.markdown("#### Connected history")
         if related:
+            st.markdown("#### Related developments")
             for i, (link, other) in enumerate(related):
                 with st.container(border=True):
                     st.caption(f"{_date(other.get('start_date'))} · {_label(link.get('relationship_type'))} · {_label(link.get('claim_status'))}")
@@ -166,8 +166,6 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                         st.caption("Shared identity/association only; causation NOT established.")
                     st.button("Open connected event →", key=f"connected_event_{event_id}_{i}", on_click=navigate,
                               args=("event", str(other["event_id"]), str(other.get("title") or "")))
-        else:
-            st.caption("No canonical event-to-event links recorded yet.")
 
         st.markdown("#### Development timeline")
         if updates:
@@ -186,8 +184,8 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
             st.write(record["commercial_impact"])
 
     with right:
-        st.markdown("#### Vessel identity")
         if vessel:
+            st.markdown("#### Vessel identity")
             with st.container(border=True):
                 st.markdown(f"**{vessel.get('name') or vessel_id}** · IMO {vessel.get('imo') or 'unresolved'}")
                 names = vessel_meta.get("former_names") or []
@@ -211,12 +209,9 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                         if company.get("entity_id"):
                             st.button("Open organisation →", key=f"connected_company_{event_id}_{i}",
                                       on_click=navigate, args=("entity", str(company["entity_id"]), str(company.get("name") or "")))
-        else:
-            st.caption("No resolved vessel linked to this event.")
 
-        st.markdown("#### Infrastructure & affected services")
-        if not (asset_links or rail_disruptions or rail_runs):
-            st.caption("No direct infrastructure or service-impact records linked to this event.")
+        if asset_links or rail_disruptions or rail_runs:
+            st.markdown("#### Infrastructure & affected services")
         for i, link in enumerate(asset_links):
             aid = str(link.get("asset_id") or "")
             asset = assets.get(aid) or {}
@@ -243,7 +238,11 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         for i, run in enumerate(rail_runs):
             service_id = str(run.get("transport_service_id") or "")
             service = _one(sb, "pc_transport_services", "service_id", service_id) if service_id else {}
-            st.markdown("**Affected rail service:** " + str(service.get("service_name") or service_id or "recorded service run"))
+            service_meta = _meta(run)
+            display_service = (service.get("service_name") or service.get("name") or service_meta.get("service_name") or service_meta.get("train_name") or "")
+            st.markdown("**Affected rail service:** " + str(display_service or "Recorded passenger or freight service"))
+            if not display_service and service_id:
+                st.caption("Service record: " + service_id)
             st.caption("Run status: " + _label(run.get("service_status")) + " · Verification: " + _label(run.get("verification_status")))
             origin = assets.get(str(run.get("origin_asset_id") or "")) or {}
             destination = assets.get(str(run.get("destination_asset_id") or "")) or {}
@@ -255,8 +254,8 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
             for nid, network in networks.items():
                 st.write("Associated railway network: " + str(network.get("network_name") or nid))
 
-        st.markdown("#### Linked organisations")
         if entity_links:
+            st.markdown("#### Organisations involved")
             for i, link in enumerate(entity_links):
                 entity = _one(sb, "pc_entities", "entity_id", link.get("entity_id"))
                 st.write(f"**{entity.get('name') or link.get('entity_id')}** — {_label(link.get('role'))}")
@@ -264,10 +263,8 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                 if entity.get("entity_id"):
                     st.button("Open organisation →", key=f"connected_incident_org_{event_id}_{i}",
                               on_click=navigate, args=("entity", str(entity["entity_id"]), str(entity.get("name") or "")))
-        else:
-            st.caption("No direct event-organisation links. Historical vessel-company roles are shown separately.")
 
-        st.markdown("#### Spatial confidence")
+        st.markdown("#### Location & confidence")
         if meta.get("location_basis", {}).get("exact_coordinates_confirmed") is False:
             st.caption(str(record.get("location") or "Area only") + " — no verified incident coordinates. No map pin has been inferred.")
         else:
