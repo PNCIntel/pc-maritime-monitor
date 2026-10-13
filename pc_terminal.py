@@ -1291,8 +1291,9 @@ def _render_dossier_pane(typ: str, oid: str, rec: dict, lens: str):
                 st.dataframe(pd.DataFrame(facts),hide_index=True,use_container_width=True)
 
         rels=_linked_objects_from_relationships("entity",oid)
+        ids=set(_entity_identity_bundle(str(oid)).get("ids") or [str(oid)])
         corporate=[x for x in rels if x.get("type")=="entity" and x.get("id") not in ids]
-    corporate=list({str(x.get("id")):x for x in corporate if x.get("id")}.values())
+        corporate=list({str(x.get("id")):x for x in corporate if x.get("id")}.values())
         if corporate:
             st.markdown("##### Corporate network")
             st.dataframe(pd.DataFrame([{"Company":x["name"],"Relationship":x["relationship"]} for x in corporate]),
