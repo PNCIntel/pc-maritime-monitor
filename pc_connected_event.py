@@ -126,24 +126,45 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
             if aid and aid not in assets:
                 assets[aid] = _one(sb, "pc_assets", "asset_id", aid)
     entity_links = _get(sb, "pc_event_entity_links", "event_id", event_id, 200)
+    # Show actual group/banner connections around directly linked organisations.
+    # The partner endpoint may be a corporate parent that is not itself an incident actor.
+    entity_ids = {str(link.get("entity_id")) for link in entity_links if link.get("entity_id")}
+    corporate_edges = []
+    edge_seen = set()
+    for eid in sorted(entity_ids):
+        for side in ("source_id", "target_id"):
+            for edge in _get(sb, "pc_relationships", side, eid, 150):
+                if str(edge.get("source_type") or "").lower() != "entity" or str(edge.get("target_type") or "").lower() != "entity":
+                    continue
+                edge_id = str(edge.get("relationship_id") or "")
+                if edge_id in edge_seen:
+                    continue
+                edge_seen.add(edge_id)
+                parent = _one(sb, "pc_entities", "entity_id", edge.get("source_id"))
+                child = _one(sb, "pc_entities", "entity_id", edge.get("target_id"))
+                if parent and child:
+                    corporate_edges.append((edge, parent, child))
+    corporate_edges.sort(key=lambda item: (str(item[1].get("name")), str(item[2].get("name"))))
     evidence = _get(sb, "pc_event_evidence", "event_id", event_id, 300)
     evidence.sort(key=lambda e: str(e.get("published_at") or ""))
     updates = _get(sb, "pc_event_updates", "event_id", event_id, 200)
     updates.sort(key=lambda u: str(u.get("occurred_at") or u.get("reported_at") or ""))
 
-    st.markdown("### Connected intelligence")
-    headline = str(record.get("description") or "").strip()
+    st.markdown("### Intelligence finding")
+    headline = str(meta.get("executive_summary") or record.get("description") or "").strip()
+    if headline:
+        st.write(headline)
     if related and vessel:
         strongest = related[0][1]
         st.info(
-            f"**Cross-event finding:** {vessel.get('name') or vessel_id} "
+            f"**Connected finding:** {vessel.get('name') or vessel_id} "
             f"(IMO {vessel.get('imo') or 'unresolved'}) also appears in "
             f"**{strongest.get('title') or strongest.get('event_id')}** "
             f"({_date(strongest.get('start_date'))}). "
-            "This is an established database connection, not evidence that one action caused another."
+            "Shared vessel identity does not establish that one action caused another."
         )
-    elif headline:
-        st.write(headline)
+    elif related:
+        st.caption(f"{len(related)} linked developments are available below; their relationship basis is shown individually.")
     st.caption(
         f"Event verification: {_label(record.get('verification_status'))} · "
         f"Record status: {_label(record.get('record_status'))} · "
@@ -211,7 +232,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                                       on_click=navigate, args=("entity", str(company["entity_id"]), str(company.get("name") or "")))
 
         if asset_links or rail_disruptions or rail_runs:
-            st.markdown("#### Infrastructure & affected services")
+            st.markdown("#### Affected infrastructure & services")
         for i, link in enumerate(asset_links):
             aid = str(link.get("asset_id") or "")
             asset = assets.get(aid) or {}
@@ -253,6 +274,24 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         if networks and not rail_disruptions:
             for nid, network in networks.items():
                 st.write("Associated railway network: " + str(network.get("network_name") or nid))
+
+        if corporate_edges:
+            st.markdown("#### Connected business network")
+            st.caption("Recorded group and commercial-banner relationships; not a list of individually affected sites.")
+            for i, (edge, parent, child) in enumerate(corporate_edges):
+                with st.container(border=True):
+                    st.markdown(f"**{parent.get('name')} → {child.get('name')}**")
+                    st.caption(_label(edge.get("relationship_type")) + " · " + _label(edge.get("record_status")))
+                    source = _meta(edge).get("source_url") or edge.get("source_url")
+                    if isinstance(source, str) and source.startswith(("http://", "https://")):
+                        st.link_button("Relationship source ↗", source)
+                    x, y = st.columns(2)
+                    with x:
+                        st.button("Open group →", key=f"business_group_{event_id}_{i}",
+                                  on_click=navigate, args=("entity", str(parent["entity_id"]), str(parent.get("name") or "")))
+                    with y:
+                        st.button("Open business →", key=f"business_banner_{event_id}_{i}",
+                                  on_click=navigate, args=("entity", str(child["entity_id"]), str(child.get("name") or "")))
 
         if entity_links:
             st.markdown("#### Organisations involved")
