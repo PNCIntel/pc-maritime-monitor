@@ -187,21 +187,30 @@ def _collapse_developments(rows):
     return out
 
 @st.cache_data(ttl=45,show_spinner=False)
-def _events(_sb):
-    # Prefer the reviewed publication view because this is where new Power Admin
-    # loads appear after canonical publication. Collapse duplicate canonical siblings
-    # before presenting the analyst feed.
+def _events(_sb, mode="trade"):
+    """Published feed plus explicitly visible canonical events not yet registered there."""
+    published=[]
     try:
-        rows=(_sb.table("pc_v12_live_developments").select("*")
-              .order("start_date",desc=True).limit(400).execute().data or [])
-        if rows: return _collapse_developments(rows)
-    except Exception: pass
-    try:
-        rows=(_sb.table("pc_events").select("*")
-              .order("start_date",desc=True).limit(400).execute().data or [])
-        return _collapse_developments(rows)
+        published=(_sb.table("pc_v12_live_developments").select("*")
+                   .order("start_date",desc=True).limit(400).execute().data or [])
     except Exception:
-        return []
+        pass
+    visibility="trade_visible" if mode=="trade" else "intelligence_visible"
+    canonical=[]
+    try:
+        canonical=(_sb.table("pc_events").select("*").eq(visibility,True)
+                   .order("start_date",desc=True).limit(400).execute().data or [])
+    except Exception:
+        pass
+    ids={_clean(r.get("event_id")) for r in published if r.get("event_id")}
+    additions=[]
+    for r in canonical:
+        eid=_clean(r.get("event_id"))
+        if not eid or eid in ids:
+            continue
+        ids.add(eid)
+        additions.append({**r,"_feed_origin":"visible_canonical"})
+    return _collapse_developments(published+additions)
 
 @st.cache_data(ttl=60,show_spinner=False)
 def _links(_sb,event_id):
@@ -377,6 +386,8 @@ def _event_expander(sb,r,mode,key_prefix="evt"):
     eid=_clean(r.get("event_id"))
     label=f"{date} · {title}" if date else title
     with st.expander(label,expanded=False):
+        if r.get("_feed_origin")=="visible_canonical":
+            st.caption("Canonical visible record · formal publication registration pending. Verification and review status remain unchanged.")
         st.markdown(f'<div class="pc-meta">{typ}{" · "+loc if loc else ""}</div>',unsafe_allow_html=True)
 
         desc=_clean(m.get("what_happened") or r.get("description"))
@@ -518,7 +529,7 @@ def render_operating_picture(mode="trade"):
         render_sidebar_search()
 
     _style(theme)
-    rows=_events(sb)
+    rows=_events(sb,mode)
     st.markdown('<div class="pc-k">POWER & CORRIDORS / OPERATING PICTURE</div>',unsafe_allow_html=True)
     st.title(title)
     st.markdown(f'<div class="pc-sub">{deck}</div>',unsafe_allow_html=True)
