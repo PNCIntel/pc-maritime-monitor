@@ -81,32 +81,105 @@ def render_market_highlights(db, product):
             _map(selected_rows,label='name')
 
 
+def _airport_coordinates(rec):
+    """Use stored airport ARP/profile coordinates; never geocode or invent points."""
+    meta=rec.get('metadata') or {}
+    sources=[rec,meta]
+    for key in ('pc_uae_facilities_20261012','saudi_aviation_update04_20261012','pc_aviation_profile_20261013'):
+        part=meta.get(key)
+        if isinstance(part,dict):
+            sources.append(part)
+            if isinstance(part.get('metadata'),dict):
+                sources.append(part['metadata'])
+    for part in sources:
+        if not isinstance(part,dict):
+            continue
+        for latkey,lonkey in (('latitude','longitude'),('lat','lon'),('lat','lng')):
+            lat=_number(part.get(latkey));lon=_number(part.get(lonkey))
+            if lat is not None and lon is not None and -90<=lat<=90:
+                return lat,lon
+        arp=part.get('published_arp')
+        if isinstance(arp,(list,tuple)) and len(arp)==2:
+            lat=_number(arp[0]);lon=_number(arp[1])
+            if lat is not None and lon is not None and -90<=lat<=90:
+                return lat,lon
+    return None
+
+
+def _event_airport_context(db,event_id):
+    links,err=_query(db,'pc_event_asset_links',eq={'event_id':event_id},limit=200)
+    airports=[]
+    seen=set()
+    for link in links:
+        aid=link.get('asset_id')
+        if not aid or aid in seen:
+            continue
+        rows,_=_query(db,'pc_assets',eq={'asset_id':aid},limit=1)
+        if not rows or rows[0].get('asset_type')!='airport':
+            continue
+        seen.add(aid)
+        rec=rows[0]
+        meta=link.get('metadata') or {}
+        airports.append({
+            'id':aid,'name':rec.get('name') or aid,
+            'iata':meta.get('iata') or (rec.get('metadata') or {}).get('iata') or '',
+            'role':meta.get('aviation_role') or link.get('relation_type') or 'associated',
+            'impact':link.get('impact_status') or 'not assessed',
+            'coordinates':_airport_coordinates(rec)
+        })
+    priority={'origin_airport':0,'scheduled_destination':1,'diversion_airport':2}
+    airports.sort(key=lambda a:priority.get(a['role'],3))
+    return airports,err
+
+
 def render_event_profile(db, event_id: str, product: str) -> bool:
-    """Present full source-backed event profile in the existing application."""
+    """Source-aware event dossier. No inferred flight path or physical impact."""
     rows,err=_query(db,'pc_intel_event_details',eq={'event_id':event_id},limit=1)
     if err or not rows:
-        return False  # Preserve existing working fallback.
+        return False
     e=rows[0]
+    canonical,_=_query(db,'pc_events',eq={'event_id':event_id},limit=1)
+    base=canonical[0] if canonical else {}
     st.caption('SECURITY & DISRUPTIONS' if product=='intelligence' else 'DEVELOPMENT & OPERATIONAL CONTEXT')
     st.title(e.get('title') or 'Development')
-    c1,c2=st.columns(2)
-    c1.metric('Event date',str(e.get('occurred_at') or 'Not recorded')[:10])
-    c2.metric('Classification',str(e.get('event_family') or 'Not classified').replace('_',' '))
+    metrics=st.columns(4)
+    metrics[0].metric('Event date',str(e.get('occurred_at') or base.get('start_date') or 'Not recorded')[:10])
+    metrics[1].metric('Classification',str(e.get('event_family') or 'Not classified').replace('_',' '))
+    metrics[2].metric('Severity',str(base.get('severity') or 'Not classified').replace('_',' ').title())
+    metrics[3].metric('Verification',str(base.get('verification_status') or 'Pending').replace('_',' ').title())
     risk=e.get('source_risk_level');trend=e.get('source_risk_trend')
     if risk or trend:
         st.info('Recorded assessment: '+' · '.join(x for x in [f'Risk: {risk}' if risk else '', f'Trend: {trend}' if trend else ''] if x))
+    else:
+        st.caption('Severity is the recorded incident classification, not a completed analyst threat assessment.')
     st.subheader('What happened')
     narrative=e.get('narrative')
     if narrative:
         st.write(narrative)
     else:
-        st.info('A narrative has not been returned by the delivery view. The original record remains available for review.')
+        st.info('Narrative not returned by the delivery view; the canonical record remains available.')
+
     st.subheader('Location and operational context')
-    _map([e],latitude='latitude_text',longitude='longitude_text')
+    airports,airport_error=_event_airport_context(db,event_id)
+    mapped=[{'lat':a['coordinates'][0],'lon':a['coordinates'][1],'name':a['name']}
+            for a in airports if a['coordinates']]
+    if mapped:
+        st.map(pd.DataFrame(mapped),latitude='lat',longitude='lon',use_container_width=True)
+        st.caption('Airport reference points from stored records. Pins indicate connected infrastructure, not the actual flight track, impact coordinates or airport damage.')
+    else:
+        _map([e],latitude='latitude_text',longitude='longitude_text')
+    if airports:
+        st.dataframe(pd.DataFrame([{
+            'Airport':a['name'],'IATA':a['iata'],
+            'Event role':a['role'].replace('_',' ').title(),
+            'Relationship status':a['impact'],
+            'Mapped ARP':'Yes' if a['coordinates'] else 'Coordinates pending'
+        } for a in airports]),hide_index=True,use_container_width=True)
+    elif airport_error:
+        st.caption('Canonical airport relationships are temporarily unavailable.')
     if e.get('location_label'):
-        st.caption('Recorded location: '+str(e['location_label']))
-    # The production event-link tables are authoritative. Never fabricate an
-    # event-to-company edge by parsing the opening words of a narrative.
+        st.caption('Recorded event location: '+str(e['location_label']))
+
     from pc_event_navigation import render_event_connections
     from pc_terminal import _set_context
     def open_dossier(typ, oid, title):
@@ -114,18 +187,29 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
         st.rerun()
     st.subheader('Connected organisations and infrastructure')
     render_event_connections(db,event_id,open_dossier,key_prefix='event_profile',compact=False)
+
     evidence=e.get('evidence') or []
     st.subheader('Sources and evidence')
     if evidence:
-        for ev in evidence:
-            st.write(ev.get('claim') or 'Source entry')
-            st.caption('Verification: '+str(ev.get('verification') or 'Not classified'))
+        seen=set()
+        for i,ev in enumerate(evidence):
             url=ev.get('url')
+            key=url if url else (ev.get('claim'),ev.get('verification'))
+            if key in seen:
+                continue
+            seen.add(key)
+            publisher=ev.get('publisher') or ev.get('source_name') or 'Source record'
+            st.markdown('**'+str(publisher)+'**')
+            st.caption('Verification: '+str(ev.get('verification') or 'Pending'))
+            claim=ev.get('claim')
+            if claim and claim!=narrative:
+                st.write(claim)
+            elif claim:
+                st.caption('Source-linked event summary; source-specific claims await review.')
             if isinstance(url,str) and url.startswith(('https://','http://')):
-                st.link_button('Read original source',url)
+                st.link_button('Read original source',url,key=f'pc_profile_source_{i}')
     else:
-        canonical,_=_query(db,'pc_events',eq={'event_id':event_id},limit=1)
-        source_id=canonical[0].get('source_id') if canonical else None
+        source_id=base.get('source_id')
         sources,_=_query(db,'pc_sources',eq={'source_id':source_id},limit=1) if source_id else ([],None)
         if sources:
             source=sources[0]
@@ -135,10 +219,9 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
                 st.link_button('Read original source',url)
         else:
             st.caption('Source details are unavailable for this event.')
-    # Optional prepared intelligence / trade layer; existing event dossier stays primary.
     try:
         from pc_event_dual_lens import render_event_lens
-        render_event_lens(db, event_id, product)
+        render_event_lens(db,event_id,product)
     except ImportError:
         pass
     return True
