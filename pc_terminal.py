@@ -2754,7 +2754,7 @@ def _sidebar_nav(lens: str, label: str, query: str=""):
     st.session_state[f"pc_terminal_search_{lens}"]=query
     st.session_state[f"pc_terminal_nav_{lens}"]=label
 
-def _return_intelligence_board():
+def _return_intelligence_board(lens: str = "intelligence"):
     """Return from a dossier without resetting the four selected event cards or filters."""
     _clear_context()
     st.session_state["pc_document_browser"] = False
