@@ -2754,6 +2754,17 @@ def _sidebar_nav(lens: str, label: str, query: str=""):
     st.session_state[f"pc_terminal_search_{lens}"]=query
     st.session_state[f"pc_terminal_nav_{lens}"]=label
 
+def _return_intelligence_board():
+    """Return from a dossier without resetting the four selected event cards or filters."""
+    _clear_context()
+    st.session_state["pc_document_browser"] = False
+    st.session_state["pc_uae_ofac_overlap"] = False
+    st.session_state["pc_terminal_workspace_intelligence"] = ""
+    st.session_state["pc_terminal_nav_intelligence"] = "Operating Picture"
+    # Deliberately preserve pc_feature_choices, pc_feature_count/signature,
+    # pc_intel_lens, v4_s_search/period/page, category and country.
+
+
 def _home_nav(lens: str):
     _clear_context()
     st.session_state['pc_document_browser'] = False
@@ -5914,7 +5925,7 @@ def render_terminal(lens: str = "trade"):
     # Intelligence events use source-aware connected history, not the legacy flat report.
     if typ == "event" and lens == "intelligence":
         from pc_connected_event import render_connected_event
-        render_connected_event(sb, rec, oid, _set_context, _back_context, _home_nav)
+        render_connected_event(sb, rec, oid, _set_context, _back_context, _return_intelligence_board)
         return
 
     # Event sources remain in the dossier; avoid a duplicate intelligence sidebar.
