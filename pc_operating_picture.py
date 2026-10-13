@@ -550,6 +550,34 @@ def render_operating_picture(mode="trade"):
     st.title(title)
     st.markdown(f'<div class="pc-sub">{deck}</div>',unsafe_allow_html=True)
 
+    if mode=="intelligence":
+        with st.expander("Protest & related-development explorer",expanded=False):
+            st.caption("Discover developments by shared issue and chronology. Matches are thematic leads, not verified organisational or causal relationships.")
+            theme=st.selectbox("Situation / theme",[
+                "India election and voter-roll protests",
+                "Pakistan PTI and Khyber Pakhtunkhwa unrest",
+                "All recorded demonstrations and civil unrest",
+            ],key="pc_protest_theme")
+            def protest_matches(row):
+                t=_event_text(row).casefold()
+                if theme.startswith("India"):
+                    return (bool(re.search(r"india|delhi|vancouver|election|voter.roll|gyanesh",t)) and
+                            bool(re.search(r"protest|demonstrat|rally|solidarity|voter.roll|election chief|vote theft",t)))
+                if theme.startswith("Pakistan"):
+                    return (bool(re.search(r"pakistan|peshawar|khyber|islamabad|imran khan|pti",t)) and
+                            bool(re.search(r"protest|demonstrat|emergency|governor rule|detention|unrest|march",t)))
+                return bool(re.search(r"protest|demonstrat|rally|civil unrest|riot|strike|march|sit.in",t))
+            matched=sorted((x for x in rows if protest_matches(x)),
+                           key=lambda x:str(x.get("start_date") or ""),reverse=True)
+            st.caption(str(len(matched))+" matching records in the current operating window, including separately labelled provisional reports.")
+            for i,item in enumerate(matched[:60]):
+                _event_expander(sb,item,mode,"protest_explorer_"+str(i))
+            if theme.startswith("India"):
+                st.caption("A Vancouver solidarity report is a research lead, not a canonical record unless it appears above. Do not infer that the Pakistan emergency is part of the India protest campaign.")
+                st.link_button("CBC Vancouver source","https://www.cbc.ca/news/canada/british-columbia/india-election-protest-vancouver-9.7377872")
+            if not matched:
+                st.info("No matching canonical records in this window. This does not establish that no protests occurred.")
+
     q=st.text_input("Find a development, company, vessel, port, corridor or place",
                     placeholder="Hormuz, AD Ports, Navi Mumbai, CLI, KEZAD, rail, tanker…")
     if q.strip():
