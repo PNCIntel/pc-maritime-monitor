@@ -5914,7 +5914,7 @@ def render_terminal(lens: str = "trade"):
     # Intelligence events use source-aware connected history, not the legacy flat report.
     if typ == "event" and lens == "intelligence":
         from pc_connected_event import render_connected_event
-        render_connected_event(sb, rec, oid, _set_context)
+        render_connected_event(sb, rec, oid, _set_context, _back_context, _home_nav)
         return
 
     # Event sources remain in the dossier; avoid a duplicate intelligence sidebar.
