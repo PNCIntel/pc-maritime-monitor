@@ -188,20 +188,35 @@ def _collapse_developments(rows):
 
 @st.cache_data(ttl=45,show_spinner=False)
 def _events(_sb, mode="trade"):
-    """Published feed plus explicitly visible canonical events not yet registered there."""
-    published=[]
-    try:
-        published=(_sb.table("pc_v12_live_developments").select("*")
-                   .order("start_date",desc=True).limit(400).execute().data or [])
-    except Exception:
-        pass
+    """Recent operating feed: published items plus explicitly lens-visible canonical events.
+
+    Fetch in pages so future Horizon entries and arbitrary 400-row limits do not
+    crowd recent incidents out. Horizon has a separate forward-looking workspace.
+    """
+    now=pd.Timestamp.now(tz="UTC")
+    lower=(now-pd.Timedelta(days=90)).isoformat()
+    upper=(now+pd.Timedelta(days=14)).isoformat()
+
+    def fetch(table, *, visibility=None):
+        out=[]
+        for offset in range(0,3000,500):
+            try:
+                q=(_sb.table(table).select("*")
+                   .gte("start_date",lower).lte("start_date",upper))
+                if visibility:
+                    q=q.eq(visibility,True)
+                batch=(q.order("start_date",desc=True)
+                       .range(offset,offset+499).execute().data or [])
+            except Exception:
+                break
+            out.extend(batch)
+            if len(batch)<500:
+                break
+        return out
+
+    published=fetch("pc_v12_live_developments")
     visibility="trade_visible" if mode=="trade" else "intelligence_visible"
-    canonical=[]
-    try:
-        canonical=(_sb.table("pc_events").select("*").eq(visibility,True)
-                   .order("start_date",desc=True).limit(400).execute().data or [])
-    except Exception:
-        pass
+    canonical=fetch("pc_events",visibility=visibility)
     ids={_clean(r.get("event_id")) for r in published if r.get("event_id")}
     additions=[]
     for r in canonical:
