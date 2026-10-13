@@ -567,7 +567,10 @@ def render_operating_picture(mode="trade"):
                     return (bool(re.search(r"pakistan|peshawar|khyber|islamabad|imran khan|pti",t)) and
                             bool(re.search(r"protest|demonstrat|emergency|governor rule|detention|unrest|march",t)))
                 return bool(re.search(r"protest|demonstrat|rally|civil unrest|riot|strike|march|sit.in",t))
-            matched=sorted((x for x in rows if protest_matches(x)),
+            situation_id="SIT-IND-ELECTORAL-ROLL-PROTESTS-202610" if theme.startswith("India") else ""
+            matched=sorted((x for x in rows if
+                (situation_id and _meta(x).get("situation_id")==situation_id) or protest_matches(x)),
+
                            key=lambda x:str(x.get("start_date") or ""),reverse=True)
             st.caption(str(len(matched))+" matching records in the current operating window, including separately labelled provisional reports.")
             for i,item in enumerate(matched[:60]):
