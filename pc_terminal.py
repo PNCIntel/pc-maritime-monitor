@@ -1169,9 +1169,16 @@ def _render_event_system_map(rec: dict, oid: str):
         if loc:
             st.caption("Location: "+loc)
     elif loc:
-        st.markdown("##### Geographic context")
-        st.write(loc)
-        st.caption("The event has a named location, but no mapped coordinate or connected mapped node is stored yet.")
+        from pc_geographic_context import locality_point
+        geo=locality_point(loc)
+        if geo:
+            st.map(pd.DataFrame([{"lat":geo["lat"],"lon":geo["lon"]}]),latitude="lat",longitude="lon",size=48,use_container_width=True)
+            st.caption("Approximate "+geo["precision"]+" for "+geo["name"]+". This is geographic context, not a verified incident location.")
+            st.link_button("Geographic reference",geo["source"])
+        else:
+            st.markdown("##### Geographic context")
+            st.write(loc)
+            st.caption("No source-backed map coordinate is recorded for this named location.")
     else:
         st.caption("No geographic context has been resolved for this event yet.")
 
