@@ -511,7 +511,8 @@ def _priority_feed(sb,rows,mode,n=10):
         _event_expander(sb,r,mode,f"prio_{i}")
 
 def _recent_feed(sb,rows,mode,n=30):
-    rel=[r for r in rows if _relevant(r,mode)]
+    now=pd.Timestamp.now(tz="UTC")
+    rel=[r for r in rows if _relevant(r,mode) and (_date(r.get("start_date")) is None or _date(r.get("start_date"))<=now)]
     rel.sort(key=lambda r:str(r.get("start_date") or ""),reverse=True)
     for i,r in enumerate(rel[:n]): _event_expander(sb,r,mode,f"recent_{i}")
 
