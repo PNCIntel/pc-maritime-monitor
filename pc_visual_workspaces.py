@@ -478,7 +478,9 @@ _SECURITY_TYPES=frozenset(('ballistic_missile_launch','missile_launch','air_defe
  'weather_disruption','flood','flash_flood','landslide','natural_disaster','port_disruption',
  'airport_disruption','operational_disruption','infrastructure_disruption','road_infrastructure_disruption',
  'transport_infrastructure_disruption','logistics_disruption','rail_disruption','derailment',
- 'supply_chain_disruption','transport_disruption','incident'))
+ 'supply_chain_disruption','transport_disruption','incident','political_protest',
+ 'public_demonstration','political_security_emergency','unruly_passenger_crew_assault',
+ 'overseas_solidarity_demonstration','solidarity_demonstration'))
 _STRATEGIC_TYPES=frozenset(('strategic_infrastructure','strategic_investment','foreign_investment_review',
  'national_security_review','critical_infrastructure_acquisition','supply_risk','commodity_supply_risk'))
 
@@ -868,6 +870,34 @@ def _security(db,core):
     k1.metric('Developments on page',len(incidents))
     k2.metric('Mapped incident locations on page',sum(_coordinate(r) is not None for r in incidents))
     k3.metric('Linked vessels on page',len({r.get('mobile_asset_id') for r in vessel_links if r.get('mobile_asset_id')}))
+    # Situation-level discovery reads canonical events, not the manually selected board.
+    if lens in (INTEL_LENSES[0],INTEL_LENSES[2]):
+        with st.expander('India electoral-roll protests · related events',expanded=False):
+            sid='SIT-IND-ELECTORAL-ROLL-PROTESTS-202610'
+            st.caption('Related by reviewed situation metadata; this does not imply shared organisers or operational coordination.')
+            ids=(
+                'EV_IN_MUMBAI_ELECTORAL_ROLL_PROTEST_20261002',
+                'EV_IN_BENGALURU_ELECTORAL_ROLL_PROTEST_20261008',
+                'EV_IN_DELHI_ELECTORAL_ROLL_DETENTIONS_20261010',
+                'EV_CA_MONTREAL_INDIA_SOLIDARITY_20261010',
+                'EV_CA_VANCOUVER_INDIA_SOLIDARITY_20261011',
+                'EV_IN_DELHI_VOTER_ROLL_PROTEST_20261012',
+            )
+            related,error=_load(db,'pc_events',filters=(('event_id','in',ids),),limit=50)
+            if error:
+                st.warning('Situation members could not be loaded.')
+            else:
+                members=sorted((r for r in related if (r.get('metadata') or {}).get('situation_id')==sid),
+                    key=lambda r:str(r.get('start_date') or ''))
+                st.caption(str(len(members))+' source-backed canonical events linked to this situation.')
+                for i,r in enumerate(members):
+                    a,b=st.columns([6,1])
+                    a.markdown('**'+str(r.get('start_date') or '')[:10]+' · '+str(r.get('title') or 'Development')+'**')
+                    a.caption(str(r.get('record_status') or 'Unclassified')+' · '+str(r.get('verification_status') or 'Verification pending'))
+                    if b.button('Open',key='india_situation_'+str(i)):
+                        _open_below('event',r['event_id'],r.get('title'))
+                if not members:
+                    st.info('No reviewed situation membership is currently returned by the database.')
     tnow,t2,tweek,t1,tmap=st.tabs(['Happening now','Risk briefing','Weekly escalation','Incidents & developments','Incident map'])
     with tnow:
         _render_happening_now(db,filters,term,lens)
