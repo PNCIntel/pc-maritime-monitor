@@ -22,7 +22,7 @@ INTEL_INCLUDE = re.compile(
     r"(attack|missile|drone|projectile|piracy|hijack|boarding|seizure|interdiction|war|conflict|security|"
     r"sanction|smuggl|traffick|fraud|crime|terror|sabotage|strike|protest|riot|closure|disruption|cyber|"
     r"fire|explosion|collision|grounding|casualt|military|naval|airspace|border|election|political|unrest|"
-    r"intelligence|risk|threat)", re.I)
+    r"intelligence|risk|threat|demonstrat|emergency|governor rule|interception|assault|civil disorder|blockade|roadblock)", re.I)
 
 TRADE_PRIORITY = [
     (re.compile(r"(acquisition|investment|capacity|project|facility|agreement|contract|expansion|upgrade|new service|stake|sale|order|terminal|port|airport|rail|logistics)", re.I), 35),
@@ -92,9 +92,9 @@ def _sources(row):
 def _event_text(r):
     m=_meta(r)
     return " ".join(_clean(x) for x in [
-        r.get("title"),r.get("event_type"),r.get("event_domain"),r.get("location"),
-        r.get("description"),r.get("operational_impact"),r.get("commercial_impact"),
-        r.get("commercial_implications"),m.get("why_it_matters"),m.get("assessment")
+        r.get("title"),r.get("event_type"),r.get("event_domain"),r.get("event_family"),r.get("location"),
+        r.get("description"),r.get("what_it_means"),r.get("pc_assessment"),r.get("operational_impact"),r.get("commercial_impact"),
+        r.get("commercial_implications"),m.get("why_it_matters"),m.get("assessment"),m.get("what_happened")
     ] if x)
 
 def _relevant(r,mode):
@@ -568,14 +568,16 @@ def render_operating_picture(mode="trade"):
         st.info("Use the search box above. It searches the current canonical development feed across title, description, impact and location.")
         return
 
-    relevant=[r for r in rows if _relevant(r,mode)]
+    now=pd.Timestamp.now(tz="UTC")
+    relevant=[r for r in rows if _relevant(r,mode) and (_date(r.get("start_date")) is None or _date(r.get("start_date"))<=now)]
+    upcoming=[r for r in rows if _relevant(r,mode) and _date(r.get("start_date")) is not None and _date(r.get("start_date"))>now]
     disruptions=[r for r in relevant if TRADE_DISRUPTION.search(_event_text(r))] if mode=="trade" else [
         r for r in relevant if re.search(r"(disruption|closure|suspend|strike|attack|fire|explosion|collision|grounding|blocked)",_event_text(r),re.I)
     ]
     business=[r for r in relevant if TRADE_BUSINESS.search(_event_text(r))] if mode=="trade" else []
     future=[]
     now=pd.Timestamp.now(tz="UTC")
-    for r in relevant:
+    for r in upcoming:
         d=_date(r.get("start_date"))
         if d is not None and not pd.isna(d) and d>=now and d<=now+pd.Timedelta(days=14):
             future.append(r)
