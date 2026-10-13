@@ -197,7 +197,7 @@ def _trade(db, core):
                                 st.caption(_business_label(e.get('verification_status')))
                             for j,url in enumerate(urls[1:]):st.link_button('Additional source '+str(j+1),url)
                             if not observations:st.write('No separate evidence observations recorded.')
-                        if st.button('Explore development below',key='v4_dev_'+str(eid)):_open_below('event',eid,row.get('title'))
+                        if st.button('Open event dossier',key='v4_dev_'+str(eid)):_open_below('event',eid,row.get('title'))
         if has_more:st.caption('More developments available on the next page.')
         _render_related_below(db,core)
 
@@ -734,7 +734,7 @@ def _render_feature_detail(db, row):
             if st.session_state.get('pc_feature_asset_signature')!=signature:
                 st.session_state['pc_feature_asset']=next(iter(choices));st.session_state['pc_feature_asset_signature']=signature
             selected=st.selectbox('Explore a facility',list(choices),format_func=lambda key:str(choices[key].get('name')),key='pc_feature_asset')
-            if st.button('Show facility below',key='pc_feature_asset_open'):_open_below('asset',selected,choices[selected].get('name'))
+            if st.button('Open facility dossier',key='pc_feature_asset_open'):_open_below('asset',selected,choices[selected].get('name'))
             mapped=[dict(a,name=a.get('name')) for a in assets if _coordinate(a)]
             if mapped:
                 _geo_map(mapped,height=320)
@@ -748,7 +748,7 @@ def _render_feature_detail(db, row):
         if isinstance(main_url,str) and main_url.startswith(('http://','https://')) and main_url not in urls:urls.insert(0,main_url)
         for i,url in enumerate(urls):st.link_button('Source '+str(i+1),url)
         if not urls:st.caption('No source links recorded yet.')
-    if st.button('Open complete event dossier below',key='pc_feature_full_event'):_open_below('event',eid,row.get('title'))
+    if st.button('Open complete event dossier',key='pc_feature_full_event'):_open_below('event',eid,row.get('title'))
 
 def _render_happening_now(db, filters, term, lens):
     st.subheader('Happening now')
@@ -791,12 +791,9 @@ def _render_happening_now(db, filters, term, lens):
                     text=meta.get('executive_summary') or row.get('description') or ''
                     st.write(text if len(text)<=380 else text[:377].rsplit(' ',1)[0]+'…')
                     st.caption('Evidence: '+_business_label(row.get('verification_status')))
-                    if st.button('Read this briefing',key='pc_feature_read_'+key):st.session_state['pc_feature_detail']=key
-    if st.session_state.get('pc_feature_detail') not in chosen:st.session_state['pc_feature_detail']=chosen[0]
-    st.divider()
-    selected=st.selectbox('Briefing shown below',chosen,format_func=lambda key:str(choices[key].get('title')),key='pc_feature_detail')
-    _render_feature_detail(db,choices[selected])
-    st.caption('Board choices come from the newest 80 matching published records. Older developments remain available in the full feed.')
+                    if st.button('Open event dossier',key='pc_feature_read_'+key):
+                        _open_below('event',key,row.get('title'))
+    st.caption('Select Open event dossier to navigate to the complete record. The Operating Picture does not append dossiers below the board.')
 
 
 def _security(db,core):
@@ -970,7 +967,7 @@ def _security(db,core):
                     for i,url in enumerate(urls):st.link_button('Read source '+str(i+1),url)
                     if not sources and not urls:st.write('No supporting evidence is linked yet.')
                 if r.get('map_precision')=='linked_facility_context':st.caption('Map location: linked facility context')
-                if st.button('Explore development below',key='v4_event_'+str(r.get('event_id'))):_open_below('event',r.get('event_id'),r.get('title'))
+                if st.button('Open event dossier',key='v4_event_'+str(r.get('event_id'))):_open_below('event',r.get('event_id'),r.get('title'))
         if has_more:st.caption('More incidents available — increase Incident results page to continue.')
         elif incidents:st.caption('End of matching results.')
         else:st.info('No incidents on this page. Return to page 1 or change the filters.')
