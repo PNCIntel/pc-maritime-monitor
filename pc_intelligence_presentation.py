@@ -177,6 +177,13 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
         } for a in airports]),hide_index=True,use_container_width=True)
     elif airport_error:
         st.caption('Canonical airport relationships are temporarily unavailable.')
+    if not mapped and e.get('location_label'):
+        from pc_geographic_context import locality_point
+        geo=locality_point(e['location_label'])
+        if geo:
+            st.map(pd.DataFrame([{'lat':geo['lat'],'lon':geo['lon']}]),latitude='lat',longitude='lon',use_container_width=True)
+            st.caption('Approximate '+geo['precision']+' for '+geo['name']+'; not verified incident coordinates.')
+            st.link_button('Geographic reference',geo['source'])
     if e.get('location_label'):
         st.caption('Recorded event location: '+str(e['location_label']))
 
