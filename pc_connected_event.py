@@ -33,6 +33,25 @@ def _meta(record):
     return value if isinstance(value, dict) else {}
 
 
+
+def _update_date_label(update: dict, event: dict) -> str:
+    """Preserve the distinction between when something happened and when it was reported."""
+    for field, suffix in (
+        ("occurred_at", "occurred"),
+        ("reported_at", "reported"),
+        ("published_at", "published"),
+    ):
+        value = update.get(field)
+        if value:
+            return f"{_date(value)} ({suffix})"
+    metadata = _meta(update)
+    for field in ("observation_date", "report_date", "publication_date"):
+        if metadata.get(field):
+            return f"{_date(metadata[field])} ({field.replace('_', ' ')})"
+    if event.get("start_date"):
+        return f"Event date: {_date(event['start_date'])} · update date unrecorded"
+    return "Update date not recorded"
+
 def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=None, go_home=None):
     """Render one event's evidence-linked neighbours before any raw record displays."""
     nav_back, nav_home, _ = st.columns([1, 1, 4])
@@ -128,7 +147,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         if updates:
             for i, update in enumerate(updates):
                 with st.container(border=True):
-                    st.caption(f"{_date(update.get('occurred_at') or update.get('reported_at'))} · {_label(update.get('update_type'))} · Review: {_label(update.get('review_status'))}")
+                    st.caption(f"{_update_date_label(update, record)} · {_label(update.get('update_type'))} · Review: {_label(update.get('review_status'))}")
                     st.write(update.get("summary") or "No summary recorded")
         else:
             st.caption("No dated updates yet.")
