@@ -83,7 +83,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate):
             f"**Cross-event finding:** {vessel.get('name') or vessel_id} "
             f"(IMO {vessel.get('imo') or 'unresolved'}) also appears in "
             f"**{strongest.get('title') or strongest.get('event_id')}** "
-            f"({_date(strongest.get('start_date')))}). "
+            f"({_date(strongest.get('start_date'))}). "
             "This is an established database connection, not evidence that one action caused another."
         )
     elif headline:
