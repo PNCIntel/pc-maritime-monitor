@@ -9,7 +9,7 @@ import re
 LOCALITIES = (
     {
         "name": "Peshawar, Pakistan",
-        "pattern": r"\\bpeshawar\\b",
+        "pattern": "peshawar",
         "lat": 34.00800,
         "lon": 71.57849,
         "source": "https://www.geonames.org/1168197/peshawar.html",
