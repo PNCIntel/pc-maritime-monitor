@@ -99,6 +99,32 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
             company_roles.append((role, company))
     company_roles.sort(key=lambda item: str(item[0].get("valid_from") or ""), reverse=True)
 
+    # Multimodal infrastructure: source-backed event asset links and rail-specific
+    # service/disruption records exist independently of vessel metadata.
+    asset_links = _get(sb, "pc_event_asset_links", "event_id", event_id, 150)
+    rail_disruptions = _get(sb, "pc_rail_network_disruptions", "event_id", event_id, 100)
+    rail_runs = _get(sb, "pc_rail_service_runs", "linked_event_id", event_id, 100)
+    assets = {}
+    networks = {}
+    for link in asset_links:
+        aid = str(link.get("asset_id") or "")
+        if aid:
+            assets[aid] = _one(sb, "pc_assets", "asset_id", aid)
+    for disruption in rail_disruptions:
+        nid = str(disruption.get("rail_network_id") or "")
+        aid = str(disruption.get("node_asset_id") or "")
+        if nid and nid not in networks:
+            networks[nid] = _one(sb, "pc_rail_networks", "rail_network_id", nid)
+        if aid and aid not in assets:
+            assets[aid] = _one(sb, "pc_assets", "asset_id", aid)
+    for run in rail_runs:
+        nid = str(run.get("rail_network_id") or "")
+        if nid and nid not in networks:
+            networks[nid] = _one(sb, "pc_rail_networks", "rail_network_id", nid)
+        for field in ("origin_asset_id", "destination_asset_id"):
+            aid = str(run.get(field) or "")
+            if aid and aid not in assets:
+                assets[aid] = _one(sb, "pc_assets", "asset_id", aid)
     entity_links = _get(sb, "pc_event_entity_links", "event_id", event_id, 200)
     evidence = _get(sb, "pc_event_evidence", "event_id", event_id, 300)
     evidence.sort(key=lambda e: str(e.get("published_at") or ""))
@@ -187,6 +213,47 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                                       on_click=navigate, args=("entity", str(company["entity_id"]), str(company.get("name") or "")))
         else:
             st.caption("No resolved vessel linked to this event.")
+
+        st.markdown("#### Infrastructure & affected services")
+        if not (asset_links or rail_disruptions or rail_runs):
+            st.caption("No direct infrastructure or service-impact records linked to this event.")
+        for i, link in enumerate(asset_links):
+            aid = str(link.get("asset_id") or "")
+            asset = assets.get(aid) or {}
+            st.write(f"**{asset.get('name') or aid}** — {_label(link.get('relation_type') or link.get('role') or 'linked asset')}")
+            if aid and asset:
+                st.button("Open facility →", key=f"connected_asset_{event_id}_{i}",
+                          on_click=navigate, args=("asset", aid, str(asset.get("name") or aid)))
+        for i, disruption in enumerate(rail_disruptions):
+            nid = str(disruption.get("rail_network_id") or "")
+            network = networks.get(nid) or {}
+            aid = str(disruption.get("node_asset_id") or "")
+            node = assets.get(aid) or {}
+            st.markdown(f"**Rail disruption:** {_label(disruption.get('disruption_type'))}")
+            if network:
+                st.write("Network: " + str(network.get("network_name") or nid))
+            if aid:
+                st.write("Affected node: " + str(node.get("name") or aid))
+                if node:
+                    st.button("Open affected rail node →", key=f"connected_rail_node_{event_id}_{i}",
+                              on_click=navigate, args=("asset", aid, str(node.get("name") or aid)))
+            if disruption.get("service_effect"):
+                st.write(disruption["service_effect"])
+            st.caption("Disruption verification: " + _label(disruption.get("verification_status")))
+        for i, run in enumerate(rail_runs):
+            service_id = str(run.get("transport_service_id") or "")
+            service = _one(sb, "pc_transport_services", "service_id", service_id) if service_id else {}
+            st.markdown("**Affected rail service:** " + str(service.get("service_name") or service_id or "recorded service run"))
+            st.caption("Run status: " + _label(run.get("service_status")) + " · Verification: " + _label(run.get("verification_status")))
+            origin = assets.get(str(run.get("origin_asset_id") or "")) or {}
+            destination = assets.get(str(run.get("destination_asset_id") or "")) or {}
+            if origin or destination:
+                st.write("Recorded service endpoints: " + str(origin.get("name") or "unresolved") +
+                         " → " + str(destination.get("name") or "unresolved"))
+                st.caption("Service endpoints are not the derailment location.")
+        if networks and not rail_disruptions:
+            for nid, network in networks.items():
+                st.write("Associated railway network: " + str(network.get("network_name") or nid))
 
         st.markdown("#### Linked organisations")
         if entity_links:
