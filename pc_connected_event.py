@@ -33,8 +33,19 @@ def _meta(record):
     return value if isinstance(value, dict) else {}
 
 
-def render_connected_event(sb, record: dict, event_id: str, navigate):
+def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=None, go_home=None):
     """Render one event's evidence-linked neighbours before any raw record displays."""
+    nav_back, nav_home, _ = st.columns([1, 1, 4])
+    with nav_back:
+        if st.session_state.get("pc_terminal_history") and go_back:
+            st.button("← Back", key="pc_connected_back", on_click=go_back, use_container_width=True)
+        elif go_home:
+            st.button("← Operating Picture", key="pc_connected_back_home", on_click=go_home,
+                      args=("intelligence",), use_container_width=True)
+    with nav_home:
+        if go_home:
+            st.button("Home", key="pc_connected_home", on_click=go_home,
+                      args=("intelligence",), use_container_width=True)
     event_id = str(event_id)
     meta = _meta(record)
     vessel_id = str(meta.get("canonical_mobile_asset_id") or "")
@@ -130,7 +141,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate):
             st.write(record["commercial_impact"])
 
     with right:
-        st.markdown("#### Canonical vessel")
+        st.markdown("#### Vessel identity")
         if vessel:
             with st.container(border=True):
                 st.markdown(f"**{vessel.get('name') or vessel_id}** · IMO {vessel.get('imo') or 'unresolved'}")
@@ -156,7 +167,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate):
                             st.button("Open organisation →", key=f"connected_company_{event_id}_{i}",
                                       on_click=navigate, args=("entity", str(company["entity_id"]), str(company.get("name") or "")))
         else:
-            st.caption("No canonical mobile asset ID linked; no vessel identity inferred.")
+            st.caption("No resolved vessel linked to this event.")
 
         st.markdown("#### Linked organisations")
         if entity_links:
