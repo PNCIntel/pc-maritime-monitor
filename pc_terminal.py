@@ -5843,20 +5843,23 @@ def render_terminal(lens: str = "trade"):
             _render_sanctions_query_report(sb)
         return
 
-    st.markdown("<div class='pc-command'><div class='pc-k'>GLOBAL SEARCH</div>", unsafe_allow_html=True)
-    q = st.text_input(
-        "Search company, vessel / IMO, port, terminal, airport, dry port, rail node, corridor, event or sanction",
-        placeholder="AD Ports, Rotterdam, Jebel Ali, IMO 9251822, Tbilisi Dry Port, Hormuz…",
-        key=f"pc_terminal_search_{lens}",
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if q.strip():
-        results = _search_objects(q, lens, 80)
-        if results:
-            _render_search_results(results, lens)
-        else:
-            st.info("No matching companies, facilities, vehicles or developments were found.")
+    # A selected record is a dedicated page: do not place global search and its
+    # potentially long results above the dossier. Search belongs on Home.
+    has_selected_record = bool(st.session_state.get("pc_terminal_type") and st.session_state.get("pc_terminal_id"))
+    if not has_selected_record:
+        st.markdown("<div class='pc-command'><div class='pc-k'>GLOBAL SEARCH</div>", unsafe_allow_html=True)
+        q = st.text_input(
+            "Search company, vessel / IMO, port, terminal, airport, dry port, rail node, corridor, event or sanction",
+            placeholder="AD Ports, Rotterdam, Jebel Ali, IMO 9251822, Tbilisi Dry Port, Hormuz…",
+            key=f"pc_terminal_search_{lens}",
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+        if q.strip():
+            results = _search_objects(q, lens, 80)
+            if results:
+                _render_search_results(results, lens)
+            else:
+                st.info("No matching companies, facilities, vehicles or developments were found.")
 
     typ, oid, rec = _context_record()
     if not typ or not oid or not rec:
