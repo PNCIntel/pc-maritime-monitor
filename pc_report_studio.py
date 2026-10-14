@@ -993,13 +993,37 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
             st.info("AI proposed an editable draft. Accept or discard it; your current work is unchanged.")
             yes,no=st.columns(2)
             st.caption(f"{len(proposal)} proposed content blocks; "+str(sum(bool(_clean(b.get("body"))) for b in proposal))+" contain narrative text.")
-            with st.expander("Read proposed analytical draft before accepting", expanded=True):
-                for draft_block in proposal:
-                    if draft_block.get("kind")=="Narrative" and _clean(draft_block.get("body")):
-                        st.markdown("#### "+_clean(draft_block.get("title")))
-                        st.markdown(_clean(draft_block.get("body")))
-                st.caption("Evidence tables remain separate and must be supported by retrieved records.")
-
+            if lens=="intelligence":
+                from pc_intelligence_publication import render_publication
+                from pc_report_figures import plan_figures, figure_block
+                proposed_evidence=st.session_state.get(f"pc_assembled_{mode}") or {}
+                suggested=plan_figures(proposed_evidence) if proposed_evidence else []
+                proposed_figures=[figure_block(f) for f in suggested if f.get("status")=="Ready to generate" and f.get("rows")]
+                st.markdown("#### Publication proof — proposed, not yet accepted")
+                preview_blocks=[dict(b) for b in proposal]
+                existing_figure_keys={b.get("figure_key") for b in preview_blocks}
+                for fig, block in zip([f for f in suggested if f.get("status")=="Ready to generate" and f.get("rows")],proposed_figures):
+                    block["figure_key"]=fig["id"]
+                    if block["figure_key"] not in existing_figure_keys:
+                        preview_blocks.append(block)
+                preview_sources=list(dict.fromkeys((st.session_state.get(f"pc_report_ai_bundle_{mode}") or {}).get("evidence_urls") or []))
+                proof=render_publication(
+                    st.session_state.get(f"pc_report_title_{mode}") or "Intelligence assessment",
+                    st.session_state.get(f"pc_report_date_{mode}") or date.today(),
+                    st.session_state.get(f"pc_report_region_{mode}") or seed.get("region") or "",
+                    product,st.session_state.get(f"pc_report_summary_{mode}") or "",
+                    preview_blocks,preview_sources,
+                    [{"sources":_urls_from_record(e)} for e in selected])
+                components.html(proof,height=820,scrolling=True)
+                if proposed_figures:
+                    st.caption(f"{len(proposed_figures)} evidence-backed figure/table components will accompany the proposed narrative on acceptance.")
+                st.caption("This is a publication proof. Source coverage does not constitute independent claim verification.")
+            else:
+                with st.expander("Read proposed analytical draft before accepting", expanded=True):
+                    for draft_block in proposal:
+                        if draft_block.get("kind")=="Narrative" and _clean(draft_block.get("body")):
+                            st.markdown("#### "+_clean(draft_block.get("title")))
+                            st.markdown(_clean(draft_block.get("body")))
             if yes.button("Accept AI draft",key=f"pc_accept_{mode}",disabled=not bool(proposal)):
                 # Clear old canvas widget state before installing the proposal. Streamlit
                 # widget keys otherwise take precedence over the new block defaults.
@@ -1007,7 +1031,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                     if key.startswith((f"pc_title_block_{mode}_",f"pc_body_{mode}_",
                                        f"pc_preset_{mode}_",f"pc_edit_table_{mode}_")):
                         del st.session_state[key]
-                installed=[dict(b) for b in proposal]
+                installed=[dict(b) for b in (preview_blocks if lens=="intelligence" else proposal)]
                 for block in installed:
                     bid=block["id"]
                     st.session_state[f"pc_title_block_{mode}_{bid}"]=block.get("title","")
