@@ -4406,7 +4406,21 @@ def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
     role_rows=_mobile_role_rows(oid,rec)
     linked=_linked_objects_from_relationships("mobile_asset",oid)
     events=_events_for_object("mobile_asset",oid)
-    sanctions=_filtered_rows("pc_sanctions_designations","mobile_asset_id",str(oid),200)
+    # Keep reported PGSA compliance separate from published legal designations.
+    imo=_clean(rec.get("imo")).strip()
+    pgsa=[q for q in _filtered_rows("pc_sanctions_import_queue","subject_identifier",imo,100)
+          if imo and _clean(q.get("authority_code")).upper()=="PGSA"] if imo else []
+    designation_links=[q for q in _filtered_rows("pc_sanctions_links","linked_id",str(oid),200)
+                       if _clean(q.get("linked_type")).casefold() in ("mobile_asset","vessel")]
+    sanctions=[]
+    seen_designations=set()
+    for link in designation_links:
+        did=_clean(link.get("sanctions_designation_id"))
+        if not did or did in seen_designations:continue
+        match=_filtered_rows("pc_sanctions_designations","sanctions_designation_id",did,1)
+        if match:
+            sanctions.append((match[0],link))
+            seen_designations.add(did)
     docs=[]
     try:
         from pc_document_vessels import documents_for_vessel
@@ -4464,6 +4478,9 @@ def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
     # Overview
     # ------------------------------------------------------------------
     with tabs[0]:
+        if pgsa:
+            st.info("PGSA maritime compliance: reported listing matched by IMO "+imo+
+                    ". See Sanctions for the research source and status. This is not itself a formal OFAC/UN/EU/UK designation.")
         left,right=st.columns([1.0,1.25],gap="large")
         with left:
             with st.container(border=True):
@@ -4566,16 +4583,31 @@ def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
     # Sanctions
     # ------------------------------------------------------------------
     with tabs[4]:
-        st.markdown("### Sanctions / Restrictions")
-        if sanctions:
-            for s in sanctions[:40]:
-                title=_company_display_value(s.get("designated_name"),s.get("subject_name"),s.get("name"),"Designation")
-                regime=_company_display_value(s.get("program"),s.get("regime"),s.get("authority"))
-                status2=_company_display_value(s.get("status"),s.get("designation_status"))
-                st.markdown(f"**{title}**")
-                st.caption(" · ".join(x for x in [regime,status2,_clean(s.get("designation_date"))] if x))
+        st.markdown("### Maritime compliance & PGSA")
+        if pgsa:
+            for i,q in enumerate(pgsa):
+                st.markdown("**PGSA reported roster · IMO "+imo+"**")
+                st.write("Reported vessel name: "+(_clean(q.get("reported_name")) or name))
+                st.caption("Research status: "+(_clean(q.get("research_status")) or "not recorded")+
+                           " · Exact IMO match. This is a research roster, not an OFAC/UN/EU/UK legal designation.")
+                url=_clean(q.get("source_url"))
+                if url.startswith(("https://","http://")):
+                    st.link_button("Open roster source ↗",url,key=f"mobile_pgsa_{_norm(oid)}_{i}")
         else:
-            st.caption("No sanctions/designation records linked to this vessel.")
+            st.caption("No PGSA research-queue record matched to this vessel by IMO. This is not proof of non-listing.")
+        st.markdown("### Published legal designations")
+        if sanctions:
+            for i,(d,link) in enumerate(sanctions):
+                st.markdown("**"+(_clean(d.get("primary_name")) or name)+"**")
+                st.caption("Source list: "+(_clean(d.get("source_list")) or "not recorded")+
+                           " · Designation status: "+(_clean(d.get("status")) or "not recorded")+
+                           " · Link review: "+(_clean(link.get("review_status")) or "not recorded")+
+                           " · Direct designation: "+str(link.get("is_direct_designation")))
+                url=_clean(d.get("source_url"))
+                if url.startswith(("https://","http://")):
+                    st.link_button("Open designation source ↗",url,key=f"mobile_designation_{_norm(oid)}_{i}")
+        else:
+            st.caption("No canonical legal designation linked to this vessel in the current dataset.")
 
     # ------------------------------------------------------------------
     # Evidence
