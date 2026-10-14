@@ -708,8 +708,15 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     if proposal is not None:
         st.info("AI proposed an editable draft. Accept or discard it; your current work is unchanged.")
         yes,no=st.columns(2)
-        if yes.button("Accept AI draft",key=f"pc_accept_{mode}"):
-            st.session_state[f"pc_editor_blocks_{mode}"]=proposal
+        st.caption(f"{len(proposal)} proposed content blocks; "+str(sum(bool(_clean(b.get("body"))) for b in proposal))+" contain narrative text.")
+        if yes.button("Accept AI draft",key=f"pc_accept_{mode}",disabled=not bool(proposal)):
+            # Clear old canvas widget state before installing the proposal. Streamlit
+            # widget keys otherwise take precedence over the new block defaults.
+            for key in list(st.session_state):
+                if key.startswith((f"pc_title_block_{mode}_",f"pc_body_{mode}_",
+                                   f"pc_preset_{mode}_",f"pc_edit_table_{mode}_")):
+                    del st.session_state[key]
+            st.session_state[f"pc_editor_blocks_{mode}"]=[dict(b) for b in proposal]
             del st.session_state[f"pc_editor_proposal_{mode}"]
             st.rerun()
         if no.button("Discard AI draft",key=f"pc_discard_{mode}"):
@@ -773,6 +780,8 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                 block["body"]=st.text_area("Text",value=block.get("body",""),height=190,key=f"pc_body_{mode}_{bid}")
                 fields[block["title"]]=block["body"]
     st.session_state[canvas_key]=blocks
+    if not blocks:
+        st.info("Canvas is empty. Add a block or generate an AI draft.")
 
     source_urls=[]
     for e in selected:
