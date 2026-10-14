@@ -799,7 +799,8 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                     st.rerun()
             st.caption("Review the selection below, assemble evidence, then draft and export using the normal Report Studio workflow.")
 
-    research_tab, editorial_tab, publication_tab = st.tabs(["1 · Research & evidence", "2 · Generate & review", "3 · Publication"])
+    research_tab, editorial_tab, publication_tab = (st.tabs(["1 · Research & evidence", "2 · Generate & review", "3 · Publication"])
+        if lens == "intelligence" else (st.container(), st.container(), st.container()))
     with research_tab:
         st.caption("Select the relevant developments, then inspect and approve connected evidence.")
         st.markdown("#### Development library")
