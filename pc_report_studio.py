@@ -1151,7 +1151,15 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     if not sources:
         st.warning("No evidence URLs yet: attach sources before publishing.")
 
-    web_html=_build_html(product,report_title,report_date,region,confidence,summary,fields,sources,blocks)
+    if lens == "intelligence":
+        from pc_intelligence_publication import render_publication, evidence_audit
+        publication_events=[{"sources":_urls_from_record(e)} for e in selected]
+        coverage=evidence_audit(publication_events)
+        if coverage["missing"]:
+            st.warning(f"Source coverage: {coverage['sourced']}/{coverage['total']} selected incidents have linked URLs. Review unsupported claims and confidence before distributing.")
+        web_html=render_publication(report_title,report_date,region,product,summary,blocks,sources,publication_events)
+    else:
+        web_html=_build_html(product,report_title,report_date,region,confidence,summary,fields,sources,blocks)
     tabs=st.tabs(["Preview","HTML","Evidence / linked events"])
     with tabs[0]:
         components.html(web_html,height=850,scrolling=True)
