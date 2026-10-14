@@ -266,19 +266,22 @@ def _recent_events(sb, limit=250):
 
 def _query_discovery(sb, query: str) -> tuple[list[dict], list[dict]]:
     """Production event and named-object lookup, independent of the terminal index."""
-    terms=[t for t in re.findall(r"[A-Za-zÀ-ÿ0-9_]+",query.casefold()) if len(t)>=2
+    normalized=query.casefold().replace("réunion","reunion").replace("french","france")
+    terms=[t for t in re.findall(r"[A-Za-zÀ-ÿ0-9_]+",normalized) if len(t)>=2
            and t not in {"and","the","with","about","report","story","stories","of","in"}][:8]
     events={}; objects={}
     for term in terms:
-        safe=term.replace("%","").replace(",","")
-        for col in ("event_id","title","description"):
-            try:
-                rows=(sb.table("pc_events").select("*").ilike(col,"%"+safe+"%")
-                      .order("start_date",desc=True).limit(100).execute().data or [])
-                for e in rows:
-                    if e.get("event_id") and not _horizon_event(e): events[e["event_id"]]=e
-            except Exception:
-                pass
+        aliases={"reunion":["reunion","réunion"],"france":["france","french"],"panama":["panama","panamanian"],"df":["df peak"]}
+        search_terms=aliases.get(term,[term])
+        for safe in search_terms:
+            for col in ("event_id","title","description"):
+                try:
+                    rows=(sb.table("pc_events").select("*").ilike(col,"%"+safe+"%")
+                          .order("start_date",desc=True).limit(100).execute().data or [])
+                    for e in rows:
+                        if e.get("event_id") and not _horizon_event(e): events[e["event_id"]]=e
+                except Exception:
+                    pass
         for table,typ,pk in (("pc_mobile_assets","mobile_asset","mobile_asset_id"),
                               ("pc_assets","asset","asset_id"),
                               ("pc_entities","entity","entity_id")):
@@ -525,50 +528,60 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     product=st.selectbox("Product",product_options,index=default_idx,key=f"pc_report_product_{mode}")
     spec=PRODUCTS[product]
 
-    st.markdown("#### Find and add developments")
-    st.caption("Search production incidents by event ID, headline or vessel/place. Horizon/watch entries are excluded.")
+    st.markdown("#### Incident library")
+    st.caption("Find stories by ordinary words, date, place or vessel. Add more than one story; selections stay put when you search again.")
     find_col,days_col=st.columns([3,1])
-    event_find=find_col.text_input("Find events",placeholder="Panama, DF Peak, Réunion or an event ID",
-                                  key=f"pc_report_find_events_{mode}")
+    event_find=find_col.text_input("Search headlines and incidents",
+        placeholder="Panama tankers, DF Peak, French boarding, Réunion...",
+        key=f"pc_report_find_events_{mode}")
     period=days_col.selectbox("Date range",["All dates","Last 30 days","Last 90 days"],
-                              key=f"pc_report_find_period_{mode}")
+        key=f"pc_report_find_period_{mode}")
     lookup=event_find.strip()
     found,_=_query_discovery(sb,lookup) if lookup else ([],[])
-    exact=[]
-    if lookup:
-        try:
-            exact=(sb.table("pc_events").select("*").eq("event_id",lookup).limit(1).execute().data or [])
-        except Exception: pass
     recent=[e for e in _recent_events(sb,300) if not _horizon_event(e)] if not lookup else []
-    event_map={str(e.get("event_id")):e for e in exact+found+recent if e.get("event_id") and not _horizon_event(e)}
+    event_map={str(e.get("event_id")):e for e in found+recent if e.get("event_id") and not _horizon_event(e)}
     if period!="All dates":
         from datetime import timedelta
         cutoff=(date.today()-timedelta(days=30 if period=="Last 30 days" else 90)).isoformat()
-        event_map={k:e for k,e in event_map.items() if _clean(e.get("start_date"))[:10]>=cutoff or e in exact}
-    # Retain selected events across Streamlit reruns and new finder queries.
+        event_map={k:e for k,e in event_map.items() if _clean(e.get("start_date"))[:10]>=cutoff}
     picked_key=f"pc_report_selected_ids_{mode}"
-    selected_ids=st.session_state.get(picked_key,[])
-    for eid in selected_ids:
-        if eid not in event_map:
+    selected_ids=list(st.session_state.get(picked_key,[]))
+    if seed.get("type")=="event" and seed.get("id") and seed["id"] not in selected_ids:
+        selected_ids.append(seed["id"])
+    st.caption(f"{len(event_map)} matching incidents" if lookup else "Recent incidents — enter a phrase to search the full production history")
+    for eid,e in list(event_map.items())[:40]:
+        c1,c2=st.columns([5,1])
+        c1.markdown("**"+_clean(e.get("title") or "Untitled incident")+"**  ·  "+_clean(e.get("start_date"))[:10])
+        if _event_summary(e):
+            c1.caption(_event_summary(e)[:210])
+        if c2.button("Added ✓" if eid in selected_ids else "Add +",
+                     disabled=eid in selected_ids,key=f"pc_story_add_{mode}_{eid}",use_container_width=True):
+            selected_ids.append(eid)
+            st.session_state[picked_key]=list(dict.fromkeys(selected_ids))
+            st.rerun()
+    if lookup and not event_map:
+        st.info("No matching production incidents. Try the vessel name or a shorter phrase; held research has not been published.")
+    st.markdown("**Selected stories**")
+    selected=[]
+    for eid in list(dict.fromkeys(selected_ids)):
+        e=event_map.get(eid)
+        if not e:
             try:
                 rows=(sb.table("pc_events").select("*").eq("event_id",eid).limit(1).execute().data or [])
-                if rows and not _horizon_event(rows[0]): event_map[eid]=rows[0]
-            except Exception: pass
-    if seed.get("type")=="event" and seed.get("id") in event_map and seed["id"] not in selected_ids:
-        selected_ids=[seed["id"]]+selected_ids
-    opts={f"{_clean(e.get('start_date'))[:10]} · {_clean(e.get('title'))} [{eid}]":eid
-          for eid,e in event_map.items()}
-    labels=[label for label,eid in opts.items() if eid in selected_ids]
-    chosen=st.multiselect("Developments to include in this report",list(opts),default=labels,
-                          key=f"pc_report_events_picker_{mode}",
-                          help="Search above; selected incidents stay attached when the search changes.")
-    selected_ids=[opts[label] for label in chosen]
-    st.session_state[picked_key]=selected_ids
-    selected=[event_map[eid] for eid in selected_ids if eid in event_map]
-    st.caption(f"{len(found)+len(exact) if lookup else len(recent)} incident results · {len(selected)} selected")
-    if lookup and not found and not exact:
-        st.warning("No production incident matched. A research-intake item is not yet a published event.")
-
+                e=rows[0] if rows else None
+            except Exception: e=None
+        if not e or _horizon_event(e):
+            continue
+        selected.append(e)
+        c1,c2=st.columns([5,1])
+        c1.write(_clean(e.get("title"))+" · "+_clean(e.get("start_date"))[:10])
+        if c2.button("Remove",key=f"pc_story_remove_{mode}_{eid}"):
+            selected_ids=[x for x in selected_ids if x!=eid]
+            st.session_state[picked_key]=selected_ids
+            st.rerun()
+    st.session_state[picked_key]=[e["event_id"] for e in selected]
+    if selected:
+        st.caption("Related context is pulled from these canonical events and their linked objects when you draft.")
     if seed:
         st.info(f"Current terminal context: {seed.get('title')} · {seed.get('type')}")
 
