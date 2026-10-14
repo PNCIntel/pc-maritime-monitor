@@ -519,11 +519,30 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     product=st.selectbox("Product",product_options,index=default_idx,key=f"pc_report_product_{mode}")
     spec=PRODUCTS[product]
 
+    st.markdown("#### Find and add developments")
+    st.caption("Search the live database by headline, place, vessel, or paste an exact event ID. No index refresh required.")
+    find_col, days_col = st.columns([3,1])
+    event_find=find_col.text_input("Find events",placeholder="Panama, DF Peak, Réunion, IMO or exact event ID",
+                                  key=f"pc_report_find_events_{mode}")
+    period=days_col.selectbox("Date range",["Last 30 days","Last 90 days","All dates"],
+                              key=f"pc_report_find_period_{mode}")
     recent=_recent_events(sb,300)
-    events=list({str(e.get("event_id")):e for e in discovered_events+recent if e.get("event_id")}.values())
+    lookup=event_find.strip() or query.strip()
+    found, _ = _query_discovery(sb,lookup) if lookup else ([],[])
+    exact=[]
+    if event_find.strip():
+        try:
+            exact=(sb.table("pc_events").select("*").eq("event_id",event_find.strip()).limit(1).execute().data or [])
+        except Exception:
+            pass
+    events=list({str(e.get("event_id")):e for e in exact+found+discovered_events+recent if e.get("event_id")}.values())
+    if period!="All dates":
+        from datetime import timedelta
+        cutoff=(date.today()-timedelta(days=30 if period=="Last 30 days" else 90)).isoformat()
+        events=[e for e in events if _clean(e.get("start_date"))[:10]>=cutoff or e in exact]
     opts=_event_options(events)
-    if discovered_events:
-        st.caption(str(len(discovered_events))+" matching production developments found across the live database.")
+    if lookup:
+        st.caption(str(len(found)+len(exact))+" matching live developments; broaden to All dates for historical material.")
 
     seed_event_labels=[]
     if seed.get("type")=="event":
@@ -532,11 +551,11 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                 seed_event_labels=[label];break
 
     selected_labels=st.multiselect(
-        "Canonical developments to include",
+        "Developments to include in this report",
         list(opts),
         default=seed_event_labels,
         key=f"pc_report_events_{mode}",
-        help="These remain linked to the saved report as canonical event IDs."
+        help="Search above, then choose one or more events. Their event IDs and evidence remain linked in the saved report."
     )
     selected=[opts[x] for x in selected_labels]
 
