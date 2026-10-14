@@ -38,6 +38,7 @@ def render_publication(title, date, region, product, summary, blocks, sources, e
                 out.append('<table><thead><tr>'+''.join('<th>'+h(c)+'</th>' for c in cols)+'</tr></thead><tbody>')
                 for row in rows:out.append('<tr>'+''.join('<td>'+h(row.get(c) or "Not established")+'</td>' for c in cols)+'</tr>')
                 out.append('</tbody></table>')
+                if b.get('caption'):out.append('<p class="note">'+h(b['caption'])+'</p>')
         else:
             for paragraph in re.split(r'\n\s*\n',str(b.get("body") or "")):
                 if paragraph.strip():
