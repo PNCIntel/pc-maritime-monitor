@@ -763,6 +763,38 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     product=st.selectbox("Product",product_options,index=default_idx,key=f"pc_report_product_{mode}")
     spec=PRODUCTS[product]
 
+    if lens=="intelligence":
+        with st.expander("Daily Brief — select and review developments",expanded=bool(st.session_state.pop("pc_report_daily_entry_intelligence",False))):
+            from datetime import timedelta
+            from zoneinfo import ZoneInfo
+            from datetime import datetime
+            day=st.date_input("Brief date (UAE)",datetime.now(ZoneInfo("Asia/Dubai")).date(),key=f"pc_studio_daily_date_{mode}")
+            days=st.selectbox("Evidence window",["Selected day","Last 7 days"],key=f"pc_studio_daily_window_{mode}")
+            start=day-timedelta(days=6 if days=="Last 7 days" else 0)
+            try:
+                candidates=(sb.table("pc_events").select("*").gte("start_date",str(start))
+                            .lt("start_date",str(day+timedelta(days=1))).order("start_date",desc=True).limit(500).execute().data or [])
+            except Exception as exc:
+                st.warning("Daily candidate retrieval incomplete: "+str(exc)[:180])
+                candidates=[]
+            def security_rank(e):
+                words=("attack","strike","missile","intercept","threat","injur","damage","board","seiz",
+                       "sanction","conflict","airport","security","suspend","disrupt","evacuat","houthi","drone","cyber")
+                blob=(" ".join(_clean(e.get(k)) for k in ("title","description","event_type","event_family"))).casefold()
+                return (sum(1 for w in words if w in blob),_clean(e.get("start_date")))
+            candidates=[e for e in candidates if not _horizon_event(e) and e.get("intelligence_visible") is not False]
+            candidates.sort(key=security_rank,reverse=True)
+            st.caption(f"{len(candidates)} candidate events. Security relevance is a sorting aid, not an AI risk rating.")
+            st.dataframe(pd.DataFrame([{"Date":_clean(e.get("start_date"))[:10],"Development":_clean(e.get("title")),
+                "Verification":_clean(e.get("verification_status")),"Sources":len(_urls_from_record(e))} for e in candidates[:35]]),
+                hide_index=True,use_container_width=True)
+            if st.button("Add security-priority candidates to report",key=f"pc_daily_select_{mode}"):
+                ids=[e["event_id"] for e in candidates if security_rank(e)[0]>0][:12]
+                old=st.session_state.get(f"pc_report_selected_ids_{mode}",[])
+                st.session_state[f"pc_report_selected_ids_{mode}"]=list(dict.fromkeys(old+ids))
+                st.rerun()
+            st.caption("Review the selection below, assemble evidence, then draft and export using the normal Report Studio workflow.")
+
     st.markdown("#### Development library")
     st.caption("Search across verified production developments. Filter by purpose; combine Trade and Security whenever needed.")
     qcol,scope_col,date_col=st.columns([3,1.4,1.3])
