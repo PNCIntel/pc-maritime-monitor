@@ -125,6 +125,21 @@ def _rows(table: str, limit: int = 3000) -> list[dict]:
     if sb is None:
         return []
     try:
+        # PostgREST commonly caps a response at 1,000 rows regardless of .limit().
+        # Page by stable primary key so every status remains discoverable.
+        keys = {"pc_assets": "asset_id", "pc_entities": "entity_id",
+                "pc_mobile_assets": "mobile_asset_id", "pc_events": "event_id"}
+        key = keys.get(table)
+        if key and limit > 500:
+            rows = []
+            while len(rows) < limit:
+                size = min(500, limit - len(rows))
+                page = (sb.table(table).select("*").order(key)
+                        .range(len(rows), len(rows) + size - 1).execute().data or [])
+                rows.extend(page)
+                if len(page) < size:
+                    break
+            return rows
         return sb.table(table).select("*").limit(limit).execute().data or []
     except Exception:
         return []
@@ -620,7 +635,7 @@ def _search_objects(q: str, lens: str, limit: int = 80) -> list[dict]:
         for typ in ("entity","asset","mobile_asset"):
             table,pk,name_col,label=OBJECTS[typ]
             try:
-                records=sb.table(table).select("*").ilike(name_col,"%"+q.strip().replace("%","").replace("_","")+"%").limit(30).execute().data or []
+                records=sb.table(table).select("*").ilike(name_col,"%"+q.strip().replace("%","").replace("_","")+"%").limit(100).execute().data or []
             except Exception:
                 records=[]
             for r in records:
@@ -637,7 +652,7 @@ def _search_objects(q: str, lens: str, limit: int = 80) -> list[dict]:
             for column in ("title","description","location","countries"):
                 request=sb.table("pc_events").select("*").ilike(column,pattern)
                 if lens in ("trade","intelligence"):
-                    request=request.eq(lens+"_visible",True).in_("record_status",["approved","verified"])
+                    request=request.eq(lens+"_visible",True)
                 for r in request.order("start_date",desc=True).limit(limit).execute().data or []:
                     if r.get("event_id"):event_rows[str(r["event_id"])]=r
             for oid,r in event_rows.items():
