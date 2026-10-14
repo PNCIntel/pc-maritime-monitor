@@ -2801,7 +2801,7 @@ def _render_publication_workspace(sb, lens: str, mode: str):
         return
     typ,oid,rec=_context_record()
     context=(typ,oid,rec) if typ and oid and rec else None
-    render_report_studio(sb,context=context,mode=mode)
+    render_report_studio(sb,context=context,mode=mode,lens_override=lens)
 
 def _render_sanctions_query_report(sb):
     try:
