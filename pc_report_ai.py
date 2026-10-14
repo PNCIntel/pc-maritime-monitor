@@ -74,6 +74,8 @@ sections {{section_name: text}},
 gaps [strings].
 Every section name must exactly match one of the requested section names."""
 
+    if lens == "intelligence":
+        system += "\nWrite a cohesive intelligence publication. Distinguish observations, reported claims, and inferences. Avoid repeating the chronology across sections. Explain cross-domain implications only when supported, consider alternative explanations, and state specific indicators that could change the assessment. Do not equate a claim with confirmed impact. Flag source gaps, and do not invent probabilities or trends.\n"
     prompt={
         "lens":lens,
         "product":product,
