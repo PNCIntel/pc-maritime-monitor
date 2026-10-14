@@ -67,7 +67,14 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                       args=("intelligence",), use_container_width=True)
     event_id = str(event_id)
     meta = _meta(record)
+    # Event links are authoritative for attached vessels, including reported-name aliases.
+    linked_vessels = [x for x in _get(sb, "pc_event_links", "event_id", event_id, 150)
+                      if str(x.get("linked_type") or "").lower() in ("mobile_asset", "vessel")]
     vessel_id = str(meta.get("canonical_mobile_asset_id") or "")
+    if not vessel_id and linked_vessels:
+        identifiers = {str(x.get("linked_id")) for x in linked_vessels if x.get("linked_id")}
+        if len(identifiers) == 1:
+            vessel_id = next(iter(identifiers))
     vessel = _one(sb, "pc_mobile_assets", "mobile_asset_id", vessel_id) if vessel_id else {}
     if not vessel and meta.get("canonical_vessel_imo"):
         vessel = _one(sb, "pc_mobile_assets", "imo", str(meta["canonical_vessel_imo"]))
@@ -144,6 +151,12 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                 child = _one(sb, "pc_entities", "entity_id", edge.get("target_id"))
                 if parent and child:
                     corporate_edges.append((edge, parent, child))
+    # Keep historical observations, but display only the preferred equivalent edge.
+    preferred_ids={str(e.get("relationship_id")) for e,_,_ in corporate_edges
+                   if _meta(e).get("intel_display_preferred") is True}
+    corporate_edges=[item for item in corporate_edges
+                     if _meta(item[0]).get("intel_display_preferred") is not False
+                     and str(_meta(item[0]).get("display_equivalent_to") or "") not in preferred_ids]
     corporate_edges.sort(key=lambda item: (str(item[1].get("name")), str(item[2].get("name"))))
     evidence = _get(sb, "pc_event_evidence", "event_id", event_id, 300)
     evidence.sort(key=lambda e: str(e.get("published_at") or ""))
@@ -195,7 +208,28 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                     st.caption(f"{_update_date_label(update, record)} · {_label(update.get('update_type'))} · Review: {_label(update.get('review_status'))}")
                     st.write(update.get("summary") or "No summary recorded")
         else:
-            st.caption("No dated updates yet.")
+            # A dated source observation is still a useful timeline entry.
+            timeline=[]
+            for ev in evidence:
+                when=ev.get("observed_at") or ev.get("published_at")
+                if when:
+                    timeline.append((str(when),str(ev.get("document_title") or ev.get("notice_reference") or "Source observation"),
+                                     str(ev.get("claim") or ""),str(ev.get("verification_status") or "pending")))
+            timeline.append((str(record.get("start_date") or ""),str(record.get("title") or "Incident"),
+                             str(record.get("description") or ""),str(record.get("verification_status") or "unrecorded")))
+            for link, other in related:
+                timeline.append((str(other.get("start_date") or ""),str(other.get("title") or "Related development"),
+                                 str(link.get("rationale") or ""),str(link.get("claim_status") or "proposed")))
+            seen_timeline=set()
+            for when,title,detail,status in sorted(timeline,key=lambda x:x[0]):
+                key=(when,title,detail)
+                if key in seen_timeline:continue
+                seen_timeline.add(key)
+                with st.container(border=True):
+                    st.caption(_date(when)+" · "+_label(status))
+                    st.markdown("**"+title+"**")
+                    if detail:st.write(detail)
+            if not seen_timeline:st.caption("No dated source observations recorded.")
 
         if record.get("operational_impact"):
             st.markdown("#### Operational implications")
@@ -292,7 +326,9 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
             for i, (edge, parent, child) in enumerate(corporate_edges):
                 with st.container(border=True):
                     st.markdown(f"**{parent.get('name')} → {child.get('name')}**")
-                    st.caption(_label(edge.get("relationship_type")) + " · " + _label(edge.get("record_status")))
+                    pct=edge.get("ownership_percent")
+                    relation=(str(pct).rstrip("0").rstrip(".")+"% ownership") if pct is not None else _label(edge.get("relationship_type"))
+                    st.caption(relation + " · " + _label(edge.get("record_status")))
                     source = _meta(edge).get("source_url") or edge.get("source_url")
                     if isinstance(source, str) and source.startswith(("http://", "https://")):
                         st.link_button("Relationship source ↗", source)
