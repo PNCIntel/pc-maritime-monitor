@@ -371,7 +371,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                 with st.container(border=True):
                     st.markdown(f"**{parent.get('name')} → {child.get('name')}**")
                     pct=edge.get("ownership_percent")
-                    relation=(str(pct).rstrip("0").rstrip(".")+"% ownership") if pct is not None else _label(edge.get("relationship_type"))
+                    relation=(str(pct)+"% ownership") if pct is not None else _label(edge.get("relationship_type"))
                     st.caption(relation + " · " + _label(edge.get("record_status")))
                     source = _meta(edge).get("source_url") or edge.get("source_url")
                     if isinstance(source, str) and source.startswith(("http://", "https://")):
