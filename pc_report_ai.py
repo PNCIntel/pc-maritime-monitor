@@ -41,6 +41,31 @@ it with generic language. Avoid vague phrases such as 'monitor the situation' un
 state exactly what indicator, threshold, actor, route, asset, filing or event would change
 the judgement. Make the output commercially and operationally useful.
 
+REPORTING STANDARD:
+Write a substantial, coherent intelligence report, not an event-by-event list rendered as a paragraph.
+The executive summary must synthesise the shared pattern and explain why the developments
+belong in one assessment. In the main sections, use meaningful paragraphs, clear topic
+sentences, and distinguish the different legal mechanisms and geographical contexts.
+Use specific vessel NAMES AND IMO numbers whenever supplied. Include their source-backed
+registered owners, managers, registry and regulatory actors where relevant. Do not invent them.
+Separate confirmed boarding/action from suspected wrongdoing, and initial deregistration
+proceedings from a completed flag cancellation. Never infer an automatic link between the
+French incident, Panama actions, and Japanese designations; identify their common theme as
+analysis rather than a demonstrated operational relationship.
+
+CITATION STANDARD:
+Evidence URLs appear in context.events[].sources and context.evidence_urls.
+For factual claims supported by an event's listed source, cite its numbered source inline
+using [1], [2] etc., where numbers refer to the evidence_urls array (1-based).
+Only cite a number if the cited URL actually supports that claim based on supplied evidence.
+If URL evidence is insufficient or unlinked, identify the gap; do not invent a citation.
+Use citations throughout the narrative, not solely at the end.
+In a section use separate paragraphs separated by blank lines; a short labelled opening
+may appear on its own line. Avoid numbered telegraphic points in a section unless they
+are genuinely useful (such as distinct indicators or vessel particulars).
+If the data supplies no specific figure, source, operational implication, or asset
+relationship, say so. Prefer detailed analysis over generic filler.
+
 Return JSON only with:
 title,
 executive_line,
