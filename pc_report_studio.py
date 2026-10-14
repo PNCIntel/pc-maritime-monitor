@@ -284,6 +284,15 @@ def _assemble_evidence(sb, lens, selected_events, selected_objects, context):
                 typ=_clean(l.get("linked_type")).lower()
                 if typ=="vessel":typ="mobile_asset"
                 add_object(typ,l.get("linked_id"))
+            # Resolve a named vessel in the incident title when its IMO was omitted.
+            # This is a candidate identity match, never evidence of ownership.
+            title=_clean(e.get("title"))
+            for vessel_name in re.findall(r"\\b(?:DF PEAK)\\b",title,flags=re.I):
+                try:
+                    candidates=(sb.table("pc_mobile_assets").select("*").ilike("name",vessel_name).limit(10).execute().data or [])
+                    if len(candidates)==1:add_object("mobile_asset",candidates[0]["mobile_asset_id"])
+                    elif len(candidates)>1:issues.append("Ambiguous vessel name in event: "+vessel_name)
+                except Exception as exc:issues.append("vessel name lookup: "+str(exc)[:130])
             # IMO evidence fallback is an identity lookup, not an inferred relationship.
             blob=str(_meta(e))+" "+_clean(e.get("description"))+" "+_clean(e.get("title"))
             for imo in set(re.findall(r"(?<!\d)\d{7}(?!\d)",blob)):
