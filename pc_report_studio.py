@@ -790,9 +790,13 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                 hide_index=True,use_container_width=True)
             if st.button("Add security-priority candidates to report",key=f"pc_daily_select_{mode}"):
                 ids=[e["event_id"] for e in candidates if security_rank(e)[0]>0][:12]
-                old=st.session_state.get(f"pc_report_selected_ids_{mode}",[])
-                st.session_state[f"pc_report_selected_ids_{mode}"]=list(dict.fromkeys(old+ids))
-                st.rerun()
+                if not ids:
+                    st.warning("No security-priority events found in this period. Select suitable developments manually below.")
+                else:
+                    old=st.session_state.get(f"pc_report_selected_ids_{mode}",[])
+                    st.session_state[f"pc_report_selected_ids_{mode}"]=list(dict.fromkeys(old+ids))
+                    st.session_state[f"pc_report_product_{mode}"]="Daily / Multi-Event Brief"
+                    st.rerun()
             st.caption("Review the selection below, assemble evidence, then draft and export using the normal Report Studio workflow.")
 
     st.markdown("#### Development library")
