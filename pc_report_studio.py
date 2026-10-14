@@ -277,13 +277,16 @@ def _assemble_evidence(sb, lens, selected_events, selected_objects, context):
                 add_object("entity",l.get("entity_id"))
             for l in fetch("pc_event_asset_links","event_id",eid):
                 add_object("asset",l.get("asset_id"))
+            # Current event IDs may carry canonical vessel identities in structured metadata.
+            for key in ("mobile_asset_id","vessel_id","linked_mobile_asset_id"):
+                if _meta(e).get(key):add_object("mobile_asset",_meta(e)[key])
             for l in fetch("pc_event_links","event_id",eid):
                 typ=_clean(l.get("linked_type")).lower()
                 if typ=="vessel":typ="mobile_asset"
                 add_object(typ,l.get("linked_id"))
             # IMO evidence fallback is an identity lookup, not an inferred relationship.
             blob=str(_meta(e))+" "+_clean(e.get("description"))+" "+_clean(e.get("title"))
-            for imo in set(re.findall(r"(?<!\\d)\\d{7}(?!\\d)",blob)):
+            for imo in set(re.findall(r"(?<!\d)\d{7}(?!\d)",blob)):
                 for r in fetch("pc_mobile_assets","imo",imo,10):
                     add_object("mobile_asset",r.get("mobile_asset_id"))
     else:
@@ -314,7 +317,10 @@ def _assemble_evidence(sb, lens, selected_events, selected_objects, context):
                 "Flag":_clean(rec.get("flag")),"Registered owner":_clean(rec.get("owner_entity_id")),
                 "ISM manager":_clean(rec.get("manager_entity_id")),"Status":_clean(rec.get("status"))})
             meta=_meta(rec)
-            for h in meta.get("name_history",[]) if isinstance(meta.get("name_history"),list) else []:
+            for u in meta.get("identity_sources",[]) if isinstance(meta.get("identity_sources"),list) else []:
+                if isinstance(u,str) and u.startswith(("https://","http://")):sources.append(u)
+            histories=meta.get("identity_history") or meta.get("name_history") or []
+            for h in histories if isinstance(histories,list) else []:
                 if isinstance(h,dict):
                     history_rows.append({"Date":_clean(h.get("date") or h.get("valid_from") or h.get("date_precision")),
                         "Development":_clean(h.get("name"))+" — "+_clean(h.get("role")),
@@ -520,7 +526,7 @@ def _asset_table_rows(objects, preset):
 def _vessels_for_report(sb, events):
     imos=set()
     for e in events:
-        imos.update(re.findall(r"(?<!\\d)\\d{7}(?!\\d)",str(_meta(e))+" "+_clean(e.get("description"))))
+        imos.update(re.findall(r"(?<!\d)\d{7}(?!\d)",str(_meta(e))+" "+_clean(e.get("description"))))
     rows=[]
     for imo in sorted(imos):
         try:
