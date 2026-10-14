@@ -5718,7 +5718,7 @@ def render_terminal(lens: str = "trade"):
                 ("Home",""),("Companies","company"),("Infrastructure","port"),
                 ("Vessels","vessel"),("Corridors","corridor"),("Markets","freight"),
                 ("Sanctions & Compliance","sanction"),("Strategic Industries","shipyard"),
-                ("Events","event"),("Brief Builder","__brief_builder__"),
+                ("Events","event"),("Report Studio","__report_studio__"),
                 ("Report Library","__report_library__"),("Documents","document")
             ],
             "intelligence":[
@@ -5728,7 +5728,6 @@ def render_terminal(lens: str = "trade"):
                 ("Monitoring & Indicators","monitoring"),
                 ("Actors & Networks","__actors__"),
                 ("Report Studio","__report_studio__"),
-                ("Brief Builder","__brief_builder__"),
                 ("Report Library","__report_library__"),
                 ("Documents","document")
             ],
@@ -5862,7 +5861,7 @@ def render_terminal(lens: str = "trade"):
         elif workspace=="__report_studio__":
             _render_publication_workspace(sb,lens,"studio")
         elif workspace=="__brief_builder__":
-            _render_publication_workspace(sb,lens,"brief")
+            _render_publication_workspace(sb,lens,"studio")
         elif workspace=="__report_library__":
             _render_publication_workspace(sb,lens,"library")
         elif workspace=="__sanctions_report__":
