@@ -2459,7 +2459,9 @@ def _daily_nav(lens: str):
     st.session_state['pc_document_browser'] = False
     st.session_state['pc_uae_ofac_overlap'] = False
     st.session_state[f"pc_terminal_search_{lens}"] = ""
-    st.session_state[f"pc_terminal_nav_{lens}"] = "Daily Brief"
+    st.session_state[f"pc_terminal_nav_{lens}"] = "Report Studio"
+    st.session_state[f"pc_terminal_workspace_{lens}"] = "__report_studio__"
+    st.session_state[f"pc_report_daily_entry_{lens}"] = True
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -5711,8 +5713,11 @@ def render_terminal(lens: str = "trade"):
                          index=0 if st.session_state.get("pc_terminal_theme","Light")=="Light" else 1,
                          key="pc_terminal_theme")
         st.divider()
-        st.button("Daily Brief", key=f"pc_daily_sidebar_{lens}", use_container_width=True,
-                  on_click=_daily_nav, args=(lens,))
+        if lens=="intelligence":
+            st.caption("Daily Brief is now inside Report Studio.")
+        else:
+            st.button("Daily Brief", key=f"pc_daily_sidebar_{lens}", use_container_width=True,
+                      on_click=_daily_nav, args=(lens,))
         navs={
             "trade":[
                 ("Home",""),("Companies","company"),("Infrastructure","port"),
@@ -5847,7 +5852,8 @@ def render_terminal(lens: str = "trade"):
         else:
             st.info('No matching documents.')
         return
-    st.button("Daily Brief", key=f"pc_daily_top_{lens}", on_click=_daily_nav, args=(lens,))
+    if lens!="intelligence":
+        st.button("Daily Brief", key=f"pc_daily_top_{lens}", on_click=_daily_nav, args=(lens,))
     if st.session_state.get(f"pc_terminal_nav_{lens}") == "Daily Brief":
         _render_daily_brief(lens)
         return
