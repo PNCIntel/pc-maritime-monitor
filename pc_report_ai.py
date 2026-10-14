@@ -94,3 +94,22 @@ Every section name must exactly match one of the requested section names."""
     }
     r=_api(api_key,payload)
     return json.loads(r["choices"][0]["message"]["content"])
+
+
+def assist_block(api_key: str, instruction: str, block: dict, context_bundle: dict) -> dict:
+    """Propose a change to ONE block; caller must explicitly accept it."""
+    if not api_key:
+        raise ValueError("OpenAI API key is not configured")
+    system="""You are the Power & Corridors evidence-grounded editorial assistant.
+Revise only the supplied block according to the instruction. Use only provided context.
+Maintain confirmed/reported/alleged distinctions. Never invent facts, legal designations,
+identifiers, sources or relationships. Use coherent prose and [n] references only
+where the matching source is present in context.evidence_urls (1-based).
+Return JSON containing title, body, gaps (list of strings). Do not modify other blocks."""
+    payload={"model":MODEL,"temperature":0.1,"response_format":{"type":"json_object"},
+             "messages":[{"role":"system","content":system},
+                         {"role":"user","content":json.dumps({"instruction":instruction,
+                           "block":block,"context":context_bundle},ensure_ascii=False,default=str)[:100000]}],
+             "max_tokens":3500}
+    result=_api(api_key,payload)
+    return json.loads(result["choices"][0]["message"]["content"])
