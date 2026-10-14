@@ -569,6 +569,8 @@ def _save_report(sb, product: str, title: str, report_date: date, region: str,
 
 def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str="studio"):
     seed=_context_seed(context)
+    if st.session_state.get(f"pc_report_fresh_{mode}"):
+        seed={}
     if mode=="library":
         st.markdown("## Report Library")
         st.caption("Structured P&C reports saved in the persistent reporting layer.")
@@ -644,7 +646,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         event_map={k:e for k,e in event_map.items() if e.get("trade_visible") is True}
     picked_key=f"pc_report_selected_ids_{mode}"
     selected_ids=list(st.session_state.get(picked_key,[]))
-    if seed.get("type")=="event" and seed.get("id") and seed["id"] not in selected_ids:
+    if not st.session_state.get(f"pc_report_fresh_{mode}") and seed.get("type")=="event" and seed.get("id") and seed["id"] not in selected_ids:
         selected_ids.append(seed["id"])
     ordered=sorted(event_map.items(),key=lambda pair:_clean(pair[1].get("start_date")),reverse=True)
     st.caption(f"{len(ordered)} matching developments · showing up to 15 per page")
@@ -911,13 +913,29 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         except Exception as exc:
             st.error(f"Could not save report: {exc}")
 
-    if c.button("Clear report form",key=f"pc_report_clear_{mode}"):
-        prefixes=(f"pc_report_field_{mode}_",f"pc_report_title_{mode}",f"pc_report_region_{mode}",
-                  f"pc_report_summary_{mode}",f"pc_report_sources_{mode}",f"pc_report_events_{mode}",
-                  f"pc_report_query_{mode}",f"pc_report_query_objects_{mode}",f"pc_report_ai_gaps_{mode}",
-                  f"pc_report_ai_bundle_{mode}",f"pc_editor_blocks_{mode}",f"pc_editor_proposal_{mode}",
-                  f"pc_title_block_{mode}_",f"pc_body_{mode}_",f"pc_edit_table_{mode}_")
-        for k in list(st.session_state):
-            if any(k.startswith(p) for p in prefixes):
-                del st.session_state[k]
+    if c.button("New report — clear workspace",key=f"pc_report_clear_{mode}"):
+        # Clear every report-specific control, not merely the text fields.
+        # Saved reports in pc_reports are unaffected.
+        prefixes=(
+            f"pc_report_field_{mode}_",f"pc_report_title_{mode}",
+            f"pc_report_date_{mode}",f"pc_report_region_{mode}",
+            f"pc_report_summary_{mode}",f"pc_report_sources_{mode}",
+            f"pc_report_events_{mode}",f"pc_report_query_{mode}",
+            f"pc_report_query_objects_{mode}",f"pc_report_ai_gaps_{mode}",
+            f"pc_report_ai_bundle_{mode}",f"pc_report_product_{mode}",
+            f"pc_report_find_events_{mode}",f"pc_report_scope_{mode}",
+            f"pc_report_find_period_{mode}",f"pc_report_selected_ids_{mode}",
+            f"pc_report_results_page_{mode}",f"pc_report_prefill_{mode}_",
+            f"pc_editor_blocks_{mode}",f"pc_editor_proposal_{mode}",
+            f"pc_editor_notice_{mode}",f"pc_kind_{mode}",
+            f"pc_title_block_{mode}_",f"pc_body_{mode}_",
+            f"pc_preset_{mode}_",f"pc_edit_table_{mode}_",
+            f"pc_table_count_{mode}_",f"pc_assist_instruction_{mode}_",
+            f"pc_assist_proposal_{mode}_",
+        )
+        for key in list(st.session_state):
+            if any(key.startswith(prefix) for prefix in prefixes):
+                del st.session_state[key]
+        # Opening a report from an event must not silently reattach that event.
+        st.session_state[f"pc_report_fresh_{mode}"]=True
         st.rerun()
