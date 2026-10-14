@@ -80,6 +80,26 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         vessel = _one(sb, "pc_mobile_assets", "imo", str(meta["canonical_vessel_imo"]))
     vessel_id = str(vessel.get("mobile_asset_id") or "")
     vessel_meta = _meta(vessel)
+    # PGSA research queue is a reported maritime non-compliance roster, not a
+    # legal designation. Only an exact IMO match can surface it here.
+    vessel_imo = str(vessel.get("imo") or "").strip()
+    pgsa_queue = []
+    if vessel_imo:
+        pgsa_queue = [q for q in _get(sb, "pc_sanctions_import_queue",
+                                      "subject_identifier", vessel_imo, 100)
+                      if str(q.get("authority_code") or "").upper() == "PGSA"]
+    # Published sanctions use the canonical designation/link model independently.
+    designation_links = []
+    if vessel_id:
+        designation_links = [q for q in _get(sb, "pc_sanctions_links", "linked_id",
+                                              vessel_id, 100)
+                             if str(q.get("linked_type") or "").lower() in ("mobile_asset", "vessel")]
+    published = []
+    for link in designation_links:
+        designation = _one(sb, "pc_sanctions_designations", "sanctions_designation_id",
+                           link.get("sanctions_designation_id"))
+        if designation:
+            published.append((link, designation))
 
     outgoing = _get(sb, "pc_event_relationships", "from_event_id", event_id)
     incoming = _get(sb, "pc_event_relationships", "to_event_id", event_id)
@@ -162,6 +182,30 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
     evidence.sort(key=lambda e: str(e.get("published_at") or ""))
     updates = _get(sb, "pc_event_updates", "event_id", event_id, 200)
     updates.sort(key=lambda u: str(u.get("occurred_at") or u.get("reported_at") or ""))
+
+    if vessel_imo and (pgsa_queue or published):
+        st.markdown("### Vessel compliance & sanctions exposure")
+        if pgsa_queue:
+            st.markdown("**PGSA — reported Hormuz non-compliance listing**")
+            st.caption("Exact IMO match to P&C's recovered PGSA research roster. This is not by itself an OFAC, UN, EU or UK designation.")
+            for q in pgsa_queue:
+                st.write(str(q.get("reported_name") or vessel.get("name") or vessel_imo)
+                         + " · IMO " + vessel_imo)
+                st.caption("Research status: " + _label(q.get("research_status")))
+                source=str(q.get("source_url") or "")
+                if source.startswith(("https://","http://")):
+                    st.link_button("PGSA roster source ↗",source)
+        for link,designation in published:
+            st.markdown("**Published designation record**")
+            st.write(str(designation.get("primary_name") or vessel.get("name") or vessel_imo)
+                     + " · " + _label(designation.get("source_list")))
+            st.caption("Designation status: " + _label(designation.get("status"))
+                       + " · link review: " + _label(link.get("review_status"))
+                       + " · direct designation: " + str(link.get("is_direct_designation")))
+            url=str(designation.get("source_url") or "")
+            if url.startswith(("https://","http://")):
+                st.link_button("Designation source ↗",url)
+        st.caption("A vessel's involvement in an incident does not establish listing, designation or liability.")
 
     st.markdown("### Intelligence finding")
     headline = str(meta.get("executive_summary") or record.get("description") or "").strip()
