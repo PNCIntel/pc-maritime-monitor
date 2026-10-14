@@ -170,6 +170,7 @@ def _ai_context_bundle(sb, lens: str, query: str, selected_objects: list[dict],
         seeds.append({"object_type":typ,"object_id":oid,"display_name":_clean(rec.get("name") or rec.get("title") or rec.get("corridor_name"))})
 
     seeds.extend(selected_objects)
+    seeds.extend({"object_type":"event","object_id":_clean(e.get("event_id")),"display_name":_clean(e.get("title"))} for e in selected_events if e.get("event_id"))
 
     seen=set()
     for s in seeds:
