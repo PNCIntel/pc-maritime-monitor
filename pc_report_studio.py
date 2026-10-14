@@ -699,10 +699,22 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                     st.session_state[f"pc_report_field_{mode}_{product}_{k}"]=_clean(v)
             st.session_state[f"pc_report_ai_gaps_{mode}"]=result.get("gaps") or []
             st.session_state[f"pc_report_ai_bundle_{mode}"]=bundle
+            st.session_state[f"pc_editor_proposal_{mode}"]=[_new_block("Narrative",name,_clean(value)) for name,value in (result.get("sections") or {}).items() if _clean(value)]
             st.rerun()
         except Exception as exc:
             st.error(f"AI drafting failed: {exc}")
 
+    proposal=st.session_state.get(f"pc_editor_proposal_{mode}")
+    if proposal is not None:
+        st.info("AI proposed an editable draft. Accept or discard it; your current work is unchanged.")
+        yes,no=st.columns(2)
+        if yes.button("Accept AI draft",key=f"pc_accept_{mode}"):
+            st.session_state[f"pc_editor_blocks_{mode}"]=proposal
+            del st.session_state[f"pc_editor_proposal_{mode}"]
+            st.rerun()
+        if no.button("Discard AI draft",key=f"pc_discard_{mode}"):
+            del st.session_state[f"pc_editor_proposal_{mode}"]
+            st.rerun()
     gaps=st.session_state.get(f"pc_report_ai_gaps_{mode}") or []
     if gaps:
         with st.expander("AI-identified gaps / unconfirmed points"):
@@ -717,14 +729,50 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
 
     summary=st.text_input("Executive line / 14-word summary",key=f"pc_report_summary_{mode}")
 
-    st.markdown("### Structured analysis")
+    st.markdown("### Editorial canvas")
+    canvas_key=f"pc_editor_blocks_{mode}"
+    if canvas_key not in st.session_state:
+        st.session_state[canvas_key]=[_new_block("Narrative",name) for name in spec["sections"]]
+    blocks=st.session_state[canvas_key]
+    ckind,cadd=st.columns([3,1])
+    kind=ckind.selectbox("New content block",BLOCK_TYPES,key=f"pc_kind_{mode}")
+    if cadd.button("Add block",key=f"pc_add_{mode}"):
+        blocks.append(_new_block(kind,preset="Vessels" if kind=="Asset table" else "Custom"))
+        st.rerun()
     fields={}
-    for field in spec["sections"]:
-        fields[field]=st.text_area(
-            field,
-            key=f"pc_report_field_{mode}_{product}_{field}",
-            height=120 if field not in {"Analysis","Key Developments","Priority Developments"} else 170
-        )
+    for i,block in enumerate(list(blocks)):
+        bid=block["id"]
+        with st.container(border=True):
+            top,up,down,delete=st.columns([6,1,1,1])
+            block["title"]=top.text_input("Heading",value=block.get("title",""),key=f"pc_title_block_{mode}_{bid}")
+            if up.button("↑",key=f"pc_up_{mode}_{bid}",disabled=i==0):
+                blocks[i-1],blocks[i]=blocks[i],blocks[i-1]
+                st.rerun()
+            if down.button("↓",key=f"pc_down_{mode}_{bid}",disabled=i==len(blocks)-1):
+                blocks[i+1],blocks[i]=blocks[i],blocks[i+1]
+                st.rerun()
+            if delete.button("×",key=f"pc_del_{mode}_{bid}"):
+                blocks.pop(i)
+                st.rerun()
+            if block["kind"]=="Asset table":
+                choices=list(TABLE_PRESETS)
+                preset=st.selectbox("Table layout",choices,index=choices.index(block.get("preset")) if block.get("preset") in choices else choices.index("Custom"),key=f"pc_preset_{mode}_{bid}")
+                if preset!=block.get("preset"):
+                    block["preset"]=preset
+                    block["rows"]=[]
+                if st.button("Populate from connected records",key=f"pc_pop_table_{mode}_{bid}"):
+                    bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
+                    block["rows"]=_asset_table_rows(bundle.get("objects") or [],preset)
+                    st.rerun()
+                frame=pd.DataFrame(block.get("rows") or [],columns=TABLE_PRESETS[preset])
+                edited=st.data_editor(frame,num_rows="dynamic",hide_index=True,use_container_width=True,key=f"pc_edit_table_{mode}_{bid}")
+                block["rows"]=edited.fillna("").to_dict("records")
+            elif block["kind"]=="References":
+                st.caption("References are collected automatically in the evidence panel below.")
+            else:
+                block["body"]=st.text_area("Text",value=block.get("body",""),height=190,key=f"pc_body_{mode}_{bid}")
+                fields[block["title"]]=block["body"]
+    st.session_state[canvas_key]=blocks
 
     source_urls=[]
     for e in selected:
@@ -747,7 +795,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     if not sources:
         st.warning("No evidence URLs yet: attach sources before publishing.")
 
-    web_html=_build_html(product,report_title,report_date,region,confidence,summary,fields,sources)
+    web_html=_build_html(product,report_title,report_date,region,confidence,summary,fields,sources,blocks)
     tabs=st.tabs(["Preview","HTML","Evidence / linked events"])
     with tabs[0]:
         components.html(web_html,height=850,scrolling=True)
@@ -768,14 +816,14 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     a,b,c=st.columns(3)
     if a.button("Save draft",type="primary",disabled=not bool(report_title.strip()),key=f"pc_report_save_draft_{mode}"):
         try:
-            rid=_save_report(sb,product,report_title,report_date,region,summary,fields,selected,sources,"draft",context)
+            rid=_save_report(sb,product,report_title,report_date,region,summary,fields,selected,sources,"draft",context,blocks)
             st.success(f"Draft saved: {rid}")
         except Exception as exc:
             st.error(f"Could not save report: {exc}")
 
     if b.button("Save for review",disabled=not bool(report_title.strip()),key=f"pc_report_save_review_{mode}"):
         try:
-            rid=_save_report(sb,product,report_title,report_date,region,summary,fields,selected,sources,"review",context)
+            rid=_save_report(sb,product,report_title,report_date,region,summary,fields,selected,sources,"review",context,blocks)
             st.success(f"Saved for review: {rid}")
         except Exception as exc:
             st.error(f"Could not save report: {exc}")
