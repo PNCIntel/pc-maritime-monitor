@@ -1011,72 +1011,107 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         st.success("New block added at the top of the canvas. Edit its heading and content below.")
         st.session_state.pop(f"pc_editor_notice_{mode}",None)
     st.caption(f"{len(blocks)} editable blocks in this report.")
-    fields={}
-    for i,block in enumerate(list(blocks)):
-        bid=block["id"]
-        with st.container(border=True):
-            top,up,down,delete=st.columns([6,1,1,1])
-            block["title"]=top.text_input("Heading",value=block.get("title",""),key=f"pc_title_block_{mode}_{bid}")
-            if up.button("↑",key=f"pc_up_{mode}_{bid}",disabled=i==0):
-                blocks[i-1],blocks[i]=blocks[i],blocks[i-1]
-                st.rerun()
-            if down.button("↓",key=f"pc_down_{mode}_{bid}",disabled=i==len(blocks)-1):
-                blocks[i+1],blocks[i]=blocks[i],blocks[i+1]
-                st.rerun()
-            if delete.button("×",key=f"pc_del_{mode}_{bid}"):
-                blocks.pop(i)
-                st.rerun()
-            if block["kind"]=="Asset table":
-                choices=list(TABLE_PRESETS)
-                preset=st.selectbox("Table layout",choices,index=choices.index(block.get("preset")) if block.get("preset") in choices else choices.index("Custom"),key=f"pc_preset_{mode}_{bid}")
-                if preset!=block.get("preset"):
-                    block["preset"]=preset
-                    block["rows"]=[]
-                if st.button("Populate from connected records",key=f"pc_pop_table_{mode}_{bid}"):
-                    bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
-                    block["rows"]=_vessels_for_report(sb,selected) if preset=="Vessels" else _asset_table_rows(bundle.get("objects") or [],preset)
-                    st.session_state.pop(f"pc_edit_table_{mode}_{bid}",None)
-                    st.session_state[f"pc_table_count_{mode}_{bid}"]=len(block["rows"])
-                    st.rerun()
-                if f"pc_table_count_{mode}_{bid}" in st.session_state:
-                    count=st.session_state.pop(f"pc_table_count_{mode}_{bid}")
-                    st.info(f"{count} canonical records found; if zero, no verified matching vessel records were found.")
-                frame=pd.DataFrame(block.get("rows") or [],columns=block.get("columns") or TABLE_PRESETS[preset])
-                edited=st.data_editor(frame,num_rows="dynamic",hide_index=True,use_container_width=True,key=f"pc_edit_table_{mode}_{bid}")
-                block["rows"]=edited.fillna("").to_dict("records")
-            elif block["kind"]=="References":
-                st.caption("References are collected automatically in the evidence panel below.")
+    # Intelligence uses a manuscript-first editor. Evidence tables stay as structured
+    # blocks, and the legacy block editor remains available for other lenses.
+    document_first = lens == "intelligence" and st.toggle(
+        "Continuous document editor", value=True, key=f"pc_document_first_{mode}",
+        help="Edit report prose as one manuscript rather than filling individual section boxes.")
+    if document_first:
+        import hashlib
+        from pc_report_document import manuscript_from_blocks, apply_manuscript
+        manuscript = manuscript_from_blocks(blocks)
+        revision = hashlib.sha256(manuscript.encode("utf-8")).hexdigest()[:12]
+        st.caption("Write and reorganise the report naturally using ## headings. Evidence tables remain linked and are not replaced by manuscript edits.")
+        with st.form(key=f"pc_manuscript_form_{mode}_{revision}"):
+            edited_manuscript = st.text_area(
+                "Report manuscript (Markdown)", value=manuscript, height=650,
+                key=f"pc_manuscript_{mode}_{revision}",
+                help="Use ## for section headings. Citation markers such as [1] are retained.")
+            apply_document = st.form_submit_button("Apply manuscript edits",type="primary",use_container_width=True)
+        if apply_document:
+            revised, error = apply_manuscript(blocks, edited_manuscript)
+            if error:
+                st.error(error)
             else:
-                block["body"]=st.text_area("Text",value=block.get("body",""),height=190,key=f"pc_body_{mode}_{bid}")
-                instruction=st.text_input("AI assistance for this block",placeholder="Expand, rewrite, compare, or add supported references",
-                    key=f"pc_assist_instruction_{mode}_{bid}")
-                if st.button("AI suggest edit",key=f"pc_assist_{mode}_{bid}"):
-                    if not instruction.strip():
-                        st.warning("Enter an instruction first.")
-                    else:
-                        try:
-                            from pc_report_ai import assist_block
-                            bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
-                            st.session_state[f"pc_assist_proposal_{mode}_{bid}"]=assist_block(_api_key(),instruction,block,bundle)
+                st.session_state[canvas_key] = revised
+                st.success("Manuscript applied. Structured evidence tables and existing source records are preserved.")
+                st.rerun()
+        with st.expander("Connected evidence tables in this report", expanded=False):
+            tables=[b for b in blocks if b.get("kind")=="Asset table"]
+            if not tables:
+                st.caption("No evidence tables added yet. Select them in Connected evidence above.")
+            for b in tables:
+                st.markdown("**"+_clean(b.get("title"))+"** · "+str(len(b.get("rows") or []))+" records")
+                st.dataframe(pd.DataFrame(b.get("rows") or []),hide_index=True,use_container_width=True)
+        st.caption("Apply manuscript edits before using other controls. Report preview and export use the applied version.")
+    fields={}
+    if not document_first:
+        for i,block in enumerate(list(blocks)):
+            bid=block["id"]
+            with st.container(border=True):
+                top,up,down,delete=st.columns([6,1,1,1])
+                block["title"]=top.text_input("Heading",value=block.get("title",""),key=f"pc_title_block_{mode}_{bid}")
+                if up.button("↑",key=f"pc_up_{mode}_{bid}",disabled=i==0):
+                    blocks[i-1],blocks[i]=blocks[i],blocks[i-1]
+                    st.rerun()
+                if down.button("↓",key=f"pc_down_{mode}_{bid}",disabled=i==len(blocks)-1):
+                    blocks[i+1],blocks[i]=blocks[i],blocks[i+1]
+                    st.rerun()
+                if delete.button("×",key=f"pc_del_{mode}_{bid}"):
+                    blocks.pop(i)
+                    st.rerun()
+                if block["kind"]=="Asset table":
+                    choices=list(TABLE_PRESETS)
+                    preset=st.selectbox("Table layout",choices,index=choices.index(block.get("preset")) if block.get("preset") in choices else choices.index("Custom"),key=f"pc_preset_{mode}_{bid}")
+                    if preset!=block.get("preset"):
+                        block["preset"]=preset
+                        block["rows"]=[]
+                    if st.button("Populate from connected records",key=f"pc_pop_table_{mode}_{bid}"):
+                        bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
+                        block["rows"]=_vessels_for_report(sb,selected) if preset=="Vessels" else _asset_table_rows(bundle.get("objects") or [],preset)
+                        st.session_state.pop(f"pc_edit_table_{mode}_{bid}",None)
+                        st.session_state[f"pc_table_count_{mode}_{bid}"]=len(block["rows"])
+                        st.rerun()
+                    if f"pc_table_count_{mode}_{bid}" in st.session_state:
+                        count=st.session_state.pop(f"pc_table_count_{mode}_{bid}")
+                        st.info(f"{count} canonical records found; if zero, no verified matching vessel records were found.")
+                    frame=pd.DataFrame(block.get("rows") or [],columns=block.get("columns") or TABLE_PRESETS[preset])
+                    edited=st.data_editor(frame,num_rows="dynamic",hide_index=True,use_container_width=True,key=f"pc_edit_table_{mode}_{bid}")
+                    block["rows"]=edited.fillna("").to_dict("records")
+                elif block["kind"]=="References":
+                    st.caption("References are collected automatically in the evidence panel below.")
+                else:
+                    block["body"]=st.text_area("Text",value=block.get("body",""),height=190,key=f"pc_body_{mode}_{bid}")
+                    instruction=st.text_input("AI assistance for this block",placeholder="Expand, rewrite, compare, or add supported references",
+                        key=f"pc_assist_instruction_{mode}_{bid}")
+                    if st.button("AI suggest edit",key=f"pc_assist_{mode}_{bid}"):
+                        if not instruction.strip():
+                            st.warning("Enter an instruction first.")
+                        else:
+                            try:
+                                from pc_report_ai import assist_block
+                                bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
+                                st.session_state[f"pc_assist_proposal_{mode}_{bid}"]=assist_block(_api_key(),instruction,block,bundle)
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"AI edit failed: {exc}")
+                    proposed=st.session_state.get(f"pc_assist_proposal_{mode}_{bid}")
+                    if proposed:
+                        st.markdown("**Suggested replacement (not yet applied)**")
+                        st.write(_clean(proposed.get("body")))
+                        ac,dc=st.columns(2)
+                        if ac.button("Accept edit",key=f"pc_assist_accept_{mode}_{bid}"):
+                            block["body"]=_clean(proposed.get("body"))
+                            block["title"]=_clean(proposed.get("title")) or block["title"]
+                            st.session_state.pop(f"pc_body_{mode}_{bid}",None)
+                            st.session_state.pop(f"pc_title_block_{mode}_{bid}",None)
+                            del st.session_state[f"pc_assist_proposal_{mode}_{bid}"]
                             st.rerun()
-                        except Exception as exc:
-                            st.error(f"AI edit failed: {exc}")
-                proposed=st.session_state.get(f"pc_assist_proposal_{mode}_{bid}")
-                if proposed:
-                    st.markdown("**Suggested replacement (not yet applied)**")
-                    st.write(_clean(proposed.get("body")))
-                    ac,dc=st.columns(2)
-                    if ac.button("Accept edit",key=f"pc_assist_accept_{mode}_{bid}"):
-                        block["body"]=_clean(proposed.get("body"))
-                        block["title"]=_clean(proposed.get("title")) or block["title"]
-                        st.session_state.pop(f"pc_body_{mode}_{bid}",None)
-                        st.session_state.pop(f"pc_title_block_{mode}_{bid}",None)
-                        del st.session_state[f"pc_assist_proposal_{mode}_{bid}"]
-                        st.rerun()
-                    if dc.button("Discard edit",key=f"pc_assist_discard_{mode}_{bid}"):
-                        del st.session_state[f"pc_assist_proposal_{mode}_{bid}"]
-                        st.rerun()
-                fields[block["title"]]=block["body"]
+                        if dc.button("Discard edit",key=f"pc_assist_discard_{mode}_{bid}"):
+                            del st.session_state[f"pc_assist_proposal_{mode}_{bid}"]
+                            st.rerun()
+                    fields[block["title"]]=block["body"]
+    blocks=st.session_state[canvas_key] if document_first else blocks
     st.session_state[canvas_key]=blocks
     if not blocks:
         st.info("Canvas is empty. Add a block or generate an AI draft.")
