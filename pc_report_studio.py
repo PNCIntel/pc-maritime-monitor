@@ -538,14 +538,15 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     product=st.selectbox("Product",product_options,index=default_idx,key=f"pc_report_product_{mode}")
     spec=PRODUCTS[product]
 
-    st.markdown("#### Incident library")
-    st.caption("Find stories by ordinary words, date, place or vessel. Add more than one story; selections stay put when you search again.")
-    find_col,days_col=st.columns([3,1])
-    event_find=find_col.text_input("Search headlines and incidents",
-        placeholder="Panama tankers, DF Peak, French boarding, Réunion...",
-        key=f"pc_report_find_events_{mode}")
-    period=days_col.selectbox("Date range",["All dates","Last 30 days","Last 90 days"],
-        key=f"pc_report_find_period_{mode}")
+    st.markdown("#### Development library")
+    st.caption("Search across verified production developments. Filter by purpose; combine Trade and Security whenever needed.")
+    qcol,scope_col,date_col=st.columns([3,1.4,1.3])
+    event_find=qcol.text_input("Find developments",placeholder="Panama tanker, DF Peak, Réunion...",
+                              key=f"pc_report_find_events_{mode}")
+    scope=scope_col.selectbox("Coverage",["All developments","Security & disruption","Trade & commercial"],
+                              key=f"pc_report_scope_{mode}")
+    period=date_col.selectbox("Period",["Last 30 days","Last 90 days","All dates"],
+                              key=f"pc_report_find_period_{mode}")
     lookup=event_find.strip()
     found,_=_query_discovery(sb,lookup) if lookup else ([],[])
     recent=[e for e in _recent_events(sb,300) if not _horizon_event(e)] if not lookup else []
@@ -554,24 +555,36 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         from datetime import timedelta
         cutoff=(date.today()-timedelta(days=30 if period=="Last 30 days" else 90)).isoformat()
         event_map={k:e for k,e in event_map.items() if _clean(e.get("start_date"))[:10]>=cutoff}
+    if scope=="Security & disruption":
+        event_map={k:e for k,e in event_map.items() if e.get("intelligence_visible") is True}
+    elif scope=="Trade & commercial":
+        event_map={k:e for k,e in event_map.items() if e.get("trade_visible") is True}
     picked_key=f"pc_report_selected_ids_{mode}"
     selected_ids=list(st.session_state.get(picked_key,[]))
     if seed.get("type")=="event" and seed.get("id") and seed["id"] not in selected_ids:
         selected_ids.append(seed["id"])
-    st.caption(f"{len(event_map)} matching incidents" if lookup else "Recent incidents — enter a phrase to search the full production history")
-    for eid,e in list(event_map.items())[:40]:
-        c1,c2=st.columns([5,1])
-        c1.markdown("**"+_clean(e.get("title") or "Untitled incident")+"**  ·  "+_clean(e.get("start_date"))[:10])
-        if _event_summary(e):
-            c1.caption(_event_summary(e)[:210])
-        if c2.button("Added ✓" if eid in selected_ids else "Add +",
-                     disabled=eid in selected_ids,key=f"pc_story_add_{mode}_{eid}",use_container_width=True):
+    ordered=sorted(event_map.items(),key=lambda pair:_clean(pair[1].get("start_date")),reverse=True)
+    st.caption(f"{len(ordered)} matching developments · showing up to 15 per page")
+    page_key=f"pc_report_results_page_{mode}"
+    max_page=max(1,(len(ordered)+14)//15)
+    page=st.number_input("Results page",min_value=1,max_value=max_page,value=1,
+                         key=page_key) if max_page>1 else 1
+    for eid,e in ordered[(page-1)*15:page*15]:
+        title=_clean(e.get("title") or "Untitled development")
+        date_str=_clean(e.get("start_date"))[:10]
+        c1,c2=st.columns([6,1])
+        c1.markdown(f"**{title}** · {date_str}")
+        summary=_event_summary(e)
+        if summary: c1.caption(summary[:165]+("…" if len(summary)>165 else ""))
+        if c2.button("✓ Added" if eid in selected_ids else "Add +",
+                     disabled=eid in selected_ids,key=f"pc_story_add_{mode}_{eid}",
+                     use_container_width=True):
             selected_ids.append(eid)
             st.session_state[picked_key]=list(dict.fromkeys(selected_ids))
             st.rerun()
-    if lookup and not event_map:
-        st.info("No matching production incidents. Try the vessel name or a shorter phrase; held research has not been published.")
-    st.markdown("**Selected stories**")
+    if lookup and not ordered:
+        st.info("No matching production developments under these filters. Try All developments or a shorter search.")
+    st.markdown("**Selected for this report**")
     selected=[]
     for eid in list(dict.fromkeys(selected_ids)):
         e=event_map.get(eid)
@@ -580,18 +593,15 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                 rows=(sb.table("pc_events").select("*").eq("event_id",eid).limit(1).execute().data or [])
                 e=rows[0] if rows else None
             except Exception: e=None
-        if not e or _horizon_event(e):
-            continue
+        if not e or _horizon_event(e): continue
         selected.append(e)
-        c1,c2=st.columns([5,1])
+        c1,c2=st.columns([6,1])
         c1.write(_clean(e.get("title"))+" · "+_clean(e.get("start_date"))[:10])
         if c2.button("Remove",key=f"pc_story_remove_{mode}_{eid}"):
-            selected_ids=[x for x in selected_ids if x!=eid]
-            st.session_state[picked_key]=selected_ids
+            st.session_state[picked_key]=[x for x in selected_ids if x!=eid]
             st.rerun()
     st.session_state[picked_key]=[e["event_id"] for e in selected]
-    if selected:
-        st.caption("Related context is pulled from these canonical events and their linked objects when you draft.")
+    if selected: st.caption("These developments and their linked records form the AI draft context.")
     if seed:
         st.info(f"Current terminal context: {seed.get('title')} · {seed.get('type')}")
 
