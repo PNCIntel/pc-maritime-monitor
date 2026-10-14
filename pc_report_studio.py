@@ -921,7 +921,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
             st.session_state[f"pc_report_region_{mode}"]=seed["region"]
         st.rerun()
 
-    if cauto2.button("AI draft from connected data",type="primary",key=f"pc_report_ai_draft_{mode}",use_container_width=True):
+    if cauto2.button("Generate full analytical first draft",type="primary",key=f"pc_report_ai_draft_{mode}",use_container_width=True):
         try:
             from pc_report_ai import draft_report
             bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
@@ -932,6 +932,12 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                 _api_key(),lens,product,spec["sections"],query,bundle,
                 title_hint=seed.get("title","")
             )
+            narrative = {k:_clean(v) for k,v in (result.get("sections") or {}).items()
+                         if k in spec["sections"] and _clean(v)}
+            if not narrative:
+                raise ValueError("The drafting service returned no usable narrative. The editor was not changed.")
+            if not assembled or not assembled.get("counts",{}).get("events"):
+                st.warning("Draft generated without assembled incident evidence; verify coverage before acceptance.")
             if result.get("title"):
                 st.session_state[f"pc_report_title_{mode}"]=result["title"]
             if result.get("executive_line"):
@@ -960,6 +966,13 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         st.info("AI proposed an editable draft. Accept or discard it; your current work is unchanged.")
         yes,no=st.columns(2)
         st.caption(f"{len(proposal)} proposed content blocks; "+str(sum(bool(_clean(b.get("body"))) for b in proposal))+" contain narrative text.")
+        with st.expander("Read proposed analytical draft before accepting", expanded=True):
+            for draft_block in proposal:
+                if draft_block.get("kind")=="Narrative" and _clean(draft_block.get("body")):
+                    st.markdown("#### "+_clean(draft_block.get("title")))
+                    st.markdown(_clean(draft_block.get("body")))
+            st.caption("Evidence tables remain separate and must be supported by retrieved records.")
+
         if yes.button("Accept AI draft",key=f"pc_accept_{mode}",disabled=not bool(proposal)):
             # Clear old canvas widget state before installing the proposal. Streamlit
             # widget keys otherwise take precedence over the new block defaults.
