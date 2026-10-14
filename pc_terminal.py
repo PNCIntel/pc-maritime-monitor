@@ -2274,6 +2274,36 @@ def _render_sanctions_home():
             _panel_header("Recent Sanctions Activity","Latest sanctions, enforcement and evasion-related developments.")
             _html_rows(_recent_event_rows(events,7),7)
 
+    # Iranian PGSA maritime non-compliance register: visible within Sanctions,
+    # but never counted as an independently published legal designation.
+    pgsa=[q for q in _rows("pc_sanctions_import_queue",5000)
+          if _clean(q.get("authority_code")).upper()=="PGSA"
+          and _clean(q.get("subject_type")).casefold() in ("vessel","mobile_asset","ship")]
+    if pgsa:
+        st.markdown("### Iran · PGSA maritime restrictions")
+        st.caption("Iranian PGSA reported non-compliance roster. Research-queue records are shown separately from formal legal designations; exact IMO matching does not imply OFAC, UN, EU or UK designation.")
+        imos={_clean(q.get("subject_identifier")).strip() for q in pgsa if _clean(q.get("subject_identifier")).strip()}
+        st.metric("PGSA vessel records in research roster",len(imos))
+        search=st.text_input("Filter PGSA vessels by name or IMO",key="pc_pgsa_roster_search").casefold().strip()
+        result=[]
+        for q in pgsa:
+            imo=_clean(q.get("subject_identifier")).strip()
+            name=_clean(q.get("reported_name"))
+            if search and search not in (name+" "+imo).casefold():continue
+            result.append({"Jurisdiction":"Iran","Authority":"PGSA",
+                "Reported vessel":name,"IMO":imo,
+                "Category":"Reported maritime non-compliance listing",
+                "Research status":_clean(q.get("research_status")) or "not recorded",
+                "Source":_clean(q.get("source_url"))})
+        if result:
+            st.dataframe(pd.DataFrame(result).drop_duplicates(subset=["Authority","IMO"]),
+                         hide_index=True,use_container_width=True,
+                         column_config={"Source":st.column_config.LinkColumn("Source")})
+        else:st.caption("No PGSA vessel matches this filter.")
+        st.caption("Roster publication and vessel-role verification are separate reviews. An absent roster entry does not prove non-listing.")
+    else:
+        st.caption("No PGSA vessel-level records are currently loaded in the sanctions research queue.")
+
     st.markdown("### Featured Sanctions Objects")
     _featured_search_cards([
         ("Dark Fleet","dark fleet"),
