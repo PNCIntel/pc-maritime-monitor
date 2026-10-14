@@ -912,25 +912,15 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                     st.success(str(st.session_state.pop(f"pc_assemble_added_{mode}"))+" evidence blocks added; existing narrative preserved.")
             st.caption("No inferred exposure, numerical trend or legal designation is generated without supporting records.")
         if lens=="intelligence" and assembled:
-            from pc_report_figures import plan_figures, figure_block
-            st.markdown("#### Figure & Analysis Planner")
-            st.caption("Suggestions are derived from retrieved records. Unsupported visuals are listed with the missing evidence instead of invented results.")
-            recommendations=plan_figures(assembled)
-            for fig in recommendations:
-                with st.expander(fig["title"]+" · "+fig["status"],expanded=fig["status"]=="Ready to generate"):
-                    st.write(fig["reason"])
-                    if fig.get("rows"):
-                        st.dataframe(pd.DataFrame(fig["rows"]),hide_index=True,use_container_width=True)
-                        if st.button("Insert in publication",key=f"pc_fig_insert_{mode}_{fig['id']}"):
-                            current=st.session_state.get(f"pc_editor_blocks_{mode}") or []
-                            if any(b.get("figure_key")==fig["id"] for b in current):
-                                st.info("This figure is already included.")
-                            else:
-                                block=figure_block(fig)
-                                block["figure_key"]=fig["id"]
-                                current.append(block)
-                                st.session_state[f"pc_editor_blocks_{mode}"]=current
-                                st.rerun()
+            from pc_publication_planner import plan_treatment
+            st.markdown("#### Recommended editorial treatment")
+            st.caption("What would explain the story best? Recommendations are not generated figures or verified conclusions.")
+            for suggestion in plan_treatment(assembled):
+                with st.container(border=True):
+                    st.markdown("**"+suggestion["title"]+"** · "+suggestion["status"])
+                    st.write(suggestion["purpose"])
+                    st.caption("Evidence limitation: "+suggestion["limitation"])
+                    st.caption("Next: "+suggestion["next_step"])
 
 
     with editorial_tab:
