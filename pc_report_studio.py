@@ -177,7 +177,7 @@ def _ai_context_bundle(sb, lens: str, query: str, selected_objects: list[dict],
         if not typ or not oid or (typ,oid) in seen:
             continue
         seen.add((typ,oid))
-        rec=_index_record(sb,typ,oid)
+        rec=_index_record(sb,typ,oid) or s
         objects.append({
             "object_type":typ,
             "object_id":oid,
