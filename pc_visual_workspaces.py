@@ -481,21 +481,33 @@ _SECURITY_TYPES=frozenset(('ballistic_missile_launch','missile_launch','air_defe
 _STRATEGIC_TYPES=frozenset(('strategic_infrastructure','strategic_investment','foreign_investment_review',
  'national_security_review','critical_infrastructure_acquisition','supply_risk','commodity_supply_risk'))
 
-def _intel_class(row):
+def _intel_classes(row):
+    """A security incident can also cause a disruption; categories are not exclusive."""
     metadata=row.get('metadata') or {}
-    # Explicit, reviewable editorial classification takes precedence over event-type defaults.
+    if not isinstance(metadata,dict):metadata={}
     explicit=str(metadata.get('intelligence_lens') or metadata.get('intelligence_classification') or '').strip().lower().replace('_',' ')
-    if explicit in ('security','security & disruption','security and disruption','disruption'):return INTEL_LENSES[0]
-    if explicit in ('strategic','strategic exposure'):return INTEL_LENSES[1]
-    if explicit in ('commercial','trade','capital','not intelligence','excluded'):return 'Other / unclassified'
+    if explicit in ('commercial','trade','capital','not intelligence','excluded'):
+        return set()
     typ=str(row.get('event_type') or '').strip().lower()
-    if typ in _SECURITY_TYPES:return INTEL_LENSES[0]
-    if typ in _STRATEGIC_TYPES:return INTEL_LENSES[1]
-    return 'Other / unclassified'
+    category=str(row.get('event_category') or '').strip().lower()
+    subcategory=str(row.get('event_subcategory') or '').strip().lower()
+    phase=str(row.get('event_phase') or '').strip().lower()
+    classes=set()
+    if explicit in ('security','security & disruption','security and disruption','disruption') or category in ('security','disruption') or typ in _SECURITY_TYPES:
+        classes.add(INTEL_LENSES[0])
+    if explicit in ('strategic','strategic exposure') or category=='strategic' or typ in _STRATEGIC_TYPES:
+        classes.add(INTEL_LENSES[1])
+    incident_terms=('attack','strike','sinking','wreck','navigation_hazard','damag','maritime','boarding','fire','grounding','derail','closure','disruption','outage','intercept','collision')
+    if any(word in typ+' '+subcategory+' '+phase for word in incident_terms):
+        classes.add(INTEL_LENSES[0])
+    return classes
+
+def _intel_class(row):
+    classes=_intel_classes(row)
+    return INTEL_LENSES[0] if INTEL_LENSES[0] in classes else (INTEL_LENSES[1] if INTEL_LENSES[1] in classes else 'Other / unclassified')
 
 def _intel_match(row,lens):
-    if lens==INTEL_LENSES[2]:return True
-    return _intel_class(row)==lens
+    return lens==INTEL_LENSES[2] or lens in _intel_classes(row)
 
 def _weekly_frame(rows):
     unique={str(r['event_id']):r for r in rows if r.get('event_id')}
@@ -801,7 +813,7 @@ def _security(db,core):
     st.title('Global Operating Picture')
     st.caption('Published intelligence, operational consequences and supporting evidence. Recent developments appear first.')
     lens=st.radio('Intelligence lens',INTEL_LENSES,horizontal=True,index=0,key='pc_intel_lens')
-    st.caption('Only explicit editorial metadata or recognised event types enter the first two lenses. Other records remain visible under All Connected Developments.')
+    st.caption('Editorial category, subtype and event phase are recognised alongside event type. Security incidents and resulting disruptions remain discoverable without changing their canonical records.')
     a,b,c,d=st.columns([2,1,1,1])
     country=d.text_input('Country (blank = all)',placeholder='Mexico, United States…',key='pc_intel_country').strip()
     term=a.text_input('Search incidents, locations and actors',placeholder='Hormuz, ReCAAP, port attack…',key='v4_s_search')
