@@ -759,7 +759,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         selected_objects=[labels[x] for x in picked]
 
     product_options=list(PRODUCTS)
-    default_idx=product_options.index("Daily / Multi-Event Brief") if mode=="brief" else 0
+    default_idx=product_options.index("Daily / Multi-Event Brief") if lens=="intelligence" or mode=="brief" else 0
     product=st.selectbox("Product",product_options,index=default_idx,key=f"pc_report_product_{mode}")
     spec=PRODUCTS[product]
 
