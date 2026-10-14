@@ -1015,27 +1015,30 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         st.markdown("### Editorial canvas")
         canvas_key=f"pc_editor_blocks_{mode}"
         if canvas_key not in st.session_state:
-            st.session_state[canvas_key]=[_new_block("Narrative",name) for name in spec["sections"]]
+            st.session_state[canvas_key]=([] if lens=="intelligence" else [_new_block("Narrative",name) for name in spec["sections"]])
         blocks=st.session_state[canvas_key]
-        ckind,cadd=st.columns([3,1])
-        kind=ckind.selectbox("New content block",BLOCK_TYPES,key=f"pc_kind_{mode}")
-        if cadd.button("Add block",key=f"pc_add_{mode}"):
-            new_block=_new_block(kind,preset="Vessels" if kind=="Asset table" else "Custom")
-            # Place new work at the top, not after seven lengthy template sections.
-            blocks.insert(0,new_block)
-            st.session_state[canvas_key]=blocks
-            st.session_state[f"pc_editor_notice_{mode}"]=new_block["id"]
-            st.rerun()
-        if st.session_state.get(f"pc_editor_notice_{mode}"):
-            st.success("New block added at the top of the canvas. Edit its heading and content below.")
-            st.session_state.pop(f"pc_editor_notice_{mode}",None)
-        st.caption(f"{len(blocks)} editable blocks in this report.")
+        if lens=="intelligence" and not any(_clean(b.get("body")) or b.get("rows") for b in blocks):
+            st.info("No publication drafted yet. Select incidents in Research & evidence, then generate the analytical draft above. Empty template sections are not displayed.")
+        if lens!="intelligence" or st.toggle("Advanced block controls",value=False,key=f"pc_advanced_blocks_{mode}"):
+            ckind,cadd=st.columns([3,1])
+            kind=ckind.selectbox("New content block",BLOCK_TYPES,key=f"pc_kind_{mode}")
+            if cadd.button("Add block",key=f"pc_add_{mode}"):
+                new_block=_new_block(kind,preset="Vessels" if kind=="Asset table" else "Custom")
+                # Place new work at the top, not after seven lengthy template sections.
+                blocks.insert(0,new_block)
+                st.session_state[canvas_key]=blocks
+                st.session_state[f"pc_editor_notice_{mode}"]=new_block["id"]
+                st.rerun()
+            if st.session_state.get(f"pc_editor_notice_{mode}"):
+                st.success("New block added at the top of the canvas. Edit its heading and content below.")
+                st.session_state.pop(f"pc_editor_notice_{mode}",None)
+            st.caption(f"{len(blocks)} editable blocks in this report.")
         # Intelligence uses a manuscript-first editor. Evidence tables stay as structured
         # blocks, and the legacy block editor remains available for other lenses.
         document_first = lens == "intelligence" and st.toggle(
-            "Continuous document editor", value=True, key=f"pc_document_first_{mode}",
+            "Edit publication manuscript", value=False, key=f"pc_document_first_{mode}",
             help="Edit report prose as one manuscript rather than filling individual section boxes.")
-        if document_first:
+        if document_first and any(_clean(b.get("body")) for b in blocks):
             import hashlib
             from pc_report_document import manuscript_from_blocks, apply_manuscript
             manuscript = manuscript_from_blocks(blocks)
@@ -1064,7 +1067,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                     st.dataframe(pd.DataFrame(b.get("rows") or []),hide_index=True,use_container_width=True)
             st.caption("Apply manuscript edits before using other controls. Report preview and export use the applied version.")
         fields={}
-        if not document_first:
+        if not document_first and (lens!="intelligence" or st.session_state.get(f"pc_advanced_blocks_{mode}",False)):
             for i,block in enumerate(list(blocks)):
                 bid=block["id"]
                 with st.container(border=True):
