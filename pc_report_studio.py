@@ -675,7 +675,7 @@ def _save_report(sb, product: str, title: str, report_date: date, region: str,
     return rid
 
 
-def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str="studio"):
+def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str="studio", lens_override: str | None=None):
     seed=_context_seed(context)
     if st.session_state.get(f"pc_report_fresh_{mode}"):
         seed={}
@@ -700,7 +700,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     st.markdown("## "+title_text)
     st.caption("Build from canonical database context, preserve evidence, and save the finished product back into the reporting graph.")
 
-    lens="trade" if mode=="brief" else "intelligence"
+    lens=lens_override if lens_override in ("trade","intelligence") else ("trade" if mode=="brief" else "intelligence")
     query=st.text_input(
         "Query / analytical question",
         value=seed.get("title","") if seed else "",
