@@ -824,6 +824,34 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                 st.caption("References are collected automatically in the evidence panel below.")
             else:
                 block["body"]=st.text_area("Text",value=block.get("body",""),height=190,key=f"pc_body_{mode}_{bid}")
+                instruction=st.text_input("AI assistance for this block",placeholder="Expand, rewrite, compare, or add supported references",
+                    key=f"pc_assist_instruction_{mode}_{bid}")
+                if st.button("AI suggest edit",key=f"pc_assist_{mode}_{bid}"):
+                    if not instruction.strip():
+                        st.warning("Enter an instruction first.")
+                    else:
+                        try:
+                            from pc_report_ai import assist_block
+                            bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
+                            st.session_state[f"pc_assist_proposal_{mode}_{bid}"]=assist_block(_api_key(),instruction,block,bundle)
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"AI edit failed: {exc}")
+                proposed=st.session_state.get(f"pc_assist_proposal_{mode}_{bid}")
+                if proposed:
+                    st.markdown("**Suggested replacement (not yet applied)**")
+                    st.write(_clean(proposed.get("body")))
+                    ac,dc=st.columns(2)
+                    if ac.button("Accept edit",key=f"pc_assist_accept_{mode}_{bid}"):
+                        block["body"]=_clean(proposed.get("body"))
+                        block["title"]=_clean(proposed.get("title")) or block["title"]
+                        st.session_state.pop(f"pc_body_{mode}_{bid}",None)
+                        st.session_state.pop(f"pc_title_block_{mode}_{bid}",None)
+                        del st.session_state[f"pc_assist_proposal_{mode}_{bid}"]
+                        st.rerun()
+                    if dc.button("Discard edit",key=f"pc_assist_discard_{mode}_{bid}"):
+                        del st.session_state[f"pc_assist_proposal_{mode}_{bid}"]
+                        st.rerun()
                 fields[block["title"]]=block["body"]
     st.session_state[canvas_key]=blocks
     if not blocks:
