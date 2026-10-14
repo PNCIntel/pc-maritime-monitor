@@ -71,7 +71,7 @@ def _urls_from_record(r: dict) -> list[str]:
         v=m.get(k)
         if isinstance(v,str) and v.startswith(("http://","https://")):
             out.append(v)
-    for x in m.get("research_sources") or []:
+    for x in (m.get("research_sources") or []) + (m.get("source_urls") or []) + (m.get("sources") or []):
         u=x.get("url") if isinstance(x,dict) else x
         if isinstance(u,str) and u.startswith(("http://","https://")):
             out.append(u)
@@ -387,15 +387,24 @@ def _build_html(product: str,title: str,report_date: date,region: str,confidence
 </div>"""]
     if summary:
         parts.append(f"<div style='margin:8px 10px 20px;padding:13px 15px;background:#f6f8fb;border:1px solid {line}'><b>Executive line:</b> {html.escape(summary)}</div>")
+    def _render_citations(raw: str) -> str:
+        escaped=html.escape(raw)
+        def cite(m):
+            n=int(m.group(1))
+            if not 1 <= n <= len(sources):
+                return html.escape(m.group(0))
+            return "<sup><a href='#ref-"+str(n)+"'>["+str(n)+"]</a></sup>"
+        return re.sub(r"\[(\d{1,3})\]",cite,escaped)
+
     for name,value in fields.items():
         if not _clean(value):
             continue
-        paras="".join(f"<p style='margin:0 0 10px'>{html.escape(p.strip())}</p>" for p in re.split(r"\n\s*\n",str(value)) if p.strip())
+        paras="".join("<p style='margin:0 0 13px'>"+_render_citations(p.strip()).replace("\n","<span style='display:block;height:5px'></span>")+"</p>" for p in re.split(r"\n\s*\n",str(value)) if p.strip())
         parts.append(f"<section style='padding:7px 10px 15px;border-bottom:1px solid {line}'><h2 style='font-size:18px;color:{navy};margin:8px 0'>{html.escape(name)}</h2>{paras}</section>")
     if sources:
         parts.append("<section style='padding:14px 10px'><h2 style='font-size:18px;color:#10213a'>Sources</h2><ol>")
-        for u in sources:
-            parts.append(f"<li style='margin:0 0 6px'><a href='{html.escape(u)}'>{html.escape(u)}</a></li>")
+        for n,u in enumerate(sources,1):
+            parts.append(f"<li id='ref-{n}' style='margin:0 0 9px'><a href='{html.escape(u,quote=True)}' target='_blank' rel='noopener noreferrer'>{html.escape(u)}</a></li>")
         parts.append("</ol></section>")
     parts.append("</div>")
     return "".join(parts)
@@ -655,10 +664,16 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     source_urls=list(dict.fromkeys(source_urls))
 
     st.markdown("### Evidence")
-    default_sources="\n".join(source_urls)
-    source_text=st.text_area("Source URLs — canonical event evidence is preloaded when available",
-                             value=default_sources,key=f"pc_report_sources_{mode}",height=110)
-    sources=[x.strip() for x in source_text.splitlines() if x.strip().startswith(("http://","https://"))]
+    evidence_key=f"pc_report_sources_{mode}"
+    prior=st.session_state.get(evidence_key,"")
+    prior_urls=[x.strip() for x in prior.splitlines() if x.strip().startswith(("http://","https://"))]
+    st.session_state[evidence_key]="\n".join(dict.fromkeys(prior_urls+source_urls))
+    source_text=st.text_area("Source URLs — automatically collected from selected incidents",
+                             key=evidence_key,height=145)
+    sources=list(dict.fromkeys(x.strip() for x in source_text.splitlines()
+                               if x.strip().startswith(("http://","https://"))))
+    if not sources:
+        st.warning("No evidence URLs yet: attach sources before publishing.")
 
     web_html=_build_html(product,report_title,report_date,region,confidence,summary,fields,sources)
     tabs=st.tabs(["Preview","HTML","Evidence / linked events"])
