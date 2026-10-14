@@ -376,8 +376,64 @@ def _prefill_from_context(product: str, seed: dict, selected_events: list[dict])
     return fields
 
 
+BLOCK_TYPES=("Narrative","Asset table","Chronology","Analysis","Monitoring","References")
+TABLE_PRESETS={
+    "Vessels":["Name","IMO","Flag","Registered owner","ISM manager","Status"],
+    "Aviation":["Name","Identifier","Operator","Country","Status"],
+    "Cyber":["Incident","Affected entity","System","Date","Status"],
+    "Infrastructure":["Facility","Type","Operator","Location","Status"],
+    "Investment":["Investor","Company / asset","Relationship","Date","Status"],
+    "Custom":["Item","Identifier","Owner / operator","Location","Status"],
+}
+
+def _new_block(kind="Narrative",title="",body="",rows=None,preset="Custom"):
+    import uuid
+    return {"id":uuid.uuid4().hex[:12],"kind":kind,"title":title or kind,
+            "body":body,"preset":preset,"rows":rows or []}
+
+def _asset_table_rows(objects, preset):
+    records=[o.get("record_data") or {} for o in objects]
+    rows=[]
+    for r in records:
+        typ=_clean(r.get("asset_type")).casefold()
+        if preset=="Vessels" and not (r.get("imo") or typ in ("vessel","ship","tanker")):
+            continue
+        if preset=="Vessels":
+            rows.append({"Name":_clean(r.get("name")),"IMO":_clean(r.get("imo")),
+              "Flag":_clean(r.get("flag")),"Registered owner":_clean(r.get("owner_name") or r.get("owner_entity_id")),
+              "ISM manager":_clean(r.get("manager_name") or r.get("manager_entity_id")),
+              "Status":_clean(r.get("status"))})
+        elif preset=="Infrastructure":
+            rows.append({"Facility":_clean(r.get("name")),"Type":_clean(r.get("asset_type")),
+             "Operator":_clean(r.get("operator_name") or r.get("operator_entity_id")),
+             "Location":_clean(r.get("region_city") or r.get("country")),"Status":_clean(r.get("status"))})
+    return rows
+
+def _render_blocks(blocks, sources, gold="#a58028", navy="#10213a", line="#dce3ec"):
+    parts=[]
+    for b in blocks:
+        title=html.escape(_clean(b.get("title")))
+        if b.get("kind")=="Asset table":
+            preset=b.get("preset") if b.get("preset") in TABLE_PRESETS else "Custom"
+            columns=TABLE_PRESETS[preset]
+            rows=b.get("rows") or []
+            table="<table style='border-collapse:collapse;width:100%;font-size:13px'><thead><tr>"
+            table+="".join("<th style='text-align:left;border-bottom:2px solid #a58028;padding:7px'>"+html.escape(c)+"</th>" for c in columns)
+            table+="</tr></thead><tbody>"
+            for row in rows:
+                table+="<tr>"+"".join("<td style='vertical-align:top;border-bottom:1px solid #dce3ec;padding:7px'>"+html.escape(_clean(row.get(c)) or "Not established")+"</td>" for c in columns)+"</tr>"
+            table+="</tbody></table>"
+            body=table if rows else "<p>No verified records added to this table.</p>"
+        else:
+            body="".join("<p style='margin:0 0 13px'>"+html.escape(p.strip())+"</p>" for p in re.split(r"\\n\\s*\\n",_clean(b.get("body"))) if p.strip())
+            for n in range(len(sources),0,-1):
+                body=body.replace("["+str(n)+"]","<sup><a href='#ref-"+str(n)+"'>["+str(n)+"]</a></sup>")
+        parts.append("<section style='padding:10px;border-bottom:1px solid "+line+"'><h2 style='font-size:18px;color:"+navy+"'>"+title+"</h2>"+body+"</section>")
+    return "".join(parts)
+
+
 def _build_html(product: str,title: str,report_date: date,region: str,confidence: str,
-                summary: str,fields: dict,sources: list[str]) -> str:
+                summary: str,fields: dict,sources: list[str],blocks=None) -> str:
     gold="#a58028"; navy="#10213a"; line="#dce3ec"; muted="#66758a"
     parts=[f"""<div style="max-width:820px;margin:0 auto;background:#fff;color:#172033;font-family:Arial,Helvetica,sans-serif;line-height:1.58">
 <div style="border-top:5px solid {gold};padding:25px 10px 16px">
@@ -396,7 +452,9 @@ def _build_html(product: str,title: str,report_date: date,region: str,confidence
             return "<sup><a href='#ref-"+str(n)+"'>["+str(n)+"]</a></sup>"
         return re.sub(r"\[(\d{1,3})\]",cite,escaped)
 
-    for name,value in fields.items():
+    if blocks:
+        parts.append(_render_blocks(blocks,sources))
+    for name,value in ({} if blocks else fields).items():
         if not _clean(value):
             continue
         paras="".join("<p style='margin:0 0 13px'>"+_render_citations(p.strip()).replace("\n","<span style='display:block;height:5px'></span>")+"</p>" for p in re.split(r"\n\s*\n",str(value)) if p.strip())
@@ -412,9 +470,12 @@ def _build_html(product: str,title: str,report_date: date,region: str,confidence
 
 def _save_report(sb, product: str, title: str, report_date: date, region: str,
                  summary: str,fields: dict,events: list[dict],sources: list[str],
-                 status: str, context: tuple[str,str,dict] | None):
+                 status: str, context: tuple[str,str,dict] | None, blocks=None):
     spec=PRODUCTS[product]
     metadata={"product":product,"confidence":st.session_state.get("pc_report_confidence") or None}
+    if blocks is not None:
+        metadata["editor_blocks"]=blocks
+        metadata["editor_version"]=2
     if context:
         metadata["canonical_context"]={"type":context[0],"id":context[1]}
     row={
@@ -431,7 +492,8 @@ def _save_report(sb, product: str, title: str, report_date: date, region: str,
     rid=sb.table("pc_reports").insert(row).execute().data[0]["report_id"]
 
     section_ids={}
-    for i,(name,value) in enumerate(fields.items(),1):
+    save_fields=({b.get("title") or b.get("kind"): (b.get("body") if b.get("kind")!="Asset table" else str(b.get("rows") or [])) for b in blocks} if blocks else fields)
+    for i,(name,value) in enumerate(save_fields.items(),1):
         if not _clean(value):
             continue
         sr=sb.table("pc_report_sections").insert({
