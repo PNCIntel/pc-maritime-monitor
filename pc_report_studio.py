@@ -699,7 +699,13 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                     st.session_state[f"pc_report_field_{mode}_{product}_{k}"]=_clean(v)
             st.session_state[f"pc_report_ai_gaps_{mode}"]=result.get("gaps") or []
             st.session_state[f"pc_report_ai_bundle_{mode}"]=bundle
-            st.session_state[f"pc_editor_proposal_{mode}"]=[_new_block("Narrative",name,_clean(value)) for name,value in (result.get("sections") or {}).items() if _clean(value)]
+            proposed=[_new_block("Narrative",name,_clean(value)) for name,value in (result.get("sections") or {}).items() if _clean(value)]
+            current=st.session_state.get(f"pc_editor_blocks_{mode}") or []
+            if proposed and not any(_clean(b.get("body")) or b.get("rows") for b in current):
+                st.session_state[f"pc_editor_blocks_{mode}"]=proposed
+                st.session_state.pop(f"pc_editor_proposal_{mode}",None)
+            else:
+                st.session_state[f"pc_editor_proposal_{mode}"]=proposed
             st.rerun()
         except Exception as exc:
             st.error(f"AI drafting failed: {exc}")
@@ -716,7 +722,13 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                 if key.startswith((f"pc_title_block_{mode}_",f"pc_body_{mode}_",
                                    f"pc_preset_{mode}_",f"pc_edit_table_{mode}_")):
                     del st.session_state[key]
-            st.session_state[f"pc_editor_blocks_{mode}"]=[dict(b) for b in proposal]
+            installed=[dict(b) for b in proposal]
+            for block in installed:
+                bid=block["id"]
+                st.session_state[f"pc_title_block_{mode}_{bid}"]=block.get("title","")
+                if block.get("kind")!="Asset table":
+                    st.session_state[f"pc_body_{mode}_{bid}"]=block.get("body","")
+            st.session_state[f"pc_editor_blocks_{mode}"]=installed
             del st.session_state[f"pc_editor_proposal_{mode}"]
             st.rerun()
         if no.button("Discard AI draft",key=f"pc_discard_{mode}"):
