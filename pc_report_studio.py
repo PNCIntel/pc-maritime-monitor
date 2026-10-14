@@ -756,8 +756,16 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     ckind,cadd=st.columns([3,1])
     kind=ckind.selectbox("New content block",BLOCK_TYPES,key=f"pc_kind_{mode}")
     if cadd.button("Add block",key=f"pc_add_{mode}"):
-        blocks.append(_new_block(kind,preset="Vessels" if kind=="Asset table" else "Custom"))
+        new_block=_new_block(kind,preset="Vessels" if kind=="Asset table" else "Custom")
+        # Place new work at the top, not after seven lengthy template sections.
+        blocks.insert(0,new_block)
+        st.session_state[canvas_key]=blocks
+        st.session_state[f"pc_editor_notice_{mode}"]=new_block["id"]
         st.rerun()
+    if st.session_state.get(f"pc_editor_notice_{mode}"):
+        st.success("New block added at the top of the canvas. Edit its heading and content below.")
+        st.session_state.pop(f"pc_editor_notice_{mode}",None)
+    st.caption(f"{len(blocks)} editable blocks in this report.")
     fields={}
     for i,block in enumerate(list(blocks)):
         bid=block["id"]
@@ -853,7 +861,8 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         prefixes=(f"pc_report_field_{mode}_",f"pc_report_title_{mode}",f"pc_report_region_{mode}",
                   f"pc_report_summary_{mode}",f"pc_report_sources_{mode}",f"pc_report_events_{mode}",
                   f"pc_report_query_{mode}",f"pc_report_query_objects_{mode}",f"pc_report_ai_gaps_{mode}",
-                  f"pc_report_ai_bundle_{mode}")
+                  f"pc_report_ai_bundle_{mode}",f"pc_editor_blocks_{mode}",f"pc_editor_proposal_{mode}",
+                  f"pc_title_block_{mode}_",f"pc_body_{mode}_",f"pc_edit_table_{mode}_")
         for k in list(st.session_state):
             if any(k.startswith(p) for p in prefixes):
                 del st.session_state[k]
