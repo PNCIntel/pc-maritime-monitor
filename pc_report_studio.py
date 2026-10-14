@@ -263,6 +263,44 @@ def _recent_events(sb, limit=250):
         return []
 
 
+
+def _query_discovery(sb, query: str) -> tuple[list[dict], list[dict]]:
+    """Search live production records by individual topic, not the whole question."""
+    terms=[t for t in re.findall(r"[\\wÀ-ÿ]+",query.casefold()) if len(t)>=3
+           and t not in {"and","the","with","about","report","sanctions","story","stories"}][:8]
+    events={}; objects={}
+    for term in terms:
+        safe=term.replace("%","").replace("_","").replace(",","")
+        for col in ("title","description","location"):
+            try:
+                rows=(sb.table("pc_events").select("*").ilike(col,"%"+safe+"%")
+                      .order("start_date",desc=True).limit(75).execute().data or [])
+                for e in rows:
+                    if e.get("event_id"): events[e["event_id"]]=e
+            except Exception:
+                pass
+        for table,typ,pk in (("pc_mobile_assets","mobile_asset","mobile_asset_id"),
+                              ("pc_assets","asset","asset_id"),
+                              ("pc_entities","entity","entity_id")):
+            try:
+                rows=(sb.table(table).select("*").ilike("name","%"+safe+"%")
+                      .limit(25).execute().data or [])
+                for r in rows:
+                    if r.get(pk):
+                        oid=str(r[pk])
+                        objects[(typ,oid)]={"object_type":typ,"object_id":oid,
+                          "display_name":_clean(r.get("name")),"subtype":_clean(r.get("subtype")),
+                          "country":_clean(r.get("country") or r.get("flag") or r.get("hq_country")),
+                          "record_data":r}
+            except Exception:
+                pass
+    ranked=sorted(events.values(),key=lambda e:(
+        sum(t in (" ".join([_clean(e.get("title")),_clean(e.get("description")),
+                           _clean(e.get("location")),_clean(_meta(e))]).casefold()) for t in terms),
+        _clean(e.get("start_date"))),reverse=True)
+    return ranked[:180],list(objects.values())[:100]
+
+
 def _event_options(events: list[dict]) -> dict[str,dict]:
     out={}
     for e in events:
@@ -458,11 +496,15 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                      else "Hormuz escalation, Red Sea shipping risk, regional disruption, actor network..."),
         key=f"pc_report_query_{mode}"
     )
+    discovered_events, discovered_objects = _query_discovery(sb, query) if query.strip() else ([], [])
     query_results=_terminal_search(sb,query,80) if query.strip() else []
+    seen_objects={(_clean(r.get("object_type")),_clean(r.get("object_id"))) for r in query_results}
+    query_results += [r for r in discovered_objects
+                      if (_clean(r.get("object_type")),_clean(r.get("object_id"))) not in seen_objects]
     selected_objects=[]
     if query_results:
         labels={_query_label(r):r for r in query_results}
-        default_labels=list(labels)[:1]
+        default_labels=list(labels)[:1] if len(labels)==1 else []
         picked=st.multiselect(
             "Canonical objects from query",
             list(labels),
@@ -477,8 +519,11 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     product=st.selectbox("Product",product_options,index=default_idx,key=f"pc_report_product_{mode}")
     spec=PRODUCTS[product]
 
-    events=_recent_events(sb,300)
+    recent=_recent_events(sb,300)
+    events=list({str(e.get("event_id")):e for e in discovered_events+recent if e.get("event_id")}.values())
     opts=_event_options(events)
+    if discovered_events:
+        st.caption(str(len(discovered_events))+" matching production developments found across the live database.")
 
     seed_event_labels=[]
     if seed.get("type")=="event":
