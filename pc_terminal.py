@@ -2274,33 +2274,70 @@ def _render_sanctions_home():
             _panel_header("Recent Sanctions Activity","Latest sanctions, enforcement and evasion-related developments.")
             _html_rows(_recent_event_rows(events,7),7)
 
-    # Iranian PGSA maritime non-compliance register: visible within Sanctions,
-    # but never counted as an independently published legal designation.
+    # Iranian PGSA reported roster, enriched through the existing canonical IMO registry.
     pgsa=[q for q in _rows("pc_sanctions_import_queue",5000)
           if _clean(q.get("authority_code")).upper()=="PGSA"
           and _clean(q.get("subject_type")).casefold() in ("vessel","mobile_asset","ship")]
     if pgsa:
-        st.markdown("### Iran · PGSA maritime restrictions")
-        st.caption("Iranian PGSA reported non-compliance roster. Research-queue records are shown separately from formal legal designations; exact IMO matching does not imply OFAC, UN, EU or UK designation.")
+        st.markdown("### Iran · PGSA maritime restrictions and corporate exposure")
+        st.caption("Reported Iranian PGSA roster; separate from formal legal designations. Corporate fields show stored registry links, not automatically verified current ownership.")
         imos={_clean(q.get("subject_identifier")).strip() for q in pgsa if _clean(q.get("subject_identifier")).strip()}
         st.metric("PGSA vessel records in research roster",len(imos))
-        search=st.text_input("Filter PGSA vessels by name or IMO",key="pc_pgsa_roster_search").casefold().strip()
-        result=[]
+        # Build indexes once, rather than querying the database for every displayed vessel.
+        vessels_by_imo={}
+        for v in _rows("pc_mobile_assets",10000):
+            imo=_clean(v.get("imo")).strip()
+            if imo in imos:vessels_by_imo.setdefault(imo,[]).append(v)
+        entities={_clean(e.get("entity_id")):_clean(e.get("name")) for e in _rows("pc_entities",10000)}
+        search=st.text_input("Filter by vessel, IMO or corporate name",key="pc_pgsa_roster_search").casefold().strip()
+        result=[]; choices={}
         for q in pgsa:
             imo=_clean(q.get("subject_identifier")).strip()
             name=_clean(q.get("reported_name"))
-            if search and search not in (name+" "+imo).casefold():continue
-            result.append({"Jurisdiction":"Iran","Authority":"PGSA",
-                "Reported vessel":name,"IMO":imo,
-                "Category":"Reported maritime non-compliance listing",
+            candidates=vessels_by_imo.get(imo,[])
+            v=candidates[0] if len(candidates)==1 else {}
+            vm=_meta(v) if v else {}
+            role_data=vm.get("pgsa_sourced_roles") or vm.get("sourced_roles") or {}
+            if not isinstance(role_data,dict):role_data={}
+            # The batch stores sourced role claims inside the vessel metadata.
+            for value in vm.values():
+                if isinstance(value,dict) and value.get("registered_owner") and value.get("ism_doc_company"):
+                    role_data=value;break
+            def company(field,source_key):
+                eid=_clean(v.get(field))
+                if eid:return entities.get(eid) or "Unresolved entity: "+eid
+                claimed=_clean(role_data.get(source_key))
+                return (claimed+" (source claim; entity unresolved)") if claimed else "Not established"
+            owner=company("owner_entity_id","registered_owner")
+            operator=company("operator_entity_id","commercial_operator")
+            manager=company("manager_entity_id","technical_manager")
+            ism_id=_clean(role_data.get("ism_resolved_entity_id"))
+            ism=(entities.get(ism_id) or _clean(role_data.get("ism_doc_company")) or "Not established")
+            if ism_id and ism_id not in entities:ism+=" (entity ID requires review)"
+            elif not ism_id and ism!="Not established":ism+=" (source claim; entity unresolved)"
+            if search and search not in " ".join((name,imo,owner,operator,manager,ism)).casefold():continue
+            result.append({"Reported vessel":name,"Registry name":_clean(v.get("name")) or "No unique IMO match",
+                "IMO":imo,"Registered owner":owner,"Operator":operator,
+                "Technical manager":manager,"ISM / DOC":ism,
+                "Match":"Exact unique IMO" if len(candidates)==1 else "REVIEW: "+str(len(candidates))+" candidates",
                 "Research status":_clean(q.get("research_status")) or "not recorded",
-                "Source":_clean(q.get("source_url"))})
+                "PGSA source":_clean(q.get("source_url"))})
+            if v.get("mobile_asset_id"):choices[imo]=v
         if result:
-            st.dataframe(pd.DataFrame(result).drop_duplicates(subset=["Authority","IMO"]),
-                         hide_index=True,use_container_width=True,
-                         column_config={"Source":st.column_config.LinkColumn("Source")})
+            st.dataframe(pd.DataFrame(result).drop_duplicates(subset=["IMO"]),hide_index=True,
+                         use_container_width=True,column_config={"PGSA source":st.column_config.LinkColumn("PGSA source")})
+            st.caption("ISM / DOC is shown only where separately sourced. An empty role or source-only name is not a verified corporate relationship.")
+            available=[row for row in result if row["IMO"] in choices]
+            if available:
+                selected=st.selectbox("Open vessel dossier",available,
+                    format_func=lambda row:row["Reported vessel"]+" · IMO "+row["IMO"],
+                    key="pc_pgsa_roster_selection")
+                if st.button("Open selected vessel",key="pc_pgsa_roster_open"):
+                    v=choices[selected["IMO"]]
+                    _set_context("mobile_asset",str(v["mobile_asset_id"]),_clean(v.get("name")))
+                    st.rerun()
         else:st.caption("No PGSA vessel matches this filter.")
-        st.caption("Roster publication and vessel-role verification are separate reviews. An absent roster entry does not prove non-listing.")
+        st.caption("An absent PGSA entry does not prove non-listing. This reported Iranian maritime restriction list is not automatically an OFAC/UN/EU/UK designation.")
     else:
         st.caption("No PGSA vessel-level records are currently loaded in the sanctions research queue.")
 
