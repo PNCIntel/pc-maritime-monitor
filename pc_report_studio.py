@@ -346,6 +346,19 @@ def _assemble_evidence(sb, lens, selected_events, selected_objects, context):
                         "Designation":_clean(d.get("source_external_id") or did),
                         "Date":_clean(d.get("effective_date") or d.get("designation_date")),
                         "Status":_clean(d.get("status")),"Record":oid})
+    exposure_rows=[]
+    for (typ,oid),o in list(objects.items())[:100]:
+        rec=o.get("record_data") or {}
+        if typ not in ("asset","entity") or not rec:continue
+        exposure_rows.append({"Name":_clean(rec.get("name")),"Type":_clean(rec.get("asset_type") or rec.get("entity_type")),
+          "Location":_clean(rec.get("region_city") or rec.get("country") or rec.get("hq_country")),
+          "Record":oid,"Record status":_clean(rec.get("record_status"))})
+    contested_rows=[]
+    for eid,e in events.items():
+        value=_clean(e.get("verification_status") or _meta(e).get("claim_status")).casefold()
+        if any(x in value for x in ("reported","unconfirmed","disputed","claimed","unknown")):
+            contested_rows.append({"Date":_clean(e.get("start_date"))[:10],"Claim":_clean(e.get("title")),
+                "Verification":value,"Event ID":eid,"Sources":"; ".join(_urls_from_record(e))})
     def table(title,preset,rows,cols=None):
         if rows:
             b=_new_block("Asset table",title,rows=rows,preset=preset)
@@ -359,11 +372,15 @@ def _assemble_evidence(sb, lens, selected_events, selected_objects, context):
     table("Vessels linked to developments","Vessels",vessel_rows)
     table("Recorded corporate roles","Custom",corporate_rows,["Record","Role","Linked ID","Date","Evidence"])
     table("Official sanctions records","Custom",sanctions_rows,["Authority","Designation","Date","Status","Record"])
+    if lens=="intelligence":
+        table("Connected facilities and organisations","Custom",exposure_rows,["Name","Type","Location","Record","Record status"])
+        table("Reported or contested developments","Custom",contested_rows,["Date","Claim","Verification","Event ID","Sources"])
     sources.extend(u for e in events.values() for u in _urls_from_record(e))
     return {"blocks":blocks,"events":list(events.values()),"objects":list(objects.values()),
             "counts":{"events":len(events),"objects":len(objects),"vessels":len(vessel_rows),
                       "history":len(history_rows),"corporate_roles":len(corporate_rows),
-                      "sanctions":len(sanctions_rows),"sources":len(set(sources))},
+                      "sanctions":len(sanctions_rows),"exposure":len(exposure_rows),
+                      "contested":len(contested_rows),"sources":len(set(sources))},
             "sources":list(dict.fromkeys(sources)),"issues":list(dict.fromkeys(issues))}
 
 
@@ -814,25 +831,46 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         st.info(f"Current terminal context: {seed.get('title')} · {seed.get('type')}")
 
     st.markdown("#### Connected evidence")
-    st.caption("Intelligence starts with selected developments; Trade starts with selected organisations, assets and corridors.")
-    if st.button("Build from connected records",key=f"pc_assemble_{mode}"):
+    if lens=="intelligence":
+        st.caption("Select incidents first. Review grounded factual components before adding them to the report.")
+    else:
+        st.caption("Start with a canonical organisation or asset, then include related developments.")
+    if st.button("Assemble evidence for review",key=f"pc_assemble_{mode}"):
         assembled=_assemble_evidence(sb,lens,selected,selected_objects,None if st.session_state.get(f"pc_report_fresh_{mode}") else context)
         st.session_state[f"pc_assembled_{mode}"]=assembled
-        if assembled["blocks"]:
-            current=st.session_state.get(f"pc_editor_blocks_{mode}") or []
-            if any(_clean(b.get("body")) or b.get("rows") for b in current):
-                st.session_state[f"pc_editor_proposal_{mode}"]=current+assembled["blocks"]
-            else:
-                st.session_state[f"pc_editor_blocks_{mode}"]=assembled["blocks"]
+        st.session_state.pop(f"pc_assemble_choices_{mode}",None)
         st.rerun()
     assembled=st.session_state.get(f"pc_assembled_{mode}") or {}
     if assembled:
-        c=assembled["counts"]
-        st.caption("Evidence assembled: "+", ".join(str(v)+" "+k.replace("_"," ") for k,v in c.items()))
+        counts=assembled["counts"]
+        st.caption("Retrieved: "+", ".join(str(v)+" "+k.replace("_"," ") for k,v in counts.items()))
         if assembled["issues"]:
-            with st.expander("Unresolved connections / retrieval diagnostics"):
+            with st.expander("Retrieval warnings — records may be incomplete"):
                 for issue in assembled["issues"]:st.write(issue)
-        st.info("Structured blocks are sourced from records; AI analysis is drafted separately. Check the data before publication.")
+        if not assembled["blocks"]:
+            st.warning("No structured component has sufficient retrieved records. Check selected events and retrieval warnings.")
+        else:
+            st.markdown("**Choose evidence components for the editorial canvas**")
+            choices_key=f"pc_assemble_choices_{mode}"
+            if choices_key not in st.session_state:
+                st.session_state[choices_key]=[b["id"] for b in assembled["blocks"]]
+            choices=st.multiselect("Include",options=[b["id"] for b in assembled["blocks"]],
+                 format_func=lambda bid:next((b["title"]+" ("+str(len(b.get("rows") or []))+" rows)" for b in assembled["blocks"] if b["id"]==bid),bid),
+                 key=choices_key)
+            for block in assembled["blocks"]:
+                with st.expander(block["title"]+" · "+str(len(block.get("rows") or []))+" records"):
+                    st.dataframe(pd.DataFrame(block.get("rows") or []),hide_index=True,use_container_width=True)
+            if st.button("Add selected components to report",disabled=not choices,key=f"pc_assemble_apply_{mode}"):
+                current=st.session_state.get(f"pc_editor_blocks_{mode}") or []
+                additions=[dict(b) for b in assembled["blocks"] if b["id"] in choices]
+                existing_ids={b["id"] for b in current}
+                additions=[b for b in additions if b["id"] not in existing_ids]
+                st.session_state[f"pc_editor_blocks_{mode}"]=current+additions
+                st.session_state[f"pc_assemble_added_{mode}"]=len(additions)
+                st.rerun()
+            if f"pc_assemble_added_{mode}" in st.session_state:
+                st.success(str(st.session_state.pop(f"pc_assemble_added_{mode}"))+" evidence blocks added; existing narrative preserved.")
+        st.caption("No inferred exposure, numerical trend or legal designation is generated without supporting records.")
 
     prefill_key=f"pc_report_prefill_{mode}_{product}"
     cauto1,cauto2=st.columns(2)
@@ -1081,6 +1119,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
             f"pc_preset_{mode}_",f"pc_edit_table_{mode}_",
             f"pc_table_count_{mode}_",f"pc_assist_instruction_{mode}_",
             f"pc_assist_proposal_{mode}_",f"pc_assembled_{mode}",
+            f"pc_assemble_choices_{mode}",f"pc_assemble_added_{mode}",
         )
         for key in list(st.session_state):
             if any(key.startswith(prefix) for prefix in prefixes):
