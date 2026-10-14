@@ -477,7 +477,15 @@ _SECURITY_TYPES=frozenset(('ballistic_missile_launch','missile_launch','air_defe
  'transport_infrastructure_disruption','logistics_disruption','rail_disruption','derailment',
  'supply_chain_disruption','transport_disruption','incident','political_protest',
  'public_demonstration','political_security_emergency','unruly_passenger_crew_assault',
- 'overseas_solidarity_demonstration','solidarity_demonstration'))
+ 'overseas_solidarity_demonstration','solidarity_demonstration',
+ 'vessel_casualty_update','vessel_casualty','maritime_casualty','ship_fire','vessel_fire',
+ 'vessel_grounding','ship_grounding','port_of_refuge','maritime_safety_incident',
+ 'third_party_cyber_incident','cyber_incident','cyber_attack','cyberattack',
+ 'cyber_breach','data_breach','ransomware','supply_chain_cyber_incident'))
+_SECURITY_FAMILIES=frozenset(('cyber','cybersecurity','security','maritime_security',
+ 'maritime_safety','vessel_casualty','safety','operational_disruption',
+ 'infrastructure_disruption','transport_disruption','smuggling','conflict'))
+_SECURITY_NATURES=frozenset(('security','safety','disruption'))
 _STRATEGIC_TYPES=frozenset(('strategic_infrastructure','strategic_investment','foreign_investment_review',
  'national_security_review','critical_infrastructure_acquisition','supply_risk','commodity_supply_risk'))
 
@@ -491,6 +499,11 @@ def _intel_class(row):
     typ=str(row.get('event_type') or '').strip().lower()
     if typ in _SECURITY_TYPES:return INTEL_LENSES[0]
     if typ in _STRATEGIC_TYPES:return INTEL_LENSES[1]
+    # Classification is a presentation decision, not a verification claim.
+    # Use structured canonical fields only, never incident prose or actor names.
+    family=str(row.get('event_family') or '').strip().lower().replace(' ','_')
+    nature=str(row.get('event_nature') or '').strip().lower().replace(' ','_')
+    if family in _SECURITY_FAMILIES or nature in _SECURITY_NATURES:return INTEL_LENSES[0]
     return 'Other / unclassified'
 
 def _intel_match(row,lens):
