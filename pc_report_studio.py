@@ -799,423 +799,430 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                     st.rerun()
             st.caption("Review the selection below, assemble evidence, then draft and export using the normal Report Studio workflow.")
 
-    st.markdown("#### Development library")
-    st.caption("Search across verified production developments. Filter by purpose; combine Trade and Security whenever needed.")
-    qcol,scope_col,date_col=st.columns([3,1.4,1.3])
-    event_find=qcol.text_input("Find developments",placeholder="Panama tanker, DF Peak, Réunion...",
-                              key=f"pc_report_find_events_{mode}")
-    scope=scope_col.selectbox("Coverage",["All developments","Security & disruption","Trade & commercial"],
-                              key=f"pc_report_scope_{mode}")
-    period=date_col.selectbox("Period",["Last 30 days","Last 90 days","All dates"],
-                              key=f"pc_report_find_period_{mode}")
-    lookup=event_find.strip()
-    found,_=_query_discovery(sb,lookup) if lookup else ([],[])
-    recent=[e for e in _recent_events(sb,300) if not _horizon_event(e)] if not lookup else []
-    event_map={str(e.get("event_id")):e for e in found+recent if e.get("event_id") and not _horizon_event(e)}
-    if period!="All dates":
-        from datetime import timedelta
-        cutoff=(date.today()-timedelta(days=30 if period=="Last 30 days" else 90)).isoformat()
-        event_map={k:e for k,e in event_map.items() if _clean(e.get("start_date"))[:10]>=cutoff}
-    if scope=="Security & disruption":
-        event_map={k:e for k,e in event_map.items() if e.get("intelligence_visible") is True}
-    elif scope=="Trade & commercial":
-        event_map={k:e for k,e in event_map.items() if e.get("trade_visible") is True}
-    picked_key=f"pc_report_selected_ids_{mode}"
-    selected_ids=list(st.session_state.get(picked_key,[]))
-    if not st.session_state.get(f"pc_report_fresh_{mode}") and seed.get("type")=="event" and seed.get("id") and seed["id"] not in selected_ids:
-        selected_ids.append(seed["id"])
-    ordered=sorted(event_map.items(),key=lambda pair:_clean(pair[1].get("start_date")),reverse=True)
-    st.caption(f"{len(ordered)} matching developments · showing up to 15 per page")
-    page_key=f"pc_report_results_page_{mode}"
-    max_page=max(1,(len(ordered)+14)//15)
-    page=st.number_input("Results page",min_value=1,max_value=max_page,value=1,
-                         key=page_key) if max_page>1 else 1
-    for eid,e in ordered[(page-1)*15:page*15]:
-        title=_clean(e.get("title") or "Untitled development")
-        date_str=_clean(e.get("start_date"))[:10]
-        c1,c2=st.columns([6,1])
-        c1.markdown(f"**{title}** · {date_str}")
-        summary=_event_summary(e)
-        if summary: c1.caption(summary[:165]+("…" if len(summary)>165 else ""))
-        if c2.button("✓ Added" if eid in selected_ids else "Add +",
-                     disabled=eid in selected_ids,key=f"pc_story_add_{mode}_{eid}",
-                     use_container_width=True):
-            selected_ids.append(eid)
-            st.session_state[picked_key]=list(dict.fromkeys(selected_ids))
-            st.rerun()
-    if lookup and not ordered:
-        st.info("No matching production developments under these filters. Try All developments or a shorter search.")
-    st.markdown("**Selected for this report**")
-    selected=[]
-    for eid in list(dict.fromkeys(selected_ids)):
-        e=event_map.get(eid)
-        if not e:
-            try:
-                rows=(sb.table("pc_events").select("*").eq("event_id",eid).limit(1).execute().data or [])
-                e=rows[0] if rows else None
-            except Exception: e=None
-        if not e or _horizon_event(e): continue
-        selected.append(e)
-        c1,c2=st.columns([6,1])
-        c1.write(_clean(e.get("title"))+" · "+_clean(e.get("start_date"))[:10])
-        if c2.button("Remove",key=f"pc_story_remove_{mode}_{eid}"):
-            st.session_state[picked_key]=[x for x in selected_ids if x!=eid]
-            st.rerun()
-    st.session_state[picked_key]=[e["event_id"] for e in selected]
-    if selected: st.caption("These developments and their linked records form the AI draft context.")
-    if seed:
-        st.info(f"Current terminal context: {seed.get('title')} · {seed.get('type')}")
+    research_tab, editorial_tab, publication_tab = st.tabs(["1 · Research & evidence", "2 · Generate & review", "3 · Publication"])
+    with research_tab:
+        st.caption("Select the relevant developments, then inspect and approve connected evidence.")
+        st.markdown("#### Development library")
+        st.caption("Search across verified production developments. Filter by purpose; combine Trade and Security whenever needed.")
+        qcol,scope_col,date_col=st.columns([3,1.4,1.3])
+        event_find=qcol.text_input("Find developments",placeholder="Panama tanker, DF Peak, Réunion...",
+                                  key=f"pc_report_find_events_{mode}")
+        scope=scope_col.selectbox("Coverage",["All developments","Security & disruption","Trade & commercial"],
+                                  key=f"pc_report_scope_{mode}")
+        period=date_col.selectbox("Period",["Last 30 days","Last 90 days","All dates"],
+                                  key=f"pc_report_find_period_{mode}")
+        lookup=event_find.strip()
+        found,_=_query_discovery(sb,lookup) if lookup else ([],[])
+        recent=[e for e in _recent_events(sb,300) if not _horizon_event(e)] if not lookup else []
+        event_map={str(e.get("event_id")):e for e in found+recent if e.get("event_id") and not _horizon_event(e)}
+        if period!="All dates":
+            from datetime import timedelta
+            cutoff=(date.today()-timedelta(days=30 if period=="Last 30 days" else 90)).isoformat()
+            event_map={k:e for k,e in event_map.items() if _clean(e.get("start_date"))[:10]>=cutoff}
+        if scope=="Security & disruption":
+            event_map={k:e for k,e in event_map.items() if e.get("intelligence_visible") is True}
+        elif scope=="Trade & commercial":
+            event_map={k:e for k,e in event_map.items() if e.get("trade_visible") is True}
+        picked_key=f"pc_report_selected_ids_{mode}"
+        selected_ids=list(st.session_state.get(picked_key,[]))
+        if not st.session_state.get(f"pc_report_fresh_{mode}") and seed.get("type")=="event" and seed.get("id") and seed["id"] not in selected_ids:
+            selected_ids.append(seed["id"])
+        ordered=sorted(event_map.items(),key=lambda pair:_clean(pair[1].get("start_date")),reverse=True)
+        st.caption(f"{len(ordered)} matching developments · showing up to 15 per page")
+        page_key=f"pc_report_results_page_{mode}"
+        max_page=max(1,(len(ordered)+14)//15)
+        page=st.number_input("Results page",min_value=1,max_value=max_page,value=1,
+                             key=page_key) if max_page>1 else 1
+        for eid,e in ordered[(page-1)*15:page*15]:
+            title=_clean(e.get("title") or "Untitled development")
+            date_str=_clean(e.get("start_date"))[:10]
+            c1,c2=st.columns([6,1])
+            c1.markdown(f"**{title}** · {date_str}")
+            summary=_event_summary(e)
+            if summary: c1.caption(summary[:165]+("…" if len(summary)>165 else ""))
+            if c2.button("✓ Added" if eid in selected_ids else "Add +",
+                         disabled=eid in selected_ids,key=f"pc_story_add_{mode}_{eid}",
+                         use_container_width=True):
+                selected_ids.append(eid)
+                st.session_state[picked_key]=list(dict.fromkeys(selected_ids))
+                st.rerun()
+        if lookup and not ordered:
+            st.info("No matching production developments under these filters. Try All developments or a shorter search.")
+        st.markdown("**Selected for this report**")
+        selected=[]
+        for eid in list(dict.fromkeys(selected_ids)):
+            e=event_map.get(eid)
+            if not e:
+                try:
+                    rows=(sb.table("pc_events").select("*").eq("event_id",eid).limit(1).execute().data or [])
+                    e=rows[0] if rows else None
+                except Exception: e=None
+            if not e or _horizon_event(e): continue
+            selected.append(e)
+            c1,c2=st.columns([6,1])
+            c1.write(_clean(e.get("title"))+" · "+_clean(e.get("start_date"))[:10])
+            if c2.button("Remove",key=f"pc_story_remove_{mode}_{eid}"):
+                st.session_state[picked_key]=[x for x in selected_ids if x!=eid]
+                st.rerun()
+        st.session_state[picked_key]=[e["event_id"] for e in selected]
+        if selected: st.caption("These developments and their linked records form the AI draft context.")
+        if seed:
+            st.info(f"Current terminal context: {seed.get('title')} · {seed.get('type')}")
 
-    st.markdown("#### Connected evidence")
-    if lens=="intelligence":
-        st.caption("Select incidents first. Review grounded factual components before adding them to the report.")
-    else:
-        st.caption("Start with a canonical organisation or asset, then include related developments.")
-    if st.button("Assemble evidence for review",key=f"pc_assemble_{mode}"):
-        assembled=_assemble_evidence(sb,lens,selected,selected_objects,None if st.session_state.get(f"pc_report_fresh_{mode}") else context)
-        st.session_state[f"pc_assembled_{mode}"]=assembled
-        st.session_state.pop(f"pc_assemble_choices_{mode}",None)
-        st.rerun()
-    assembled=st.session_state.get(f"pc_assembled_{mode}") or {}
-    if assembled:
-        counts=assembled["counts"]
-        st.caption("Retrieved: "+", ".join(str(v)+" "+k.replace("_"," ") for k,v in counts.items()))
-        if assembled["issues"]:
-            with st.expander("Retrieval warnings — records may be incomplete"):
-                for issue in assembled["issues"]:st.write(issue)
-        if not assembled["blocks"]:
-            st.warning("No structured component has sufficient retrieved records. Check selected events and retrieval warnings.")
+        st.markdown("#### Connected evidence")
+        if lens=="intelligence":
+            st.caption("Select incidents first. Review grounded factual components before adding them to the report.")
         else:
-            st.markdown("**Choose evidence components for the editorial canvas**")
-            choices_key=f"pc_assemble_choices_{mode}"
-            if choices_key not in st.session_state:
-                st.session_state[choices_key]=[b["id"] for b in assembled["blocks"]]
-            choices=st.multiselect("Include",options=[b["id"] for b in assembled["blocks"]],
-                 format_func=lambda bid:next((b["title"]+" ("+str(len(b.get("rows") or []))+" rows)" for b in assembled["blocks"] if b["id"]==bid),bid),
-                 key=choices_key)
-            for block in assembled["blocks"]:
-                with st.expander(block["title"]+" · "+str(len(block.get("rows") or []))+" records"):
-                    st.dataframe(pd.DataFrame(block.get("rows") or []),hide_index=True,use_container_width=True)
-            if st.button("Add selected components to report",disabled=not choices,key=f"pc_assemble_apply_{mode}"):
+            st.caption("Start with a canonical organisation or asset, then include related developments.")
+        if st.button("Assemble evidence for review",key=f"pc_assemble_{mode}"):
+            assembled=_assemble_evidence(sb,lens,selected,selected_objects,None if st.session_state.get(f"pc_report_fresh_{mode}") else context)
+            st.session_state[f"pc_assembled_{mode}"]=assembled
+            st.session_state.pop(f"pc_assemble_choices_{mode}",None)
+            st.rerun()
+        assembled=st.session_state.get(f"pc_assembled_{mode}") or {}
+        if assembled:
+            counts=assembled["counts"]
+            st.caption("Retrieved: "+", ".join(str(v)+" "+k.replace("_"," ") for k,v in counts.items()))
+            if assembled["issues"]:
+                with st.expander("Retrieval warnings — records may be incomplete"):
+                    for issue in assembled["issues"]:st.write(issue)
+            if not assembled["blocks"]:
+                st.warning("No structured component has sufficient retrieved records. Check selected events and retrieval warnings.")
+            else:
+                st.markdown("**Choose evidence components for the editorial canvas**")
+                choices_key=f"pc_assemble_choices_{mode}"
+                if choices_key not in st.session_state:
+                    st.session_state[choices_key]=[b["id"] for b in assembled["blocks"]]
+                choices=st.multiselect("Include",options=[b["id"] for b in assembled["blocks"]],
+                     format_func=lambda bid:next((b["title"]+" ("+str(len(b.get("rows") or []))+" rows)" for b in assembled["blocks"] if b["id"]==bid),bid),
+                     key=choices_key)
+                for block in assembled["blocks"]:
+                    with st.expander(block["title"]+" · "+str(len(block.get("rows") or []))+" records"):
+                        st.dataframe(pd.DataFrame(block.get("rows") or []),hide_index=True,use_container_width=True)
+                if st.button("Add selected components to report",disabled=not choices,key=f"pc_assemble_apply_{mode}"):
+                    current=st.session_state.get(f"pc_editor_blocks_{mode}") or []
+                    additions=[dict(b) for b in assembled["blocks"] if b["id"] in choices]
+                    existing_ids={b["id"] for b in current}
+                    additions=[b for b in additions if b["id"] not in existing_ids]
+                    st.session_state[f"pc_editor_blocks_{mode}"]=current+additions
+                    st.session_state[f"pc_assemble_added_{mode}"]=len(additions)
+                    st.rerun()
+                if f"pc_assemble_added_{mode}" in st.session_state:
+                    st.success(str(st.session_state.pop(f"pc_assemble_added_{mode}"))+" evidence blocks added; existing narrative preserved.")
+            st.caption("No inferred exposure, numerical trend or legal designation is generated without supporting records.")
+
+    with editorial_tab:
+        st.caption("Generate the intelligence article and review the proposed text before acceptance.")
+        prefill_key=f"pc_report_prefill_{mode}_{product}"
+        cauto1,cauto2=st.columns(2)
+        if cauto1.button("Populate facts from selected data",key=f"pc_report_populate_{mode}",use_container_width=True):
+            vals=_prefill_from_context(product,seed,selected)
+            for k,v in vals.items():
+                if v:
+                    st.session_state[f"pc_report_field_{mode}_{product}_{k}"]=v
+            if seed.get("title") and not st.session_state.get(f"pc_report_title_{mode}"):
+                st.session_state[f"pc_report_title_{mode}"]=seed["title"]
+            if seed.get("region") and not st.session_state.get(f"pc_report_region_{mode}"):
+                st.session_state[f"pc_report_region_{mode}"]=seed["region"]
+            st.rerun()
+
+        if cauto2.button("Generate full analytical first draft",type="primary",key=f"pc_report_ai_draft_{mode}",use_container_width=True):
+            try:
+                from pc_report_ai import draft_report
+                bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
+                if assembled:
+                    bundle["assembled_evidence"]={"counts":assembled["counts"],"blocks":assembled["blocks"],"issues":assembled["issues"]}
+                    bundle["evidence_urls"]=list(dict.fromkeys(bundle.get("evidence_urls",[])+assembled["sources"]))
+                result=draft_report(
+                    _api_key(),lens,product,spec["sections"],query,bundle,
+                    title_hint=seed.get("title","")
+                )
+                narrative = {k:_clean(v) for k,v in (result.get("sections") or {}).items()
+                             if k in spec["sections"] and _clean(v)}
+                if not narrative:
+                    raise ValueError("The drafting service returned no usable narrative. The editor was not changed.")
+                if not assembled or not assembled.get("counts",{}).get("events"):
+                    st.warning("Draft generated without assembled incident evidence; verify coverage before acceptance.")
+                if result.get("title"):
+                    st.session_state[f"pc_report_title_{mode}"]=result["title"]
+                if result.get("executive_line"):
+                    st.session_state[f"pc_report_summary_{mode}"]=result["executive_line"]
+                if result.get("confidence") in {"Low","Medium","Moderate","High"}:
+                    st.session_state["pc_report_confidence"]=result["confidence"]
+                for k,v in (result.get("sections") or {}).items():
+                    if k in spec["sections"] and _clean(v):
+                        st.session_state[f"pc_report_field_{mode}_{product}_{k}"]=_clean(v)
+                st.session_state[f"pc_report_ai_gaps_{mode}"]=result.get("gaps") or []
+                st.session_state[f"pc_report_ai_bundle_{mode}"]=bundle
+                proposed=[_new_block("Narrative",name,_clean(value)) for name,value in (result.get("sections") or {}).items() if _clean(value)]
                 current=st.session_state.get(f"pc_editor_blocks_{mode}") or []
-                additions=[dict(b) for b in assembled["blocks"] if b["id"] in choices]
-                existing_ids={b["id"] for b in current}
-                additions=[b for b in additions if b["id"] not in existing_ids]
-                st.session_state[f"pc_editor_blocks_{mode}"]=current+additions
-                st.session_state[f"pc_assemble_added_{mode}"]=len(additions)
-                st.rerun()
-            if f"pc_assemble_added_{mode}" in st.session_state:
-                st.success(str(st.session_state.pop(f"pc_assemble_added_{mode}"))+" evidence blocks added; existing narrative preserved.")
-        st.caption("No inferred exposure, numerical trend or legal designation is generated without supporting records.")
-
-    prefill_key=f"pc_report_prefill_{mode}_{product}"
-    cauto1,cauto2=st.columns(2)
-    if cauto1.button("Populate facts from selected data",key=f"pc_report_populate_{mode}",use_container_width=True):
-        vals=_prefill_from_context(product,seed,selected)
-        for k,v in vals.items():
-            if v:
-                st.session_state[f"pc_report_field_{mode}_{product}_{k}"]=v
-        if seed.get("title") and not st.session_state.get(f"pc_report_title_{mode}"):
-            st.session_state[f"pc_report_title_{mode}"]=seed["title"]
-        if seed.get("region") and not st.session_state.get(f"pc_report_region_{mode}"):
-            st.session_state[f"pc_report_region_{mode}"]=seed["region"]
-        st.rerun()
-
-    if cauto2.button("Generate full analytical first draft",type="primary",key=f"pc_report_ai_draft_{mode}",use_container_width=True):
-        try:
-            from pc_report_ai import draft_report
-            bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
-            if assembled:
-                bundle["assembled_evidence"]={"counts":assembled["counts"],"blocks":assembled["blocks"],"issues":assembled["issues"]}
-                bundle["evidence_urls"]=list(dict.fromkeys(bundle.get("evidence_urls",[])+assembled["sources"]))
-            result=draft_report(
-                _api_key(),lens,product,spec["sections"],query,bundle,
-                title_hint=seed.get("title","")
-            )
-            narrative = {k:_clean(v) for k,v in (result.get("sections") or {}).items()
-                         if k in spec["sections"] and _clean(v)}
-            if not narrative:
-                raise ValueError("The drafting service returned no usable narrative. The editor was not changed.")
-            if not assembled or not assembled.get("counts",{}).get("events"):
-                st.warning("Draft generated without assembled incident evidence; verify coverage before acceptance.")
-            if result.get("title"):
-                st.session_state[f"pc_report_title_{mode}"]=result["title"]
-            if result.get("executive_line"):
-                st.session_state[f"pc_report_summary_{mode}"]=result["executive_line"]
-            if result.get("confidence") in {"Low","Medium","Moderate","High"}:
-                st.session_state["pc_report_confidence"]=result["confidence"]
-            for k,v in (result.get("sections") or {}).items():
-                if k in spec["sections"] and _clean(v):
-                    st.session_state[f"pc_report_field_{mode}_{product}_{k}"]=_clean(v)
-            st.session_state[f"pc_report_ai_gaps_{mode}"]=result.get("gaps") or []
-            st.session_state[f"pc_report_ai_bundle_{mode}"]=bundle
-            proposed=[_new_block("Narrative",name,_clean(value)) for name,value in (result.get("sections") or {}).items() if _clean(value)]
-            current=st.session_state.get(f"pc_editor_blocks_{mode}") or []
-            if proposed and not any(_clean(b.get("body")) or b.get("rows") for b in current):
-                st.session_state[f"pc_editor_blocks_{mode}"]=proposed
-                st.session_state.pop(f"pc_editor_proposal_{mode}",None)
-            else:
-                factual=[dict(b) for b in current if b.get("kind")=="Asset table" and b.get("rows")]
-                st.session_state[f"pc_editor_proposal_{mode}"]=proposed+factual
-            st.rerun()
-        except Exception as exc:
-            st.error(f"AI drafting failed: {exc}")
-
-    proposal=st.session_state.get(f"pc_editor_proposal_{mode}")
-    if proposal is not None:
-        st.info("AI proposed an editable draft. Accept or discard it; your current work is unchanged.")
-        yes,no=st.columns(2)
-        st.caption(f"{len(proposal)} proposed content blocks; "+str(sum(bool(_clean(b.get("body"))) for b in proposal))+" contain narrative text.")
-        with st.expander("Read proposed analytical draft before accepting", expanded=True):
-            for draft_block in proposal:
-                if draft_block.get("kind")=="Narrative" and _clean(draft_block.get("body")):
-                    st.markdown("#### "+_clean(draft_block.get("title")))
-                    st.markdown(_clean(draft_block.get("body")))
-            st.caption("Evidence tables remain separate and must be supported by retrieved records.")
-
-        if yes.button("Accept AI draft",key=f"pc_accept_{mode}",disabled=not bool(proposal)):
-            # Clear old canvas widget state before installing the proposal. Streamlit
-            # widget keys otherwise take precedence over the new block defaults.
-            for key in list(st.session_state):
-                if key.startswith((f"pc_title_block_{mode}_",f"pc_body_{mode}_",
-                                   f"pc_preset_{mode}_",f"pc_edit_table_{mode}_")):
-                    del st.session_state[key]
-            installed=[dict(b) for b in proposal]
-            for block in installed:
-                bid=block["id"]
-                st.session_state[f"pc_title_block_{mode}_{bid}"]=block.get("title","")
-                if block.get("kind")!="Asset table":
-                    st.session_state[f"pc_body_{mode}_{bid}"]=block.get("body","")
-            st.session_state[f"pc_editor_blocks_{mode}"]=installed
-            del st.session_state[f"pc_editor_proposal_{mode}"]
-            st.rerun()
-        if no.button("Discard AI draft",key=f"pc_discard_{mode}"):
-            del st.session_state[f"pc_editor_proposal_{mode}"]
-            st.rerun()
-    gaps=st.session_state.get(f"pc_report_ai_gaps_{mode}") or []
-    if gaps:
-        with st.expander("AI-identified gaps / unconfirmed points"):
-            for g in gaps:
-                st.markdown("- "+_clean(g))
-
-    c1,c2,c3,c4=st.columns([2.3,1.0,1.0,1.0])
-    report_title=c1.text_input("Headline",value=seed.get("title",""),key=f"pc_report_title_{mode}")
-    report_date=c2.date_input("Date",value=date.today(),key=f"pc_report_date_{mode}")
-    region=c3.text_input("Geography",value=seed.get("region",""),key=f"pc_report_region_{mode}")
-    confidence=c4.selectbox("Confidence",["","Low","Medium","Moderate","High"],key="pc_report_confidence")
-
-    summary=st.text_input("Executive line / 14-word summary",key=f"pc_report_summary_{mode}")
-
-    st.markdown("### Editorial canvas")
-    canvas_key=f"pc_editor_blocks_{mode}"
-    if canvas_key not in st.session_state:
-        st.session_state[canvas_key]=[_new_block("Narrative",name) for name in spec["sections"]]
-    blocks=st.session_state[canvas_key]
-    ckind,cadd=st.columns([3,1])
-    kind=ckind.selectbox("New content block",BLOCK_TYPES,key=f"pc_kind_{mode}")
-    if cadd.button("Add block",key=f"pc_add_{mode}"):
-        new_block=_new_block(kind,preset="Vessels" if kind=="Asset table" else "Custom")
-        # Place new work at the top, not after seven lengthy template sections.
-        blocks.insert(0,new_block)
-        st.session_state[canvas_key]=blocks
-        st.session_state[f"pc_editor_notice_{mode}"]=new_block["id"]
-        st.rerun()
-    if st.session_state.get(f"pc_editor_notice_{mode}"):
-        st.success("New block added at the top of the canvas. Edit its heading and content below.")
-        st.session_state.pop(f"pc_editor_notice_{mode}",None)
-    st.caption(f"{len(blocks)} editable blocks in this report.")
-    # Intelligence uses a manuscript-first editor. Evidence tables stay as structured
-    # blocks, and the legacy block editor remains available for other lenses.
-    document_first = lens == "intelligence" and st.toggle(
-        "Continuous document editor", value=True, key=f"pc_document_first_{mode}",
-        help="Edit report prose as one manuscript rather than filling individual section boxes.")
-    if document_first:
-        import hashlib
-        from pc_report_document import manuscript_from_blocks, apply_manuscript
-        manuscript = manuscript_from_blocks(blocks)
-        revision = hashlib.sha256(manuscript.encode("utf-8")).hexdigest()[:12]
-        st.caption("Write and reorganise the report naturally using ## headings. Evidence tables remain linked and are not replaced by manuscript edits.")
-        with st.form(key=f"pc_manuscript_form_{mode}_{revision}"):
-            edited_manuscript = st.text_area(
-                "Report manuscript (Markdown)", value=manuscript, height=650,
-                key=f"pc_manuscript_{mode}_{revision}",
-                help="Use ## for section headings. Citation markers such as [1] are retained.")
-            apply_document = st.form_submit_button("Apply manuscript edits",type="primary",use_container_width=True)
-        if apply_document:
-            revised, error = apply_manuscript(blocks, edited_manuscript)
-            if error:
-                st.error(error)
-            else:
-                st.session_state[canvas_key] = revised
-                st.success("Manuscript applied. Structured evidence tables and existing source records are preserved.")
-                st.rerun()
-        with st.expander("Connected evidence tables in this report", expanded=False):
-            tables=[b for b in blocks if b.get("kind")=="Asset table"]
-            if not tables:
-                st.caption("No evidence tables added yet. Select them in Connected evidence above.")
-            for b in tables:
-                st.markdown("**"+_clean(b.get("title"))+"** · "+str(len(b.get("rows") or []))+" records")
-                st.dataframe(pd.DataFrame(b.get("rows") or []),hide_index=True,use_container_width=True)
-        st.caption("Apply manuscript edits before using other controls. Report preview and export use the applied version.")
-    fields={}
-    if not document_first:
-        for i,block in enumerate(list(blocks)):
-            bid=block["id"]
-            with st.container(border=True):
-                top,up,down,delete=st.columns([6,1,1,1])
-                block["title"]=top.text_input("Heading",value=block.get("title",""),key=f"pc_title_block_{mode}_{bid}")
-                if up.button("↑",key=f"pc_up_{mode}_{bid}",disabled=i==0):
-                    blocks[i-1],blocks[i]=blocks[i],blocks[i-1]
-                    st.rerun()
-                if down.button("↓",key=f"pc_down_{mode}_{bid}",disabled=i==len(blocks)-1):
-                    blocks[i+1],blocks[i]=blocks[i],blocks[i+1]
-                    st.rerun()
-                if delete.button("×",key=f"pc_del_{mode}_{bid}"):
-                    blocks.pop(i)
-                    st.rerun()
-                if block["kind"]=="Asset table":
-                    choices=list(TABLE_PRESETS)
-                    preset=st.selectbox("Table layout",choices,index=choices.index(block.get("preset")) if block.get("preset") in choices else choices.index("Custom"),key=f"pc_preset_{mode}_{bid}")
-                    if preset!=block.get("preset"):
-                        block["preset"]=preset
-                        block["rows"]=[]
-                    if st.button("Populate from connected records",key=f"pc_pop_table_{mode}_{bid}"):
-                        bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
-                        block["rows"]=_vessels_for_report(sb,selected) if preset=="Vessels" else _asset_table_rows(bundle.get("objects") or [],preset)
-                        st.session_state.pop(f"pc_edit_table_{mode}_{bid}",None)
-                        st.session_state[f"pc_table_count_{mode}_{bid}"]=len(block["rows"])
-                        st.rerun()
-                    if f"pc_table_count_{mode}_{bid}" in st.session_state:
-                        count=st.session_state.pop(f"pc_table_count_{mode}_{bid}")
-                        st.info(f"{count} canonical records found; if zero, no verified matching vessel records were found.")
-                    frame=pd.DataFrame(block.get("rows") or [],columns=block.get("columns") or TABLE_PRESETS[preset])
-                    edited=st.data_editor(frame,num_rows="dynamic",hide_index=True,use_container_width=True,key=f"pc_edit_table_{mode}_{bid}")
-                    block["rows"]=edited.fillna("").to_dict("records")
-                elif block["kind"]=="References":
-                    st.caption("References are collected automatically in the evidence panel below.")
+                if proposed and not any(_clean(b.get("body")) or b.get("rows") for b in current):
+                    st.session_state[f"pc_editor_blocks_{mode}"]=proposed
+                    st.session_state.pop(f"pc_editor_proposal_{mode}",None)
                 else:
-                    block["body"]=st.text_area("Text",value=block.get("body",""),height=190,key=f"pc_body_{mode}_{bid}")
-                    instruction=st.text_input("AI assistance for this block",placeholder="Expand, rewrite, compare, or add supported references",
-                        key=f"pc_assist_instruction_{mode}_{bid}")
-                    if st.button("AI suggest edit",key=f"pc_assist_{mode}_{bid}"):
-                        if not instruction.strip():
-                            st.warning("Enter an instruction first.")
-                        else:
-                            try:
-                                from pc_report_ai import assist_block
-                                bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
-                                st.session_state[f"pc_assist_proposal_{mode}_{bid}"]=assist_block(_api_key(),instruction,block,bundle)
+                    factual=[dict(b) for b in current if b.get("kind")=="Asset table" and b.get("rows")]
+                    st.session_state[f"pc_editor_proposal_{mode}"]=proposed+factual
+                st.rerun()
+            except Exception as exc:
+                st.error(f"AI drafting failed: {exc}")
+
+        proposal=st.session_state.get(f"pc_editor_proposal_{mode}")
+        if proposal is not None:
+            st.info("AI proposed an editable draft. Accept or discard it; your current work is unchanged.")
+            yes,no=st.columns(2)
+            st.caption(f"{len(proposal)} proposed content blocks; "+str(sum(bool(_clean(b.get("body"))) for b in proposal))+" contain narrative text.")
+            with st.expander("Read proposed analytical draft before accepting", expanded=True):
+                for draft_block in proposal:
+                    if draft_block.get("kind")=="Narrative" and _clean(draft_block.get("body")):
+                        st.markdown("#### "+_clean(draft_block.get("title")))
+                        st.markdown(_clean(draft_block.get("body")))
+                st.caption("Evidence tables remain separate and must be supported by retrieved records.")
+
+            if yes.button("Accept AI draft",key=f"pc_accept_{mode}",disabled=not bool(proposal)):
+                # Clear old canvas widget state before installing the proposal. Streamlit
+                # widget keys otherwise take precedence over the new block defaults.
+                for key in list(st.session_state):
+                    if key.startswith((f"pc_title_block_{mode}_",f"pc_body_{mode}_",
+                                       f"pc_preset_{mode}_",f"pc_edit_table_{mode}_")):
+                        del st.session_state[key]
+                installed=[dict(b) for b in proposal]
+                for block in installed:
+                    bid=block["id"]
+                    st.session_state[f"pc_title_block_{mode}_{bid}"]=block.get("title","")
+                    if block.get("kind")!="Asset table":
+                        st.session_state[f"pc_body_{mode}_{bid}"]=block.get("body","")
+                st.session_state[f"pc_editor_blocks_{mode}"]=installed
+                del st.session_state[f"pc_editor_proposal_{mode}"]
+                st.rerun()
+            if no.button("Discard AI draft",key=f"pc_discard_{mode}"):
+                del st.session_state[f"pc_editor_proposal_{mode}"]
+                st.rerun()
+        gaps=st.session_state.get(f"pc_report_ai_gaps_{mode}") or []
+        if gaps:
+            with st.expander("AI-identified gaps / unconfirmed points"):
+                for g in gaps:
+                    st.markdown("- "+_clean(g))
+
+        c1,c2,c3,c4=st.columns([2.3,1.0,1.0,1.0])
+        report_title=c1.text_input("Headline",value=seed.get("title",""),key=f"pc_report_title_{mode}")
+        report_date=c2.date_input("Date",value=date.today(),key=f"pc_report_date_{mode}")
+        region=c3.text_input("Geography",value=seed.get("region",""),key=f"pc_report_region_{mode}")
+        confidence=c4.selectbox("Confidence",["","Low","Medium","Moderate","High"],key="pc_report_confidence")
+
+        summary=st.text_input("Executive line / 14-word summary",key=f"pc_report_summary_{mode}")
+
+        st.markdown("### Editorial canvas")
+        canvas_key=f"pc_editor_blocks_{mode}"
+        if canvas_key not in st.session_state:
+            st.session_state[canvas_key]=[_new_block("Narrative",name) for name in spec["sections"]]
+        blocks=st.session_state[canvas_key]
+        ckind,cadd=st.columns([3,1])
+        kind=ckind.selectbox("New content block",BLOCK_TYPES,key=f"pc_kind_{mode}")
+        if cadd.button("Add block",key=f"pc_add_{mode}"):
+            new_block=_new_block(kind,preset="Vessels" if kind=="Asset table" else "Custom")
+            # Place new work at the top, not after seven lengthy template sections.
+            blocks.insert(0,new_block)
+            st.session_state[canvas_key]=blocks
+            st.session_state[f"pc_editor_notice_{mode}"]=new_block["id"]
+            st.rerun()
+        if st.session_state.get(f"pc_editor_notice_{mode}"):
+            st.success("New block added at the top of the canvas. Edit its heading and content below.")
+            st.session_state.pop(f"pc_editor_notice_{mode}",None)
+        st.caption(f"{len(blocks)} editable blocks in this report.")
+        # Intelligence uses a manuscript-first editor. Evidence tables stay as structured
+        # blocks, and the legacy block editor remains available for other lenses.
+        document_first = lens == "intelligence" and st.toggle(
+            "Continuous document editor", value=True, key=f"pc_document_first_{mode}",
+            help="Edit report prose as one manuscript rather than filling individual section boxes.")
+        if document_first:
+            import hashlib
+            from pc_report_document import manuscript_from_blocks, apply_manuscript
+            manuscript = manuscript_from_blocks(blocks)
+            revision = hashlib.sha256(manuscript.encode("utf-8")).hexdigest()[:12]
+            st.caption("Write and reorganise the report naturally using ## headings. Evidence tables remain linked and are not replaced by manuscript edits.")
+            with st.form(key=f"pc_manuscript_form_{mode}_{revision}"):
+                edited_manuscript = st.text_area(
+                    "Report manuscript (Markdown)", value=manuscript, height=650,
+                    key=f"pc_manuscript_{mode}_{revision}",
+                    help="Use ## for section headings. Citation markers such as [1] are retained.")
+                apply_document = st.form_submit_button("Apply manuscript edits",type="primary",use_container_width=True)
+            if apply_document:
+                revised, error = apply_manuscript(blocks, edited_manuscript)
+                if error:
+                    st.error(error)
+                else:
+                    st.session_state[canvas_key] = revised
+                    st.success("Manuscript applied. Structured evidence tables and existing source records are preserved.")
+                    st.rerun()
+            with st.expander("Connected evidence tables in this report", expanded=False):
+                tables=[b for b in blocks if b.get("kind")=="Asset table"]
+                if not tables:
+                    st.caption("No evidence tables added yet. Select them in Connected evidence above.")
+                for b in tables:
+                    st.markdown("**"+_clean(b.get("title"))+"** · "+str(len(b.get("rows") or []))+" records")
+                    st.dataframe(pd.DataFrame(b.get("rows") or []),hide_index=True,use_container_width=True)
+            st.caption("Apply manuscript edits before using other controls. Report preview and export use the applied version.")
+        fields={}
+        if not document_first:
+            for i,block in enumerate(list(blocks)):
+                bid=block["id"]
+                with st.container(border=True):
+                    top,up,down,delete=st.columns([6,1,1,1])
+                    block["title"]=top.text_input("Heading",value=block.get("title",""),key=f"pc_title_block_{mode}_{bid}")
+                    if up.button("↑",key=f"pc_up_{mode}_{bid}",disabled=i==0):
+                        blocks[i-1],blocks[i]=blocks[i],blocks[i-1]
+                        st.rerun()
+                    if down.button("↓",key=f"pc_down_{mode}_{bid}",disabled=i==len(blocks)-1):
+                        blocks[i+1],blocks[i]=blocks[i],blocks[i+1]
+                        st.rerun()
+                    if delete.button("×",key=f"pc_del_{mode}_{bid}"):
+                        blocks.pop(i)
+                        st.rerun()
+                    if block["kind"]=="Asset table":
+                        choices=list(TABLE_PRESETS)
+                        preset=st.selectbox("Table layout",choices,index=choices.index(block.get("preset")) if block.get("preset") in choices else choices.index("Custom"),key=f"pc_preset_{mode}_{bid}")
+                        if preset!=block.get("preset"):
+                            block["preset"]=preset
+                            block["rows"]=[]
+                        if st.button("Populate from connected records",key=f"pc_pop_table_{mode}_{bid}"):
+                            bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
+                            block["rows"]=_vessels_for_report(sb,selected) if preset=="Vessels" else _asset_table_rows(bundle.get("objects") or [],preset)
+                            st.session_state.pop(f"pc_edit_table_{mode}_{bid}",None)
+                            st.session_state[f"pc_table_count_{mode}_{bid}"]=len(block["rows"])
+                            st.rerun()
+                        if f"pc_table_count_{mode}_{bid}" in st.session_state:
+                            count=st.session_state.pop(f"pc_table_count_{mode}_{bid}")
+                            st.info(f"{count} canonical records found; if zero, no verified matching vessel records were found.")
+                        frame=pd.DataFrame(block.get("rows") or [],columns=block.get("columns") or TABLE_PRESETS[preset])
+                        edited=st.data_editor(frame,num_rows="dynamic",hide_index=True,use_container_width=True,key=f"pc_edit_table_{mode}_{bid}")
+                        block["rows"]=edited.fillna("").to_dict("records")
+                    elif block["kind"]=="References":
+                        st.caption("References are collected automatically in the evidence panel below.")
+                    else:
+                        block["body"]=st.text_area("Text",value=block.get("body",""),height=190,key=f"pc_body_{mode}_{bid}")
+                        instruction=st.text_input("AI assistance for this block",placeholder="Expand, rewrite, compare, or add supported references",
+                            key=f"pc_assist_instruction_{mode}_{bid}")
+                        if st.button("AI suggest edit",key=f"pc_assist_{mode}_{bid}"):
+                            if not instruction.strip():
+                                st.warning("Enter an instruction first.")
+                            else:
+                                try:
+                                    from pc_report_ai import assist_block
+                                    bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
+                                    st.session_state[f"pc_assist_proposal_{mode}_{bid}"]=assist_block(_api_key(),instruction,block,bundle)
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(f"AI edit failed: {exc}")
+                        proposed=st.session_state.get(f"pc_assist_proposal_{mode}_{bid}")
+                        if proposed:
+                            st.markdown("**Suggested replacement (not yet applied)**")
+                            st.write(_clean(proposed.get("body")))
+                            ac,dc=st.columns(2)
+                            if ac.button("Accept edit",key=f"pc_assist_accept_{mode}_{bid}"):
+                                block["body"]=_clean(proposed.get("body"))
+                                block["title"]=_clean(proposed.get("title")) or block["title"]
+                                st.session_state.pop(f"pc_body_{mode}_{bid}",None)
+                                st.session_state.pop(f"pc_title_block_{mode}_{bid}",None)
+                                del st.session_state[f"pc_assist_proposal_{mode}_{bid}"]
                                 st.rerun()
-                            except Exception as exc:
-                                st.error(f"AI edit failed: {exc}")
-                    proposed=st.session_state.get(f"pc_assist_proposal_{mode}_{bid}")
-                    if proposed:
-                        st.markdown("**Suggested replacement (not yet applied)**")
-                        st.write(_clean(proposed.get("body")))
-                        ac,dc=st.columns(2)
-                        if ac.button("Accept edit",key=f"pc_assist_accept_{mode}_{bid}"):
-                            block["body"]=_clean(proposed.get("body"))
-                            block["title"]=_clean(proposed.get("title")) or block["title"]
-                            st.session_state.pop(f"pc_body_{mode}_{bid}",None)
-                            st.session_state.pop(f"pc_title_block_{mode}_{bid}",None)
-                            del st.session_state[f"pc_assist_proposal_{mode}_{bid}"]
-                            st.rerun()
-                        if dc.button("Discard edit",key=f"pc_assist_discard_{mode}_{bid}"):
-                            del st.session_state[f"pc_assist_proposal_{mode}_{bid}"]
-                            st.rerun()
-                    fields[block["title"]]=block["body"]
-    blocks=st.session_state[canvas_key] if document_first else blocks
-    st.session_state[canvas_key]=blocks
-    if not blocks:
-        st.info("Canvas is empty. Add a block or generate an AI draft.")
+                            if dc.button("Discard edit",key=f"pc_assist_discard_{mode}_{bid}"):
+                                del st.session_state[f"pc_assist_proposal_{mode}_{bid}"]
+                                st.rerun()
+                        fields[block["title"]]=block["body"]
+        blocks=st.session_state[canvas_key] if document_first else blocks
+        st.session_state[canvas_key]=blocks
+        if not blocks:
+            st.info("Canvas is empty. Add a block or generate an AI draft.")
 
-    source_urls=[]
-    for e in selected:
-        source_urls.extend(_urls_from_record(e))
-    if seed.get("type")=="event":
-        source_urls.extend(_urls_from_record(seed.get("record") or {}))
-    ai_bundle=st.session_state.get(f"pc_report_ai_bundle_{mode}") or {}
-    source_urls.extend(ai_bundle.get("evidence_urls") or [])
-    source_urls.extend((st.session_state.get(f"pc_assembled_{mode}") or {}).get("sources") or [])
-    source_urls=list(dict.fromkeys(source_urls))
+    with publication_tab:
+        st.caption("Read the publication, inspect source coverage and save or export the reviewed edition.")
+        source_urls=[]
+        for e in selected:
+            source_urls.extend(_urls_from_record(e))
+        if seed.get("type")=="event":
+            source_urls.extend(_urls_from_record(seed.get("record") or {}))
+        ai_bundle=st.session_state.get(f"pc_report_ai_bundle_{mode}") or {}
+        source_urls.extend(ai_bundle.get("evidence_urls") or [])
+        source_urls.extend((st.session_state.get(f"pc_assembled_{mode}") or {}).get("sources") or [])
+        source_urls=list(dict.fromkeys(source_urls))
 
-    st.markdown("### Evidence")
-    evidence_key=f"pc_report_sources_{mode}"
-    prior=st.session_state.get(evidence_key,"")
-    prior_urls=[x.strip() for x in prior.splitlines() if x.strip().startswith(("http://","https://"))]
-    st.session_state[evidence_key]="\n".join(dict.fromkeys(prior_urls+source_urls))
-    source_text=st.text_area("Source URLs — automatically collected from selected incidents",
-                             key=evidence_key,height=145)
-    sources=list(dict.fromkeys(x.strip() for x in source_text.splitlines()
-                               if x.strip().startswith(("http://","https://"))))
-    if not sources:
-        st.warning("No evidence URLs yet: attach sources before publishing.")
+        st.markdown("### Evidence")
+        evidence_key=f"pc_report_sources_{mode}"
+        prior=st.session_state.get(evidence_key,"")
+        prior_urls=[x.strip() for x in prior.splitlines() if x.strip().startswith(("http://","https://"))]
+        st.session_state[evidence_key]="\n".join(dict.fromkeys(prior_urls+source_urls))
+        source_text=st.text_area("Source URLs — automatically collected from selected incidents",
+                                 key=evidence_key,height=145)
+        sources=list(dict.fromkeys(x.strip() for x in source_text.splitlines()
+                                   if x.strip().startswith(("http://","https://"))))
+        if not sources:
+            st.warning("No evidence URLs yet: attach sources before publishing.")
 
-    if lens == "intelligence":
-        from pc_intelligence_publication import render_publication, evidence_audit
-        publication_events=[{"sources":_urls_from_record(e)} for e in selected]
-        coverage=evidence_audit(publication_events)
-        if coverage["missing"]:
-            st.warning(f"Source coverage: {coverage['sourced']}/{coverage['total']} selected incidents have linked URLs. Review unsupported claims and confidence before distributing.")
-        web_html=render_publication(report_title,report_date,region,product,summary,blocks,sources,publication_events)
-    else:
-        web_html=_build_html(product,report_title,report_date,region,confidence,summary,fields,sources,blocks)
-    tabs=st.tabs(["Preview","HTML","Evidence / linked events"])
-    with tabs[0]:
-        components.html(web_html,height=850,scrolling=True)
-    with tabs[1]:
-        st.code(web_html,language="html")
-        st.download_button("Download HTML",web_html,file_name=f"pc-{spec['report_type']}.html",mime="text/html",
-                           key=f"pc_report_download_{mode}")
-    with tabs[2]:
-        if selected:
-            st.dataframe(pd.DataFrame([{
-                "Date":_clean(x.get("start_date"))[:10],"Development":_clean(x.get("title")),
-                "Event ID":_clean(x.get("event_id")),"Sources":len(_urls_from_record(x))
-            } for x in selected]),hide_index=True,use_container_width=True)
-        if sources:
-            for u in sources:
-                st.markdown("- "+u)
+        if lens == "intelligence":
+            from pc_intelligence_publication import render_publication, evidence_audit
+            publication_events=[{"sources":_urls_from_record(e)} for e in selected]
+            coverage=evidence_audit(publication_events)
+            if coverage["missing"]:
+                st.warning(f"Source coverage: {coverage['sourced']}/{coverage['total']} selected incidents have linked URLs. Review unsupported claims and confidence before distributing.")
+            web_html=render_publication(report_title,report_date,region,product,summary,blocks,sources,publication_events)
+        else:
+            web_html=_build_html(product,report_title,report_date,region,confidence,summary,fields,sources,blocks)
+        tabs=st.tabs(["Preview","HTML","Evidence / linked events"])
+        with tabs[0]:
+            components.html(web_html,height=850,scrolling=True)
+        with tabs[1]:
+            st.code(web_html,language="html")
+            st.download_button("Download HTML",web_html,file_name=f"pc-{spec['report_type']}.html",mime="text/html",
+                               key=f"pc_report_download_{mode}")
+        with tabs[2]:
+            if selected:
+                st.dataframe(pd.DataFrame([{
+                    "Date":_clean(x.get("start_date"))[:10],"Development":_clean(x.get("title")),
+                    "Event ID":_clean(x.get("event_id")),"Sources":len(_urls_from_record(x))
+                } for x in selected]),hide_index=True,use_container_width=True)
+            if sources:
+                for u in sources:
+                    st.markdown("- "+u)
 
-    a,b,c=st.columns(3)
-    if a.button("Save draft",type="primary",disabled=not bool(report_title.strip()),key=f"pc_report_save_draft_{mode}"):
-        try:
-            rid=_save_report(sb,product,report_title,report_date,region,summary,fields,selected,sources,"draft",context,blocks)
-            st.success(f"Draft saved: {rid}")
-        except Exception as exc:
-            st.error(f"Could not save report: {exc}")
+        a,b,c=st.columns(3)
+        if a.button("Save draft",type="primary",disabled=not bool(report_title.strip()),key=f"pc_report_save_draft_{mode}"):
+            try:
+                rid=_save_report(sb,product,report_title,report_date,region,summary,fields,selected,sources,"draft",context,blocks)
+                st.success(f"Draft saved: {rid}")
+            except Exception as exc:
+                st.error(f"Could not save report: {exc}")
 
-    if b.button("Save for review",disabled=not bool(report_title.strip()),key=f"pc_report_save_review_{mode}"):
-        try:
-            rid=_save_report(sb,product,report_title,report_date,region,summary,fields,selected,sources,"review",context,blocks)
-            st.success(f"Saved for review: {rid}")
-        except Exception as exc:
-            st.error(f"Could not save report: {exc}")
+        if b.button("Save for review",disabled=not bool(report_title.strip()),key=f"pc_report_save_review_{mode}"):
+            try:
+                rid=_save_report(sb,product,report_title,report_date,region,summary,fields,selected,sources,"review",context,blocks)
+                st.success(f"Saved for review: {rid}")
+            except Exception as exc:
+                st.error(f"Could not save report: {exc}")
 
-    if c.button("New report — clear workspace",key=f"pc_report_clear_{mode}"):
-        # Clear every report-specific control, not merely the text fields.
-        # Saved reports in pc_reports are unaffected.
-        prefixes=(
-            f"pc_report_field_{mode}_",f"pc_report_title_{mode}",
-            f"pc_report_date_{mode}",f"pc_report_region_{mode}",
-            f"pc_report_summary_{mode}",f"pc_report_sources_{mode}",
-            f"pc_report_events_{mode}",f"pc_report_query_{mode}",
-            f"pc_report_query_objects_{mode}",f"pc_report_ai_gaps_{mode}",
-            f"pc_report_ai_bundle_{mode}",f"pc_report_product_{mode}",
-            f"pc_report_find_events_{mode}",f"pc_report_scope_{mode}",
-            f"pc_report_find_period_{mode}",f"pc_report_selected_ids_{mode}",
-            f"pc_report_results_page_{mode}",f"pc_report_prefill_{mode}_",
-            f"pc_editor_blocks_{mode}",f"pc_editor_proposal_{mode}",
-            f"pc_editor_notice_{mode}",f"pc_kind_{mode}",
-            f"pc_title_block_{mode}_",f"pc_body_{mode}_",
-            f"pc_preset_{mode}_",f"pc_edit_table_{mode}_",
-            f"pc_table_count_{mode}_",f"pc_assist_instruction_{mode}_",
-            f"pc_assist_proposal_{mode}_",f"pc_assembled_{mode}",
-            f"pc_assemble_choices_{mode}",f"pc_assemble_added_{mode}",
-        )
-        for key in list(st.session_state):
-            if any(key.startswith(prefix) for prefix in prefixes):
-                del st.session_state[key]
-        # Opening a report from an event must not silently reattach that event.
-        st.session_state[f"pc_report_fresh_{mode}"]=True
-        st.rerun()
+        if c.button("New report — clear workspace",key=f"pc_report_clear_{mode}"):
+            # Clear every report-specific control, not merely the text fields.
+            # Saved reports in pc_reports are unaffected.
+            prefixes=(
+                f"pc_report_field_{mode}_",f"pc_report_title_{mode}",
+                f"pc_report_date_{mode}",f"pc_report_region_{mode}",
+                f"pc_report_summary_{mode}",f"pc_report_sources_{mode}",
+                f"pc_report_events_{mode}",f"pc_report_query_{mode}",
+                f"pc_report_query_objects_{mode}",f"pc_report_ai_gaps_{mode}",
+                f"pc_report_ai_bundle_{mode}",f"pc_report_product_{mode}",
+                f"pc_report_find_events_{mode}",f"pc_report_scope_{mode}",
+                f"pc_report_find_period_{mode}",f"pc_report_selected_ids_{mode}",
+                f"pc_report_results_page_{mode}",f"pc_report_prefill_{mode}_",
+                f"pc_editor_blocks_{mode}",f"pc_editor_proposal_{mode}",
+                f"pc_editor_notice_{mode}",f"pc_kind_{mode}",
+                f"pc_title_block_{mode}_",f"pc_body_{mode}_",
+                f"pc_preset_{mode}_",f"pc_edit_table_{mode}_",
+                f"pc_table_count_{mode}_",f"pc_assist_instruction_{mode}_",
+                f"pc_assist_proposal_{mode}_",f"pc_assembled_{mode}",
+                f"pc_assemble_choices_{mode}",f"pc_assemble_added_{mode}",
+            )
+            for key in list(st.session_state):
+                if any(key.startswith(prefix) for prefix in prefixes):
+                    del st.session_state[key]
+            # Opening a report from an event must not silently reattach that event.
+            st.session_state[f"pc_report_fresh_{mode}"]=True
+            st.rerun()
