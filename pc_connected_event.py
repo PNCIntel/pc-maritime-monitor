@@ -206,15 +206,26 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
 
     with right:
         if vessel:
-            st.markdown("#### Vessel identity")
+            asset_kind = str(vessel.get("asset_type") or vessel.get("subtype") or "").lower()
+            if "aircraft" in asset_kind or "aviation" in asset_kind:
+                identity_heading = "Aircraft identity"
+            elif any(token in asset_kind for token in ("truck", "road", "vehicle", "train", "locomotive", "wagon", "rail")):
+                identity_heading = "Vehicle identity"
+            elif vessel.get("imo") or any(token in asset_kind for token in ("ship", "vessel", "tanker", "marine")):
+                identity_heading = "Vessel identity"
+            else:
+                identity_heading = "Asset identity"
+            st.markdown("#### " + identity_heading)
             with st.container(border=True):
-                st.markdown(f"**{vessel.get('name') or vessel_id}** · IMO {vessel.get('imo') or 'unresolved'}")
+                identity_detail = (" · IMO " + str(vessel["imo"])) if vessel.get("imo") else ""
+                st.markdown(f"**{vessel.get('name') or vessel_id}**" + identity_detail)
                 names = vessel_meta.get("former_names") or []
                 if names:
                     st.caption("Former names: " + " → ".join(map(str, names)))
-                st.caption(f"Identity: {_label(vessel.get('record_status'))} · "
-                           f"Flag: {vessel.get('flag') or 'not independently resolved'}")
-                st.button("Open vessel →", key=f"connected_vessel_{event_id}", on_click=navigate,
+                st.caption("Record status: " + _label(vessel.get("record_status")))
+                if vessel.get("imo"):
+                    st.caption("Flag: " + str(vessel.get("flag") or "not independently resolved"))
+                st.button("Open asset →", key=f"connected_vessel_{event_id}", on_click=navigate,
                           args=("mobile_asset", vessel_id, str(vessel.get("name") or "")))
                 if company_roles:
                     st.markdown("**Dated company roles**")
