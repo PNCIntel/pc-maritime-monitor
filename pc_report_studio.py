@@ -409,6 +409,27 @@ def _asset_table_rows(objects, preset):
              "Location":_clean(r.get("region_city") or r.get("country")),"Status":_clean(r.get("status"))})
     return rows
 
+def _vessels_for_report(sb, events):
+    imos=set()
+    for e in events:
+        imos.update(re.findall(r"(?<!\\d)\\d{7}(?!\\d)",str(_meta(e))+" "+_clean(e.get("description"))))
+    rows=[]
+    for imo in sorted(imos):
+        try:
+            rows.extend(sb.table("pc_mobile_assets").select("*").eq("imo",imo).execute().data or [])
+        except Exception: pass
+    ids={r.get(k) for r in rows for k in ("owner_entity_id","manager_entity_id") if r.get(k)}
+    names={}
+    if ids:
+        try:
+            names={r["entity_id"]:r["name"] for r in (sb.table("pc_entities").select("entity_id,name").in_("entity_id",list(ids)).execute().data or [])}
+        except Exception: pass
+    return [{"Name":_clean(r.get("name")),"IMO":_clean(r.get("imo")),"Flag":_clean(r.get("flag")),
+      "Registered owner":names.get(r.get("owner_entity_id"),"Not established"),
+      "ISM manager":names.get(r.get("manager_entity_id"),"Not established"),
+      "Status":_clean(r.get("status"))} for r in rows]
+
+
 def _render_blocks(blocks, sources, gold="#a58028", navy="#10213a", line="#dce3ec"):
     parts=[]
     for b in blocks:
@@ -789,8 +810,13 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                     block["rows"]=[]
                 if st.button("Populate from connected records",key=f"pc_pop_table_{mode}_{bid}"):
                     bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
-                    block["rows"]=_asset_table_rows(bundle.get("objects") or [],preset)
+                    block["rows"]=_vessels_for_report(sb,selected) if preset=="Vessels" else _asset_table_rows(bundle.get("objects") or [],preset)
+                    st.session_state.pop(f"pc_edit_table_{mode}_{bid}",None)
+                    st.session_state[f"pc_table_count_{mode}_{bid}"]=len(block["rows"])
                     st.rerun()
+                if f"pc_table_count_{mode}_{bid}" in st.session_state:
+                    count=st.session_state.pop(f"pc_table_count_{mode}_{bid}")
+                    st.info(f"{count} canonical records found; if zero, no verified matching vessel records were found.")
                 frame=pd.DataFrame(block.get("rows") or [],columns=TABLE_PRESETS[preset])
                 edited=st.data_editor(frame,num_rows="dynamic",hide_index=True,use_container_width=True,key=f"pc_edit_table_{mode}_{bid}")
                 block["rows"]=edited.fillna("").to_dict("records")
