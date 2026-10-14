@@ -244,6 +244,114 @@ def _ai_context_bundle(sb, lens: str, query: str, selected_objects: list[dict],
     }
 
 
+def _assemble_evidence(sb, lens, selected_events, selected_objects, context):
+    """Build traceable factual blocks before asking AI for prose; no invented graph edges."""
+    events={e["event_id"]:e for e in selected_events if e.get("event_id")}
+    objects={}
+    for o in selected_objects:
+        typ=_clean(o.get("object_type")); oid=_clean(o.get("object_id"))
+        if typ and oid: objects[(typ,oid)]=o
+    if context and context[0]!="event":
+        typ,oid,rec=context
+        objects[(typ,oid)]={"object_type":typ,"object_id":oid,"record_data":rec}
+    issues=[]; sources=[]
+    def fetch(table, column, value, limit=200):
+        try:
+            return sb.table(table).select("*").eq(column,value).limit(limit).execute().data or []
+        except Exception as exc:
+            issues.append(table+": "+str(exc)[:130])
+            return []
+    def add_object(typ,oid):
+        if not oid or (typ,oid) in objects: return
+        tables={"mobile_asset":("pc_mobile_assets","mobile_asset_id"),
+                "entity":("pc_entities","entity_id"),"asset":("pc_assets","asset_id")}
+        if typ not in tables:return
+        table,key=tables[typ]
+        result=fetch(table,key,oid,1)
+        if result:objects[(typ,oid)]={"object_type":typ,"object_id":oid,"record_data":result[0]}
+    # Intelligence is event-led: resolve explicitly linked objects first.
+    if lens=="intelligence":
+        for eid,e in list(events.items()):
+            sources.extend(_urls_from_record(e))
+            for l in fetch("pc_event_entity_links","event_id",eid):
+                add_object("entity",l.get("entity_id"))
+            for l in fetch("pc_event_asset_links","event_id",eid):
+                add_object("asset",l.get("asset_id"))
+            for l in fetch("pc_event_links","event_id",eid):
+                typ=_clean(l.get("linked_type")).lower()
+                if typ=="vessel":typ="mobile_asset"
+                add_object(typ,l.get("linked_id"))
+            # IMO evidence fallback is an identity lookup, not an inferred relationship.
+            blob=str(_meta(e))+" "+_clean(e.get("description"))+" "+_clean(e.get("title"))
+            for imo in set(re.findall(r"(?<!\\d)\\d{7}(?!\\d)",blob)):
+                for r in fetch("pc_mobile_assets","imo",imo,10):
+                    add_object("mobile_asset",r.get("mobile_asset_id"))
+    else:
+        # Trade is object-led; include linked production events as developments.
+        for typ,oid in list(objects):
+            for l in _index_links(sb,typ,oid):
+                other_typ=other_id=None
+                if l.get("source_type")==typ and l.get("source_id")==oid:
+                    other_typ,other_id=l.get("target_type"),l.get("target_id")
+                elif l.get("target_type")==typ and l.get("target_id")==oid:
+                    other_typ,other_id=l.get("source_type"),l.get("source_id")
+                if other_typ=="event" and other_id:
+                    for e in fetch("pc_events","event_id",other_id,1):
+                        if not _horizon_event(e):events[e["event_id"]]=e
+                elif other_typ in ("mobile_asset","asset","entity"):add_object(other_typ,other_id)
+    blocks=[]; vessel_rows=[]; history_rows=[]; corporate_rows=[]; sanctions_rows=[]
+    for (typ,oid),o in list(objects.items())[:100]:
+        rec=o.get("record_data") or {}
+        if not rec:
+            table,key={"mobile_asset":("pc_mobile_assets","mobile_asset_id"),
+                "entity":("pc_entities","entity_id"),"asset":("pc_assets","asset_id")}.get(typ,(None,None))
+            if table:
+                rows=fetch(table,key,oid,1)
+                rec=rows[0] if rows else {}
+        sources.extend(_urls_from_record(rec))
+        if typ=="mobile_asset" and rec:
+            vessel_rows.append({"Name":_clean(rec.get("name")),"IMO":_clean(rec.get("imo")),
+                "Flag":_clean(rec.get("flag")),"Registered owner":_clean(rec.get("owner_entity_id")),
+                "ISM manager":_clean(rec.get("manager_entity_id")),"Status":_clean(rec.get("status"))})
+            meta=_meta(rec)
+            for h in meta.get("name_history",[]) if isinstance(meta.get("name_history"),list) else []:
+                if isinstance(h,dict):
+                    history_rows.append({"Date":_clean(h.get("date") or h.get("valid_from") or h.get("date_precision")),
+                        "Development":_clean(h.get("name"))+" — "+_clean(h.get("role")),
+                        "Record":oid,"Source":_clean(h.get("source"))})
+            for role,col in (("Registered owner","owner_entity_id"),("Operator","operator_entity_id"),("Manager","manager_entity_id")):
+                if rec.get(col):
+                    corporate_rows.append({"Record":_clean(rec.get("name")),"Role":role,
+                        "Linked ID":_clean(rec.get(col)),"Date":_clean(rec.get("as_of")),"Evidence":"Current vessel record"})
+            for l in fetch("pc_sanctions_links","linked_id",oid):
+                if l.get("linked_type")!="mobile_asset":continue
+                did=l.get("sanctions_designation_id")
+                for d in fetch("pc_sanctions_designations","sanctions_designation_id",did,1) if did else []:
+                    sanctions_rows.append({"Authority":_clean(d.get("authority") or d.get("jurisdiction")),
+                        "Designation":_clean(d.get("source_external_id") or did),
+                        "Date":_clean(d.get("effective_date") or d.get("designation_date")),
+                        "Status":_clean(d.get("status")),"Record":oid})
+    def table(title,preset,rows,cols=None):
+        if rows:
+            b=_new_block("Asset table",title,rows=rows,preset=preset)
+            if cols:b["columns"]=cols
+            blocks.append(b)
+    timeline=[{"Date":_clean(e.get("start_date"))[:10],"Development":_clean(e.get("title")),
+               "Record":_clean(eid),"Source":"; ".join(_urls_from_record(e))} for eid,e in events.items()]
+    timeline.extend(history_rows)
+    timeline.sort(key=lambda r:r["Date"] or "0000")
+    table("Connected events and history","Custom",timeline,["Date","Development","Record","Source"])
+    table("Vessels linked to developments","Vessels",vessel_rows)
+    table("Recorded corporate roles","Custom",corporate_rows,["Record","Role","Linked ID","Date","Evidence"])
+    table("Official sanctions records","Custom",sanctions_rows,["Authority","Designation","Date","Status","Record"])
+    sources.extend(u for e in events.values() for u in _urls_from_record(e))
+    return {"blocks":blocks,"events":list(events.values()),"objects":list(objects.values()),
+            "counts":{"events":len(events),"objects":len(objects),"vessels":len(vessel_rows),
+                      "history":len(history_rows),"corporate_roles":len(corporate_rows),
+                      "sanctions":len(sanctions_rows),"sources":len(set(sources))},
+            "sources":list(dict.fromkeys(sources)),"issues":list(dict.fromkeys(issues))}
+
+
 def _context_seed(context: tuple[str,str,dict] | None) -> dict:
     if not context:
         return {}
@@ -436,7 +544,7 @@ def _render_blocks(blocks, sources, gold="#a58028", navy="#10213a", line="#dce3e
         title=html.escape(_clean(b.get("title")))
         if b.get("kind")=="Asset table":
             preset=b.get("preset") if b.get("preset") in TABLE_PRESETS else "Custom"
-            columns=TABLE_PRESETS[preset]
+            columns=b.get("columns") or TABLE_PRESETS[preset]
             rows=b.get("rows") or []
             table="<table style='border-collapse:collapse;width:100%;font-size:13px'><thead><tr>"
             table+="".join("<th style='text-align:left;border-bottom:2px solid #a58028;padding:7px'>"+html.escape(c)+"</th>" for c in columns)
@@ -690,6 +798,27 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
     if seed:
         st.info(f"Current terminal context: {seed.get('title')} · {seed.get('type')}")
 
+    st.markdown("#### Connected evidence")
+    st.caption("Intelligence starts with selected developments; Trade starts with selected organisations, assets and corridors.")
+    if st.button("Build from connected records",key=f"pc_assemble_{mode}"):
+        assembled=_assemble_evidence(sb,lens,selected,selected_objects,None if st.session_state.get(f"pc_report_fresh_{mode}") else context)
+        st.session_state[f"pc_assembled_{mode}"]=assembled
+        if assembled["blocks"]:
+            current=st.session_state.get(f"pc_editor_blocks_{mode}") or []
+            if any(_clean(b.get("body")) or b.get("rows") for b in current):
+                st.session_state[f"pc_editor_proposal_{mode}"]=current+assembled["blocks"]
+            else:
+                st.session_state[f"pc_editor_blocks_{mode}"]=assembled["blocks"]
+        st.rerun()
+    assembled=st.session_state.get(f"pc_assembled_{mode}") or {}
+    if assembled:
+        c=assembled["counts"]
+        st.caption("Evidence assembled: "+", ".join(str(v)+" "+k.replace("_"," ") for k,v in c.items()))
+        if assembled["issues"]:
+            with st.expander("Unresolved connections / retrieval diagnostics"):
+                for issue in assembled["issues"]:st.write(issue)
+        st.info("Structured blocks are sourced from records; AI analysis is drafted separately. Check the data before publication.")
+
     prefill_key=f"pc_report_prefill_{mode}_{product}"
     cauto1,cauto2=st.columns(2)
     if cauto1.button("Populate facts from selected data",key=f"pc_report_populate_{mode}",use_container_width=True):
@@ -707,6 +836,9 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         try:
             from pc_report_ai import draft_report
             bundle=_ai_context_bundle(sb,lens,query,selected_objects,selected,context)
+            if assembled:
+                bundle["assembled_evidence"]={"counts":assembled["counts"],"blocks":assembled["blocks"],"issues":assembled["issues"]}
+                bundle["evidence_urls"]=list(dict.fromkeys(bundle.get("evidence_urls",[])+assembled["sources"]))
             result=draft_report(
                 _api_key(),lens,product,spec["sections"],query,bundle,
                 title_hint=seed.get("title","")
@@ -819,7 +951,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                 if f"pc_table_count_{mode}_{bid}" in st.session_state:
                     count=st.session_state.pop(f"pc_table_count_{mode}_{bid}")
                     st.info(f"{count} canonical records found; if zero, no verified matching vessel records were found.")
-                frame=pd.DataFrame(block.get("rows") or [],columns=TABLE_PRESETS[preset])
+                frame=pd.DataFrame(block.get("rows") or [],columns=block.get("columns") or TABLE_PRESETS[preset])
                 edited=st.data_editor(frame,num_rows="dynamic",hide_index=True,use_container_width=True,key=f"pc_edit_table_{mode}_{bid}")
                 block["rows"]=edited.fillna("").to_dict("records")
             elif block["kind"]=="References":
@@ -866,6 +998,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         source_urls.extend(_urls_from_record(seed.get("record") or {}))
     ai_bundle=st.session_state.get(f"pc_report_ai_bundle_{mode}") or {}
     source_urls.extend(ai_bundle.get("evidence_urls") or [])
+    source_urls.extend((st.session_state.get(f"pc_assembled_{mode}") or {}).get("sources") or [])
     source_urls=list(dict.fromkeys(source_urls))
 
     st.markdown("### Evidence")
@@ -931,7 +1064,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
             f"pc_title_block_{mode}_",f"pc_body_{mode}_",
             f"pc_preset_{mode}_",f"pc_edit_table_{mode}_",
             f"pc_table_count_{mode}_",f"pc_assist_instruction_{mode}_",
-            f"pc_assist_proposal_{mode}_",
+            f"pc_assist_proposal_{mode}_",f"pc_assembled_{mode}",
         )
         for key in list(st.session_state):
             if any(key.startswith(prefix) for prefix in prefixes):
