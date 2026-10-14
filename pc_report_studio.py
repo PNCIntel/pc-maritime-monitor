@@ -860,7 +860,8 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                 st.session_state[f"pc_editor_blocks_{mode}"]=proposed
                 st.session_state.pop(f"pc_editor_proposal_{mode}",None)
             else:
-                st.session_state[f"pc_editor_proposal_{mode}"]=proposed
+                factual=[dict(b) for b in current if b.get("kind")=="Asset table" and b.get("rows")]
+                st.session_state[f"pc_editor_proposal_{mode}"]=proposed+factual
             st.rerun()
         except Exception as exc:
             st.error(f"AI drafting failed: {exc}")
