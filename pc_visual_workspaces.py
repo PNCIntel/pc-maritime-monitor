@@ -1119,7 +1119,15 @@ def _security(db,core):
                     '_item':item,'_assessment':assessment})
             if display:
                 st.dataframe(pd.DataFrame([{k:v for k,v in entry.items() if not k.startswith('_')} for entry in display]),
-                    hide_index=True,use_container_width=True,height=620)
+                    hide_index=True,use_container_width=True,height=640,row_height=68,
+                    column_config={
+                        'Date':st.column_config.DateColumn('Event date',width='small'),
+                        'Security development':st.column_config.TextColumn('Security development',width='large'),
+                        'Current Risk':st.column_config.TextColumn('Current Risk',width='small'),
+                        'P&C Assessment':st.column_config.TextColumn('P&C Assessment',width='large'),
+                        'Risk Outlook':st.column_config.TextColumn('Risk Outlook',width='large'),
+                        'Monitoring Indicators':st.column_config.TextColumn('Monitoring Indicators',width='large'),
+                        'Evidence':st.column_config.TextColumn('Evidence',width='small')})
                 choice=st.selectbox('Open development dossier',range(len(display)),
                     format_func=lambda i:display[i]['Date']+' · '+display[i]['Security development'],
                     key='pc_brief_event_choice')
