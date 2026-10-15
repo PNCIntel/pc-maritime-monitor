@@ -74,7 +74,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     logo_html='<div class="brand">POWER &amp; CORRIDORS</div>'
     # A committed transparent brand image is preferred; deployment can also use
     # an explicit st.secrets path for a managed asset. Do not load arbitrary URLs.
-    for location in (Path(__file__).with_name("assets")/"power-corridors-logo-dark-matched-transparent.png",):
+    for location in (Path(__file__).with_name("assets")/"power-corridors-logo-light-matched-transparent.png",):
         if location.is_file():
             logo_html='<img class="logo" src="data:image/png;base64,'+base64.b64encode(location.read_bytes()).decode("ascii")+'"/>'
             break
@@ -90,8 +90,8 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     html='''<!doctype html><html><head><meta charset="utf-8"><style>
     @page{size:A4;margin:19mm 17mm 19mm 17mm;@bottom-left{content:"POWER & CORRIDORS  /  INTELLIGENCE";font:8pt Arial;color:#536679}
     @bottom-right{content:"Page " counter(page);font:8pt Arial;color:#536679}}
-    body{font-family:Arial,sans-serif;font-size:10pt;color:#192a38;line-height:1.48}
-    .logo{max-width:360px;max-height:72px;object-fit:contain}.regional-map{width:100%;max-height:285px;object-fit:cover;margin:9px 0 4px}.brand{color:#0b344d;font-weight:800;letter-spacing:2.2px;font-size:17pt}.strap{font-size:8pt;letter-spacing:1.8px;color:#42748b}
+    body{font-family:Arial,sans-serif;font-size:9.5pt;color:#192a38;line-height:1.38}
+    .logo{width:315px;height:auto;max-height:90px;object-fit:contain}.regional-map{width:100%;max-height:285px;object-fit:cover;margin:9px 0 4px}.brand{color:#0b344d;font-weight:800;letter-spacing:2.2px;font-size:17pt}.strap{font-size:8pt;letter-spacing:1.8px;color:#42748b}
     .rule{height:4px;background:#13556c;border-right:30px solid #bea365;margin:10px 0 22px}.title{font-size:24pt;line-height:1.15;margin:9px 0}
     .meta{font-size:8pt;color:#526778}.metrics{display:table;width:100%;margin:20px 0;border-collapse:separate;border-spacing:5px}
     .metric{display:table-cell;width:33%;background:#eff4f6;padding:10px}.metric small{display:block;color:#557185;font-size:7pt;text-transform:uppercase}
@@ -112,7 +112,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
         _h(outlook.get("confidence") or "Unassigned")+'</strong></div><div class="metric"><small>Assessed</small><strong>'+_h(_date(outlook.get("assessed_at")))+'</strong></div></div>')
     if outlook.get("valid_until"): html+='<p class="meta">Assessment valid until: '+_h(outlook["valid_until"])+' (check current conditions before reliance).</p>'
     html+='<div class="section"><h2>KEY JUDGEMENT</h2><div class="box">'+_paragraph(key_judgment)+'</div></div>'
-    html+='<div class="section"><h2>01 / What happened?</h2>'+_paragraph(what)+'</div>'
+    html+='<div class="section"><h2>WHAT HAPPENED</h2>'+_paragraph(what)+'</div>'
     if meaning and meaning != key_judgment:
         html+='<div class="section"><h2>02 / Why it matters — P&C assessment</h2>'+_paragraph(meaning)+'</div>'
     for label,value in implications:
@@ -122,14 +122,14 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
         html+='<div class="section"><h2>Alternative explanation</h2>'+_paragraph(alternative)+'</div>'
     if gaps:
         html+='<div class="section"><h2>What remains unconfirmed</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in gaps)+'</ul></div>'
-    html+='<div class="section"><h2>03 / What could happen next? — Risk outlook</h2><div class="box">'+_paragraph(forecast)+'</div></div>'
-    html+='<div class="section"><h2>04 / What are we monitoring, and why?</h2>'+('<ul>'+''.join('<li>'+_h(i)+'</li>' for i in indicators)+'</ul>' if indicators else '<p class="muted">No reviewed indicators recorded.</p>')+'</div>'
+    html+='<div class="section"><h2>RISK OUTLOOK</h2><div class="box">'+_paragraph(forecast)+'</div></div>'
+    html+='<div class="section"><h2>MONITORING PRIORITIES</h2>'+('<ul>'+''.join('<li>'+_h(i)+'</li>' for i in indicators)+'</ul>' if indicators else '<p class="muted">No reviewed indicators recorded.</p>')+'</div>'
     if triggers:
         html+='<div class="section"><h2>Decision triggers</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in triggers)+'</ul></div>'
-    html+='<div class="section"><h2>05 / Geographic and infrastructure context</h2>'+map_html+table(["Asset","Mode","Recorded relationship","Impact status"],infra)+'</div>'
-    html+='<div class="section"><h2>06 / Connected developments</h2>'+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
+    html+='<div class="section"><h2>GEOGRAPHIC &amp; INFRASTRUCTURE EXPOSURE</h2>'+map_html+table(["Asset","Mode","Recorded relationship","Impact status"],infra)+'</div>'
+    html+='<div class="section"><h2>RELATED DEVELOPMENTS</h2>'+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
     if bottom_line and bottom_line not in (key_judgment,meaning):
         html+='<div class="section"><h2>BOTTOM LINE</h2><div class="box">'+_paragraph(bottom_line)+'</div></div>'
-    html+='<div class="section"><h2>07 / Evidence and source provenance</h2>'+(''.join(sources) if sources else '<p class="muted">No individual source claims available in this record.</p>')+'</div>'
+    html+='<div class="section"><h2>SOURCES &amp; EVIDENCE</h2>'+(''.join(sources) if sources else '<p class="muted">No individual source claims available in this record.</p>')+'</div>'
     html+='<div class="disclaimer">Power &amp; Corridors · powerncorridors.com · Analytical judgments are qualified by the cited evidence. Contextual links do not establish causation, attack attribution, damage, closure or current operating status. This PDF is a dated snapshot, not a live notice.</div></body></html>'
     return HTML(string=html,base_url="https://powerncorridors.com/").write_pdf()
