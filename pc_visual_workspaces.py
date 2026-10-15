@@ -242,6 +242,15 @@ def _render_pc_assessments(db,core,term):
         st.warning('The P&C assessment feed is unavailable. Load the assessment SQL update and refresh the database.')
         with st.expander('Assessment connection details'): st.caption(error)
         return
+    # Published global judgments can supplement the legacy regional delivery view.
+    # Event observations alone never receive an automatically inferred rating.
+    global_rows,global_error=_load(db,'pc_global_risk_briefings',limit=200)
+    if not global_error:
+        existing={str(v.get('assessment_id')) for v in rows}
+        for entry in global_rows:
+            if entry.get('publication_status')=='published' and str(entry.get('assessment_id')) not in existing:
+                rows.append(entry)
+                existing.add(str(entry.get('assessment_id')))
     if not rows:
         st.info('No published P&C assessment matches this search.')
         return
@@ -259,7 +268,7 @@ def _render_pc_assessments(db,core,term):
                     assessment['monitoring_priorities']=extra['monitoring_indicators']
     regions=list(dict.fromkeys(str(r.get('geography') or r.get('region_code')) for r in rows))
     area=st.selectbox('Assessment area',['All matching areas']+regions,key='pc_assessment_area')
-    selected=[r for r in rows if area=='All matching areas' or str(r.get('geography') or r.get('region_code'))==area]
+    selected=[r for r in rows if (area=='All matching areas' or str(r.get('geography') or r.get('region_code'))==area) and (not term or any(term.lower() in str(r.get(key) or '').lower() for key in ('geography','headline','region_code','explanation')))]
     st.markdown("""<style>
 .pc-brief-hero{background:#142b42;color:#fff;padding:24px 28px;border-radius:12px;margin:12px 0 20px;border-left:5px solid #c9a461}
 .pc-brief-hero h3,.pc-brief-hero h3 *{color:#fff!important;-webkit-text-fill-color:#fff!important;margin:0 0 8px}.pc-brief-hero p,.pc-brief-hero p *{color:#e0e8ef!important;-webkit-text-fill-color:#e0e8ef!important;margin:0}
@@ -272,7 +281,7 @@ def _render_pc_assessments(db,core,term):
     st.markdown('<div class="pc-brief-hero"><h3>Operating risk briefing</h3><p>Read the judgments across locations, then explore the reasoning, commercial exposure and evidence behind each assessment.</p></div>',unsafe_allow_html=True)
     counts=st.columns(3)
     counts[0].metric('Published assessments',len(selected))
-    counts[1].metric('Require review',sum(_assessment_freshness(r)!='CURRENT' for r in selected))
+    counts[1].metric('Coverage areas',len({str(r.get('geography') or r.get('region_code')) for r in selected}))
     counts[2].metric('Linked companies',len({c.get('entity_id') for r in selected for c in (r.get('company_exposure') or []) if c.get('entity_id')}))
     st.markdown('#### Risk at a glance')
     def badge(value):
