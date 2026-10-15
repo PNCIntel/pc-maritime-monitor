@@ -1040,30 +1040,86 @@ def _security(db,core):
         elif incidents:st.caption('End of matching results.')
         else:st.info('No incidents on this page. Return to page 1 or change the filters.')
     with t2:
-        st.subheader('Latest security developments')
-        st.caption('Worldwide · newest event date first · source status retained. Event severity is not a P&C risk rating.')
-        recent, recent_error = _load(db,'pc_events',
+        st.subheader('Global security risk briefing')
+        st.caption('Latest dated security developments worldwide. Risk judgments and outlooks are shown only where an explicit P&C assessment is linked.')
+        recent,recent_error=_load(db,'pc_events',
             columns='event_id,title,start_date,event_type,verification_status,description,metadata',
             filters=(('intelligence_visible','eq',True),),
             order=(('start_date',True),('event_id',False)),limit=500)
         if recent_error:
-            st.warning('The global security feed is temporarily unavailable.')
+            st.warning('Global security developments are temporarily unavailable.')
         else:
-            recent=[item for item in recent
-                if item.get('event_id') and pd.notna(pd.to_datetime(item.get('start_date'),utc=True,errors='coerce'))
+            recent=[item for item in recent if item.get('event_id')
+                and pd.notna(pd.to_datetime(item.get('start_date'),utc=True,errors='coerce'))
                 and INTEL_LENSES[0] in _intel_classes(item)]
             if term:
                 recent=[item for item in recent if term.lower() in
                     (str(item.get('title') or '')+' '+str(item.get('description') or '')+' '+str(item.get('event_type') or '')).lower()]
             recent=recent[:20]
+            # Only explicit event IDs in the published evidence qualify as a join.
+            assessments,ae=_load(db,'pc_v_security_pc_assessments',limit=150)
+            global_assessments,ge=_load(db,'pc_global_risk_briefings',limit=200)
+            published=(assessments if not ae else [])+([v for v in global_assessments if v.get('publication_status')=='published'] if not ge else [])
+            outlooks,oe=_load(db,'pc_risk_assessment_outlooks',limit=500)
+            overlays={str(v.get('assessment_id')):v for v in outlooks if v.get('publication_status')=='published'} if not oe else {}
+            by_event={}
+            for assessment in published:
+                for evidence_item in assessment.get('evidence') or []:
+                    if not isinstance(evidence_item,dict):continue
+                    event_id=evidence_item.get('event_id')
+                    if event_id:
+                        by_event.setdefault(str(event_id),[]).append(assessment)
+            def briefing_text(v):
+                return str(v or '').strip()
+            display=[]
             for item in recent:
-                left,right=st.columns([7,1])
-                left.markdown('**'+str(item.get('title') or 'Development')+'**')
-                left.caption(str(item.get('start_date'))[:10]+' · '+_business_label(item.get('event_type'))+' · Evidence: '+_business_label(item.get('verification_status')))
-                if right.button('Open',key='pc_brief_latest_'+str(item['event_id'])):
-                    _open_below('event',item['event_id'],item.get('title'))
-            if not recent:st.info('No dated security developments match this selection.')
-        with st.expander('Published P&C risk assessments and outlooks',expanded=False):
+                linked=by_event.get(str(item['event_id']),[])
+                linked.sort(key=lambda x:str(x.get('assessment_date') or x.get('as_known_at') or ''),reverse=True)
+                assessment=linked[0] if linked else {}
+                overlay=overlays.get(str(assessment.get('assessment_id')),{})
+                current=bool(assessment) and _assessment_freshness(assessment)=='CURRENT'
+                risk=briefing_text(assessment.get('risk_level')) if current else 'Not currently assessed'
+                interpretation=(briefing_text(assessment.get('executive_summary') or assessment.get('explanation'))
+                    if current else 'Published event; current P&C judgment not linked')
+                outlook=briefing_text(overlay.get('risk_outlook') or assessment.get('risk_outlook') or assessment.get('outlook')) if current else ''
+                indicators=overlay.get('monitoring_indicators') or assessment.get('monitoring_priorities') or []
+                if not isinstance(indicators,list):indicators=[]
+                display.append({'Date':str(item['start_date'])[:10],
+                    'Security development':str(item.get('title') or 'Development'),
+                    'Current Risk':risk,
+                    'P&C Assessment':interpretation,
+                    'Risk Outlook':outlook or 'Not yet assessed',
+                    'Monitoring Indicators':'; '.join(map(str,indicators)) if current and indicators else 'Not yet assessed',
+                    'Evidence':_business_label(item.get('verification_status')),
+                    '_item':item,'_assessment':assessment})
+            if display:
+                st.dataframe(pd.DataFrame([{k:v for k,v in entry.items() if not k.startswith('_')} for entry in display]),
+                    hide_index=True,use_container_width=True,height=620)
+                choice=st.selectbox('Open development dossier',range(len(display)),
+                    format_func=lambda i:display[i]['Date']+' · '+display[i]['Security development'],
+                    key='pc_brief_event_choice')
+                chosen=display[choice];event=chosen['_item'];assessment=chosen['_assessment']
+                if st.button('Open full connected event dossier',key='pc_brief_open_event'):
+                    _open_below('event',event['event_id'],event.get('title'))
+                with st.expander('P&C assessment and evidence for selected development',expanded=True):
+                    st.markdown('**'+chosen['Security development']+'**')
+                    st.caption(chosen['Date']+' · '+chosen['Evidence'])
+                    for field in ('Current Risk','P&C Assessment','Risk Outlook','Monitoring Indicators'):
+                        st.markdown('**'+field+'**')
+                        st.write(chosen[field])
+                    if assessment:
+                        st.caption('Assessment dated '+str(assessment.get('assessment_date') or assessment.get('as_known_at') or 'unrecorded')[:10]
+                            +' · '+_assessment_freshness(assessment))
+                        for evidence_item in assessment.get('evidence') or []:
+                            if isinstance(evidence_item,dict) and str(evidence_item.get('event_id'))==str(event['event_id']):
+                                url=evidence_item.get('source_url')
+                                if isinstance(url,str) and url.startswith(('https://','http://')):
+                                    st.link_button('Assessment evidence source',url)
+                    else:
+                        st.caption('No explicitly linked published P&C assessment; the incident record remains available in its full dossier.')
+            else:
+                st.info('No dated security developments match this selection.')
+        with st.expander('Published regional and global assessments (including earlier snapshots)',expanded=False):
             _render_pc_assessments(db,core,term)
 
     _render_related_below(db,core)
