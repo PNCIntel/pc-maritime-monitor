@@ -101,19 +101,19 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     @page{size:A4;margin:19mm 17mm 19mm 17mm;@bottom-left{content:"POWER & CORRIDORS  /  INTELLIGENCE";font:8pt Arial;color:#536679}
     @bottom-right{content:"Page " counter(page);font:8pt Arial;color:#536679}}
     body{font-family:Arial,sans-serif;font-size:10pt;color:#192a38;line-height:1.48}
-    .logo{max-width:360px;max-height:88px;object-fit:contain}.regional-map{width:100%;max-height:285px;object-fit:cover;margin:9px 0 4px}.brand{color:#0b344d;font-weight:800;letter-spacing:2.2px;font-size:17pt}.strap{font-size:8pt;letter-spacing:1.8px;color:#42748b}
+    .logo{max-width:360px;max-height:72px;object-fit:contain}.regional-map{width:100%;max-height:285px;object-fit:cover;margin:9px 0 4px}.brand{color:#0b344d;font-weight:800;letter-spacing:2.2px;font-size:17pt}.strap{font-size:8pt;letter-spacing:1.8px;color:#42748b}
     .rule{height:4px;background:#13556c;border-right:30px solid #bea365;margin:10px 0 22px}.title{font-size:24pt;line-height:1.15;margin:9px 0}
     .meta{font-size:8pt;color:#526778}.metrics{display:table;width:100%;margin:20px 0;border-collapse:separate;border-spacing:5px}
     .metric{display:table-cell;width:33%;background:#eff4f6;padding:10px}.metric small{display:block;color:#557185;font-size:7pt;text-transform:uppercase}
-    .metric strong{font-size:12pt;color:#123c51}.section{margin-top:12px}.section h2{break-after:avoid;font-size:12pt;color:#124e68;border-bottom:1px solid #bdd0d8;padding-bottom:5px}
+    .metric strong{font-size:12pt;color:#123c51}.section{margin-top:10px}.section h2{break-after:avoid;font-size:12pt;color:#124e68;border-bottom:1px solid #bdd0d8;padding-bottom:5px}
     .muted{color:#74818b} .box{background:#f1f5f7;padding:12px;border-left:3px solid #226781}
     .map{break-inside:avoid;min-height:95px;background:#eef3f5;border:1px solid #cbd9df;padding:12px}.map b{font-size:8pt;letter-spacing:1.1px}
     .place{font-size:16pt;font-weight:bold;color:#104c64;margin-bottom:0}
     table{border-collapse:collapse;width:100%;font-size:8pt}th{text-align:left;color:#164961;background:#e9f1f5}
-    th,td{padding:7px 6px;border-bottom:1px solid #d4e0e6;vertical-align:top}
-    .source{padding:8px 0;border-bottom:1px solid #dce6e9;break-inside:avoid}.source span{color:#657b89;font-size:8pt;display:block}
-    .source p{margin:4px 0}.url{font-size:7.5pt;color:#526778;overflow-wrap:anywhere;margin-top:4px}a{color:#096381;text-decoration:underline;overflow-wrap:anywhere}
-    li{margin-bottom:3px}.disclaimer{font-size:8pt;color:#566d7b;border-top:1px solid #b9ced6;margin-top:25px;padding-top:8px}
+    th,td{padding:5px 6px;border-bottom:1px solid #d4e0e6;vertical-align:top}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}
+    .source{padding:5px 0;border-bottom:1px solid #dce6e9;break-inside:avoid}.source span{color:#657b89;font-size:8pt;display:block}
+    .source p{margin:3px 0}.url{font-size:7.5pt;color:#526778;overflow-wrap:anywhere;margin-top:4px}a{color:#096381;text-decoration:underline;overflow-wrap:anywhere}
+    li{margin-bottom:2px}.disclaimer{font-size:8pt;color:#566d7b;border-top:1px solid #b9ced6;margin-top:25px;padding-top:8px}
     </style></head><body>'''
     html+=logo_html+'<div class="strap">INDEPENDENT INTELLIGENCE ON MOVEMENT, INFRASTRUCTURE &amp; RISK</div><div class="rule"></div>'
     html+=(opening+'<h1 class="title">'+_h(title)+'</h1><div class="meta">Incident '+_h(incident_id)+' · Event '+_h(_date(record.get("start_date")))+
