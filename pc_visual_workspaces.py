@@ -309,7 +309,7 @@ def _render_pc_assessments(db,core,term):
     current_rows=[r for r in selected if _assessment_freshness(r)=='CURRENT']
     earlier_rows=[r for r in selected if _assessment_freshness(r)!='CURRENT']
     def render_table(items):
-        table='<table class="pc-risk-grid"><thead><tr><th>Assessment</th><th>Current Risk</th><th>P&C Assessment</th><th>Risk Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
+        table='<table class="pc-risk-grid"><thead><tr><th>Incident / Scope</th><th>Current Risk</th><th>P&C Assessment</th><th>Risk Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
         for r in items:
             summary=r.get('executive_summary') or r.get('explanation') or 'P&C assessment not yet recorded'
             qualifier=qualification(r)
@@ -1087,6 +1087,15 @@ def _security(db,core):
             published=(assessments if not ae else [])+([v for v in global_assessments if v.get('publication_status')=='published'] if not ge else [])
             outlooks,oe=_load(db,'pc_risk_assessment_outlooks',limit=500)
             overlays={str(v.get('assessment_id')):v for v in outlooks if v.get('publication_status')=='published'} if not oe else {}
+            ids=tuple(str(v['event_id']) for v in recent)
+            versions,ve=_load(db,'pc_v07_event_assessments',filters=(('event_id','in',ids),),limit=500) if ids else ([],None)
+            versions_by_event={}
+            if not ve:
+                for version in versions:
+                    eid=str(version.get('event_id') or '')
+                    if eid: versions_by_event.setdefault(eid,[]).append(version)
+                for group in versions_by_event.values():
+                    group.sort(key=lambda v:(int(v.get('version') or 0),str(v.get('created_at') or '')),reverse=True)
             by_event={}
             for assessment in published:
                 for evidence_item in assessment.get('evidence') or []:
@@ -1098,44 +1107,58 @@ def _security(db,core):
                 return str(v or '').strip()
             display=[]
             for item in recent:
-                linked=by_event.get(str(item['event_id']),[])
+                eid=str(item['event_id'])
+                linked=by_event.get(eid,[])
                 linked.sort(key=lambda x:str(x.get('assessment_date') or x.get('as_known_at') or ''),reverse=True)
                 assessment=linked[0] if linked else {}
                 overlay=overlays.get(str(assessment.get('assessment_id')),{})
                 current=bool(assessment) and _assessment_freshness(assessment)=='CURRENT'
-                risk=briefing_text(assessment.get('risk_level')) if current else 'Not currently assessed'
-                interpretation=(briefing_text(assessment.get('executive_summary') or assessment.get('explanation'))
-                    if current else 'Published event; current P&C judgment not linked')
-                outlook=briefing_text(overlay.get('risk_outlook') or assessment.get('risk_outlook') or assessment.get('outlook')) if current else ''
-                indicators=overlay.get('monitoring_indicators') or assessment.get('monitoring_priorities') or []
+                version=(versions_by_event.get(eid) or [{}])[0]
+                meta=item.get('metadata') or {}
+                if not isinstance(meta,dict):meta={}
+                prior=meta.get('pc_risk_analysis') or {}
+                if not isinstance(prior,dict):prior={}
+                risk=briefing_text(assessment.get('risk_level')) if current else 'Not rated'
+                if not current and prior.get('published_rating') and prior.get('analyst_approval')=='approved':
+                    risk=briefing_text(prior['published_rating'])
+                interpretation=(briefing_text(assessment.get('executive_summary') or assessment.get('explanation')) if current else
+                    briefing_text(version.get('pc_assessment') or version.get('what_it_means') or prior.get('finding') or item.get('description')))
+                outlook=(briefing_text(overlay.get('risk_outlook') or assessment.get('risk_outlook') or assessment.get('outlook')) if current else
+                    briefing_text(prior.get('outlook')))
+                indicators=(overlay.get('monitoring_indicators') or assessment.get('monitoring_priorities') or []) if current else (
+                    version.get('monitoring_indicators') or prior.get('monitoring_indicators') or meta.get('monitoring') or [])
                 if not isinstance(indicators,list):indicators=[]
+                status=('Published judgment' if current or version.get('assessment_status')=='published' else
+                    'Analytical draft · rating not approved' if version or prior else 'Assessment pending')
                 display.append({'Date':str(item['start_date'])[:10],
-                    'Security development':str(item.get('title') or 'Development'),
+                    'Incident':str(item.get('title') or 'Development'),
                     'Current Risk':risk,
-                    'P&C Assessment':interpretation,
+                    'P&C Assessment':interpretation or 'Evidence review required',
                     'Risk Outlook':outlook or 'Not yet assessed',
-                    'Monitoring Indicators':'; '.join(map(str,indicators)) if current and indicators else 'Not yet assessed',
+                    'Monitoring Indicators':'; '.join(map(str,indicators)) if indicators else 'Not yet assessed',
                     'Evidence':_business_label(item.get('verification_status')),
+                    'Assessment status':status,
                     '_item':item,'_assessment':assessment})
             if display:
                 st.dataframe(pd.DataFrame([{k:v for k,v in entry.items() if not k.startswith('_')} for entry in display]),
                     hide_index=True,use_container_width=True,height=640,row_height=68,
                     column_config={
                         'Date':st.column_config.DateColumn('Event date',width='small'),
-                        'Security development':st.column_config.TextColumn('Security development',width='large'),
+                        'Incident':st.column_config.TextColumn('Incident',width='large'),
                         'Current Risk':st.column_config.TextColumn('Current Risk',width='small'),
                         'P&C Assessment':st.column_config.TextColumn('P&C Assessment',width='large'),
                         'Risk Outlook':st.column_config.TextColumn('Risk Outlook',width='large'),
                         'Monitoring Indicators':st.column_config.TextColumn('Monitoring Indicators',width='large'),
-                        'Evidence':st.column_config.TextColumn('Evidence',width='small')})
+                        'Evidence':st.column_config.TextColumn('Evidence',width='small'),
+                        'Assessment status':st.column_config.TextColumn('Assessment status',width='medium')})
                 choice=st.selectbox('Open development dossier',range(len(display)),
-                    format_func=lambda i:display[i]['Date']+' · '+display[i]['Security development'],
+                    format_func=lambda i:display[i]['Date']+' · '+display[i]['Incident'],
                     key='pc_brief_event_choice')
                 chosen=display[choice];event=chosen['_item'];assessment=chosen['_assessment']
                 if st.button('Open full connected event dossier',key='pc_brief_open_event'):
                     _open_below('event',event['event_id'],event.get('title'))
                 with st.expander('P&C assessment and evidence for selected development',expanded=True):
-                    st.markdown('**'+chosen['Security development']+'**')
+                    st.markdown('**'+chosen['Incident']+'**')
                     st.caption(chosen['Date']+' · '+chosen['Evidence'])
                     for field in ('Current Risk','P&C Assessment','Risk Outlook','Monitoring Indicators'):
                         st.markdown('**'+field+'**')
