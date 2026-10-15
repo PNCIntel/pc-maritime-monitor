@@ -74,7 +74,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     logo_html='<div class="brand">POWER &amp; CORRIDORS</div>'
     # A committed transparent brand image is preferred; deployment can also use
     # an explicit st.secrets path for a managed asset. Do not load arbitrary URLs.
-    for location in (Path(__file__).with_name("assets")/"pc-logo.png",):
+    for location in (Path(__file__).with_name("assets")/"power-corridors-logo-dark-matched-transparent.png",):
         if location.is_file():
             logo_html='<img class="logo" src="data:image/png;base64,'+base64.b64encode(location.read_bytes()).decode("ascii")+'"/>'
             break
