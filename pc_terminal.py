@@ -6118,10 +6118,12 @@ def render_terminal(lens: str = "trade"):
         _render_mobile_asset_terminal(oid,rec,lens)
         return
 
-    # Intelligence events use source-aware connected history, not the legacy flat report.
-    if typ == "event" and lens == "intelligence":
+    # Event dossiers are shared across Intelligence and Trade. The surrounding
+    # workspace remains lens-specific; event facts, assessment and PDF are not.
+    if typ == "event" and lens in {"intelligence", "trade"}:
         from pc_connected_event import render_connected_event
-        render_connected_event(sb, rec, oid, _set_context, _back_context, _return_intelligence_board)
+        render_connected_event(sb, rec, oid, _set_context, _back_context,
+                               lambda target=lens: _return_intelligence_board(target))
         return
 
     # Event sources remain in the dossier; avoid a duplicate intelligence sidebar.
