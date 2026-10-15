@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from html import escape
 from io import BytesIO
+from pathlib import Path
+import base64
 from urllib.parse import quote
 import re
 
@@ -28,6 +30,7 @@ def _paragraph(value):
 def create_incident_brief(record, assessment, outlook, evidence, related, assets, metadata=None, map_point=None):
     """Return PDF bytes built from the same canonical dossier, not generated incident claims."""
     from weasyprint import HTML
+    from pc_event_map_image import regional_map_uri
     meta=metadata if isinstance(metadata,dict) else {}
     title=record.get("title") or record.get("event_id") or "Event"
     incident_id=record.get("event_id") or "Unrecorded"
@@ -56,17 +59,32 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     if map_point and map_point.get("name"):
         name=map_point["name"]
         url=map_point.get("source")
-        map_html='<div class="map"><b>REGIONAL GEOGRAPHIC REFERENCE</b><p class="place">'+_h(name)+'</p><p>Approximate named-place context — not the verified incident position.</p>'
+        embedded=None
+        try:
+            embedded=regional_map_uri(map_point["lat"],map_point["lon"],zoom=map_point.get("zoom",8))
+        except (KeyError,TypeError,ValueError): pass
+        map_html='<div class="map"><b>REGIONAL GEOGRAPHIC REFERENCE</b><p class="place">'+_h(name)+'</p>'
+        if embedded: map_html+='<img class="regional-map" src="'+embedded+'" alt="Regional named-place context map"/>'
+        map_html+='<p>Approximate geographic reference — not the verified incident position.</p>'
         if _valid_url(url): map_html+='<p><a href="'+_h(url)+'">Open location map ↗</a></p>'
         map_html+='</div>'
     def table(heads,rows):
         return '<table><thead><tr>'+''.join('<th>'+_h(h)+'</th>' for h in heads)+'</tr></thead><tbody>'+''.join(rows)+'</tbody></table>' if rows else '<p class="muted">No documented linked records.</p>'
     issued=datetime.now(timezone.utc).strftime("%d %B %Y %H:%M UTC")
+    logo_html='<div class="brand">POWER &amp; CORRIDORS</div>'
+    # A committed transparent brand image is preferred; deployment can also use
+    # an explicit st.secrets path for a managed asset. Do not load arbitrary URLs.
+    for location in (Path(__file__).with_name("assets")/"pc-logo.png",):
+        if location.is_file():
+            logo_html='<img class="logo" src="data:image/png;base64,'+base64.b64encode(location.read_bytes()).decode("ascii")+'"/>'
+            break
+    opening=('<div class="strap">P&C INTELLIGENCE &nbsp; / &nbsp; INCIDENT INTELLIGENCE BRIEF</div>')
+    bottom_line=outlook.get("pc_assessment") or assessment.get("pc_assessment") or meaning
     html='''<!doctype html><html><head><meta charset="utf-8"><style>
     @page{size:A4;margin:19mm 17mm 19mm 17mm;@bottom-left{content:"POWER & CORRIDORS  /  INTELLIGENCE";font:8pt Arial;color:#536679}
     @bottom-right{content:"Page " counter(page);font:8pt Arial;color:#536679}}
     body{font-family:Arial,sans-serif;font-size:10pt;color:#192a38;line-height:1.48}
-    .brand{color:#0b344d;font-weight:800;letter-spacing:2.2px;font-size:17pt}.strap{font-size:8pt;letter-spacing:1.8px;color:#42748b}
+    .logo{max-width:360px;max-height:88px;object-fit:contain}.regional-map{width:100%;max-height:285px;object-fit:cover;margin:9px 0 4px}.brand{color:#0b344d;font-weight:800;letter-spacing:2.2px;font-size:17pt}.strap{font-size:8pt;letter-spacing:1.8px;color:#42748b}
     .rule{height:4px;background:#13556c;border-right:30px solid #bea365;margin:10px 0 22px}.title{font-size:24pt;line-height:1.15;margin:9px 0}
     .meta{font-size:8pt;color:#526778}.metrics{display:table;width:100%;margin:20px 0;border-collapse:separate;border-spacing:5px}
     .metric{display:table-cell;width:33%;background:#eff4f6;padding:10px}.metric small{display:block;color:#557185;font-size:7pt;text-transform:uppercase}
@@ -80,18 +98,20 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     .source p{margin:4px 0}.url{font-size:7.5pt;color:#526778;overflow-wrap:anywhere;margin-top:4px}a{color:#096381;text-decoration:underline;overflow-wrap:anywhere}
     li{margin-bottom:5px}.disclaimer{font-size:8pt;color:#566d7b;border-top:1px solid #b9ced6;margin-top:25px;padding-top:8px}
     </style></head><body>'''
-    html+='<div class="brand">POWER &amp; CORRIDORS</div><div class="strap">INDEPENDENT INTELLIGENCE ON MOVEMENT, INFRASTRUCTURE &amp; RISK</div><div class="rule"></div>'
-    html+=('<div class="strap">INCIDENT INTELLIGENCE BRIEF</div><h1 class="title">'+_h(title)+'</h1><div class="meta">Incident '+_h(incident_id)+' · Event '+_h(_date(record.get("start_date")))+
+    html+=logo_html+'<div class="strap">INDEPENDENT INTELLIGENCE ON MOVEMENT, INFRASTRUCTURE &amp; RISK</div><div class="rule"></div>'
+    html+=(opening+'<h1 class="title">'+_h(title)+'</h1><div class="meta">Incident '+_h(incident_id)+' · Event '+_h(_date(record.get("start_date")))+
         ' · Published/exported '+_h(issued)+' · Verification '+_h(record.get("verification_status") or "Unrecorded")+'</div>')
     html+=('<div class="metrics"><div class="metric"><small>Current risk</small><strong>'+_h(outlook.get("current_risk") or "Not rated")+'</strong></div><div class="metric"><small>Confidence</small><strong>'+
         _h(outlook.get("confidence") or "Unassigned")+'</strong></div><div class="metric"><small>Assessed</small><strong>'+_h(_date(outlook.get("assessed_at")))+'</strong></div></div>')
     if outlook.get("valid_until"): html+='<p class="meta">Assessment valid until: '+_h(outlook["valid_until"])+' (check current conditions before reliance).</p>'
+    html+='<div class="section"><h2>KEY JUDGEMENT</h2><div class="box">'+_paragraph(bottom_line)+'</div></div>'
     html+='<div class="section"><h2>01 / What happened?</h2>'+_paragraph(what)+'</div>'
     html+='<div class="section"><h2>02 / What does it mean? — P&C assessment</h2>'+_paragraph(meaning)+'</div>'
     html+='<div class="section"><h2>03 / What could happen next? — Risk outlook</h2><div class="box">'+_paragraph(forecast)+'</div></div>'
     html+='<div class="section"><h2>04 / What are we monitoring, and why?</h2>'+('<ul>'+''.join('<li>'+_h(i)+'</li>' for i in indicators)+'</ul>' if indicators else '<p class="muted">No reviewed indicators recorded.</p>')+'</div>'
     html+='<div class="section"><h2>05 / Geographic and infrastructure context</h2>'+map_html+table(["Asset","Mode","Recorded relationship","Impact status"],infra)+'</div>'
     html+='<div class="section"><h2>06 / Connected developments</h2>'+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
+    html+='<div class="section"><h2>BOTTOM LINE</h2><div class="box">'+_paragraph(bottom_line)+'</div></div>'
     html+='<div class="section"><h2>07 / Evidence and source provenance</h2>'+(''.join(sources) if sources else '<p class="muted">No individual source claims available in this record.</p>')+'</div>'
     html+='<div class="disclaimer">Power &amp; Corridors · powerncorridors.com · Analytical judgments are qualified by the cited evidence. Contextual links do not establish causation, attack attribution, damage, closure or current operating status. This PDF is a dated snapshot, not a live notice.</div></body></html>'
     return HTML(string=html,base_url="https://powerncorridors.com/").write_pdf()
