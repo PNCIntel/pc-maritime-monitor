@@ -327,28 +327,40 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                 if -90<=lat<=90 and -180<=lon<=180 and (lat,lon)!=(0,0):
                     points.append({"lat":lat,"lon":lon,"name":asset.get("name") or str(link.get("asset_id"))})
             except (ValueError,TypeError): pass
-        # Map presence is unconditional. Without verified coordinates, explain the gap.
+        # Prefer exact recorded facility geometry; otherwise map the named locality.
+        # A place-name pin is a geographic reference, never a claimed incident point.
+        mapped=False
         if points:
             st.map(pd.DataFrame(points).drop_duplicates(),latitude="lat",longitude="lon",use_container_width=True)
-            st.caption("Mapped facility coordinates: contextual links, not incident location or damage.")
-        else:
-            # Use a published approximate geographic reference only when explicitly sourced in metadata.
+            st.caption("Recorded linked facility locations · contextual exposure, not event coordinates or damage.")
+            mapped=True
+        if not mapped:
             geographic=meta.get("geographic_reference") or {}
             if isinstance(geographic,dict) and geographic.get("source_url"):
                 try:
                     lat,lon=float(geographic["latitude"]),float(geographic["longitude"])
                     if -90<=lat<=90 and -180<=lon<=180:
                         st.map(pd.DataFrame([{"lat":lat,"lon":lon}]),latitude="lat",longitude="lon",use_container_width=True)
-                        st.caption("Approximate sourced regional reference, NOT incident coordinates: "+str(geographic.get("label") or "regional context"))
+                        st.caption("Sourced regional reference: "+str(geographic.get("label") or "named area")+" · not the incident point.")
+                        mapped=True
                 except (KeyError,ValueError,TypeError): pass
-            from pc_geographic_context import locality_point
-            place=locality_point(str(meta.get("geographic_scope") or "")+" "+str(record.get("title") or ""))
+        if not mapped:
+            from pc_geographic_context import named_place_point
+            names=[meta.get("geographic_scope"),record.get("location_name"),record.get("location_label"),
+                   record.get("country"),meta.get("location_name"),meta.get("location_label")]
+            # Headline is a last resort only when no specific locality was recorded.
+            names=[str(n).strip() for n in names if isinstance(n,str) and n.strip()]
+            if not names:
+                from pc_geographic_context import locality_point
+                known=locality_point(record.get("title"))
+                if known: names=[known["name"]]
+            place=next((p for n in names if (p:=named_place_point(n))),None)
             if place:
                 st.map(pd.DataFrame([{"lat":place["lat"],"lon":place["lon"]}]),latitude="lat",longitude="lon",use_container_width=True)
-                st.caption("Regional reference only: "+place["name"]+" · "+place["precision"]+". NOT the incident position.")
-                st.link_button("View geographic reference ↗",place["source"],key="geo_ref_"+event_id)
+                st.caption("Approximate named-place map: "+place["name"]+" · "+place["precision"]+". Not a verified incident position.")
+                st.link_button("Map reference ↗",place["source"],key="geo_ref_"+event_id)
             else:
-                st.info("Map location is unresolved: no verified incident, linked facility or sourced locality coordinates. No pin has been invented.")
+                st.info("No resolvable named location for a regional reference map; incident position is not inferred.")
         st.markdown("### Connected infrastructure")
         if facility_rows:
             st.dataframe(pd.DataFrame(facility_rows).drop_duplicates(),hide_index=True,use_container_width=True)
