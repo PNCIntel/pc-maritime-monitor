@@ -108,6 +108,13 @@ def _airport_coordinates(rec):
 
 def _event_airport_context(db,event_id):
     links,err=_query(db,'pc_event_asset_links',eq={'event_id':event_id},limit=200)
+    # Read the same canonical event graph as Trade and the connected dossier.
+    graph,_=_query(db,'pc_event_links',eq={'event_id':event_id},limit=300)
+    for edge in graph:
+        if str(edge.get('linked_type') or '').lower() in ('asset','airport','infrastructure'):
+            links.append({'asset_id':edge.get('linked_id'),'relation_type':edge.get('relationship'),
+                          'impact_status':'Source-recorded relationship; see role',
+                          'metadata':{'aviation_role':edge.get('relationship')}})
     airports=[]
     seen=set()
     for link in links:
