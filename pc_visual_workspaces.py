@@ -267,11 +267,30 @@ def _render_pc_assessments(db,core,term):
         value=str(value or 'INSUFFICIENT EVIDENCE')
         tone={'HIGH':'high','SEVERE':'high','CRITICAL':'high','MODERATE':'medium','MEDIUM':'medium','LOW':'low'}.get(value.upper(),'unknown')
         return '<span class="pc-pill pc-'+tone+'">'+escape(value)+'</span>'
-    table='<table class="pc-risk-grid"><thead><tr><th>Assessment</th><th>Risk / disruption</th><th>Direction</th><th>Confidence</th><th>Review status</th></tr></thead><tbody>'
+    def outlook(r):
+        # A trend, expiry or event severity cannot generate a forward-looking judgment.
+        value=r.get('risk_outlook') or r.get('outlook')
+        if not isinstance(value,str) or not value.strip():
+            return 'Outlook not yet assessed'
+        return value.strip()
+    def last_assessed(r):
+        value=r.get('assessment_date') or r.get('as_known_at')
+        return str(value)[:10] if value else 'date unrecorded'
+    def qualification(r):
+        return ('Earlier assessment · last assessed '+last_assessed(r)+
+                ' · current conditions not established') if _assessment_freshness(r)!='CURRENT' else ''
+    def indicators(r):
+        values=r.get('monitoring_priorities') or []
+        if not isinstance(values,list): values=[]
+        values=[str(v).strip() for v in values if str(v).strip()]
+        return '; '.join(values) if values else 'Indicators not yet recorded'
+    table='<table class="pc-risk-grid"><thead><tr><th>Assessment</th><th>Current Risk</th><th>P&C Assessment</th><th>Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
     for r in selected:
-        table+='<tr><td>'+escape(str(r.get('headline') or r.get('geography')))+'</td><td>'+badge(r.get('risk_level'))+'</td><td>'+escape(str(r.get('trend') or 'UNDETERMINED'))+'</td><td>'+escape(str(r.get('confidence') or 'Unassigned').capitalize())+'</td><td>'+escape(_assessment_freshness(r))+'</td></tr>'
+        summary=r.get('executive_summary') or r.get('explanation') or 'P&C assessment not yet recorded'
+        qualifier=qualification(r)
+        table+='<tr><td>'+escape(str(r.get('headline') or r.get('geography') or 'Assessment'))+'</td><td>'+badge(r.get('risk_level'))+'</td><td>'+escape(str(summary))+'</td><td>'+escape(outlook(r))+(('<div><small>'+escape(qualifier)+'</small></div>') if qualifier else '')+'</td><td>'+escape(indicators(r))+'</td></tr>'
     st.markdown(table+'</tbody></table>',unsafe_allow_html=True)
-    st.caption('Qualitative judgments, not numerical probabilities. Undetermined direction and insufficient evidence remain explicit. Assessment dates are independent of incident filters.')
+    st.caption('Independent qualitative judgments, not numerical probabilities. Outlook is displayed only when explicitly recorded in the published assessment; no rating is inferred from incident severity, trend or review dates.')
     with st.expander('Key judgments across this selection',expanded=True):
         for r in selected:
             st.markdown('**'+str(r.get('headline') or r.get('geography'))+'**')
@@ -291,9 +310,13 @@ def _render_pc_assessments(db,core,term):
             y.metric('Trend',row.get('trend') or 'UNDETERMINED')
             z.metric('Confidence',str(row.get('confidence') or 'Unassigned').capitalize())
             st.write(row.get('executive_summary') or row.get('explanation') or '')
-            st.caption('Valid until '+str(row.get('valid_until') or 'Unrecorded')+' · Coverage: '+str(row.get('coverage_status') or 'Unrecorded'))
+            st.markdown('**Risk Outlook**')
+            st.write(outlook(row))
+            st.markdown('**Monitoring Indicators**')
+            st.write(indicators(row))
+            st.caption('Valid until +str(row.get('valid_until') or 'Unrecorded')+' · Coverage: '+str(row.get('coverage_status') or 'Unrecorded'))
             if _assessment_freshness(row)!='CURRENT':
-                st.warning('Review due: this is an earlier assessment snapshot. It does not establish current conditions.')
+                st.warning('Earlier assessment · last assessed '+last_assessed(row)+'. Current conditions are not established by this snapshot.')
             with st.expander('Reasoning, threat drivers and scope'):
                 st.write(row.get('explanation') or '')
                 for driver in row.get('threat_drivers') or []: st.markdown('- '+str(driver))
@@ -302,7 +325,7 @@ def _render_pc_assessments(db,core,term):
             with st.expander('Companies and operating exposure',expanded=True):
                 companies=row.get('company_exposure') or []
                 if not companies:
-                    st.write('No airport-company links documented for this assessment scope.')
+                    st.write('No company or infrastructure exposure links documented for this assessment scope.')
                 else:
                     exposure=pd.DataFrame([{'Company':c.get('company'),'Airport':_airport_display(c.get('airport')),'Relationship':_business_label(c.get('role')),'Evidence status':_business_label(c.get('status'))} for c in companies]).drop_duplicates()
                     chart,listing=st.columns([1,2])
