@@ -512,7 +512,9 @@ def _render_related_below(db,core):
                 rating=judgment.get('current_risk') if judgment.get('judgment_status')=='published' else (prior.get('published_rating') if prior.get('analyst_approval')=='approved' else None)
                 st.markdown('**Current Risk**')
                 st.write(judgment.get('risk_level') or 'INSUFFICIENT EVIDENCE')
-                st.caption('Confidence: '+str(judgment.get('confidence') or 'Unassigned')+' · assessed '+str(judgment.get('rating_as_of') or 'undated'))
+                _cf=str(judgment.get('confidence') or 'Unassigned').lower()
+                _cf_tone={'high':('🟢','High'),'moderate':('🟠','Moderate'),'medium':('🟠','Moderate'),'low':('🔴','Low')}.get(_cf,('⚪','Unassigned'))
+                st.markdown('**Confidence:** '+_cf_tone[0]+' '+_cf_tone[1]+' · assessed '+str(judgment.get('rating_as_of') or 'undated'))
                 st.write(judgment.get('risk_rationale') or judgment.get('current_risk') or '')
                 st.markdown('**P&C Assessment**')
                 st.write(version.get('pc_assessment') or version.get('what_it_means') or prior.get('finding') or 'Substantive assessment pending')
@@ -1180,6 +1182,7 @@ def _security(db,core):
                 .pc-risk-grid td{padding:12px;border-bottom:1px solid #8193a544;vertical-align:top;line-height:1.48;overflow-wrap:anywhere}
                 .pc-risk-grid th:nth-child(1){width:19%}.pc-risk-grid th:nth-child(2){width:12%}.pc-risk-grid th:nth-child(3){width:28%}.pc-risk-grid th:nth-child(4){width:23%}.pc-risk-grid th:nth-child(5){width:18%}
                 .pc-pill{display:inline-block;padding:4px 9px;border-radius:5px;font-weight:700;font-size:.75rem;white-space:normal}
+                .pc-conf{display:inline-block;margin-top:7px;padding:3px 8px;border-radius:12px;font-size:.71rem;font-weight:700;border:1px solid transparent}.pc-conf-high{background:#d8f2e8;color:#116549;border-color:#7bc8a4}.pc-conf-moderate{background:#fff0cf;color:#765000;border-color:#e0bd64}.pc-conf-low{background:#fce3e1;color:#8b302d;border-color:#dfa6a0}.pc-conf-unknown{background:#e7edf3;color:#40556a;border-color:#c1cfdb}
                 .pc-high{background:#fce8e6;color:#922b21}.pc-medium{background:#fff1d6;color:#805400}.pc-low{background:#e1f2ec;color:#17654a}.pc-unknown{background:#e7edf3;color:#40556a}
                 .pc-inc-date{font-size:.76rem;opacity:.7;margin-top:7px}
                 .pc-risk-grid tbody tr:nth-child(odd){background:#5c79900d}.pc-risk-grid tbody tr:hover{background:#c9a46119}
@@ -1207,10 +1210,14 @@ def _security(db,core):
                     value=str(value or 'Not rated')
                     tone={'HIGH':'high','CRITICAL':'high','SEVERE':'high','ELEVATED':'medium','MODERATE':'medium','MEDIUM':'medium','LOW':'low'}.get(value.upper(),'unknown')
                     return '<span class="pc-pill pc-'+tone+'">'+escape(value)+'</span>'
+                def confidence_pill(value):
+                    label=str(value or 'Unassigned').capitalize()
+                    tone={'high':'high','moderate':'moderate','medium':'moderate','low':'low'}.get(label.lower(),'unknown')
+                    return '<span class="pc-conf pc-conf-'+tone+'">'+escape(label)+' confidence</span>'
                 table='<table class="pc-risk-grid"><thead><tr><th>Incident / Scope</th><th>Risk & Confidence</th><th>P&C Assessment</th><th>Risk Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
                 for row in page_rows:
                     table+='<tr><td><strong>'+escape(row['Incident'])+'</strong><div class="pc-inc-date">'+escape(row['Date']+' · '+row['Evidence'])+'</div></td>'
-                    table+='<td>'+risk_pill(row['Current Risk'])+'<span class="pc-confidence">Confidence: '+escape(str(row.get('_confidence') or 'Unassigned'))+'</span><div class="pc-risk-explain">'+escape(str(row.get('_risk_rationale') or row.get('_risk_finding') or 'Category pending evidenced assessment'))+'</div></td><td>'+escape(row['P&C Assessment'])+'</td><td>'+escape(row['Risk Outlook'])+'</td><td>'+escape(row['Monitoring Indicators'])+'</td></tr>'
+                    table+='<td>'+risk_pill(row['Current Risk'])+'<div>'+confidence_pill(row.get('_confidence'))+'</div><div class="pc-risk-explain">'+escape(str(row.get('_risk_rationale') or row.get('_risk_finding') or 'Category pending evidenced assessment'))+'</div></td><td>'+escape(row['P&C Assessment'])+'</td><td>'+escape(row['Risk Outlook'])+'</td><td>'+escape(row['Monitoring Indicators'])+'</td></tr>'
                 st.markdown(table+'</tbody></table>',unsafe_allow_html=True)
                 prev,number,next_=st.columns([1,3,1])
                 with prev:
@@ -1226,7 +1233,7 @@ def _security(db,core):
                 with st.container(border=True):
                     st.markdown('#### '+escape(chosen['Incident']))
                     st.caption(chosen['Date']+' · '+chosen['Evidence']+' · '+chosen['Assessment status'])
-                    x,y=st.columns([1,3]);x.markdown('**Current Risk**');x.markdown(risk_pill(chosen['Current Risk']),unsafe_allow_html=True);x.caption('Confidence: '+str(chosen.get('_confidence') or 'Unassigned')+' · rated '+str(chosen.get('_rating_as_of') or 'not dated'));y.markdown('**Risk rationale**');y.write(chosen.get('_risk_rationale') or chosen.get('_risk_finding') or 'Assessment pending')
+                    x,y=st.columns([1,3]);x.markdown('**Current Risk**');x.markdown(risk_pill(chosen['Current Risk']),unsafe_allow_html=True);x.markdown(confidence_pill(chosen.get('_confidence')),unsafe_allow_html=True);x.caption('Rated '+str(chosen.get('_rating_as_of') or 'not dated'));y.markdown('**Risk rationale**');y.write(chosen.get('_risk_rationale') or chosen.get('_risk_finding') or 'Assessment pending')
                     y.markdown('**P&C Assessment**');y.write(chosen['P&C Assessment'])
                     st.markdown('**Risk Outlook**');st.write(chosen['Risk Outlook'])
                     st.markdown('**Monitoring Indicators**');st.write(chosen['Monitoring Indicators'])
