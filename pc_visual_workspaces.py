@@ -511,7 +511,9 @@ def _render_related_below(db,core):
                 st.caption('Versioned event analysis: '+str(version.get('assessment_status') or prior.get('assessment_type') or 'stored draft')+' · Approval: '+str(prior.get('analyst_approval') or 'not recorded'))
                 rating=judgment.get('current_risk') if judgment.get('judgment_status')=='published' else (prior.get('published_rating') if prior.get('analyst_approval')=='approved' else None)
                 st.markdown('**Current Risk**')
-                st.write(rating or 'Not rated · source-qualified analysis is not an approved rating')
+                st.write(judgment.get('risk_level') or 'INSUFFICIENT EVIDENCE')
+                st.caption('Confidence: '+str(judgment.get('confidence') or 'Unassigned')+' · assessed '+str(judgment.get('rating_as_of') or 'undated'))
+                st.write(judgment.get('risk_rationale') or judgment.get('current_risk') or '')
                 st.markdown('**P&C Assessment**')
                 st.write(version.get('pc_assessment') or version.get('what_it_means') or prior.get('finding') or 'Substantive assessment pending')
                 st.markdown('**Risk Outlook**')
@@ -1146,9 +1148,9 @@ def _security(db,core):
                 if not isinstance(meta,dict):meta={}
                 prior=meta.get('pc_risk_analysis') or {}
                 if not isinstance(prior,dict):prior={}
-                risk=briefing_text(assessment.get('risk_level')) if current else (briefing_text(judgment.get('risk_level')) if judgment.get('judgment_status')=='published' else '')
+                risk=briefing_text(judgment.get('risk_level')) if judgment.get('judgment_status')=='published' else (briefing_text(assessment.get('risk_level')) if current else '')
                 if risk.upper() not in ('CRITICAL','SEVERE','HIGH','ELEVATED','MODERATE','MEDIUM','LOW'):
-                    risk='ASSESSED' if judgment.get('judgment_status')=='published' else 'PENDING'
+                    risk='INSUFFICIENT EVIDENCE' if judgment.get('judgment_status')=='published' else 'PENDING'
                 if not current and prior.get('published_rating') and prior.get('analyst_approval')=='approved' and briefing_text(prior['published_rating']).upper() in ('CRITICAL','SEVERE','HIGH','ELEVATED','MODERATE','MEDIUM','LOW'):
                     risk=briefing_text(prior['published_rating'])
                 interpretation=(briefing_text(assessment.get('executive_summary') or assessment.get('explanation')) if current else
@@ -1160,7 +1162,7 @@ def _security(db,core):
                 if not isinstance(indicators,list):indicators=[]
                 status=('Published judgment' if current or judgment.get('judgment_status')=='published' or version.get('assessment_status')=='published' else
                     'Analytical draft · rating not approved' if version or prior else 'Assessment pending')
-                display.append({'_risk_finding':judgment.get('current_risk'), 'Date':str(item['start_date'])[:10],
+                display.append({'_risk_finding':judgment.get('current_risk'), '_risk_rationale':judgment.get('risk_rationale'), '_risk_scope':judgment.get('risk_scope'), '_confidence':judgment.get('confidence'), '_rating_as_of':judgment.get('rating_as_of'), 'Date':str(item['start_date'])[:10],
                     'Incident':str(item.get('title') or 'Development'),
                     'Current Risk':risk,
                     'P&C Assessment':interpretation or 'Evidence review required',
@@ -1176,13 +1178,13 @@ def _security(db,core):
                 .pc-risk-grid{width:100%;border-collapse:collapse;margin:12px 0 22px;font-size:.87rem;table-layout:fixed}
                 .pc-risk-grid th{text-align:left;padding:12px;border-bottom:2px solid #c9a461;color:inherit}
                 .pc-risk-grid td{padding:12px;border-bottom:1px solid #8193a544;vertical-align:top;line-height:1.48;overflow-wrap:anywhere}
-                .pc-risk-grid th:nth-child(1){width:20%}.pc-risk-grid th:nth-child(2){width:10%}.pc-risk-grid th:nth-child(3){width:27%}.pc-risk-grid th:nth-child(4){width:24%}.pc-risk-grid th:nth-child(5){width:19%}
+                .pc-risk-grid th:nth-child(1){width:19%}.pc-risk-grid th:nth-child(2){width:12%}.pc-risk-grid th:nth-child(3){width:28%}.pc-risk-grid th:nth-child(4){width:23%}.pc-risk-grid th:nth-child(5){width:18%}
                 .pc-pill{display:inline-block;padding:4px 9px;border-radius:5px;font-weight:700;font-size:.75rem;white-space:normal}
                 .pc-high{background:#fce8e6;color:#922b21}.pc-medium{background:#fff1d6;color:#805400}.pc-low{background:#e1f2ec;color:#17654a}.pc-unknown{background:#e7edf3;color:#40556a}
                 .pc-inc-date{font-size:.76rem;opacity:.7;margin-top:7px}
                 .pc-risk-grid tbody tr:nth-child(odd){background:#5c79900d}.pc-risk-grid tbody tr:hover{background:#c9a46119}
                 .pc-risk-grid td:first-child{border-left:3px solid #c9a46155}
-                .pc-pill.pc-unknown{font-size:.72rem}
+                .pc-pill.pc-unknown{font-size:.72rem}.pc-confidence{display:block;font-size:.75rem;opacity:.8;margin-top:6px}.pc-risk-explain{font-size:.79rem;line-height:1.4;margin-top:7px}
                 </style>""",unsafe_allow_html=True)
                 st.markdown('<div class="pc-brief-hero"><h3>Operating risk briefing</h3><p>Published intelligence across maritime, aviation, rail, infrastructure and security. Select any incident for its connected dossier and supporting evidence.</p></div>',unsafe_allow_html=True)
                 published_count=sum(row.get('Assessment status')=='Published judgment' for row in display)
@@ -1205,10 +1207,10 @@ def _security(db,core):
                     value=str(value or 'Not rated')
                     tone={'HIGH':'high','CRITICAL':'high','SEVERE':'high','ELEVATED':'medium','MODERATE':'medium','MEDIUM':'medium','LOW':'low'}.get(value.upper(),'unknown')
                     return '<span class="pc-pill pc-'+tone+'">'+escape(value)+'</span>'
-                table='<table class="pc-risk-grid"><thead><tr><th>Incident / Scope</th><th>Current Risk</th><th>P&C Assessment</th><th>Risk Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
+                table='<table class="pc-risk-grid"><thead><tr><th>Incident / Scope</th><th>Risk & Confidence</th><th>P&C Assessment</th><th>Risk Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
                 for row in page_rows:
                     table+='<tr><td><strong>'+escape(row['Incident'])+'</strong><div class="pc-inc-date">'+escape(row['Date']+' · '+row['Evidence'])+'</div></td>'
-                    table+='<td>'+risk_pill(row['Current Risk'])+'</td><td>'+escape(row['P&C Assessment'])+'</td><td>'+escape(row['Risk Outlook'])+'</td><td>'+escape(row['Monitoring Indicators'])+'</td></tr>'
+                    table+='<td>'+risk_pill(row['Current Risk'])+'<span class="pc-confidence">Confidence: '+escape(str(row.get('_confidence') or 'Unassigned'))+'</span><div class="pc-risk-explain">'+escape(str(row.get('_risk_rationale') or row.get('_risk_finding') or 'Category pending evidenced assessment'))+'</div></td><td>'+escape(row['P&C Assessment'])+'</td><td>'+escape(row['Risk Outlook'])+'</td><td>'+escape(row['Monitoring Indicators'])+'</td></tr>'
                 st.markdown(table+'</tbody></table>',unsafe_allow_html=True)
                 prev,number,next_=st.columns([1,3,1])
                 with prev:
@@ -1224,7 +1226,7 @@ def _security(db,core):
                 with st.container(border=True):
                     st.markdown('#### '+escape(chosen['Incident']))
                     st.caption(chosen['Date']+' · '+chosen['Evidence']+' · '+chosen['Assessment status'])
-                    x,y=st.columns([1,3]);x.markdown('**Current Risk**');x.write(chosen['Current Risk']);x.caption(str(chosen.get('_risk_finding') or 'Risk category not separately authored'))
+                    x,y=st.columns([1,3]);x.markdown('**Current Risk**');x.markdown(risk_pill(chosen['Current Risk']),unsafe_allow_html=True);x.caption('Confidence: '+str(chosen.get('_confidence') or 'Unassigned')+' · rated '+str(chosen.get('_rating_as_of') or 'not dated'));y.markdown('**Risk rationale**');y.write(chosen.get('_risk_rationale') or chosen.get('_risk_finding') or 'Assessment pending')
                     y.markdown('**P&C Assessment**');y.write(chosen['P&C Assessment'])
                     st.markdown('**Risk Outlook**');st.write(chosen['Risk Outlook'])
                     st.markdown('**Monitoring Indicators**');st.write(chosen['Monitoring Indicators'])
