@@ -37,7 +37,6 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     meta=metadata if isinstance(metadata,dict) else {}
     edited=editorial if isinstance(editorial,dict) else {}
     title=record.get("title") or record.get("event_id") or "Event"
-    incident_id=record.get("event_id") or "Unrecorded"
     what=edited.get("what_happened") or assessment.get("what_happened") or record.get("description")
     meaning=edited.get("why_it_matters") or outlook.get("pc_assessment") or assessment.get("pc_assessment") or assessment.get("what_it_means") or meta.get("pc_assessment")
     forecast=edited.get("risk_outlook") or outlook.get("risk_outlook") or meta.get("risk_outlook")
@@ -82,7 +81,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
         if location.is_file():
             logo_html='<img class="logo" src="data:image/png;base64,'+base64.b64encode(location.read_bytes()).decode("ascii")+'"/>'
             break
-    opening=('<div class="strap">P&C INTELLIGENCE &nbsp; / &nbsp; INCIDENT INTELLIGENCE BRIEF</div>')
+    opening=('<div class="strap">POWER &amp; CORRIDORS INTELLIGENCE &nbsp; / &nbsp; INCIDENT INTELLIGENCE BRIEF</div>')
     key_judgment=edited.get("key_judgment") or outlook.get("key_judgment") or assessment.get("key_judgment") or meaning
     bottom_line=edited.get("bottom_line") or outlook.get("bottom_line") or assessment.get("bottom_line")
     alternative=edited.get("alternative_explanation") or outlook.get("alternative_explanation") or assessment.get("alternative_explanation") or meta.get("alternative_explanation")
@@ -97,7 +96,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     body{font-family:Arial,sans-serif;font-size:9.5pt;color:#192a38;line-height:1.38}
     .logo{width:315px;height:auto;max-height:90px;object-fit:contain}.regional-map{width:100%;max-height:285px;object-fit:cover;margin:9px 0 4px}.brand{color:#0b344d;font-weight:800;letter-spacing:2.2px;font-size:17pt}.strap{font-size:8pt;letter-spacing:1.8px;color:#42748b}
     .rule{height:4px;background:#13556c;border-right:30px solid #bea365;margin:10px 0 22px}.title{font-size:24pt;line-height:1.15;margin:9px 0}
-    .meta{font-size:8pt;color:#526778}.metrics{display:table;width:100%;margin:20px 0;border-collapse:separate;border-spacing:5px}
+    .issue-date{font-size:10pt;font-weight:bold;color:#124e68;margin:14px 0 5px}.meta{font-size:8pt;color:#526778}.metrics{display:table;width:100%;margin:20px 0;border-collapse:separate;border-spacing:5px}
     .metric{display:table-cell;width:33%;background:#eff4f6;padding:10px}.metric small{display:block;color:#557185;font-size:7pt;text-transform:uppercase}
     .metric strong{font-size:12pt;color:#123c51}.section{margin-top:10px}.section h2{break-after:avoid;font-size:12pt;color:#124e68;border-bottom:1px solid #bdd0d8;padding-bottom:5px}
     .muted{color:#74818b} .box{background:#f1f5f7;padding:12px;border-left:3px solid #226781}
@@ -109,9 +108,9 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     .source p{margin:3px 0}.url{font-size:7.5pt;color:#526778;overflow-wrap:anywhere;margin-top:4px}a{color:#096381;text-decoration:underline;overflow-wrap:anywhere}
     li{margin-bottom:2px}.disclaimer{font-size:8pt;color:#566d7b;border-top:1px solid #b9ced6;margin-top:25px;padding-top:8px}
     </style></head><body>'''
-    html+=logo_html+'<div class="strap">INDEPENDENT INTELLIGENCE ON MOVEMENT, INFRASTRUCTURE &amp; RISK</div><div class="rule"></div>'
-    html+=(opening+'<h1 class="title">'+_h(title)+'</h1><div class="meta">Incident '+_h(incident_id)+' · Event '+_h(_date(record.get("start_date")))+
-        ' · Published/exported '+_h(issued)+' · Verification '+_h(record.get("verification_status") or "Unrecorded")+'</div>')
+    html+=logo_html+'<div class="strap"><b>POWER &amp; CORRIDORS INTELLIGENCE</b> · INDEPENDENT INTELLIGENCE ON MOVEMENT, INFRASTRUCTURE &amp; RISK</div><div class="rule"></div>'
+    html+=(opening+'<div class="issue-date">ISSUED '+_h(issued)+'</div><h1 class="title">'+_h(title)+'</h1><div class="meta">Event date '+_h(_date(record.get("start_date")))+
+        ' · Verification '+_h(record.get("verification_status") or "Unrecorded")+'</div>')
     html+=('<div class="metrics"><div class="metric"><small>Current risk</small><strong>'+_h(outlook.get("current_risk") or "Not rated")+'</strong></div><div class="metric"><small>Confidence</small><strong>'+
         _h(outlook.get("confidence") or "Unassigned")+'</strong></div><div class="metric"><small>Assessed</small><strong>'+_h(_date(outlook.get("assessed_at")))+'</strong></div></div>')
     if outlook.get("valid_until"): html+='<p class="meta">Assessment valid until: '+_h(outlook["valid_until"])+' (check current conditions before reliance).</p>'
@@ -131,6 +130,8 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     if triggers:
         html+='<div class="section"><h2>Decision triggers</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in triggers)+'</ul></div>'
     html+='<div class="section"><h2>GEOGRAPHIC &amp; INFRASTRUCTURE EXPOSURE</h2>'+map_html+table(["Asset","Mode","Recorded relationship","Impact status"],infra)+'</div>'
+    if edited.get("wider_context") or edited.get("connected_developments_synthesis"):
+        html+='<div class="section"><h2>WIDER CONTEXT &amp; CONNECTED DEVELOPMENTS</h2>'+_paragraph(edited.get("wider_context") or edited.get("connected_developments_synthesis"))+'</div>'
     html+='<div class="section"><h2>RELATED DEVELOPMENTS</h2>'+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
     if bottom_line and bottom_line not in (key_judgment,meaning):
         html+='<div class="section"><h2>BOTTOM LINE</h2><div class="box">'+_paragraph(bottom_line)+'</div></div>'
