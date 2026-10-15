@@ -5,14 +5,15 @@ from pc_report_ai import _api, MODEL
 
 FIELDS=("key_judgment","what_happened","why_it_matters","operational_significance",
         "commercial_significance","alternative_explanation","uncertainties",
-        "risk_outlook","monitoring_analysis","decision_triggers","bottom_line")
+        "risk_outlook","monitoring_analysis","decision_triggers","bottom_line","historical_context","wider_context")
 
-def draft_event_brief(api_key, record, assessment, outlook, evidence, related, assets, metadata):
+def draft_event_brief(api_key, record, assessment, outlook, evidence, related, assets, metadata, publication_context=None):
     if not api_key: raise ValueError("Configure the report API key first")
     claims=evidence or (metadata.get("source_claims") or [])
     context={"event":record,"approved_assessment":assessment,"published_judgment":outlook,
              "sources":claims,"related_developments":[{"relationship":edge,"event":event} for edge,event in related],
-             "infrastructure":assets,"editorial_context":metadata}
+             "infrastructure":assets,"editorial_context":metadata,
+             "knowledge_graph_context":publication_context or {}}
     system="""You are the senior editor of Power & Corridors, writing a publishable Incident Intelligence Brief.
 Write clear professional English prose, not a database summary. Use only the supplied evidence.
 Distinguish reported events, official claims, unconfirmed matters and P&C judgments. Never invent
@@ -21,7 +22,7 @@ Never represent contextual infrastructure as damaged. The key judgment, implicat
 must serve DIFFERENT functions and must not repeat one another. Explain how an event might propagate
 through aviation, rail, road, maritime, energy and commercial operations ONLY when the recorded links
 support that analysis. Related event links describe context, not proof of shared actor or causation.
-Use plain-language statuses, never internal tokens such as reported_secondary, snake_case identifiers,
+Use the knowledge graph context to explain source-backed subject history (including past names, dated\ncorporate roles and sanctions only when linked). Separate legal designations from research queues.\nDo not infer a direct connection between separate enforcement actions, and identify missing coverage.\nDraft historical_context and wider_context as distinct concise narrative sections.\nUse plain-language statuses, never internal tokens such as reported_secondary, snake_case identifiers,
 entity IDs or unqualified NOT ESTABLISHED repeated in prose.
 For monitoring, write 3-6 distinct entries, each explaining indicator, significance and what change would
 alter the assessment. State a forecast horizon only if one exists in the approved source context.
