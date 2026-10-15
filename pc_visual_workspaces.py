@@ -239,9 +239,9 @@ def _render_pc_assessments(db,core,term):
         search_columns=('geography','headline','region_code','explanation'),
         order=(('as_known_at',True),('assessment_id',False)),limit=100)
     if error:
-        st.warning('The P&C assessment feed is unavailable. Load the assessment SQL update and refresh the database.')
-        with st.expander('Assessment connection details'): st.caption(error)
-        return
+        # The global feed is independent; legacy regional view failure must not suppress it.
+        rows=[]
+        st.caption('Earlier regional assessment feed is temporarily unavailable; published global assessments remain accessible.')
     # Published global judgments can supplement the legacy regional delivery view.
     # Event observations alone never receive an automatically inferred rating.
     global_rows,global_error=_load(db,'pc_global_risk_briefings',limit=200)
