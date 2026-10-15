@@ -310,7 +310,14 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                 if isinstance(source,str) and source.startswith(("https://","http://")):
                     st.link_button("Read source ↗",source,key="pc_exec_evidence_"+event_id+"_"+str(i))
     else:
-        st.warning("No separate evidence observations recorded. Source provenance must be completed before treating this dossier as fully substantiated.")
+        principal = _one(sb, "pc_sources", "source_id", record.get("source_id")) if record.get("source_id") else {}
+        source_url = principal.get("url") or meta.get("source_url")
+        if principal or source_url:
+            st.caption("Principal event source (not a substitute for claim-level evidence observations).")
+            st.write(principal.get("source_name") or principal.get("publisher") or "Source linked in event record")
+            if isinstance(source_url,str) and source_url.startswith(("https://","http://")):
+                st.link_button("Read principal source ↗",source_url,key="pc_exec_principal_"+event_id)
+        st.warning("No separate evidence observations recorded. Source provenance and claim-level review require completion.")
     if related:
         st.markdown("#### Connected developments")
         for link, other in related[:8]:
