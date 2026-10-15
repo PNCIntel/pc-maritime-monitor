@@ -283,6 +283,7 @@ def _render_pc_assessments(db,core,term):
     counts[0].metric('Published assessments',len(selected))
     counts[1].metric('Coverage areas',len({str(r.get('geography') or r.get('region_code')) for r in selected}))
     counts[2].metric('Linked companies',len({c.get('entity_id') for r in selected for c in (r.get('company_exposure') or []) if c.get('entity_id')}))
+    selected.sort(key=lambda r: ( _assessment_freshness(r)=='CURRENT', str(r.get('assessment_date') or r.get('as_known_at') or '')),reverse=True)
     st.markdown('#### Risk at a glance')
     def badge(value):
         value=str(value or 'INSUFFICIENT EVIDENCE')
@@ -311,6 +312,7 @@ def _render_pc_assessments(db,core,term):
         qualifier=qualification(r)
         table+='<tr><td>'+escape(str(r.get('headline') or r.get('geography') or 'Assessment'))+'</td><td>'+badge(r.get('risk_level'))+'</td><td>'+escape(str(summary))+'</td><td>'+escape(outlook(r))+(('<div><small>'+escape(qualifier)+'</small></div>') if qualifier else '')+'</td><td>'+escape(indicators(r))+'</td></tr>'
     st.markdown(table+'</tbody></table>',unsafe_allow_html=True)
+    st.caption('Current and more recently assessed judgments appear first; expired snapshots remain clearly qualified.')
     st.caption('Independent qualitative judgments, not numerical probabilities. Outlook is displayed only when explicitly recorded in the published assessment; no rating is inferred from incident severity, trend or review dates.')
     with st.expander('Key judgments across this selection',expanded=True):
         for r in selected:
