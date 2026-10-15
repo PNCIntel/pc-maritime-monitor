@@ -233,6 +233,92 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                 st.link_button("Designation source ↗",url)
         st.caption("A vessel's involvement in an incident does not establish listing, designation or liability.")
 
+    # Intelligence-first executive dossier; built from existing canonical records.
+    # Never convert nearby infrastructure or incident severity into confirmed impact/risk.
+    assessments = _get(sb, "pc_v07_event_assessments", "event_id", event_id, 100)
+    assessments.sort(key=lambda a: (str(a.get("version") or ""), str(a.get("assessment_id") or "")), reverse=True)
+    approved = [a for a in assessments if str(a.get("assessment_status") or "").lower() in
+                ("published", "approved", "reviewed")]
+    assessment = approved[0] if approved else {}
+    if not assessment and assessments:
+        st.caption("An event analysis exists in draft; it is not presented as an approved P&C judgment.")
+    outlooks = _get(sb, "pc_event_intelligence_outlooks", "event_id", event_id, 30)
+    outlooks = [o for o in outlooks if str(o.get("publication_status") or "") == "published"]
+    outlooks.sort(key=lambda o: str(o.get("assessed_at") or ""), reverse=True)
+    outlook = outlooks[0] if outlooks else {}
+    st.markdown("## Intelligence assessment")
+    st.caption("Global, multimodal P&C dossier · event facts, analysis and forward outlook are distinct.")
+    risk_value = outlook.get("current_risk") or "Not independently assessed"
+    confidence = outlook.get("confidence") or "Not independently assessed"
+    x, y, z = st.columns(3)
+    x.metric("Current Risk", str(risk_value))
+    y.metric("Confidence", str(confidence))
+    z.metric("Evidence observations", len(evidence))
+    st.caption("Event verification: "+_label(record.get("verification_status"))+
+               " · Last assessed: "+_date(outlook.get("assessed_at") or assessment.get("updated_at"))+
+               " · An incident severity is not a regional risk rating.")
+    st.markdown("#### P&C assessment")
+    st.write(outlook.get("pc_assessment") or assessment.get("pc_assessment") or
+             assessment.get("what_it_means") or "No approved P&C assessment has been published for this event.")
+    st.markdown("#### Risk Outlook")
+    st.write(outlook.get("risk_outlook") or "A forward outlook has not yet been published.")
+    st.markdown("#### Monitoring Indicators")
+    indicators = outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or []
+    if isinstance(indicators, str):
+        indicators = [indicators]
+    if isinstance(indicators, dict):
+        indicators = [str(k)+": "+str(v) for k,v in indicators.items()]
+    if indicators:
+        for indicator in indicators: st.markdown("- "+str(indicator))
+    else:
+        st.caption("No reviewed monitoring indicators published.")
+    st.markdown("#### Spatial context and connected infrastructure")
+    points, asset_table = [], []
+    for link in asset_links:
+        aid = str(link.get("asset_id") or "")
+        asset = assets.get(aid) or {}
+        relation = str(link.get("relation_type") or link.get("role") or "linked context")
+        if not asset: continue
+        asset_table.append({"Infrastructure":asset.get("name") or aid,
+                            "Mode / type":asset.get("asset_type") or "Not classified",
+                            "Recorded relationship":_label(relation),
+                            "Impact status":link.get("impact_status") or "Direct impact not established"})
+        try:
+            lat, lon = float(asset.get("latitude")), float(asset.get("longitude"))
+            if -90 <= lat <= 90 and -180 <= lon <= 180 and (lat,lon)!=(0,0):
+                points.append({"lat":lat,"lon":lon,"name":asset.get("name") or aid})
+        except (ValueError,TypeError): pass
+    if points:
+        import pandas as pd
+        st.map(pd.DataFrame(points),latitude="lat",longitude="lon",use_container_width=True)
+        st.caption("Stored coordinates of explicitly linked infrastructure, NOT incident coordinates or evidence of damage.")
+    else:
+        st.caption("No source-linked facility coordinates available; exact incident coordinates are not inferred.")
+    if asset_table:
+        import pandas as pd
+        st.dataframe(pd.DataFrame(asset_table).drop_duplicates(),hide_index=True,use_container_width=True)
+    else:
+        st.caption("No explicitly linked infrastructure yet. Relevant facilities require documented contextual or direct event links.")
+    st.markdown("#### Evidence and provenance")
+    if evidence:
+        for i, ev in enumerate(evidence):
+            with st.expander(str(ev.get("document_title") or ev.get("notice_reference") or ev.get("source_name") or "Evidence observation")+" · "+_date(ev.get("published_at"))):
+                st.caption("Claim status: "+_label(ev.get("verification_status"))+
+                           " · observed: "+_date(ev.get("observed_at")))
+                st.write(ev.get("claim") or "Claim not transcribed.")
+                source = ev.get("original_url") or ev.get("source_url")
+                if isinstance(source,str) and source.startswith(("https://","http://")):
+                    st.link_button("Read source ↗",source,key="pc_exec_evidence_"+event_id+"_"+str(i))
+    else:
+        st.warning("No separate evidence observations recorded. Source provenance must be completed before treating this dossier as fully substantiated.")
+    if related:
+        st.markdown("#### Connected developments")
+        for link, other in related[:8]:
+            st.write(_date(other.get("start_date"))+" · "+str(other.get("title") or other.get("event_id"))+
+                     " · "+_label(link.get("relationship_type")))
+        st.caption("Only recorded event-to-event associations; no causal inference.")
+    st.divider()
+
     # Shared production graph navigation across Intelligence and Trade.
     # Coordinates are not inferred from related airport or facility identities.
     from pc_event_navigation import render_event_connections
