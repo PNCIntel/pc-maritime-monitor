@@ -269,115 +269,137 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
           "confidence":judgment.get("confidence"),"pc_assessment":judgment.get("risk_rationale") or judgment.get("current_risk"),
           "risk_outlook":judgment.get("risk_outlook"),"monitoring_indicators":judgment.get("monitoring_indicators"),
           "assessed_at":judgment.get("assessed_at"),"valid_until":judgment.get("valid_until")}}
-    st.markdown("## Intelligence assessment")
-    st.caption("Global, multimodal P&C dossier · event facts, analysis and forward outlook are distinct.")
-    risk_value = outlook.get("current_risk")
-    confidence = outlook.get("confidence")
-    x, y, z = st.columns(3)
-    x.metric("Current Risk", str(risk_value or "Pending assessment"))
-    y.metric("Confidence", str(confidence or "Not assigned"))
-    z.metric("Source records", len(evidence))
-    if outlook.get("valid_until"):
-        import datetime as dt
-        try:
-            expiry=dt.datetime.fromisoformat(str(outlook["valid_until"]).replace("Z","+00:00"))
-            if expiry.tzinfo is None: expiry=expiry.replace(tzinfo=dt.timezone.utc)
-            if expiry <= dt.datetime.now(dt.timezone.utc):
-                st.warning("Earlier assessment, last assessed "+_date(outlook.get("assessed_at"))+". Current conditions require revalidation.")
-        except (TypeError,ValueError): pass
-    st.caption("Event verification: "+_label(record.get("verification_status"))+
-               " · Last assessed: "+_date(outlook.get("assessed_at") or assessment.get("updated_at"))+
-               " · An incident severity is not a regional risk rating.")
-    st.markdown("#### P&C assessment")
-    st.write(outlook.get("pc_assessment") or assessment.get("pc_assessment") or
-             assessment.get("what_it_means") or meta.get("pc_assessment") or meta.get("executive_summary") or
-             record.get("description") or "Assessment pending source review.")
-    if not outlook and not assessment:
-        st.caption("Event narrative / existing editorial context; not a separately approved risk rating.")
-    st.markdown("#### Risk Outlook")
-    st.write(outlook.get("risk_outlook") or meta.get("risk_outlook") or
-             "Outlook pending evidence-backed publication.")
-    if not outlook: st.caption("Provisional monitoring interpretation; no separately published outlook or rating.")
-    st.markdown("#### Monitoring Indicators")
-    indicators = outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators") or []
-    if isinstance(indicators, str):
-        indicators = [indicators]
-    if isinstance(indicators, dict):
-        indicators = [str(k)+": "+str(v) for k,v in indicators.items()]
-    if indicators:
-        for indicator in indicators: st.markdown("- "+str(indicator))
-    else:
-        st.caption("No reviewed monitoring indicators published.")
-    st.markdown("#### Spatial context and connected infrastructure")
-    points, asset_table = [], []
-    for link in asset_links:
-        aid = str(link.get("asset_id") or "")
-        asset = assets.get(aid) or {}
-        relation = str(link.get("relation_type") or link.get("role") or "linked context")
-        if not asset: continue
-        asset_table.append({"Infrastructure":asset.get("name") or aid,
-                            "Mode / type":asset.get("asset_type") or "Not classified",
-                            "Recorded relationship":_label(relation),
-                            "Impact status":link.get("impact_status") or "Direct impact not established"})
-        try:
-            lat, lon = float(asset.get("latitude")), float(asset.get("longitude"))
-            if -90 <= lat <= 90 and -180 <= lon <= 180 and (lat,lon)!=(0,0):
-                points.append({"lat":lat,"lon":lon,"name":asset.get("name") or aid})
-        except (ValueError,TypeError): pass
-    if points:
+    # Editorial questions precede visual evidence. Graphs must be earned by actual data.
+    st.markdown("## Intelligence dossier")
+    st.caption(_date(record.get("start_date"))+" · "+_label(record.get("verification_status"))+
+               " · Source-qualified analysis; context is not confirmed impact.")
+    left,right=st.columns([1.35,1],gap="large")
+    with left:
+        a,b,c=st.columns(3)
+        a.metric("Current Risk",str(outlook.get("current_risk") or "Not rated"))
+        b.metric("Confidence",str(outlook.get("confidence") or "Unassigned"))
+        c.metric("Assessed",_date(outlook.get("assessed_at") or assessment.get("updated_at")))
+        if outlook.get("valid_until"):
+            import datetime as dt
+            try:
+                expires=dt.datetime.fromisoformat(str(outlook["valid_until"]).replace("Z","+00:00"))
+                if expires.tzinfo is None: expires=expires.replace(tzinfo=dt.timezone.utc)
+                if expires <= dt.datetime.now(dt.timezone.utc):
+                    st.warning("Historical assessment: last assessed "+_date(outlook.get("assessed_at"))+
+                               ". Current conditions require revalidation.")
+            except (TypeError,ValueError): pass
+        st.markdown("### What happened?")
+        st.write(assessment.get("what_happened") or record.get("description") or
+                 "An adequately sourced incident narrative has not yet been recorded.")
+        st.markdown("### What does it mean?")
+        st.write(outlook.get("pc_assessment") or assessment.get("pc_assessment") or
+                 assessment.get("what_it_means") or meta.get("pc_assessment") or
+                 "An approved analytical judgment has not yet been recorded.")
+        st.markdown("### What could happen next?")
+        st.write(outlook.get("risk_outlook") or meta.get("risk_outlook") or
+                 "An evidence-backed outlook has not yet been published.")
+        st.markdown("### What are we monitoring, and why?")
+        indicators=outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators") or []
+        if isinstance(indicators,dict): indicators=[str(k)+": "+str(v) for k,v in indicators.items()]
+        if isinstance(indicators,str): indicators=[indicators]
+        if isinstance(indicators,list) and indicators:
+            for item in indicators: st.markdown("- "+str(item))
+        else: st.caption("No published monitoring indicators.")
+        if assessment.get("operational_impact") or assessment.get("commercial_impact"):
+            with st.expander("Operational and commercial implications"):
+                if assessment.get("operational_impact"): st.write(assessment["operational_impact"])
+                if assessment.get("commercial_impact"): st.write(assessment["commercial_impact"])
+    with right:
+        st.markdown("### Geographic context")
         import pandas as pd
-        st.map(pd.DataFrame(points),latitude="lat",longitude="lon",use_container_width=True)
-        st.caption("Stored coordinates of explicitly linked infrastructure, NOT incident coordinates or evidence of damage.")
-    else:
-        st.caption("No source-linked facility coordinates available; exact incident coordinates are not inferred.")
-    if not asset_table and isinstance(meta.get("infrastructure_context"),list):
-        import pandas as pd
-        context=[{"Infrastructure":v.get("name"),"Mode / type":v.get("mode") or "Context",
-                  "Recorded relationship":v.get("relationship") or v.get("role"),
-                  "Impact status":v.get("status") or "No direct impact established"}
-                 for v in meta["infrastructure_context"] if isinstance(v,dict)]
-        if context:
-            st.caption("Documented analytical context, not asserted direct event-to-asset links.")
-            st.dataframe(pd.DataFrame(context),hide_index=True,use_container_width=True)
-    if asset_table:
-        import pandas as pd
-        st.dataframe(pd.DataFrame(asset_table).drop_duplicates(),hide_index=True,use_container_width=True)
-    else:
-        st.caption("No explicitly linked infrastructure yet. Relevant facilities require documented contextual or direct event links.")
-    st.markdown("#### Evidence and provenance")
-    if evidence:
-        for i, ev in enumerate(evidence):
-            with st.expander(str(ev.get("document_title") or ev.get("notice_reference") or ev.get("source_name") or "Evidence observation")+" · "+_date(ev.get("published_at"))):
-                st.caption("Claim status: "+_label(ev.get("verification_status"))+
-                           " · observed: "+_date(ev.get("observed_at")))
-                st.write(ev.get("claim") or "Claim not transcribed.")
-                source = ev.get("original_url") or ev.get("source_url")
-                if isinstance(source,str) and source.startswith(("https://","http://")):
-                    st.link_button("Read source ↗",source,key="pc_exec_evidence_"+event_id+"_"+str(i))
-    else:
-        claims=meta.get("source_claims") or []
-        for i,claim in enumerate(claims):
-            if not isinstance(claim,dict): continue
-            st.markdown("**"+str(claim.get("publisher") or "Recorded source")+"**")
-            st.write(claim.get("claim") or "")
-            st.caption("Status: "+str(claim.get("verification") or "Unreviewed"))
-            url=claim.get("url")
+        points=[]
+        # Facility pins represent known infrastructure, never inferred incident coordinates.
+        facility_rows=[]
+        for link in asset_links:
+            asset=assets.get(str(link.get("asset_id") or "")) or {}
+            if not asset: continue
+            facility_rows.append({"Asset":asset.get("name") or link.get("asset_id"),
+                "Mode":asset.get("asset_type") or "Other",
+                "Relationship":_label(link.get("relation_type") or link.get("role")),
+                "Impact":link.get("impact_status") or "Not established"})
+            try:
+                lat,lon=float(asset.get("latitude")),float(asset.get("longitude"))
+                if -90<=lat<=90 and -180<=lon<=180 and (lat,lon)!=(0,0):
+                    points.append({"lat":lat,"lon":lon,"name":asset.get("name") or str(link.get("asset_id"))})
+            except (ValueError,TypeError): pass
+        # Map presence is unconditional. Without verified coordinates, explain the gap.
+        if points:
+            st.map(pd.DataFrame(points).drop_duplicates(),latitude="lat",longitude="lon",use_container_width=True)
+            st.caption("Mapped facility coordinates: contextual links, not incident location or damage.")
+        else:
+            # Use a published approximate geographic reference only when explicitly sourced in metadata.
+            geographic=meta.get("geographic_reference") or {}
+            if isinstance(geographic,dict) and geographic.get("source_url"):
+                try:
+                    lat,lon=float(geographic["latitude"]),float(geographic["longitude"])
+                    if -90<=lat<=90 and -180<=lon<=180:
+                        st.map(pd.DataFrame([{"lat":lat,"lon":lon}]),latitude="lat",longitude="lon",use_container_width=True)
+                        st.caption("Approximate sourced regional reference, NOT incident coordinates: "+str(geographic.get("label") or "regional context"))
+                except (KeyError,ValueError,TypeError): pass
+            st.info("Verified mappable coordinates are not available for this event. Exact incident location has not been inferred.")
+        st.markdown("### Connected infrastructure")
+        if facility_rows:
+            st.dataframe(pd.DataFrame(facility_rows).drop_duplicates(),hide_index=True,use_container_width=True)
+        elif isinstance(meta.get("infrastructure_context"),list) and meta["infrastructure_context"]:
+            st.caption("Documented contextual network, not verified direct impact.")
+            for item in meta["infrastructure_context"]:
+                if isinstance(item,dict):
+                    st.markdown("**"+str(item.get("name") or "Infrastructure")+"** · "+
+                                str(item.get("mode") or "Context"))
+                    st.caption(str(item.get("relationship") or item.get("role") or "")+
+                               " · "+str(item.get("status") or "Direct impact not established"))
+        else: st.caption("No infrastructure relationship recorded.")
+    st.divider()
+    evidence_tab,network_tab,history_tab=st.tabs(["Evidence & sources","Connected developments","Figures & chronology"])
+    with evidence_tab:
+        claims=evidence if evidence else [v for v in (meta.get("source_claims") or []) if isinstance(v,dict)]
+        st.caption(str(len(claims))+" attributed source records; editorial metadata references are not independent claim-level verification.")
+        if not claims: st.info("No source claims have been attached to this record.")
+        for i,ev in enumerate(claims):
+            publisher=ev.get("publisher") or ev.get("source_name") or ev.get("document_title") or "Source"
+            st.markdown("**"+str(publisher)+"**")
+            st.write(ev.get("claim") or "Claim details not recorded.")
+            st.caption("Source status: "+_label(ev.get("verification_status") or ev.get("verification"))+
+                       " · Publication: "+_date(ev.get("published_at")))
+            url=ev.get("original_url") or ev.get("source_url") or ev.get("url")
             if isinstance(url,str) and url.startswith(("https://","http://")):
-                st.link_button("Read source ↗",url,key="pc_context_source_"+event_id+"_"+str(i))
-        principal = _one(sb, "pc_sources", "source_id", record.get("source_id")) if record.get("source_id") else {}
-        source_url = principal.get("url") or meta.get("source_url")
-        if principal or source_url:
-            st.caption("Principal event source (not a substitute for claim-level evidence observations).")
-            st.write(principal.get("source_name") or principal.get("publisher") or "Source linked in event record")
-            if isinstance(source_url,str) and source_url.startswith(("https://","http://")):
-                st.link_button("Read principal source ↗",source_url,key="pc_exec_principal_"+event_id)
-        st.warning("No separate evidence observations recorded. Source provenance and claim-level review require completion.")
-    if related:
-        st.markdown("#### Connected developments")
-        for link, other in related[:8]:
-            st.write(_date(other.get("start_date"))+" · "+str(other.get("title") or other.get("event_id"))+
-                     " · "+_label(link.get("relationship_type")))
-        st.caption("Only recorded event-to-event associations; no causal inference.")
+                st.link_button("Read original source ↗",url,key="dossier_source_"+event_id+"_"+str(i))
+            st.divider()
+    with network_tab:
+        if related:
+            st.caption("Documented editorial or graph relationships. No shared perpetrator or causation inferred.")
+            for i,(link,other) in enumerate(related):
+                with st.container(border=True):
+                    st.caption(_date(other.get("start_date"))+" · "+_label(other.get("verification_status"))+
+                               " · "+_label(link.get("relationship_type")))
+                    st.markdown("**"+str(other.get("title") or other.get("event_id"))+"**")
+                    if link.get("rationale"): st.write(link["rationale"])
+                    st.button("Open dossier →",key="related_dossier_"+event_id+"_"+str(i),
+                              on_click=navigate,args=("event",str(other["event_id"]),str(other.get("title") or "")))
+        else: st.caption("No explicitly related developments recorded.")
+    with history_tab:
+        # Only generate a figure when records support it; avoid decorative or fabricated charts.
+        dated=[{"Date":_date(u.get("occurred_at") or u.get("reported_at")),
+                "Development":u.get("summary") or u.get("update_type") or "Update"} for u in updates]
+        if dated:
+            st.dataframe(pd.DataFrame(dated),hide_index=True,use_container_width=True)
+        elif related:
+            st.dataframe(pd.DataFrame([{"Date":_date(o.get("start_date")),
+                "Development":o.get("title"),"Relationship":_label(l.get("relationship_type"))}
+                for l,o in related]),hide_index=True,use_container_width=True)
+        else: st.caption("No additional dated observations available for a timeline.")
+        types=[str((assets.get(str(l.get("asset_id") or "")) or {}).get("asset_type") or "")
+               for l in asset_links]
+        types=[t for t in types if t]
+        if len(types)>=2 and len(set(types))>=2:
+            st.markdown("**Linked infrastructure by mode**")
+            st.bar_chart(pd.Series(types).value_counts())
+            st.caption("Recorded link counts only; not damage, traffic or financial exposure.")
     st.divider()
     if st.toggle("Show underlying record, chronology and specialist links", value=False, key="pc_full_dossier_"+event_id):
 
