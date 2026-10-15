@@ -504,18 +504,20 @@ def _render_related_below(db,core):
             if not isinstance(metadata,dict):metadata={}
             prior=metadata.get('pc_risk_analysis') or {}
             if not isinstance(prior,dict):prior={}
-            if version or prior:
+            judgment_rows,jerr=_load(db,'pc_event_assessment_judgments',filters=(('event_id','eq',oid),),limit=1)
+            judgment=judgment_rows[0] if not jerr and judgment_rows else {}
+            if version or prior or judgment:
                 st.markdown('#### Event-level P&C analysis')
                 st.caption('Versioned event analysis: '+str(version.get('assessment_status') or prior.get('assessment_type') or 'stored draft')+' · Approval: '+str(prior.get('analyst_approval') or 'not recorded'))
-                rating=prior.get('published_rating') if prior.get('analyst_approval')=='approved' else None
+                rating=judgment.get('current_risk') if judgment.get('judgment_status')=='published' else (prior.get('published_rating') if prior.get('analyst_approval')=='approved' else None)
                 st.markdown('**Current Risk**')
                 st.write(rating or 'Not rated · source-qualified analysis is not an approved rating')
                 st.markdown('**P&C Assessment**')
                 st.write(version.get('pc_assessment') or version.get('what_it_means') or prior.get('finding') or 'Substantive assessment pending')
                 st.markdown('**Risk Outlook**')
-                st.write(prior.get('outlook') or 'Not yet assessed')
+                st.write(judgment.get('risk_outlook') or prior.get('outlook') or 'Not yet assessed')
                 st.markdown('**Monitoring Indicators**')
-                monitoring=version.get('monitoring_indicators') or prior.get('monitoring_indicators') or metadata.get('monitoring') or []
+                monitoring=judgment.get('monitoring_indicators') or version.get('monitoring_indicators') or prior.get('monitoring_indicators') or metadata.get('monitoring') or []
                 if isinstance(monitoring,list):
                     for indicator in monitoring: st.write('• '+str(indicator))
             st.markdown('#### Linked situation / regional P&C assessment')
