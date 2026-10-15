@@ -281,8 +281,24 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                     "impact_status":link.get("impact_status") or "Not established"})
         if not export_assets:
             export_assets=[v for v in meta.get("infrastructure_context",[]) if isinstance(v,dict)]
-        from pc_geographic_context import locality_point
-        pdf_place=locality_point(str(meta.get("geographic_scope") or "")+" "+str(record.get("title") or ""))
+        from pc_geographic_context import named_place_point, locality_point
+        pdf_place=None
+        geo=meta.get("geographic_reference") or {}
+        if isinstance(geo,dict) and geo.get("source_url"):
+            try:
+                lat,lon=float(geo["latitude"]),float(geo["longitude"])
+                if -85<=lat<=85 and -180<=lon<=180:
+                    pdf_place={"name":geo.get("label") or "Sourced geographic reference",
+                               "lat":lat,"lon":lon,"source":geo["source_url"],"zoom":8}
+            except (ValueError,KeyError,TypeError): pass
+        if not pdf_place:
+            for name in (meta.get("geographic_scope"),rec.get("location_name") if isinstance(rec,dict) else None,
+                         record.get("location_name"),record.get("location_label"),meta.get("location_name"),record.get("country")):
+                if isinstance(name,str) and name.strip():
+                    pdf_place=named_place_point(name)
+                    if pdf_place: break
+        if not pdf_place:
+            pdf_place=locality_point(str(record.get("title") or ""))
         pdf_bytes=create_incident_brief(record,assessment,outlook,evidence,related,export_assets,meta,pdf_place)
         st.download_button("↓ Export Intelligence Brief · PDF",data=pdf_bytes,
             file_name="PC_Incident_Brief_"+str(event_id).replace("/","_")+".pdf",
