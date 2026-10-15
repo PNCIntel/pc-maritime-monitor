@@ -24,14 +24,33 @@ def render_event_connections(db, event_id, navigate, *, key_prefix='connected', 
         st.caption('Event connections unavailable.'); return
     entities, ee = _query(db, 'pc_event_entity_links', 'event_id', event_id)
     assets, ae = _query(db, 'pc_event_asset_links', 'event_id', event_id)
-    if ee or ae:
+    graph, ge = _query(db, 'pc_event_links', 'event_id', event_id)
+    if ee or ae or ge:
         st.caption('Some production relationships could not be retrieved; displayed links may be incomplete.')
     unique_entities = {(str(r.get('entity_id')), str(r.get('role')), str((r.get('metadata') or {}).get('specific_relationship') or '')):r for r in entities if r.get('entity_id')}
     unique_assets = {(str(r.get('asset_id')), str(r.get('relation_type'))):r for r in assets if r.get('asset_id')}
+    # Merge explicit source-attributed generic graph edges into the same existing navigation.
+    # Do not imply that membership, location context, and impact are equivalent.
+    for r in graph:
+        kind = str(r.get('linked_type') or '').lower()
+        oid = str(r.get('linked_id') or '')
+        rel = str(r.get('relationship') or 'related')
+        if not oid:
+            continue
+        if kind in ('entity', 'company', 'organisation', 'organization'):
+            if not any(k[0] == oid for k in unique_entities):
+                unique_entities[(oid, rel, rel)] = {'entity_id': oid, 'role': rel,
+                    'metadata': {'specific_relationship': rel},
+                    'verification_status': r.get('confidence') or 'recorded'}
+        elif kind in ('asset', 'infrastructure', 'port', 'canal'):
+            if not any(k[0] == oid for k in unique_assets):
+                unique_assets[(oid, rel)] = {'asset_id': oid, 'relation_type': rel,
+                    'metadata': {'specific_relationship': rel},
+                    'impact_status': 'Context only — no direct impact inferred'}
     count = len({k[0] for k in unique_entities}) + len({k[0] for k in unique_assets})
     st.caption(f'Canonical graph: {len({k[0] for k in unique_entities})} organisations · {len({k[0] for k in unique_assets})} facilities')
     if not count:
-        if not ee and not ae:
+        if not ee and not ae and not ge:
             st.caption('Article-only in this relationship layer — canonical participants or assets need reconciliation. Specialist sanctions links may exist separately.')
         return
     with st.expander('Open connected companies and infrastructure', expanded=not compact):
