@@ -306,22 +306,32 @@ def _render_pc_assessments(db,core,term):
         if not isinstance(values,list): values=[]
         values=[str(v).strip() for v in values if str(v).strip()]
         return '; '.join(values) if values else 'Indicators not yet recorded'
-    table='<table class="pc-risk-grid"><thead><tr><th>Assessment</th><th>Current Risk</th><th>P&C Assessment</th><th>Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
-    for r in selected:
-        summary=r.get('executive_summary') or r.get('explanation') or 'P&C assessment not yet recorded'
-        qualifier=qualification(r)
-        table+='<tr><td>'+escape(str(r.get('headline') or r.get('geography') or 'Assessment'))+'</td><td>'+badge(r.get('risk_level'))+'</td><td>'+escape(str(summary))+'</td><td>'+escape(outlook(r))+(('<div><small>'+escape(qualifier)+'</small></div>') if qualifier else '')+'</td><td>'+escape(indicators(r))+'</td></tr>'
-    st.markdown(table+'</tbody></table>',unsafe_allow_html=True)
-    st.caption('Current and more recently assessed judgments appear first; expired snapshots remain clearly qualified.')
+    current_rows=[r for r in selected if _assessment_freshness(r)=='CURRENT']
+    earlier_rows=[r for r in selected if _assessment_freshness(r)!='CURRENT']
+    def render_table(items):
+        table='<table class="pc-risk-grid"><thead><tr><th>Assessment</th><th>Current Risk</th><th>P&C Assessment</th><th>Risk Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
+        for r in items:
+            summary=r.get('executive_summary') or r.get('explanation') or 'P&C assessment not yet recorded'
+            qualifier=qualification(r)
+            table+='<tr><td>'+escape(str(r.get('headline') or r.get('geography') or 'Assessment'))+'</td><td>'+badge(r.get('risk_level'))+'</td><td>'+escape(str(summary))+'</td><td>'+escape(outlook(r))+(('<div><small>'+escape(qualifier)+'</small></div>') if qualifier else '')+'</td><td>'+escape(indicators(r))+'</td></tr>'
+        st.markdown(table+'</tbody></table>',unsafe_allow_html=True)
+    if current_rows:
+        render_table(current_rows)
+    else:
+        st.info('No currently valid published assessments in this selection.')
+    if earlier_rows:
+        with st.expander('Earlier assessment snapshots ('+str(len(earlier_rows))+') — historical, not current',expanded=False):
+            st.caption('Retained for context with explicit last-assessed dates and qualifications.')
+            render_table(earlier_rows)
     st.caption('Independent qualitative judgments, not numerical probabilities. Outlook is displayed only when explicitly recorded in the published assessment; no rating is inferred from incident severity, trend or review dates.')
     with st.expander('Key judgments across this selection',expanded=True):
-        for r in selected:
+        for r in current_rows:
             st.markdown('**'+str(r.get('headline') or r.get('geography'))+'**')
             st.write(r.get('executive_summary') or r.get('explanation') or '')
     st.markdown('#### Explore an assessment')
     choices={str(r['assessment_id']):str(r.get('headline') or r.get('geography')) for r in selected}
-    if st.session_state.get('pc_brief_detail') not in choices:
-        st.session_state['pc_brief_detail']=next(iter(choices))
+    if st.session_state.get('pc_brief_detail') not in choices or (current_rows and st.session_state.get('pc_brief_detail') in {str(v['assessment_id']) for v in earlier_rows}):
+        st.session_state['pc_brief_detail']=str(current_rows[0]['assessment_id']) if current_rows else next(iter(choices))
     chosen=st.selectbox('Detailed briefing',list(choices),format_func=lambda aid:choices[aid],key='pc_brief_detail')
     for row in [r for r in selected if str(r['assessment_id'])==chosen]:
         aid=str(row['assessment_id'])
