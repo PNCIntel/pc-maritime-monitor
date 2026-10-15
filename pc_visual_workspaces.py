@@ -1182,7 +1182,7 @@ def _security(db,core):
                 .pc-risk-grid td{padding:12px;border-bottom:1px solid #8193a544;vertical-align:top;line-height:1.48;overflow-wrap:anywhere}
                 .pc-risk-grid th:nth-child(1){width:19%}.pc-risk-grid th:nth-child(2){width:12%}.pc-risk-grid th:nth-child(3){width:28%}.pc-risk-grid th:nth-child(4){width:23%}.pc-risk-grid th:nth-child(5){width:18%}
                 .pc-pill{display:inline-block;padding:4px 9px;border-radius:5px;font-weight:700;font-size:.75rem;white-space:normal}
-                .pc-conf{display:inline-block;margin-top:7px;padding:3px 8px;border-radius:12px;font-size:.71rem;font-weight:700;border:1px solid transparent}.pc-conf-high{background:#d8f2e8;color:#116549;border-color:#7bc8a4}.pc-conf-moderate{background:#fff0cf;color:#765000;border-color:#e0bd64}.pc-conf-low{background:#fce3e1;color:#8b302d;border-color:#dfa6a0}.pc-conf-unknown{background:#e7edf3;color:#40556a;border-color:#c1cfdb}
+                .pc-risk-legend{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px}.pc-risk-legend .pc-conf{margin-top:0}.pc-conf{display:inline-block;margin-top:7px;padding:3px 8px;border-radius:12px;font-size:.71rem;font-weight:700;border:1px solid transparent}.pc-conf-high{background:#d8f2e8;color:#116549;border-color:#7bc8a4}.pc-conf-moderate{background:#fff0cf;color:#765000;border-color:#e0bd64}.pc-conf-low{background:#fce3e1;color:#8b302d;border-color:#dfa6a0}.pc-conf-unknown{background:#e7edf3;color:#40556a;border-color:#c1cfdb}
                 .pc-high{background:#fce8e6;color:#922b21}.pc-medium{background:#fff1d6;color:#805400}.pc-low{background:#e1f2ec;color:#17654a}.pc-unknown{background:#e7edf3;color:#40556a}
                 .pc-inc-date{font-size:.76rem;opacity:.7;margin-top:7px}
                 .pc-risk-grid tbody tr:nth-child(odd){background:#5c79900d}.pc-risk-grid tbody tr:hover{background:#c9a46119}
@@ -1214,19 +1214,15 @@ def _security(db,core):
                     label=str(value or 'Unassigned').capitalize()
                     tone={'high':'high','moderate':'moderate','medium':'moderate','low':'low'}.get(label.lower(),'unknown')
                     return '<span class="pc-conf pc-conf-'+tone+'">'+escape(label)+' confidence</span>'
-                st.markdown(
-                    '<div style="display:flex;flex-wrap:wrap;gap:8px 22px;align-items:center;margin:10px 0 14px;font-size:.80rem">'
-                    '<div><strong>Current Risk:</strong> '
-                    '<span class="pc-pill pc-high">CRITICAL / HIGH</span> '
-                    '<span class="pc-pill pc-medium">ELEVATED / MODERATE</span> '
-                    '<span class="pc-pill pc-low">LOW</span> '
-                    '<span class="pc-pill pc-unknown">INSUFFICIENT EVIDENCE</span></div>'
-                    '<div><strong>Assessment Confidence:</strong> '
-                    '<span class="pc-conf pc-conf-high" style="margin-top:0">High</span> '
-                    '<span class="pc-conf pc-conf-moderate" style="margin-top:0">Moderate</span> '
-                    '<span class="pc-conf pc-conf-low" style="margin-top:0">Low</span> '
-                    '<span class="pc-conf pc-conf-unknown" style="margin-top:0">Unassigned</span></div>'
-                    '</div>',unsafe_allow_html=True)
+                # Native Streamlit layout: separate HTML fragments are sanitised inconsistently across versions.
+                st.markdown('**Colour key**')
+                left,right=st.columns(2)
+                with left:
+                    st.caption('CURRENT RISK')
+                    st.markdown('<div class="pc-risk-legend"><span class="pc-pill pc-high">CRITICAL / HIGH</span> <span class="pc-pill pc-medium">ELEVATED / MODERATE</span> <span class="pc-pill pc-low">LOW</span> <span class="pc-pill pc-unknown">INSUFFICIENT EVIDENCE</span></div>',unsafe_allow_html=True)
+                with right:
+                    st.caption('ASSESSMENT CONFIDENCE')
+                    st.markdown('<div class="pc-risk-legend"><span class="pc-conf pc-conf-high">High</span> <span class="pc-conf pc-conf-moderate">Moderate</span> <span class="pc-conf pc-conf-low">Low</span> <span class="pc-conf pc-conf-unknown">Unassigned</span></div>',unsafe_allow_html=True)
                 table='<table class="pc-risk-grid"><thead><tr><th>Incident / Scope</th><th>Risk & Confidence</th><th>P&C Assessment</th><th>Risk Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
                 for row in page_rows:
                     table+='<tr><td><strong>'+escape(row['Incident'])+'</strong><div class="pc-inc-date">'+escape(row['Date']+' · '+row['Evidence'])+'</div></td>'
