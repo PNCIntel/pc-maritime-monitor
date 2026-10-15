@@ -129,6 +129,32 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
     # Multimodal infrastructure: source-backed event asset links and rail-specific
     # service/disruption records exist independently of vessel metadata.
     asset_links = _get(sb, "pc_event_asset_links", "event_id", event_id, 150)
+    # Canonical event graph is shared across modes. Specialist link tables are
+    # complementary, not the sole source for aviation/port/rail infrastructure.
+    canonical_event_links = _get(sb, "pc_event_links", "event_id", event_id, 500)
+    existing_asset_ids = {str(x.get("asset_id")) for x in asset_links}
+    graph_event_neighbours = []
+    for gl in canonical_event_links:
+        kind = str(gl.get("linked_type") or "").lower()
+        gid = str(gl.get("linked_id") or "")
+        if kind in ("asset", "port", "airport", "terminal", "facility", "rail_node") and gid:
+            if gid not in existing_asset_ids:
+                asset_links.append({"asset_id":gid,"relation_type":gl.get("relationship"),
+                                    "role":gl.get("relationship"),"_graph_only":True})
+                existing_asset_ids.add(gid)
+        elif kind == "event" and gid and gid != event_id:
+            graph_event_neighbours.append(gl)
+
+    related_ids = {str(other.get("event_id")) for _,other in related}
+    for gl in graph_event_neighbours:
+        other_id = str(gl.get("linked_id") or "")
+        if other_id in related_ids: continue
+        other = _one(sb, "pc_events", "event_id", other_id)
+        if other:
+            related.append(({"relationship_type":gl.get("relationship"),"claim_status":"linked",
+                             "rationale":_meta(gl).get("rationale") or "Source-recorded event association"},other))
+            related_ids.add(other_id)
+    related.sort(key=lambda item: str(item[1].get("start_date") or ""), reverse=True)
     rail_disruptions = _get(sb, "pc_rail_network_disruptions", "event_id", event_id, 100)
     rail_runs = _get(sb, "pc_rail_service_runs", "linked_event_id", event_id, 100)
     assets = {}
