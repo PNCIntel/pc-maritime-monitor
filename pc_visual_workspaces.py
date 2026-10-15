@@ -369,7 +369,7 @@ def _render_pc_assessments(db,core,term):
                     url=e.get('source_url')
                     if isinstance(url,str) and url.startswith(('https://','http://')):
                         st.link_button('Supporting source',url)
-                    if st.button('Open evidence dossier',key=f'pc_assess_event_{aid}_{i}'):
+                    if e.get('event_id') and st.button('Open evidence dossier',key=f'pc_assess_event_{aid}_{i}'):
                         _open_below('event',e.get('event_id'),e.get('title'))
             with st.expander('Monitoring priorities and review triggers'):
                 st.markdown('**Monitoring priorities**')
