@@ -1029,6 +1029,23 @@ def _security(db,core):
         else:st.info('No incidents on this page. Return to page 1 or change the filters.')
     with t2:
         _render_pc_assessments(db,core,term)
+        st.markdown('#### Recent developments awaiting or informing assessment')
+        st.caption('Global event feed, separate from published qualitative judgments. Appearance here does not assign a risk level or imply a verified impact.')
+        recent, recent_error = _load(db,'pc_events',
+            columns='event_id,title,start_date,event_type,verification_status,description,metadata',
+            filters=(('intelligence_visible','eq',True),),
+            order=(('start_date',True),('event_id',False)),limit=120)
+        if recent_error:
+            st.caption('Recent global developments are temporarily unavailable.')
+        else:
+            recent=[item for item in recent if _intel_match(item,lens)][:15]
+            for item in recent:
+                left,right=st.columns([7,1])
+                left.markdown('**'+str(item.get('title') or 'Development')+'**')
+                left.caption(str(item.get('start_date') or 'Date unrecorded')[:10]+' · '+_business_label(item.get('event_type'))+' · Evidence: '+_business_label(item.get('verification_status')))
+                if right.button('Open',key='pc_brief_latest_'+str(item.get('event_id'))):
+                    _open_below('event',item['event_id'],item.get('title'))
+            if not recent:st.info('No recent developments returned by the global feed.')
         st.subheader('Outside assessments recorded on incident cards')
         assessed=[r for r in incidents if r.get('source_risk_level') or r.get('source_risk_trend')]
         if not assessed:st.info('No outside risk/trend fields on this incident page. P&C assessments are shown separately above.')
