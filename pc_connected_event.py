@@ -248,22 +248,27 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
     outlook = outlooks[0] if outlooks else {}
     st.markdown("## Intelligence assessment")
     st.caption("Global, multimodal P&C dossier · event facts, analysis and forward outlook are distinct.")
-    risk_value = outlook.get("current_risk") or "Not independently assessed"
-    confidence = outlook.get("confidence") or "Not independently assessed"
+    risk_value = outlook.get("current_risk")
+    confidence = outlook.get("confidence")
     x, y, z = st.columns(3)
-    x.metric("Current Risk", str(risk_value))
-    y.metric("Confidence", str(confidence))
-    z.metric("Evidence observations", len(evidence))
+    x.metric("Current Risk", str(risk_value or "Pending assessment"))
+    y.metric("Confidence", str(confidence or "Not assigned"))
+    z.metric("Source records", len(evidence))
     st.caption("Event verification: "+_label(record.get("verification_status"))+
                " · Last assessed: "+_date(outlook.get("assessed_at") or assessment.get("updated_at"))+
                " · An incident severity is not a regional risk rating.")
     st.markdown("#### P&C assessment")
     st.write(outlook.get("pc_assessment") or assessment.get("pc_assessment") or
-             assessment.get("what_it_means") or "No approved P&C assessment has been published for this event.")
+             assessment.get("what_it_means") or meta.get("pc_assessment") or meta.get("executive_summary") or
+             record.get("description") or "Assessment pending source review.")
+    if not outlook and not assessment:
+        st.caption("Event narrative / existing editorial context; not a separately approved risk rating.")
     st.markdown("#### Risk Outlook")
-    st.write(outlook.get("risk_outlook") or "A forward outlook has not yet been published.")
+    st.write(outlook.get("risk_outlook") or meta.get("risk_outlook") or
+             "Operational consequences remain contingent on further corroborated reporting and official notices.")
+    if not outlook: st.caption("Provisional monitoring interpretation; no separately published outlook or rating.")
     st.markdown("#### Monitoring Indicators")
-    indicators = outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or []
+    indicators = outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators") or []
     if isinstance(indicators, str):
         indicators = [indicators]
     if isinstance(indicators, dict):
@@ -325,283 +330,284 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                      " · "+_label(link.get("relationship_type")))
         st.caption("Only recorded event-to-event associations; no causal inference.")
     st.divider()
+    with st.expander("Full underlying record, timeline and specialist links", expanded=False):
 
-    # Shared production graph navigation across Intelligence and Trade.
-    # Coordinates are not inferred from related airport or facility identities.
-    from pc_event_navigation import render_event_connections
-    st.markdown("### Recorded event facts")
-    st.write({
-        "Event date": _date(record.get("start_date")),
-        "Classification": _label(record.get("event_type") or record.get("event_family")),
-        "Severity": _label(record.get("severity") or "Not classified"),
-        "Verification": _label(record.get("verification_status")),
-    })
-    st.markdown("### Connected organisations and infrastructure")
-    render_event_connections(sb, event_id, navigate,
-                             key_prefix="intel_connected_"+event_id, compact=False)
+            # Shared production graph navigation across Intelligence and Trade.
+        # Coordinates are not inferred from related airport or facility identities.
+        from pc_event_navigation import render_event_connections
+        st.markdown("### Recorded event facts")
+        st.write({
+            "Event date": _date(record.get("start_date")),
+            "Classification": _label(record.get("event_type") or record.get("event_family")),
+            "Severity": _label(record.get("severity") or "Not classified"),
+            "Verification": _label(record.get("verification_status")),
+        })
+        st.markdown("### Connected organisations and infrastructure")
+        render_event_connections(sb, event_id, navigate,
+                                 key_prefix="intel_connected_"+event_id, compact=False)
 
-    st.markdown("### Intelligence finding")
-    headline = str(meta.get("executive_summary") or record.get("description") or "").strip()
-    if headline:
-        st.write(headline)
-    if related and vessel:
-        strongest = related[0][1]
-        st.info(
-            f"**Connected finding:** {vessel.get('name') or vessel_id} "
-            f"(IMO {vessel.get('imo') or 'unresolved'}) also appears in "
-            f"**{strongest.get('title') or strongest.get('event_id')}** "
-            f"({_date(strongest.get('start_date'))}). "
-            "Shared vessel identity does not establish that one action caused another."
+        st.markdown("### Intelligence finding")
+        headline = str(meta.get("executive_summary") or record.get("description") or "").strip()
+        if headline:
+            st.write(headline)
+        if related and vessel:
+            strongest = related[0][1]
+            st.info(
+                f"**Connected finding:** {vessel.get('name') or vessel_id} "
+                f"(IMO {vessel.get('imo') or 'unresolved'}) also appears in "
+                f"**{strongest.get('title') or strongest.get('event_id')}** "
+                f"({_date(strongest.get('start_date'))}). "
+                "Shared vessel identity does not establish that one action caused another."
+            )
+        elif related:
+            st.caption(f"{len(related)} linked developments are available below; their relationship basis is shown individually.")
+        st.caption(
+            f"Event verification: {_label(record.get('verification_status'))} · "
+            f"Record status: {_label(record.get('record_status'))} · "
+            "Source and claim review are distinct from identity resolution."
         )
-    elif related:
-        st.caption(f"{len(related)} linked developments are available below; their relationship basis is shown individually.")
-    st.caption(
-        f"Event verification: {_label(record.get('verification_status'))} · "
-        f"Record status: {_label(record.get('record_status'))} · "
-        "Source and claim review are distinct from identity resolution."
-    )
 
-    left, right = st.columns([1.2, 1], gap="large")
-    with left:
-        if related:
-            st.markdown("#### Related developments")
-            for i, (link, other) in enumerate(related):
-                with st.container(border=True):
-                    st.caption(f"{_date(other.get('start_date'))} · {_label(link.get('relationship_type'))} · {_label(link.get('claim_status'))}")
-                    st.markdown(f"**{other.get('title') or other.get('event_id')}**")
-                    rationale = str(link.get("rationale") or "").strip()
-                    if rationale:
-                        st.write(rationale)
-                    lm = _meta(link)
-                    if lm.get("causation_established") is False:
-                        st.caption("Shared identity/association only; causation NOT established.")
-                    st.button("Open connected event →", key=f"connected_event_{event_id}_{i}", on_click=navigate,
-                              args=("event", str(other["event_id"]), str(other.get("title") or "")))
+        left, right = st.columns([1.2, 1], gap="large")
+        with left:
+            if related:
+                st.markdown("#### Related developments")
+                for i, (link, other) in enumerate(related):
+                    with st.container(border=True):
+                        st.caption(f"{_date(other.get('start_date'))} · {_label(link.get('relationship_type'))} · {_label(link.get('claim_status'))}")
+                        st.markdown(f"**{other.get('title') or other.get('event_id')}**")
+                        rationale = str(link.get("rationale") or "").strip()
+                        if rationale:
+                            st.write(rationale)
+                        lm = _meta(link)
+                        if lm.get("causation_established") is False:
+                            st.caption("Shared identity/association only; causation NOT established.")
+                        st.button("Open connected event →", key=f"connected_event_{event_id}_{i}", on_click=navigate,
+                                  args=("event", str(other["event_id"]), str(other.get("title") or "")))
 
-        st.markdown("#### Development timeline")
-        if updates:
-            for i, update in enumerate(updates):
-                with st.container(border=True):
-                    st.caption(f"{_update_date_label(update, record)} · {_label(update.get('update_type'))} · Review: {_label(update.get('review_status'))}")
-                    st.write(update.get("summary") or "No summary recorded")
-        else:
-            # A dated source observation is still a useful timeline entry.
-            timeline=[]
-            for ev in evidence:
-                when=ev.get("observed_at") or ev.get("published_at")
-                if when:
-                    timeline.append((str(when),str(ev.get("document_title") or ev.get("notice_reference") or "Source observation"),
-                                     str(ev.get("claim") or ""),str(ev.get("verification_status") or "pending")))
-            timeline.append((str(record.get("start_date") or ""),str(record.get("title") or "Incident"),
-                             str(record.get("description") or ""),str(record.get("verification_status") or "unrecorded")))
-            for link, other in related:
-                timeline.append((str(other.get("start_date") or ""),str(other.get("title") or "Related development"),
-                                 str(link.get("rationale") or ""),str(link.get("claim_status") or "proposed")))
-            seen_timeline=set()
-            for when,title,detail,status in sorted(timeline,key=lambda x:x[0]):
-                key=(when,title,detail)
-                if key in seen_timeline:continue
-                seen_timeline.add(key)
-                with st.container(border=True):
-                    st.caption(_date(when)+" · "+_label(status))
-                    st.markdown("**"+title+"**")
-                    if detail:st.write(detail)
-            if not seen_timeline:st.caption("No dated source observations recorded.")
-
-        if record.get("operational_impact"):
-            st.markdown("#### Operational implications")
-            st.write(record["operational_impact"])
-        if record.get("commercial_impact"):
-            st.markdown("#### Commercial implications")
-            st.write(record["commercial_impact"])
-
-    with right:
-        if vessel:
-            asset_kind = str(vessel.get("asset_type") or vessel.get("subtype") or "").lower()
-            if "aircraft" in asset_kind or "aviation" in asset_kind:
-                identity_heading = "Aircraft identity"
-            elif any(token in asset_kind for token in ("truck", "road", "vehicle", "train", "locomotive", "wagon", "rail")):
-                identity_heading = "Vehicle identity"
-            elif vessel.get("imo") or any(token in asset_kind for token in ("ship", "vessel", "tanker", "marine")):
-                identity_heading = "Vessel identity"
+            st.markdown("#### Development timeline")
+            if updates:
+                for i, update in enumerate(updates):
+                    with st.container(border=True):
+                        st.caption(f"{_update_date_label(update, record)} · {_label(update.get('update_type'))} · Review: {_label(update.get('review_status'))}")
+                        st.write(update.get("summary") or "No summary recorded")
             else:
-                identity_heading = "Asset identity"
-            st.markdown("#### " + identity_heading)
-            with st.container(border=True):
-                identity_detail = (" · IMO " + str(vessel["imo"])) if vessel.get("imo") else ""
-                st.markdown(f"**{vessel.get('name') or vessel_id}**" + identity_detail)
-                names = vessel_meta.get("former_names") or []
-                if names:
-                    st.caption("Former names: " + " → ".join(map(str, names)))
-                st.caption("Record status: " + _label(vessel.get("record_status")))
-                if vessel.get("imo"):
-                    st.caption("Flag: " + str(vessel.get("flag") or "not independently resolved"))
-                st.button("Open asset →", key=f"connected_vessel_{event_id}", on_click=navigate,
-                          args=("mobile_asset", vessel_id, str(vessel.get("name") or "")))
-                if company_roles:
-                    st.markdown("**Dated company roles**")
-                    for i, (role, company) in enumerate(company_roles):
-                        rm = _meta(role)
-                        st.markdown(f"**{company.get('name') or role.get('source_id')}** · {_label(role.get('relationship_type'))}")
-                        st.caption(f"As observed {_date(rm.get('observation_date') or role.get('valid_from'))} · "
-                                   f"{_label(role.get('confidence'))} confidence")
-                        if rm.get("not_a_current_role_assertion") or rm.get("temporal_semantics") == "as_of_snapshot":
-                            st.caption("Historical snapshot—not evidence of current ownership.")
-                        if rm.get("source_url"):
-                            st.markdown(f"[Role source]({rm['source_url']})")
-                        if company.get("entity_id"):
-                            st.button("Open organisation →", key=f"connected_company_{event_id}_{i}",
-                                      on_click=navigate, args=("entity", str(company["entity_id"]), str(company.get("name") or "")))
+                # A dated source observation is still a useful timeline entry.
+                timeline=[]
+                for ev in evidence:
+                    when=ev.get("observed_at") or ev.get("published_at")
+                    if when:
+                        timeline.append((str(when),str(ev.get("document_title") or ev.get("notice_reference") or "Source observation"),
+                                         str(ev.get("claim") or ""),str(ev.get("verification_status") or "pending")))
+                timeline.append((str(record.get("start_date") or ""),str(record.get("title") or "Incident"),
+                                 str(record.get("description") or ""),str(record.get("verification_status") or "unrecorded")))
+                for link, other in related:
+                    timeline.append((str(other.get("start_date") or ""),str(other.get("title") or "Related development"),
+                                     str(link.get("rationale") or ""),str(link.get("claim_status") or "proposed")))
+                seen_timeline=set()
+                for when,title,detail,status in sorted(timeline,key=lambda x:x[0]):
+                    key=(when,title,detail)
+                    if key in seen_timeline:continue
+                    seen_timeline.add(key)
+                    with st.container(border=True):
+                        st.caption(_date(when)+" · "+_label(status))
+                        st.markdown("**"+title+"**")
+                        if detail:st.write(detail)
+                if not seen_timeline:st.caption("No dated source observations recorded.")
 
-        if asset_links or rail_disruptions or rail_runs:
-            st.markdown("#### Affected infrastructure & services")
-        for i, link in enumerate(asset_links):
-            aid = str(link.get("asset_id") or "")
-            asset = assets.get(aid) or {}
-            st.write(f"**{asset.get('name') or aid}** — {_label(link.get('relation_type') or link.get('role') or 'linked asset')}")
-            if aid and asset:
-                st.button("Open facility →", key=f"connected_asset_{event_id}_{i}",
-                          on_click=navigate, args=("asset", aid, str(asset.get("name") or aid)))
-        for i, disruption in enumerate(rail_disruptions):
-            nid = str(disruption.get("rail_network_id") or "")
-            network = networks.get(nid) or {}
-            aid = str(disruption.get("node_asset_id") or "")
-            node = assets.get(aid) or {}
-            st.markdown(f"**Rail disruption:** {_label(disruption.get('disruption_type'))}")
-            if network:
-                st.write("Network: " + str(network.get("network_name") or nid))
-            if aid:
-                st.write("Affected node: " + str(node.get("name") or aid))
-                if node:
-                    st.button("Open affected rail node →", key=f"connected_rail_node_{event_id}_{i}",
-                              on_click=navigate, args=("asset", aid, str(node.get("name") or aid)))
-            if disruption.get("service_effect"):
-                st.write(disruption["service_effect"])
-            st.caption("Disruption verification: " + _label(disruption.get("verification_status")))
-        for i, run in enumerate(rail_runs):
-            service_id = str(run.get("transport_service_id") or "")
-            service = _one(sb, "pc_transport_services", "service_id", service_id) if service_id else {}
-            service_meta = _meta(run)
-            display_service = (service.get("service_name") or service.get("name") or service_meta.get("service_name") or service_meta.get("train_name") or "")
-            st.markdown("**Affected rail service:** " + str(display_service or "Recorded passenger or freight service"))
-            if not display_service and service_id:
-                st.caption("Service record: " + service_id)
-            st.caption("Run status: " + _label(run.get("service_status")) + " · Verification: " + _label(run.get("verification_status")))
-            origin = assets.get(str(run.get("origin_asset_id") or "")) or {}
-            destination = assets.get(str(run.get("destination_asset_id") or "")) or {}
-            if origin or destination:
-                st.write("Recorded service endpoints: " + str(origin.get("name") or "unresolved") +
-                         " → " + str(destination.get("name") or "unresolved"))
-                st.caption("Service endpoints are not the derailment location.")
-        if networks and not rail_disruptions:
-            for nid, network in networks.items():
-                st.write("Associated railway network: " + str(network.get("network_name") or nid))
+            if record.get("operational_impact"):
+                st.markdown("#### Operational implications")
+                st.write(record["operational_impact"])
+            if record.get("commercial_impact"):
+                st.markdown("#### Commercial implications")
+                st.write(record["commercial_impact"])
 
-        if corporate_edges:
-            st.markdown("#### Connected business network")
-            st.caption("Recorded group and commercial-banner relationships; not a list of individually affected sites.")
-            for i, (edge, parent, child) in enumerate(corporate_edges):
+        with right:
+            if vessel:
+                asset_kind = str(vessel.get("asset_type") or vessel.get("subtype") or "").lower()
+                if "aircraft" in asset_kind or "aviation" in asset_kind:
+                    identity_heading = "Aircraft identity"
+                elif any(token in asset_kind for token in ("truck", "road", "vehicle", "train", "locomotive", "wagon", "rail")):
+                    identity_heading = "Vehicle identity"
+                elif vessel.get("imo") or any(token in asset_kind for token in ("ship", "vessel", "tanker", "marine")):
+                    identity_heading = "Vessel identity"
+                else:
+                    identity_heading = "Asset identity"
+                st.markdown("#### " + identity_heading)
                 with st.container(border=True):
-                    st.markdown(f"**{parent.get('name')} → {child.get('name')}**")
-                    pct=edge.get("ownership_percent")
-                    relation=(str(pct)+"% ownership") if pct is not None else _label(edge.get("relationship_type"))
-                    st.caption(relation + " · " + _label(edge.get("record_status")))
-                    source = _meta(edge).get("source_url") or edge.get("source_url")
-                    if isinstance(source, str) and source.startswith(("http://", "https://")):
-                        st.link_button("Relationship source ↗", source)
-                    x, y = st.columns(2)
-                    with x:
-                        st.button("Open group →", key=f"business_group_{event_id}_{i}",
-                                  on_click=navigate, args=("entity", str(parent["entity_id"]), str(parent.get("name") or "")))
-                    with y:
-                        st.button("Open business →", key=f"business_banner_{event_id}_{i}",
-                                  on_click=navigate, args=("entity", str(child["entity_id"]), str(child.get("name") or "")))
+                    identity_detail = (" · IMO " + str(vessel["imo"])) if vessel.get("imo") else ""
+                    st.markdown(f"**{vessel.get('name') or vessel_id}**" + identity_detail)
+                    names = vessel_meta.get("former_names") or []
+                    if names:
+                        st.caption("Former names: " + " → ".join(map(str, names)))
+                    st.caption("Record status: " + _label(vessel.get("record_status")))
+                    if vessel.get("imo"):
+                        st.caption("Flag: " + str(vessel.get("flag") or "not independently resolved"))
+                    st.button("Open asset →", key=f"connected_vessel_{event_id}", on_click=navigate,
+                              args=("mobile_asset", vessel_id, str(vessel.get("name") or "")))
+                    if company_roles:
+                        st.markdown("**Dated company roles**")
+                        for i, (role, company) in enumerate(company_roles):
+                            rm = _meta(role)
+                            st.markdown(f"**{company.get('name') or role.get('source_id')}** · {_label(role.get('relationship_type'))}")
+                            st.caption(f"As observed {_date(rm.get('observation_date') or role.get('valid_from'))} · "
+                                       f"{_label(role.get('confidence'))} confidence")
+                            if rm.get("not_a_current_role_assertion") or rm.get("temporal_semantics") == "as_of_snapshot":
+                                st.caption("Historical snapshot—not evidence of current ownership.")
+                            if rm.get("source_url"):
+                                st.markdown(f"[Role source]({rm['source_url']})")
+                            if company.get("entity_id"):
+                                st.button("Open organisation →", key=f"connected_company_{event_id}_{i}",
+                                          on_click=navigate, args=("entity", str(company["entity_id"]), str(company.get("name") or "")))
 
-        if entity_links:
-            st.markdown("#### Organisations involved")
-            for i, link in enumerate(entity_links):
-                entity = _one(sb, "pc_entities", "entity_id", link.get("entity_id"))
-                st.write(f"**{entity.get('name') or link.get('entity_id')}** — {_label(link.get('role'))}")
-                st.caption(f"Attribution: {_label(link.get('attribution_status'))}; {_meta(link).get('role_detail') or 'specific role pending review'}")
-                if entity.get("entity_id"):
-                    st.button("Open organisation →", key=f"connected_incident_org_{event_id}_{i}",
-                              on_click=navigate, args=("entity", str(entity["entity_id"]), str(entity.get("name") or "")))
+            if asset_links or rail_disruptions or rail_runs:
+                st.markdown("#### Affected infrastructure & services")
+            for i, link in enumerate(asset_links):
+                aid = str(link.get("asset_id") or "")
+                asset = assets.get(aid) or {}
+                st.write(f"**{asset.get('name') or aid}** — {_label(link.get('relation_type') or link.get('role') or 'linked asset')}")
+                if aid and asset:
+                    st.button("Open facility →", key=f"connected_asset_{event_id}_{i}",
+                              on_click=navigate, args=("asset", aid, str(asset.get("name") or aid)))
+            for i, disruption in enumerate(rail_disruptions):
+                nid = str(disruption.get("rail_network_id") or "")
+                network = networks.get(nid) or {}
+                aid = str(disruption.get("node_asset_id") or "")
+                node = assets.get(aid) or {}
+                st.markdown(f"**Rail disruption:** {_label(disruption.get('disruption_type'))}")
+                if network:
+                    st.write("Network: " + str(network.get("network_name") or nid))
+                if aid:
+                    st.write("Affected node: " + str(node.get("name") or aid))
+                    if node:
+                        st.button("Open affected rail node →", key=f"connected_rail_node_{event_id}_{i}",
+                                  on_click=navigate, args=("asset", aid, str(node.get("name") or aid)))
+                if disruption.get("service_effect"):
+                    st.write(disruption["service_effect"])
+                st.caption("Disruption verification: " + _label(disruption.get("verification_status")))
+            for i, run in enumerate(rail_runs):
+                service_id = str(run.get("transport_service_id") or "")
+                service = _one(sb, "pc_transport_services", "service_id", service_id) if service_id else {}
+                service_meta = _meta(run)
+                display_service = (service.get("service_name") or service.get("name") or service_meta.get("service_name") or service_meta.get("train_name") or "")
+                st.markdown("**Affected rail service:** " + str(display_service or "Recorded passenger or freight service"))
+                if not display_service and service_id:
+                    st.caption("Service record: " + service_id)
+                st.caption("Run status: " + _label(run.get("service_status")) + " · Verification: " + _label(run.get("verification_status")))
+                origin = assets.get(str(run.get("origin_asset_id") or "")) or {}
+                destination = assets.get(str(run.get("destination_asset_id") or "")) or {}
+                if origin or destination:
+                    st.write("Recorded service endpoints: " + str(origin.get("name") or "unresolved") +
+                             " → " + str(destination.get("name") or "unresolved"))
+                    st.caption("Service endpoints are not the derailment location.")
+            if networks and not rail_disruptions:
+                for nid, network in networks.items():
+                    st.write("Associated railway network: " + str(network.get("network_name") or nid))
 
-        st.markdown("#### Location & confidence")
-        if meta.get("location_basis", {}).get("exact_coordinates_confirmed") is False:
-            st.caption(str(record.get("location") or "Area only") + " — no verified incident coordinates. No map pin has been inferred.")
-        else:
-            st.caption(str(record.get("location") or "Exact location not established"))
+            if corporate_edges:
+                st.markdown("#### Connected business network")
+                st.caption("Recorded group and commercial-banner relationships; not a list of individually affected sites.")
+                for i, (edge, parent, child) in enumerate(corporate_edges):
+                    with st.container(border=True):
+                        st.markdown(f"**{parent.get('name')} → {child.get('name')}**")
+                        pct=edge.get("ownership_percent")
+                        relation=(str(pct)+"% ownership") if pct is not None else _label(edge.get("relationship_type"))
+                        st.caption(relation + " · " + _label(edge.get("record_status")))
+                        source = _meta(edge).get("source_url") or edge.get("source_url")
+                        if isinstance(source, str) and source.startswith(("http://", "https://")):
+                            st.link_button("Relationship source ↗", source)
+                        x, y = st.columns(2)
+                        with x:
+                            st.button("Open group →", key=f"business_group_{event_id}_{i}",
+                                      on_click=navigate, args=("entity", str(parent["entity_id"]), str(parent.get("name") or "")))
+                        with y:
+                            st.button("Open business →", key=f"business_banner_{event_id}_{i}",
+                                      on_click=navigate, args=("entity", str(child["entity_id"]), str(child.get("name") or "")))
 
-    # Display source-attributed cyber enrichment on the existing incident dossier.
-    cyber = meta.get("n0n_enrichment_20261015") or {}
-    if isinstance(cyber, dict) and cyber:
-        st.markdown("### Cyber extortion intelligence")
-        st.caption("Attacker leak-site allegations; inclusion does not establish a breach or operational outage.")
-        a, b, c = st.columns(3)
-        a.metric("Organisations named", cyber.get("alleged_organisations_count") or "—")
-        b.metric("Countries", cyber.get("countries_count") or "—")
-        c.metric("Threatened release (UTC)", str(cyber.get("publication_threat_at_utc") or "Not established").replace("T", " ")[:16])
-        demands = cyber.get("specific_reported_demands") or []
-        if isinstance(demands, list) and demands:
-            st.markdown("#### Reported ransom demands")
-            import pandas as pd
-            st.dataframe(pd.DataFrame([{
-                "Organisation": d.get("name"), "Demand (USD)": d.get("amount_usd"),
-                "Negotiation entry (%)": d.get("negotiation_entry_percent"),
-                "Claimed files": d.get("claimed_file_count"),
-                "Claimed MB": d.get("claimed_data_mb"), "Claimed GB": d.get("claimed_data_gb"),
-            } for d in demands]), hide_index=True, use_container_width=True)
-        names = cyber.get("listed_organisations") or []
-        if isinstance(names, list) and names:
-            with st.expander(f"Organisations named in claim ({len(names)})", expanded=True):
-                st.write(", ".join(str(n) for n in names))
-        extra = cyber.get("additional_reported_datasets") or []
-        if isinstance(extra, list) and extra:
-            with st.expander("Additional claimed datasets"):
-                st.dataframe(pd.DataFrame(extra), hide_index=True, use_container_width=True)
-        categories = cyber.get("claimed_data_categories") or []
-        if categories:
-            st.caption("Claimed data categories: " + ", ".join(map(str, categories)))
-        st.caption(str(cyber.get("cyberlogitec_connection") or "Supplier involvement not confirmed"))
-        for label, key in (("SOCRadar", "source_socradar"), ("Splash247", "source_splash247")):
-            url = cyber.get(key)
-            if isinstance(url, str) and url.startswith(("https://", "http://")):
-                st.link_button(label + " source ↗", url)
+            if entity_links:
+                st.markdown("#### Organisations involved")
+                for i, link in enumerate(entity_links):
+                    entity = _one(sb, "pc_entities", "entity_id", link.get("entity_id"))
+                    st.write(f"**{entity.get('name') or link.get('entity_id')}** — {_label(link.get('role'))}")
+                    st.caption(f"Attribution: {_label(link.get('attribution_status'))}; {_meta(link).get('role_detail') or 'specific role pending review'}")
+                    if entity.get("entity_id"):
+                        st.button("Open organisation →", key=f"connected_incident_org_{event_id}_{i}",
+                                  on_click=navigate, args=("entity", str(entity["entity_id"]), str(entity.get("name") or "")))
 
-    # Some sourced company relationships are stored in pc_event_links rather than
-    # pc_event_entity_links. Show actual canonical links, never infer compromise.
-    graph_links = [x for x in _get(sb, "pc_event_links", "event_id", event_id, 500)
-                   if str(x.get("linked_type") or "").lower() in ("entity", "company", "organisation", "organization")]
-    if graph_links:
-        st.markdown("#### Connected organisations — specific reported roles")
-        for i, link in enumerate(graph_links):
-            name = str(link.get("linked_name") or link.get("linked_id") or "Unknown organisation")
-            st.markdown("**" + name + "** — " + _label(link.get("relationship")))
-            lm = _meta(link)
-            if lm.get("compromise_status"):
-                st.caption("Compromise status: " + _label(lm["compromise_status"]))
-            linked_id = str(link.get("linked_id") or "")
-            if linked_id and _one(sb, "pc_entities", "entity_id", linked_id):
-                st.button("Open organisation →", key=f"cyber_graph_org_{event_id}_{i}",
-                          on_click=navigate, args=("entity", linked_id, name))
+            st.markdown("#### Location & confidence")
+            if meta.get("location_basis", {}).get("exact_coordinates_confirmed") is False:
+                st.caption(str(record.get("location") or "Area only") + " — no verified incident coordinates. No map pin has been inferred.")
+            else:
+                st.caption(str(record.get("location") or "Exact location not established"))
 
-    st.markdown("#### Evidence by source purpose")
-    groups = {}
-    for ev in evidence:
-        m = _meta(ev)
-        kind = m.get("source_role") or ("Contemporary reporting" if m.get("publisher") else "Research / source document")
-        groups.setdefault(kind, []).append(ev)
-    if not groups:
-        st.caption("No evidence records found.")
-    for purpose, records in groups.items():
-        with st.expander(f"{_label(purpose)} ({len(records)})", expanded=purpose in ("official_judicial_statement_reproduced", "official_sanctions_policy")):
-            for e in records:
-                m = _meta(e)
-                st.markdown(f"**{e.get('document_title') or m.get('publisher') or 'Source'}** · {_date(e.get('published_at'))}")
-                st.write(e.get("claim") or "Claim not transcribed")
-                st.caption("Claim review: " + _label(e.get("verification_status")))
-                url = str(e.get("original_url") or "")
-                if url.startswith(("https://", "http://")):
-                    st.link_button("Open source ↗", url)
-                st.divider()
+        # Display source-attributed cyber enrichment on the existing incident dossier.
+        cyber = meta.get("n0n_enrichment_20261015") or {}
+        if isinstance(cyber, dict) and cyber:
+            st.markdown("### Cyber extortion intelligence")
+            st.caption("Attacker leak-site allegations; inclusion does not establish a breach or operational outage.")
+            a, b, c = st.columns(3)
+            a.metric("Organisations named", cyber.get("alleged_organisations_count") or "—")
+            b.metric("Countries", cyber.get("countries_count") or "—")
+            c.metric("Threatened release (UTC)", str(cyber.get("publication_threat_at_utc") or "Not established").replace("T", " ")[:16])
+            demands = cyber.get("specific_reported_demands") or []
+            if isinstance(demands, list) and demands:
+                st.markdown("#### Reported ransom demands")
+                import pandas as pd
+                st.dataframe(pd.DataFrame([{
+                    "Organisation": d.get("name"), "Demand (USD)": d.get("amount_usd"),
+                    "Negotiation entry (%)": d.get("negotiation_entry_percent"),
+                    "Claimed files": d.get("claimed_file_count"),
+                    "Claimed MB": d.get("claimed_data_mb"), "Claimed GB": d.get("claimed_data_gb"),
+                } for d in demands]), hide_index=True, use_container_width=True)
+            names = cyber.get("listed_organisations") or []
+            if isinstance(names, list) and names:
+                with st.expander(f"Organisations named in claim ({len(names)})", expanded=True):
+                    st.write(", ".join(str(n) for n in names))
+            extra = cyber.get("additional_reported_datasets") or []
+            if isinstance(extra, list) and extra:
+                with st.expander("Additional claimed datasets"):
+                    st.dataframe(pd.DataFrame(extra), hide_index=True, use_container_width=True)
+            categories = cyber.get("claimed_data_categories") or []
+            if categories:
+                st.caption("Claimed data categories: " + ", ".join(map(str, categories)))
+            st.caption(str(cyber.get("cyberlogitec_connection") or "Supplier involvement not confirmed"))
+            for label, key in (("SOCRadar", "source_socradar"), ("Splash247", "source_splash247")):
+                url = cyber.get(key)
+                if isinstance(url, str) and url.startswith(("https://", "http://")):
+                    st.link_button(label + " source ↗", url)
+
+        # Some sourced company relationships are stored in pc_event_links rather than
+        # pc_event_entity_links. Show actual canonical links, never infer compromise.
+        graph_links = [x for x in _get(sb, "pc_event_links", "event_id", event_id, 500)
+                       if str(x.get("linked_type") or "").lower() in ("entity", "company", "organisation", "organization")]
+        if graph_links:
+            st.markdown("#### Connected organisations — specific reported roles")
+            for i, link in enumerate(graph_links):
+                name = str(link.get("linked_name") or link.get("linked_id") or "Unknown organisation")
+                st.markdown("**" + name + "** — " + _label(link.get("relationship")))
+                lm = _meta(link)
+                if lm.get("compromise_status"):
+                    st.caption("Compromise status: " + _label(lm["compromise_status"]))
+                linked_id = str(link.get("linked_id") or "")
+                if linked_id and _one(sb, "pc_entities", "entity_id", linked_id):
+                    st.button("Open organisation →", key=f"cyber_graph_org_{event_id}_{i}",
+                              on_click=navigate, args=("entity", linked_id, name))
+
+        st.markdown("#### Evidence by source purpose")
+        groups = {}
+        for ev in evidence:
+            m = _meta(ev)
+            kind = m.get("source_role") or ("Contemporary reporting" if m.get("publisher") else "Research / source document")
+            groups.setdefault(kind, []).append(ev)
+        if not groups:
+            st.caption("No evidence records found.")
+        for purpose, records in groups.items():
+            with st.expander(f"{_label(purpose)} ({len(records)})", expanded=purpose in ("official_judicial_statement_reproduced", "official_sanctions_policy")):
+                for e in records:
+                    m = _meta(e)
+                    st.markdown(f"**{e.get('document_title') or m.get('publisher') or 'Source'}** · {_date(e.get('published_at'))}")
+                    st.write(e.get("claim") or "Claim not transcribed")
+                    st.caption("Claim review: " + _label(e.get("verification_status")))
+                    url = str(e.get("original_url") or "")
+                    if url.startswith(("https://", "http://")):
+                        st.link_button("Open source ↗", url)
+                    st.divider()
