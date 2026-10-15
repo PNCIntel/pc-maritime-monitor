@@ -24,7 +24,10 @@ def _list(value):
 def _valid_url(url):
     return isinstance(url,str) and url.startswith(("https://","http://")) and not any(ch.isspace() or ch in '<>"' for ch in url)
 
-def _plain(value):\n    return str(value or "Unrecorded").replace("_"," ").strip()\n\ndef _paragraph(value):
+def _plain(value):
+    return str(value or "Unrecorded").replace("_"," ").strip()
+
+def _paragraph(value):
     return "<p>"+_h(value).replace("\\n","<br/>")+"</p>" if value else '<p class="muted">Not established in the current record.</p>'
 
 def create_incident_brief(record, assessment, outlook, evidence, related, assets, metadata=None, map_point=None, editorial=None):
