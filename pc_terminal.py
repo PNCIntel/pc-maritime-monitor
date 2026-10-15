@@ -1400,6 +1400,11 @@ def _render_spatial_pane(typ: str, oid: str, rec: dict, lens: str):
     st.markdown("### Spatial / System Context")
     st.caption("Infrastructure, corridors, routes and connected nodes.")
 
+    if typ=="event":
+        from pc_event_navigation import render_event_connections
+        render_event_connections(_sb(),oid,_set_context,key_prefix="trade_spatial_"+_norm(oid),compact=False)
+        st.caption("Connected reference infrastructure is not an asserted incident coordinate or direct physical impact.")
+        return
     if typ=="asset":
         _render_map_for_asset(rec)
         local=_local_infrastructure(rec)
