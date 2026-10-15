@@ -1105,7 +1105,7 @@ def _security(db,core):
             if term:
                 recent=[item for item in recent if term.lower() in
                     (str(item.get('title') or '')+' '+str(item.get('description') or '')+' '+str(item.get('event_type') or '')).lower()]
-            recent=recent[:20]
+            recent=recent[:50]
             # Only explicit event IDs in the published evidence qualify as a join.
             assessments,ae=_load(db,'pc_v_security_pc_assessments',limit=150)
             global_assessments,ge=_load(db,'pc_global_risk_briefings',limit=200)
@@ -1169,60 +1169,47 @@ def _security(db,core):
                     '_item':item,'_assessment':assessment})
             if display:
                 st.markdown("""<style>
-                .pc-intel-head{padding:22px 24px;background:linear-gradient(115deg,#10283b,#193e52);border-radius:12px;border-left:4px solid #cfab70;margin-bottom:16px}
-                .pc-intel-head h3{color:#fff!important;margin:0;font-size:1.32rem}
-                .pc-intel-head p{color:#d6e4ea!important;margin:7px 0 0}
-                .pc-intel-detail{background:#102638;border:1px solid #315066;border-radius:12px;padding:20px 24px;margin:12px 0;color:#e8f0f4}
-                .pc-intel-detail h3,.pc-intel-detail strong{color:#fff!important}
-                .pc-intel-detail .pc-kicker{font-size:.76rem;letter-spacing:.11em;text-transform:uppercase;color:#cbb38a}
-                .pc-intel-detail .pc-risk{font-weight:700;color:#f4d397}
-                .pc-intel-detail .pc-body{line-height:1.55;margin:6px 0 17px;color:#e2ebf0}
-                .pc-intel-detail .pc-muted{font-size:.8rem;color:#aac0cd}
+                .pc-brief-hero{background:#142b42;color:#fff;padding:24px 28px;border-radius:12px;margin:12px 0 20px;border-left:5px solid #c9a461}
+                .pc-brief-hero h3{color:#fff!important;margin:0 0 8px}.pc-brief-hero p{color:#e0e8ef!important;margin:0}
+                .pc-risk-grid{width:100%;border-collapse:collapse;margin:12px 0 22px;font-size:.87rem;table-layout:fixed}
+                .pc-risk-grid th{text-align:left;padding:12px;border-bottom:2px solid #c9a461;color:inherit}
+                .pc-risk-grid td{padding:12px;border-bottom:1px solid #8193a544;vertical-align:top;line-height:1.48;overflow-wrap:anywhere}
+                .pc-risk-grid th:nth-child(1){width:20%}.pc-risk-grid th:nth-child(2){width:10%}.pc-risk-grid th:nth-child(3){width:27%}.pc-risk-grid th:nth-child(4){width:24%}.pc-risk-grid th:nth-child(5){width:19%}
+                .pc-pill{display:inline-block;padding:4px 9px;border-radius:5px;font-weight:700;font-size:.75rem;white-space:normal}
+                .pc-high{background:#fce8e6;color:#922b21}.pc-medium{background:#fff1d6;color:#805400}.pc-low{background:#e1f2ec;color:#17654a}.pc-unknown{background:#e7edf3;color:#40556a}
+                .pc-inc-date{font-size:.76rem;opacity:.7;margin-top:7px}
                 </style>""",unsafe_allow_html=True)
-                st.markdown('<div class="pc-intel-head"><h3>Global intelligence overview</h3><p>Select an incident to examine the P&C judgment, forward outlook and evidence. Newest events appear first.</p></div>',unsafe_allow_html=True)
-                table_rows=[{k:v for k,v in entry.items() if not k.startswith('_')} for entry in display]
-                cols=['Date','Incident','Current Risk','P&C Assessment','Risk Outlook','Monitoring Indicators','Evidence']
-                st.caption(str(len(display))+' recent security incidents · worldwide · event date order')
-                try:
-                    selection=st.dataframe(pd.DataFrame(table_rows)[cols],hide_index=True,use_container_width=True,
-                        height=560,row_height=64,on_select='rerun',selection_mode='single-row',
-                        key='pc_brief_intelligence_table',
-                        column_config={
-                            'Date':st.column_config.TextColumn('DATE',width='small'),
-                            'Incident':st.column_config.TextColumn('INCIDENT',width='large'),
-                            'Current Risk':st.column_config.TextColumn('CURRENT RISK',width='small'),
-                            'P&C Assessment':st.column_config.TextColumn('P&C ASSESSMENT',width='large'),
-                            'Risk Outlook':st.column_config.TextColumn('OUTLOOK',width='large'),
-                            'Monitoring Indicators':st.column_config.TextColumn('MONITORING INDICATORS',width='large'),
-                            'Evidence':st.column_config.TextColumn('EVIDENCE',width='small')})
-                    chosen_index=(selection.selection.rows or [0])[0]
-                except TypeError:
-                    st.dataframe(pd.DataFrame(table_rows)[cols],hide_index=True,use_container_width=True,height=560)
-                    chosen_index=st.selectbox('Incident detail',range(len(display)),
-                        format_func=lambda i:display[i]['Date']+' · '+display[i]['Incident'],key='pc_brief_event_choice')
-                chosen=display[chosen_index];event=chosen['_item'];assessment=chosen['_assessment']
-                def detail_line(label,value):
-                    return '<div class="pc-kicker">'+escape(label)+'</div><div class="pc-body">'+escape(str(value or 'Not yet assessed'))+'</div>'
-                details='<div class="pc-intel-detail"><div class="pc-kicker">'+escape(chosen['Date']+' · '+chosen['Evidence'])+'</div><h3>'+escape(chosen['Incident'])+'</h3>'
-                details+='<div class="pc-risk">'+escape(chosen['Current Risk'])+'</div><div style="height:14px"></div>'
-                for field in ('P&C Assessment','Risk Outlook','Monitoring Indicators'):
-                    details+=detail_line(field,chosen[field])
-                details+='<div class="pc-muted">'+escape(next((v for v in ('Assessment status',) if chosen.get(v)), ''))+': '+escape(chosen.get('Assessment status') or 'Unrecorded')+'</div></div>'
-                st.markdown(details,unsafe_allow_html=True)
-                if st.button('Open incident dossier →',key='pc_brief_open_event',type='primary'):
-                    _open_below('event',event['event_id'],event.get('title'))
-                if assessment:
-                    with st.expander('Evidence and assessment provenance',expanded=False):
-                        st.caption('Assessment dated '+str(assessment.get('assessment_date') or assessment.get('as_known_at') or 'unrecorded')[:10]+' · '+_assessment_freshness(assessment))
-                        for evidence_item in assessment.get('evidence') or []:
-                            if isinstance(evidence_item,dict) and str(evidence_item.get('event_id'))==str(event['event_id']):
-                                url=evidence_item.get('source_url')
-                                if isinstance(url,str) and url.startswith(('https://','http://')):
-                                    st.link_button('Assessment source',url)
+                st.markdown('<div class="pc-brief-hero"><h3>Operating risk briefing</h3><p>Published intelligence across maritime, aviation, rail, infrastructure and security. Select any incident for its connected dossier and supporting evidence.</p></div>',unsafe_allow_html=True)
+                published_count=sum(row.get('Assessment status')=='Published judgment' for row in display)
+                m1,m2,m3=st.columns(3)
+                m1.metric('Published incident judgments',published_count)
+                m2.metric('Recent incidents',len(display))
+                m3.metric('Evidence-linked records',sum(bool(row['_item'].get('verification_status')) for row in display))
+                st.markdown('#### Risk at a glance')
+                st.caption('Latest dated worldwide incidents · verified reporting and assessment publication are separate.')
+                def risk_pill(value):
+                    value=str(value or 'Not rated')
+                    tone={'HIGH':'high','CRITICAL':'high','SEVERE':'high','ELEVATED':'medium','MODERATE':'medium','MEDIUM':'medium','LOW':'low'}.get(value.upper(),'unknown')
+                    return '<span class="pc-pill pc-'+tone+'">'+escape(value)+'</span>'
+                table='<table class="pc-risk-grid"><thead><tr><th>Incident / Scope</th><th>Current Risk</th><th>P&C Assessment</th><th>Risk Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
+                for row in display:
+                    table+='<tr><td><strong>'+escape(row['Incident'])+'</strong><div class="pc-inc-date">'+escape(row['Date']+' · '+row['Evidence'])+'</div></td>'
+                    table+='<td>'+risk_pill(row['Current Risk'])+'</td><td>'+escape(row['P&C Assessment'])+'</td><td>'+escape(row['Risk Outlook'])+'</td><td>'+escape(row['Monitoring Indicators'])+'</td></tr>'
+                st.markdown(table+'</tbody></table>',unsafe_allow_html=True)
+                st.markdown('#### Explore an incident')
+                choice=st.selectbox('Incident dossier',range(len(display)),format_func=lambda i:display[i]['Date']+' · '+display[i]['Incident'],key='pc_brief_event_choice')
+                chosen=display[choice];event=chosen['_item']
+                with st.container(border=True):
+                    st.markdown('#### '+escape(chosen['Incident']))
+                    st.caption(chosen['Date']+' · '+chosen['Evidence']+' · '+chosen['Assessment status'])
+                    x,y=st.columns([1,3]);x.markdown('**Current Risk**');x.write(chosen['Current Risk'])
+                    y.markdown('**P&C Assessment**');y.write(chosen['P&C Assessment'])
+                    st.markdown('**Risk Outlook**');st.write(chosen['Risk Outlook'])
+                    st.markdown('**Monitoring Indicators**');st.write(chosen['Monitoring Indicators'])
+                    if st.button('Open full connected incident dossier →',type='primary',key='pc_brief_open_event'):
+                        _open_below('event',event['event_id'],event.get('title'))
             else:
                 st.info('No dated security developments match this selection.')
-        with st.expander('Published regional and global assessments (including earlier snapshots)',expanded=False):
-            _render_pc_assessments(db,core,term)
 
     _render_related_below(db,core)
 
