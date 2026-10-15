@@ -269,6 +269,28 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
           "confidence":judgment.get("confidence"),"pc_assessment":judgment.get("risk_rationale") or judgment.get("current_risk"),
           "risk_outlook":judgment.get("risk_outlook"),"monitoring_indicators":judgment.get("monitoring_indicators"),
           "assessed_at":judgment.get("assessed_at"),"valid_until":judgment.get("valid_until")}}
+    # Export the same approved narrative and evidence as a dated, branded client PDF.
+    try:
+        from pc_event_pdf import create_incident_brief
+        export_assets=[]
+        for link in asset_links:
+            asset=assets.get(str(link.get("asset_id") or "")) or {}
+            if asset:
+                export_assets.append({"name":asset.get("name"),"mode":asset.get("asset_type"),
+                    "relationship":link.get("relation_type") or link.get("role"),
+                    "impact_status":link.get("impact_status") or "Not established"})
+        if not export_assets:
+            export_assets=[v for v in meta.get("infrastructure_context",[]) if isinstance(v,dict)]
+        from pc_geographic_context import locality_point
+        pdf_place=locality_point(str(meta.get("geographic_scope") or "")+" "+str(record.get("title") or ""))
+        pdf_bytes=create_incident_brief(record,assessment,outlook,evidence,related,export_assets,meta,pdf_place)
+        st.download_button("↓ Export Intelligence Brief · PDF",data=pdf_bytes,
+            file_name="PC_Incident_Brief_"+str(event_id).replace("/","_")+".pdf",
+            mime="application/pdf",key="export_incident_pdf_"+event_id,
+            use_container_width=False)
+    except Exception as exc:
+        st.error("PDF export failed: "+type(exc).__name__+" — "+str(exc))
+
     # Editorial questions precede visual evidence. Graphs must be earned by actual data.
     st.markdown("## Intelligence dossier")
     st.caption(_date(record.get("start_date"))+" · "+_label(record.get("verification_status"))+
@@ -419,27 +441,6 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
             st.markdown("**Linked infrastructure by mode**")
             st.bar_chart(pd.Series(types).value_counts())
             st.caption("Recorded link counts only; not damage, traffic or financial exposure.")
-    # Export the same approved narrative and evidence as a dated, branded client PDF.
-    try:
-        from pc_event_pdf import create_incident_brief
-        export_assets=[]
-        for link in asset_links:
-            asset=assets.get(str(link.get("asset_id") or "")) or {}
-            if asset:
-                export_assets.append({"name":asset.get("name"),"mode":asset.get("asset_type"),
-                    "relationship":link.get("relation_type") or link.get("role"),
-                    "impact_status":link.get("impact_status") or "Not established"})
-        if not export_assets:
-            export_assets=[v for v in meta.get("infrastructure_context",[]) if isinstance(v,dict)]
-        from pc_geographic_context import locality_point
-        pdf_place=locality_point(str(meta.get("geographic_scope") or "")+" "+str(record.get("title") or ""))
-        pdf_bytes=create_incident_brief(record,assessment,outlook,evidence,related,export_assets,meta,pdf_place)
-        st.download_button("↓ Export Intelligence Brief · PDF",data=pdf_bytes,
-            file_name="PC_Incident_Brief_"+str(event_id).replace("/","_")+".pdf",
-            mime="application/pdf",key="export_incident_pdf_"+event_id,
-            use_container_width=False)
-    except Exception as exc:
-        st.caption("PDF export is temporarily unavailable: "+str(exc))
     st.divider()
     if st.toggle("Show underlying record, chronology and specialist links", value=False, key="pc_full_dossier_"+event_id):
 
