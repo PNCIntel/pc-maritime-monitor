@@ -36,7 +36,9 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     forecast=outlook.get("risk_outlook") or meta.get("risk_outlook")
     indicators=_list(outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators"))
     claims=evidence or [v for v in _list(meta.get("source_claims")) if isinstance(v,dict)]
-    if not claims:\n        claims=[{"publisher":"Recorded event source","url":u,"claim":"Source URL recorded in the event metadata"} for u in _list(meta.get("source_urls")) if _valid_url(u)]\n    sources=[]
+    if not claims:
+        claims=[{"publisher":"Recorded event source","url":u,"claim":"Source URL recorded in the event metadata"} for u in _list(meta.get("source_urls")) if _valid_url(u)]
+    sources=[]
     for n,claim in enumerate(claims,1):
         url=claim.get("original_url") or claim.get("source_url") or claim.get("url") or claim.get("link")
         link=('<a href="'+_h(url)+'">Read original article / advisory ↗</a><div class="url">'+_h(url)+'</div>') if _valid_url(url) else '<span class="muted">Source link requires completion</span>'
