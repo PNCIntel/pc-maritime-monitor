@@ -78,6 +78,16 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
         if location.is_file():
             logo_html='<img class="logo" src="data:image/png;base64,'+base64.b64encode(location.read_bytes()).decode("ascii")+'"/>'
             break
+    if logo_html.startswith('<div'):
+        try:
+            import requests
+            response=requests.get(
+                "https://storage.ghost.io/c/b7/5a/b75acb20-9d7a-4c8a-83eb-debbe0c72528/content/images/2026/07/power-corridors-logo-dark-matched-transparent-10.png",
+                timeout=5)
+            response.raise_for_status()
+            if response.content.startswith(b"\\x89PNG") and len(response.content)<2000000:
+                logo_html='<img class="logo" src="data:image/png;base64,'+base64.b64encode(response.content).decode("ascii")+'"/>'
+        except (Exception,): pass
     opening=('<div class="strap">P&C INTELLIGENCE &nbsp; / &nbsp; INCIDENT INTELLIGENCE BRIEF</div>')
     bottom_line=outlook.get("pc_assessment") or assessment.get("pc_assessment") or meaning
     html='''<!doctype html><html><head><meta charset="utf-8"><style>
