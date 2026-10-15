@@ -265,7 +265,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         st.caption("Event narrative / existing editorial context; not a separately approved risk rating.")
     st.markdown("#### Risk Outlook")
     st.write(outlook.get("risk_outlook") or meta.get("risk_outlook") or
-             "Operational consequences remain contingent on further corroborated reporting and official notices.")
+             "Outlook pending evidence-backed publication.")
     if not outlook: st.caption("Provisional monitoring interpretation; no separately published outlook or rating.")
     st.markdown("#### Monitoring Indicators")
     indicators = outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators") or []
@@ -330,7 +330,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                      " · "+_label(link.get("relationship_type")))
         st.caption("Only recorded event-to-event associations; no causal inference.")
     st.divider()
-    with st.expander("Full underlying record, timeline and specialist links", expanded=False):
+    if st.toggle("Show underlying record, chronology and specialist links", value=False, key="pc_full_dossier_"+event_id):
 
             # Shared production graph navigation across Intelligence and Trade.
         # Coordinates are not inferred from related airport or facility identities.
