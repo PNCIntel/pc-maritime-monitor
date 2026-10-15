@@ -1105,7 +1105,7 @@ def _security(db,core):
             if term:
                 recent=[item for item in recent if term.lower() in
                     (str(item.get('title') or '')+' '+str(item.get('description') or '')+' '+str(item.get('event_type') or '')).lower()]
-            recent=recent[:50]
+            recent=recent[:120]
             # Only explicit event IDs in the published evidence qualify as a join.
             assessments,ae=_load(db,'pc_v_security_pc_assessments',limit=150)
             global_assessments,ge=_load(db,'pc_global_risk_briefings',limit=200)
@@ -1146,8 +1146,10 @@ def _security(db,core):
                 if not isinstance(meta,dict):meta={}
                 prior=meta.get('pc_risk_analysis') or {}
                 if not isinstance(prior,dict):prior={}
-                risk=briefing_text(assessment.get('risk_level')) if current else (briefing_text(judgment.get('current_risk')) if judgment.get('judgment_status')=='published' else 'Not rated')
-                if not current and prior.get('published_rating') and prior.get('analyst_approval')=='approved':
+                risk=briefing_text(assessment.get('risk_level')) if current else (briefing_text(judgment.get('risk_level')) if judgment.get('judgment_status')=='published' else '')
+                if risk.upper() not in ('CRITICAL','SEVERE','HIGH','ELEVATED','MODERATE','MEDIUM','LOW'):
+                    risk='ASSESSED' if judgment.get('judgment_status')=='published' else 'PENDING'
+                if not current and prior.get('published_rating') and prior.get('analyst_approval')=='approved' and briefing_text(prior['published_rating']).upper() in ('CRITICAL','SEVERE','HIGH','ELEVATED','MODERATE','MEDIUM','LOW'):
                     risk=briefing_text(prior['published_rating'])
                 interpretation=(briefing_text(assessment.get('executive_summary') or assessment.get('explanation')) if current else
                     briefing_text(version.get('pc_assessment') or version.get('what_it_means') or prior.get('finding') or item.get('description')))
@@ -1158,7 +1160,7 @@ def _security(db,core):
                 if not isinstance(indicators,list):indicators=[]
                 status=('Published judgment' if current or judgment.get('judgment_status')=='published' or version.get('assessment_status')=='published' else
                     'Analytical draft · rating not approved' if version or prior else 'Assessment pending')
-                display.append({'Date':str(item['start_date'])[:10],
+                display.append({'_risk_finding':judgment.get('current_risk'), 'Date':str(item['start_date'])[:10],
                     'Incident':str(item.get('title') or 'Development'),
                     'Current Risk':risk,
                     'P&C Assessment':interpretation or 'Evidence review required',
@@ -1178,6 +1180,9 @@ def _security(db,core):
                 .pc-pill{display:inline-block;padding:4px 9px;border-radius:5px;font-weight:700;font-size:.75rem;white-space:normal}
                 .pc-high{background:#fce8e6;color:#922b21}.pc-medium{background:#fff1d6;color:#805400}.pc-low{background:#e1f2ec;color:#17654a}.pc-unknown{background:#e7edf3;color:#40556a}
                 .pc-inc-date{font-size:.76rem;opacity:.7;margin-top:7px}
+                .pc-risk-grid tbody tr:nth-child(odd){background:#5c79900d}.pc-risk-grid tbody tr:hover{background:#c9a46119}
+                .pc-risk-grid td:first-child{border-left:3px solid #c9a46155}
+                .pc-pill.pc-unknown{font-size:.72rem}
                 </style>""",unsafe_allow_html=True)
                 st.markdown('<div class="pc-brief-hero"><h3>Operating risk briefing</h3><p>Published intelligence across maritime, aviation, rail, infrastructure and security. Select any incident for its connected dossier and supporting evidence.</p></div>',unsafe_allow_html=True)
                 published_count=sum(row.get('Assessment status')=='Published judgment' for row in display)
@@ -1186,23 +1191,40 @@ def _security(db,core):
                 m2.metric('Recent incidents',len(display))
                 m3.metric('Evidence-linked records',sum(bool(row['_item'].get('verification_status')) for row in display))
                 st.markdown('#### Risk at a glance')
+                display.sort(key=lambda row:(row['Assessment status']!='Published judgment',row['Date']),reverse=False)
+                published_rows=[r for r in display if r['Assessment status']=='Published judgment']
+                display=sorted(published_rows,key=lambda row:row['Date'],reverse=True)+sorted([r for r in display if r['Assessment status']!='Published judgment'],key=lambda row:row['Date'],reverse=True)
+                page_size=8
+                page_count=(len(display)+page_size-1)//page_size
+                if st.session_state.get('pc_risk_page',1)>page_count:st.session_state['pc_risk_page']=1
+                if 'pc_risk_page' not in st.session_state:st.session_state['pc_risk_page']=1
+                page=st.session_state['pc_risk_page']
+                page_rows=display[(page-1)*page_size:page*page_size]
                 st.caption('Latest dated worldwide incidents · verified reporting and assessment publication are separate.')
                 def risk_pill(value):
                     value=str(value or 'Not rated')
                     tone={'HIGH':'high','CRITICAL':'high','SEVERE':'high','ELEVATED':'medium','MODERATE':'medium','MEDIUM':'medium','LOW':'low'}.get(value.upper(),'unknown')
                     return '<span class="pc-pill pc-'+tone+'">'+escape(value)+'</span>'
                 table='<table class="pc-risk-grid"><thead><tr><th>Incident / Scope</th><th>Current Risk</th><th>P&C Assessment</th><th>Risk Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
-                for row in display:
+                for row in page_rows:
                     table+='<tr><td><strong>'+escape(row['Incident'])+'</strong><div class="pc-inc-date">'+escape(row['Date']+' · '+row['Evidence'])+'</div></td>'
                     table+='<td>'+risk_pill(row['Current Risk'])+'</td><td>'+escape(row['P&C Assessment'])+'</td><td>'+escape(row['Risk Outlook'])+'</td><td>'+escape(row['Monitoring Indicators'])+'</td></tr>'
                 st.markdown(table+'</tbody></table>',unsafe_allow_html=True)
+                prev,number,next_=st.columns([1,3,1])
+                with prev:
+                    if st.button('← Previous',disabled=page<=1,key='pc_risk_prev'):
+                        st.session_state['pc_risk_page']=page-1;st.rerun()
+                number.caption('Page '+str(page)+' of '+str(page_count)+' · incidents '+str((page-1)*8+1)+'–'+str(min(page*8,len(display)))+' of '+str(len(display)))
+                with next_:
+                    if st.button('Next →',disabled=page>=page_count,key='pc_risk_next'):
+                        st.session_state['pc_risk_page']=page+1;st.rerun()
                 st.markdown('#### Explore an incident')
-                choice=st.selectbox('Incident dossier',range(len(display)),format_func=lambda i:display[i]['Date']+' · '+display[i]['Incident'],key='pc_brief_event_choice')
-                chosen=display[choice];event=chosen['_item']
+                choice=st.selectbox('Incident dossier',range(len(page_rows)),format_func=lambda i:page_rows[i]['Date']+' · '+page_rows[i]['Incident'],key='pc_brief_event_choice_'+str(page))
+                chosen=page_rows[choice];event=chosen['_item']
                 with st.container(border=True):
                     st.markdown('#### '+escape(chosen['Incident']))
                     st.caption(chosen['Date']+' · '+chosen['Evidence']+' · '+chosen['Assessment status'])
-                    x,y=st.columns([1,3]);x.markdown('**Current Risk**');x.write(chosen['Current Risk'])
+                    x,y=st.columns([1,3]);x.markdown('**Current Risk**');x.write(chosen['Current Risk']);x.caption(str(chosen.get('_risk_finding') or 'Risk category not separately authored'))
                     y.markdown('**P&C Assessment**');y.write(chosen['P&C Assessment'])
                     st.markdown('**Risk Outlook**');st.write(chosen['Risk Outlook'])
                     st.markdown('**Monitoring Indicators**');st.write(chosen['Monitoring Indicators'])
