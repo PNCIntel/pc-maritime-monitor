@@ -20,7 +20,7 @@ def _list(value):
     return []
 
 def _valid_url(url):
-    return isinstance(url,str) and url.startswith(("https://","http://")) and not re.search(r'[<>"\\s]',url)
+    return isinstance(url,str) and url.startswith(("https://","http://")) and not any(ch.isspace() or ch in '<>"' for ch in url)
 
 def _paragraph(value):
     return "<p>"+_h(value).replace("\\n","<br/>")+"</p>" if value else '<p class="muted">Not established in the current record.</p>'
@@ -36,10 +36,10 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     forecast=outlook.get("risk_outlook") or meta.get("risk_outlook")
     indicators=_list(outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators"))
     claims=evidence or [v for v in _list(meta.get("source_claims")) if isinstance(v,dict)]
-    sources=[]
+    if not claims:\n        claims=[{"publisher":"Recorded event source","url":u,"claim":"Source URL recorded in the event metadata"} for u in _list(meta.get("source_urls")) if _valid_url(u)]\n    sources=[]
     for n,claim in enumerate(claims,1):
-        url=claim.get("original_url") or claim.get("source_url") or claim.get("url")
-        link=('<a href="'+_h(url)+'">Open original source ↗</a>') if _valid_url(url) else 'Original URL not recorded'
+        url=claim.get("original_url") or claim.get("source_url") or claim.get("url") or claim.get("link")
+        link=('<a href="'+_h(url)+'">Read original article / advisory ↗</a><div class="url">'+_h(url)+'</div>') if _valid_url(url) else '<span class="muted">Source link requires completion</span>'
         sources.append('<div class="source"><b>['+str(n)+'] '+_h(claim.get("publisher") or claim.get("document_title") or claim.get("source_name") or "Source")+'</b><span>'+_h(_date(claim.get("published_at")))+
             ' · '+_h(claim.get("verification_status") or claim.get("verification") or "Unreviewed")+'</span><p>'+_h(claim.get("claim") or "Claim text not recorded.")+'</p>'+link+'</div>')
     related_html=[]
@@ -65,7 +65,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     @bottom-right{content:"Page " counter(page);font:8pt Arial;color:#536679}}
     body{font-family:Arial,sans-serif;font-size:10pt;color:#192a38;line-height:1.48}
     .brand{color:#0b344d;font-weight:800;letter-spacing:2.2px;font-size:17pt}.strap{font-size:8pt;letter-spacing:1.8px;color:#42748b}
-    .rule{height:4px;background:#0f536b;margin:10px 0 22px}.title{font-size:24pt;line-height:1.15;margin:9px 0}
+    .rule{height:4px;background:#13556c;border-right:30px solid #bea365;margin:10px 0 22px}.title{font-size:24pt;line-height:1.15;margin:9px 0}
     .meta{font-size:8pt;color:#526778}.metrics{display:table;width:100%;margin:20px 0;border-collapse:separate;border-spacing:5px}
     .metric{display:table-cell;width:33%;background:#eff4f6;padding:10px}.metric small{display:block;color:#557185;font-size:7pt;text-transform:uppercase}
     .metric strong{font-size:12pt;color:#123c51}.section{margin-top:19px;break-inside:avoid}.section h2{font-size:12pt;color:#124e68;border-bottom:1px solid #bdd0d8;padding-bottom:5px}
@@ -75,7 +75,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     table{border-collapse:collapse;width:100%;font-size:8pt}th{text-align:left;color:#164961;background:#e9f1f5}
     th,td{padding:7px 6px;border-bottom:1px solid #d4e0e6;vertical-align:top}
     .source{padding:8px 0;border-bottom:1px solid #dce6e9;break-inside:avoid}.source span{color:#657b89;font-size:8pt;display:block}
-    .source p{margin:4px 0}a{color:#096381;text-decoration:underline;overflow-wrap:anywhere}
+    .source p{margin:4px 0}.url{font-size:7.5pt;color:#526778;overflow-wrap:anywhere;margin-top:4px}a{color:#096381;text-decoration:underline;overflow-wrap:anywhere}
     li{margin-bottom:5px}.disclaimer{font-size:8pt;color:#566d7b;border-top:1px solid #b9ced6;margin-top:25px;padding-top:8px}
     </style></head><body>'''
     html+='<div class="brand">POWER &amp; CORRIDORS</div><div class="strap">INDEPENDENT INTELLIGENCE ON MOVEMENT, INFRASTRUCTURE &amp; RISK</div><div class="rule"></div>'
