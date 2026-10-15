@@ -154,6 +154,19 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
             related.append(({"relationship_type":gl.get("relationship"),"claim_status":"linked",
                              "rationale":_meta(gl).get("rationale") or "Source-recorded event association"},other))
             related_ids.add(other_id)
+    # Explicit editorial situation links, resolved to real event IDs at read time.
+    # These links describe context only; they do not attribute an attack or assert causation.
+    for candidate in meta.get("curated_related_events") or []:
+        if not isinstance(candidate,dict): continue
+        other_id=str(candidate.get("event_id") or "")
+        if not other_id or other_id==event_id or other_id in related_ids: continue
+        other=_one(sb,"pc_events","event_id",other_id)
+        if not other: continue
+        related.append(({"relationship_type":candidate.get("relationship") or "wider escalation context",
+                         "claim_status":"editorial context, not causal attribution",
+                         "rationale":candidate.get("rationale") or "",
+                         "metadata":{"causation_established":False}},other))
+        related_ids.add(other_id)
     related.sort(key=lambda item: str(item[1].get("start_date") or ""), reverse=True)
     rail_disruptions = _get(sb, "pc_rail_network_disruptions", "event_id", event_id, 100)
     rail_runs = _get(sb, "pc_rail_service_runs", "linked_event_id", event_id, 100)
