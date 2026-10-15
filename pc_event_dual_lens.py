@@ -63,6 +63,10 @@ def render_event_lens(db, event_id: str, product: str):
         _items('Transport and logistics impacts', r.get('logistics_impacts'))
         _items('Other recorded impacts', r.get('other_impacts'))
         _items('Company effects', r.get('company_effects'))
-        _items('Recorded asset connections', r.get('linked_objects'))
+        # The navigable canonical graph is rendered above by pc_event_navigation.
+        # Raw linked_objects contain internal IDs and are not client-facing prose.
+        connections = r.get('linked_objects') or []
+        if connections:
+            st.caption(f'{len(connections)} source-linked object records; open named companies and infrastructure in the Connected organisations section above.')
         if not any(r.get(k) for k in ('logistics_impacts', 'other_impacts', 'company_effects')):
             st.info('No structured commercial effect has been recorded for this event yet.')
