@@ -79,10 +79,10 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     li{margin-bottom:5px}.disclaimer{font-size:8pt;color:#566d7b;border-top:1px solid #b9ced6;margin-top:25px;padding-top:8px}
     </style></head><body>'''
     html+='<div class="brand">POWER &amp; CORRIDORS</div><div class="strap">INDEPENDENT INTELLIGENCE ON MOVEMENT, INFRASTRUCTURE &amp; RISK</div><div class="rule"></div>'
-    html+='<div class="strap">INCIDENT INTELLIGENCE BRIEF</div><h1 class="title">'+_h(title)+'</h1><div class="meta">Incident '+_h(incident_id)+' · Event '+_h(_date(record.get("start_date")))+
-        ' · Published/exported '+_h(issued)+' · Verification '+_h(record.get("verification_status") or "Unrecorded")+'</div>'
-    html+='<div class="metrics"><div class="metric"><small>Current risk</small><strong>'+_h(outlook.get("current_risk") or "Not rated")+'</strong></div><div class="metric"><small>Confidence</small><strong>'+
-        _h(outlook.get("confidence") or "Unassigned")+'</strong></div><div class="metric"><small>Assessed</small><strong>'+_h(_date(outlook.get("assessed_at")))+'</strong></div></div>'
+    html+=('<div class="strap">INCIDENT INTELLIGENCE BRIEF</div><h1 class="title">'+_h(title)+'</h1><div class="meta">Incident '+_h(incident_id)+' · Event '+_h(_date(record.get("start_date")))+
+        ' · Published/exported '+_h(issued)+' · Verification '+_h(record.get("verification_status") or "Unrecorded")+'</div>')
+    html+=('<div class="metrics"><div class="metric"><small>Current risk</small><strong>'+_h(outlook.get("current_risk") or "Not rated")+'</strong></div><div class="metric"><small>Confidence</small><strong>'+
+        _h(outlook.get("confidence") or "Unassigned")+'</strong></div><div class="metric"><small>Assessed</small><strong>'+_h(_date(outlook.get("assessed_at")))+'</strong></div></div>')
     if outlook.get("valid_until"): html+='<p class="meta">Assessment valid until: '+_h(outlook["valid_until"])+' (check current conditions before reliance).</p>'
     html+='<div class="section"><h2>01 / What happened?</h2>'+_paragraph(what)+'</div>'
     html+='<div class="section"><h2>02 / What does it mean? — P&C assessment</h2>'+_paragraph(meaning)+'</div>'
