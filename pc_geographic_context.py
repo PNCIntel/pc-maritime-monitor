@@ -7,6 +7,10 @@ from __future__ import annotations
 import re
 
 LOCALITIES = (
+    {"name":"Medina, Saudi Arabia","pattern":r"\\b(?:medina|madinah)\\b",
+     "lat":24.4672,"lon":39.6111,
+     "source":"https://www.openstreetmap.org/search?query=Medina%20Saudi%20Arabia",
+     "precision":"approximate city reference, not an incident location"},
     {
         "name": "Peshawar, Pakistan",
         "pattern": "peshawar",
