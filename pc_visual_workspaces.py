@@ -1119,6 +1119,8 @@ def _security(db,core):
                     if eid: versions_by_event.setdefault(eid,[]).append(version)
                 for group in versions_by_event.values():
                     group.sort(key=lambda v:(int(v.get('version') or 0),str(v.get('created_at') or '')),reverse=True)
+            event_judgments,je=_load(db,'pc_event_assessment_judgments',filters=(('event_id','in',ids),),limit=500) if ids else ([],None)
+            judgments_by_event={str(v.get('event_id')):v for v in event_judgments} if not je else {}
             by_event={}
             for assessment in published:
                 for evidence_item in assessment.get('evidence') or []:
@@ -1137,21 +1139,22 @@ def _security(db,core):
                 overlay=overlays.get(str(assessment.get('assessment_id')),{})
                 current=bool(assessment) and _assessment_freshness(assessment)=='CURRENT'
                 version=(versions_by_event.get(eid) or [{}])[0]
+                judgment=judgments_by_event.get(eid) or {}
                 meta=item.get('metadata') or {}
                 if not isinstance(meta,dict):meta={}
                 prior=meta.get('pc_risk_analysis') or {}
                 if not isinstance(prior,dict):prior={}
-                risk=briefing_text(assessment.get('risk_level')) if current else 'Not rated'
+                risk=briefing_text(assessment.get('risk_level')) if current else (briefing_text(judgment.get('current_risk')) if judgment.get('judgment_status')=='published' else 'Not rated')
                 if not current and prior.get('published_rating') and prior.get('analyst_approval')=='approved':
                     risk=briefing_text(prior['published_rating'])
                 interpretation=(briefing_text(assessment.get('executive_summary') or assessment.get('explanation')) if current else
                     briefing_text(version.get('pc_assessment') or version.get('what_it_means') or prior.get('finding') or item.get('description')))
                 outlook=(briefing_text(overlay.get('risk_outlook') or assessment.get('risk_outlook') or assessment.get('outlook')) if current else
-                    briefing_text(prior.get('outlook')))
+                    briefing_text(judgment.get('risk_outlook') or prior.get('outlook')))
                 indicators=(overlay.get('monitoring_indicators') or assessment.get('monitoring_priorities') or []) if current else (
-                    version.get('monitoring_indicators') or prior.get('monitoring_indicators') or meta.get('monitoring') or [])
+                    judgment.get('monitoring_indicators') or version.get('monitoring_indicators') or prior.get('monitoring_indicators') or meta.get('monitoring') or [])
                 if not isinstance(indicators,list):indicators=[]
-                status=('Published judgment' if current or version.get('assessment_status')=='published' else
+                status=('Published judgment' if current or judgment.get('judgment_status')=='published' or version.get('assessment_status')=='published' else
                     'Analytical draft · rating not approved' if version or prior else 'Assessment pending')
                 display.append({'Date':str(item['start_date'])[:10],
                     'Incident':str(item.get('title') or 'Development'),
