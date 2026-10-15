@@ -299,7 +299,38 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                     if pdf_place: break
         if not pdf_place:
             pdf_place=locality_point(str(record.get("title") or ""))
-        pdf_bytes=create_incident_brief(record,assessment,outlook,evidence,related,export_assets,meta,pdf_place)
+        # AI is opt-in and creates an editable draft, never an automatically published judgment.
+        draft_key="pc_editorial_draft_"+event_id
+        approved_key="pc_editorial_approved_"+event_id
+        with st.expander("Improve brief writing with AI · review before export",expanded=False):
+            st.caption("Rewrites supported analysis in plain language. Sources, statuses and event links stay canonical.")
+            if st.button("Generate editorial draft",key="pc_draft_btn_"+event_id):
+                try:
+                    import os
+                    from pc_event_editorial import draft_event_brief
+                    key=os.environ.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY","")
+                    st.session_state[draft_key]=draft_event_brief(key,record,assessment,outlook,evidence,related,export_assets,meta)
+                    st.session_state[approved_key]=False
+                except Exception as draft_exc:
+                    st.error("Editorial draft unavailable: "+str(draft_exc))
+            if st.session_state.get(draft_key):
+                import json
+                revised=st.text_area("Edit the draft JSON before approval",
+                    value=json.dumps(st.session_state[draft_key],ensure_ascii=False,indent=2),
+                    height=370,key="pc_editorial_text_"+event_id)
+                if st.button("Approve edited narrative for PDF",key="pc_approve_"+event_id):
+                    try:
+                        edited=json.loads(revised)
+                        if not isinstance(edited,dict): raise ValueError("Expected a JSON object")
+                        st.session_state[draft_key]=edited
+                        st.session_state[approved_key]=True
+                        st.success("Approved for this session's PDF export; canonical records unchanged.")
+                    except (ValueError,TypeError) as parse_exc:
+                        st.error("Please correct the draft JSON: "+str(parse_exc))
+            if st.session_state.get(approved_key):
+                st.caption("Export below will use the approved editorial narrative.")
+        approved_editorial=st.session_state.get(draft_key) if st.session_state.get(approved_key) else None
+        pdf_bytes=create_incident_brief(record,assessment,outlook,evidence,related,export_assets,meta,pdf_place,editorial=approved_editorial)
         st.download_button("↓ Export Intelligence Brief · PDF",data=pdf_bytes,
             file_name="PC_Incident_Brief_"+str(event_id).replace("/","_")+".pdf",
             mime="application/pdf",key="export_incident_pdf_"+event_id,
