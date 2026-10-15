@@ -317,6 +317,15 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         st.caption("Stored coordinates of explicitly linked infrastructure, NOT incident coordinates or evidence of damage.")
     else:
         st.caption("No source-linked facility coordinates available; exact incident coordinates are not inferred.")
+    if not asset_table and isinstance(meta.get("infrastructure_context"),list):
+        import pandas as pd
+        context=[{"Infrastructure":v.get("name"),"Mode / type":v.get("mode") or "Context",
+                  "Recorded relationship":v.get("relationship") or v.get("role"),
+                  "Impact status":v.get("status") or "No direct impact established"}
+                 for v in meta["infrastructure_context"] if isinstance(v,dict)]
+        if context:
+            st.caption("Documented analytical context, not asserted direct event-to-asset links.")
+            st.dataframe(pd.DataFrame(context),hide_index=True,use_container_width=True)
     if asset_table:
         import pandas as pd
         st.dataframe(pd.DataFrame(asset_table).drop_duplicates(),hide_index=True,use_container_width=True)
@@ -333,6 +342,15 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                 if isinstance(source,str) and source.startswith(("https://","http://")):
                     st.link_button("Read source ↗",source,key="pc_exec_evidence_"+event_id+"_"+str(i))
     else:
+        claims=meta.get("source_claims") or []
+        for i,claim in enumerate(claims):
+            if not isinstance(claim,dict): continue
+            st.markdown("**"+str(claim.get("publisher") or "Recorded source")+"**")
+            st.write(claim.get("claim") or "")
+            st.caption("Status: "+str(claim.get("verification") or "Unreviewed"))
+            url=claim.get("url")
+            if isinstance(url,str) and url.startswith(("https://","http://")):
+                st.link_button("Read source ↗",url,key="pc_context_source_"+event_id+"_"+str(i))
         principal = _one(sb, "pc_sources", "source_id", record.get("source_id")) if record.get("source_id") else {}
         source_url = principal.get("url") or meta.get("source_url")
         if principal or source_url:
