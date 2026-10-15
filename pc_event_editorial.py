@@ -15,7 +15,7 @@ def draft_event_brief(api_key, record, assessment, outlook, evidence, related, a
              "infrastructure":assets,"editorial_context":metadata,
              "knowledge_graph_context":publication_context or {}}
     system="""You are the senior editor of Power & Corridors, writing a publishable Incident Intelligence Brief.
-Write clear professional English prose, not a database summary. Use only the supplied evidence.
+Write a self-contained client publication in clear professional English. Use only the supplied evidence.\nNever mention earlier P&C drafts, previous assessments, database construction, source-reconciliation exercises, or the writing process; incorporate their substantiated facts directly.
 Distinguish reported events, official claims, unconfirmed matters and P&C judgments. Never invent
 attribution, impacts, casualty counts, probabilities, source URLs, timings, asset status or causal links.
 Never represent contextual infrastructure as damaged. The key judgment, implications and bottom line
