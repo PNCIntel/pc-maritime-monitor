@@ -495,7 +495,30 @@ def _render_related_below(db,core):
                 except Exception as exc:
                     st.caption('Infrastructure event dossier unavailable: '+str(exc))
         if typ=='event':
-            st.markdown('#### P&C risk assessment')
+            event_rows,event_error=_load(db,'pc_events',filters=(('event_id','eq',oid),),limit=1)
+            event=event_rows[0] if not event_error and event_rows else {}
+            versions,version_error=_load(db,'pc_v07_event_assessments',filters=(('event_id','eq',oid),),limit=100)
+            versions=sorted(versions,key=lambda v:(int(v.get('version') or 0),str(v.get('created_at') or '')),reverse=True) if not version_error else []
+            version=versions[0] if versions else {}
+            metadata=event.get('metadata') or {}
+            if not isinstance(metadata,dict):metadata={}
+            prior=metadata.get('pc_risk_analysis') or {}
+            if not isinstance(prior,dict):prior={}
+            if version or prior:
+                st.markdown('#### Event-level P&C analysis')
+                st.caption('Versioned event analysis: '+str(version.get('assessment_status') or prior.get('assessment_type') or 'stored draft')+' · Approval: '+str(prior.get('analyst_approval') or 'not recorded'))
+                rating=prior.get('published_rating') if prior.get('analyst_approval')=='approved' else None
+                st.markdown('**Current Risk**')
+                st.write(rating or 'Not rated · source-qualified analysis is not an approved rating')
+                st.markdown('**P&C Assessment**')
+                st.write(version.get('pc_assessment') or version.get('what_it_means') or prior.get('finding') or 'Substantive assessment pending')
+                st.markdown('**Risk Outlook**')
+                st.write(prior.get('outlook') or 'Not yet assessed')
+                st.markdown('**Monitoring Indicators**')
+                monitoring=version.get('monitoring_indicators') or prior.get('monitoring_indicators') or metadata.get('monitoring') or []
+                if isinstance(monitoring,list):
+                    for indicator in monitoring: st.write('• '+str(indicator))
+            st.markdown('#### Linked situation / regional P&C assessment')
             legacy,le=_load(db,'pc_v_security_pc_assessments',limit=150)
             global_items,ge=_load(db,'pc_global_risk_briefings',limit=200)
             candidates=(legacy if not le else [])+([v for v in global_items if v.get('publication_status')=='published'] if not ge else [])
