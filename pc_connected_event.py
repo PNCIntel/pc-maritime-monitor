@@ -299,6 +299,16 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                     if pdf_place: break
         if not pdf_place:
             pdf_place=locality_point(str(record.get("title") or ""))
+        # Explicit, source-qualified point: the casualty/wreck is not the strike point.
+        wreck=meta.get("wreck_position") or meta.get("casualty_position") or {}
+        if not pdf_place and isinstance(wreck,dict) and wreck.get("source_url"):
+            try:
+                wlat=float(wreck.get("latitude")); wlon=float(wreck.get("longitude"))
+                if -85<=wlat<=85 and -180<=wlon<=180:
+                    pdf_place={"name":wreck.get("label") or "Reported wreck position",
+                               "lat":wlat,"lon":wlon,"source":wreck["source_url"],"zoom":8,
+                               "qualification":"Reported wreck position; initial incident location not established"}
+            except (TypeError,ValueError): pass
         from pc_publication_context import build_context
         publication_context=build_context(
             record,vessel=vessel,company_roles=company_roles,designations=published,
@@ -308,6 +318,17 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                    " vessel-company roles · "+str(len(publication_context["published_sanctions"]))+
                    " linked designations · "+str(len(publication_context["related_developments"]))+
                    " connected developments. Missing coverage is not a negative finding.")
+        with st.expander("Pre-publication intelligence coverage",expanded=True):
+            st.write("This is an internal coverage audit, not client-facing text.")
+            for key,label in (("vessel_profile","Subject profile"),("company_history","Corporate history"),
+                              ("published_sanctions","Linked legal designations"),
+                              ("related_developments","Connected developments"),
+                              ("infrastructure","Infrastructure exposure"),("updates","Developing chronology")):
+                value=publication_context.get(key) or {}
+                count=len(value) if isinstance(value,list) else int(bool(value))
+                st.write(label+": "+(str(count)+" records" if count else "Not returned; inspect coverage"))
+            st.write("Geographic reference: "+(str(pdf_place.get("name")) if pdf_place else "Not resolved"))
+            for gap in publication_context.get("coverage_gaps") or []: st.caption("Coverage gap: "+gap)
         with st.expander("Publication context and gaps",expanded=False):
             st.json(publication_context,expanded=False)
         # AI is opt-in and creates an editable draft, never an automatically published judgment.
