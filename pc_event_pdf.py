@@ -24,7 +24,7 @@ def _list(value):
 def _valid_url(url):
     return isinstance(url,str) and url.startswith(("https://","http://")) and not any(ch.isspace() or ch in '<>"' for ch in url)
 
-def _paragraph(value):
+def _plain(value):\n    return str(value or "Unrecorded").replace("_"," ").strip()\n\ndef _paragraph(value):
     return "<p>"+_h(value).replace("\\n","<br/>")+"</p>" if value else '<p class="muted">Not established in the current record.</p>'
 
 def create_incident_brief(record, assessment, outlook, evidence, related, assets, metadata=None, map_point=None, editorial=None):
@@ -47,15 +47,15 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
         url=claim.get("original_url") or claim.get("source_url") or claim.get("url") or claim.get("link")
         link=('<a href="'+_h(url)+'">Read original article / advisory ↗</a><div class="url">'+_h(url)+'</div>') if _valid_url(url) else '<span class="muted">Source link requires completion</span>'
         sources.append('<div class="source"><b>['+str(n)+'] '+_h(claim.get("publisher") or claim.get("document_title") or claim.get("source_name") or "Source")+'</b><span>'+_h(_date(claim.get("published_at")))+
-            ' · '+_h(claim.get("verification_status") or claim.get("verification") or "Unreviewed")+'</span><p>'+_h(claim.get("claim") or "Claim text not recorded.")+'</p>'+link+'</div>')
+            ' · '+_h(_plain(claim.get("verification_status") or claim.get("verification") or "Unreviewed"))+'</span><p>'+_h(claim.get("claim") or "Claim text not recorded.")+'</p>'+link+'</div>')
     related_html=[]
     for link,other in related:
         related_html.append('<tr><td>'+_h(_date(other.get("start_date")))+'</td><td>'+_h(other.get("title") or other.get("event_id"))+'</td><td>'+
-            _h(link.get("relationship_type") or link.get("relationship"))+'</td><td>'+_h(other.get("verification_status") or "Unrecorded")+'</td></tr>')
+            _h(_plain(link.get("relationship_type") or link.get("relationship")))+'</td><td>'+_h(_plain(other.get("verification_status") or "Unrecorded"))+'</td></tr>')
     infra=[]
     for v in assets:
         infra.append('<tr><td>'+_h(v.get("name") or v.get("Asset") or "Asset")+'</td><td>'+_h(v.get("mode") or v.get("asset_type") or v.get("Mode") or "Context")+
-                     '</td><td>'+_h(v.get("relationship") or v.get("Relationship") or "")+'</td><td>'+_h(v.get("impact_status") or v.get("Impact") or "Not established")+'</td></tr>')
+                     '</td><td>'+_h(_plain(v.get("relationship") or v.get("Relationship") or ""))+'</td><td>'+_h(v.get("impact_status") or v.get("Impact") or "Not established")+'</td></tr>')
     map_html='<div class="map"><b>REGIONAL GEOGRAPHIC REFERENCE</b><p>Location could not be resolved to a mappable named place. No exact incident position is inferred.</p></div>'
     if map_point and map_point.get("name"):
         name=map_point["name"]
