@@ -192,6 +192,29 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
     def open_dossier(typ, oid, title):
         _set_context(typ, oid, title)
         st.rerun()
+    # Show explicitly linked services and their canonical, planned infrastructure.
+    service_links,_ = _query(db,'pc_event_links',eq={'event_id':event_id},limit=200)
+    for sl in service_links:
+        if str(sl.get('linked_type') or '').lower() not in ('transport_service','service'):
+            continue
+        services,_ = _query(db,'pc_transport_services',eq={'transport_service_id':sl.get('linked_id')},limit=1)
+        if not services:
+            continue
+        service = services[0]
+        ri = (service.get('metadata') or {}).get('route_intelligence_20261015') or {}
+        waypoints = ri.get('canonical_waypoints') or []
+        st.subheader('Connected transport service')
+        st.markdown('**'+str(service.get('service_name') or sl.get('linked_name') or 'Service')+'**')
+        st.caption('Route status: '+str(ri.get('version_status') or service.get('status') or 'unknown').replace('_',' ')+' · Connected infrastructure is not a confirmed movement or direct incident impact.')
+        for wp in sorted(waypoints,key=lambda w:int(w.get('sequence') or 0)):
+            label=str(wp.get('asset_name') or wp.get('place') or 'Unresolved')
+            a,b=st.columns([5,1])
+            a.write(str(wp.get('sequence') or '')+'. **'+label+'** · '+str(wp.get('function') or '').replace('_',' '))
+            if wp.get('asset_id') and b.button('Open ↗',key='pc_route_'+str(event_id)+'_'+str(wp.get('sequence'))):
+                open_dossier('asset',wp['asset_id'],label)
+        if ri.get('first_sailing_date_conflict'):
+            st.caption('Published first-sailing dates differ. No departure or completed Suez transit confirmed.')
+
     st.subheader('Connected organisations and infrastructure')
     render_event_connections(db,event_id,open_dossier,key_prefix='event_profile',compact=False)
 
