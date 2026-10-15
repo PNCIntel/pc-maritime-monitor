@@ -149,11 +149,15 @@ def render_event_profile(db, event_id: str, product: str) -> bool:
     base=canonical[0] if canonical else {}
     st.caption('SECURITY & DISRUPTIONS' if product=='intelligence' else 'DEVELOPMENT & OPERATIONAL CONTEXT')
     st.title(e.get('title') or 'Development')
-    metrics=st.columns(4)
-    metrics[0].metric('Event date',str(e.get('occurred_at') or base.get('start_date') or 'Not recorded')[:10])
-    metrics[1].metric('Classification',str(e.get('event_family') or 'Not classified').replace('_',' '))
-    metrics[2].metric('Severity',str(base.get('severity') or 'Not classified').replace('_',' ').title())
-    metrics[3].metric('Verification',str(base.get('verification_status') or 'Pending').replace('_',' ').title())
+    # Compact, wrapping metadata avoids Streamlit metric ellipses in narrow panes.
+    facts=[
+        ("Event date",str(e.get('occurred_at') or base.get('start_date') or 'Not recorded')[:10]),
+        ("Classification",str(e.get('event_family') or 'Not classified').replace('_',' ')),
+        ("Severity",str(base.get('severity') or 'Not classified').replace('_',' ').title()),
+        ("Verification",str(base.get('verification_status') or 'Pending').replace('_',' ').title()),
+    ]
+    st.dataframe(pd.DataFrame([{"Attribute":k,"Recorded value":v} for k,v in facts]),
+                 hide_index=True,use_container_width=True)
     risk=e.get('source_risk_level');trend=e.get('source_risk_trend')
     if risk or trend:
         st.info('Recorded assessment: '+' · '.join(x for x in [f'Risk: {risk}' if risk else '', f'Trend: {trend}' if trend else ''] if x))
