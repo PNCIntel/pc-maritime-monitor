@@ -299,6 +299,17 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                     if pdf_place: break
         if not pdf_place:
             pdf_place=locality_point(str(record.get("title") or ""))
+        from pc_publication_context import build_context
+        publication_context=build_context(
+            record,vessel=vessel,company_roles=company_roles,designations=published,
+            pgsa_queue=pgsa_queue,related=related,assets=export_assets,
+            updates=updates,corporate_edges=corporate_edges)
+        st.caption("Publication context: "+str(len(publication_context["company_history"]))+
+                   " vessel-company roles · "+str(len(publication_context["published_sanctions"]))+
+                   " linked designations · "+str(len(publication_context["related_developments"]))+
+                   " connected developments. Missing coverage is not a negative finding.")
+        with st.expander("Publication context and gaps",expanded=False):
+            st.json(publication_context,expanded=False)
         # AI is opt-in and creates an editable draft, never an automatically published judgment.
         draft_key="pc_editorial_draft_"+event_id
         approved_key="pc_editorial_approved_"+event_id
@@ -309,7 +320,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                     import os
                     from pc_event_editorial import draft_event_brief
                     key=os.environ.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY","")
-                    st.session_state[draft_key]=draft_event_brief(key,record,assessment,outlook,evidence,related,export_assets,meta)
+                    st.session_state[draft_key]=draft_event_brief(key,record,assessment,outlook,evidence,related,export_assets,meta,publication_context=publication_context)
                     st.session_state[approved_key]=False
                 except Exception as draft_exc:
                     st.error("Editorial draft unavailable: "+str(draft_exc))
