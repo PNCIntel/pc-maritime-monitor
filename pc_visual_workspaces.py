@@ -1168,39 +1168,57 @@ def _security(db,core):
                     'Assessment status':status,
                     '_item':item,'_assessment':assessment})
             if display:
-                st.dataframe(pd.DataFrame([{k:v for k,v in entry.items() if not k.startswith('_')} for entry in display]),
-                    hide_index=True,use_container_width=True,height=640,row_height=68,
-                    column_config={
-                        'Date':st.column_config.DateColumn('Event date',width='small'),
-                        'Incident':st.column_config.TextColumn('Incident',width='large'),
-                        'Current Risk':st.column_config.TextColumn('Current Risk',width='small'),
-                        'P&C Assessment':st.column_config.TextColumn('P&C Assessment',width='large'),
-                        'Risk Outlook':st.column_config.TextColumn('Risk Outlook',width='large'),
-                        'Monitoring Indicators':st.column_config.TextColumn('Monitoring Indicators',width='large'),
-                        'Evidence':st.column_config.TextColumn('Evidence',width='small'),
-                        'Assessment status':st.column_config.TextColumn('Assessment status',width='medium')})
-                choice=st.selectbox('Open development dossier',range(len(display)),
-                    format_func=lambda i:display[i]['Date']+' · '+display[i]['Incident'],
-                    key='pc_brief_event_choice')
-                chosen=display[choice];event=chosen['_item'];assessment=chosen['_assessment']
-                if st.button('Open full connected event dossier',key='pc_brief_open_event'):
+                st.markdown("""<style>
+                .pc-intel-head{padding:22px 24px;background:linear-gradient(115deg,#10283b,#193e52);border-radius:12px;border-left:4px solid #cfab70;margin-bottom:16px}
+                .pc-intel-head h3{color:#fff!important;margin:0;font-size:1.32rem}
+                .pc-intel-head p{color:#d6e4ea!important;margin:7px 0 0}
+                .pc-intel-detail{background:#102638;border:1px solid #315066;border-radius:12px;padding:20px 24px;margin:12px 0;color:#e8f0f4}
+                .pc-intel-detail h3,.pc-intel-detail strong{color:#fff!important}
+                .pc-intel-detail .pc-kicker{font-size:.76rem;letter-spacing:.11em;text-transform:uppercase;color:#cbb38a}
+                .pc-intel-detail .pc-risk{font-weight:700;color:#f4d397}
+                .pc-intel-detail .pc-body{line-height:1.55;margin:6px 0 17px;color:#e2ebf0}
+                .pc-intel-detail .pc-muted{font-size:.8rem;color:#aac0cd}
+                </style>""",unsafe_allow_html=True)
+                st.markdown('<div class="pc-intel-head"><h3>Global intelligence overview</h3><p>Select an incident to examine the P&C judgment, forward outlook and evidence. Newest events appear first.</p></div>',unsafe_allow_html=True)
+                table_rows=[{k:v for k,v in entry.items() if not k.startswith('_')} for entry in display]
+                cols=['Date','Incident','Current Risk','P&C Assessment','Risk Outlook','Monitoring Indicators','Evidence']
+                st.caption(str(len(display))+' recent security incidents · worldwide · event date order')
+                try:
+                    selection=st.dataframe(pd.DataFrame(table_rows)[cols],hide_index=True,use_container_width=True,
+                        height=560,row_height=64,on_select='rerun',selection_mode='single-row',
+                        key='pc_brief_intelligence_table',
+                        column_config={
+                            'Date':st.column_config.TextColumn('DATE',width='small'),
+                            'Incident':st.column_config.TextColumn('INCIDENT',width='large'),
+                            'Current Risk':st.column_config.TextColumn('CURRENT RISK',width='small'),
+                            'P&C Assessment':st.column_config.TextColumn('P&C ASSESSMENT',width='large'),
+                            'Risk Outlook':st.column_config.TextColumn('OUTLOOK',width='large'),
+                            'Monitoring Indicators':st.column_config.TextColumn('MONITORING INDICATORS',width='large'),
+                            'Evidence':st.column_config.TextColumn('EVIDENCE',width='small')})
+                    chosen_index=(selection.selection.rows or [0])[0]
+                except TypeError:
+                    st.dataframe(pd.DataFrame(table_rows)[cols],hide_index=True,use_container_width=True,height=560)
+                    chosen_index=st.selectbox('Incident detail',range(len(display)),
+                        format_func=lambda i:display[i]['Date']+' · '+display[i]['Incident'],key='pc_brief_event_choice')
+                chosen=display[chosen_index];event=chosen['_item'];assessment=chosen['_assessment']
+                def detail_line(label,value):
+                    return '<div class="pc-kicker">'+escape(label)+'</div><div class="pc-body">'+escape(str(value or 'Not yet assessed'))+'</div>'
+                details='<div class="pc-intel-detail"><div class="pc-kicker">'+escape(chosen['Date']+' · '+chosen['Evidence'])+'</div><h3>'+escape(chosen['Incident'])+'</h3>'
+                details+='<div class="pc-risk">'+escape(chosen['Current Risk'])+'</div><div style="height:14px"></div>'
+                for field in ('P&C Assessment','Risk Outlook','Monitoring Indicators'):
+                    details+=detail_line(field,chosen[field])
+                details+='<div class="pc-muted">'+escape(next((v for v in ('Assessment status',) if chosen.get(v)), ''))+': '+escape(chosen.get('Assessment status') or 'Unrecorded')+'</div></div>'
+                st.markdown(details,unsafe_allow_html=True)
+                if st.button('Open incident dossier →',key='pc_brief_open_event',type='primary'):
                     _open_below('event',event['event_id'],event.get('title'))
-                with st.expander('P&C assessment and evidence for selected development',expanded=True):
-                    st.markdown('**'+chosen['Incident']+'**')
-                    st.caption(chosen['Date']+' · '+chosen['Evidence'])
-                    for field in ('Current Risk','P&C Assessment','Risk Outlook','Monitoring Indicators'):
-                        st.markdown('**'+field+'**')
-                        st.write(chosen[field])
-                    if assessment:
-                        st.caption('Assessment dated '+str(assessment.get('assessment_date') or assessment.get('as_known_at') or 'unrecorded')[:10]
-                            +' · '+_assessment_freshness(assessment))
+                if assessment:
+                    with st.expander('Evidence and assessment provenance',expanded=False):
+                        st.caption('Assessment dated '+str(assessment.get('assessment_date') or assessment.get('as_known_at') or 'unrecorded')[:10]+' · '+_assessment_freshness(assessment))
                         for evidence_item in assessment.get('evidence') or []:
                             if isinstance(evidence_item,dict) and str(evidence_item.get('event_id'))==str(event['event_id']):
                                 url=evidence_item.get('source_url')
                                 if isinstance(url,str) and url.startswith(('https://','http://')):
-                                    st.link_button('Assessment evidence source',url)
-                    else:
-                        st.caption('No explicitly linked published P&C assessment; the incident record remains available in its full dossier.')
+                                    st.link_button('Assessment source',url)
             else:
                 st.info('No dated security developments match this selection.')
         with st.expander('Published regional and global assessments (including earlier snapshots)',expanded=False):
