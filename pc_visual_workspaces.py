@@ -326,7 +326,7 @@ def _render_pc_assessments(db,core,term):
             st.write(outlook(row))
             st.markdown('**Monitoring Indicators**')
             st.write(indicators(row))
-            st.caption('Valid until +str(row.get('valid_until') or 'Unrecorded')+' · Coverage: '+str(row.get('coverage_status') or 'Unrecorded'))
+            st.caption('Valid until '+str(row.get('valid_until') or 'Unrecorded')+' · Coverage: '+str(row.get('coverage_status') or 'Unrecorded'))
             if _assessment_freshness(row)!='CURRENT':
                 st.warning('Earlier assessment · last assessed '+last_assessed(row)+'. Current conditions are not established by this snapshot.')
             with st.expander('Reasoning, threat drivers and scope'):
