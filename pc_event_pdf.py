@@ -130,6 +130,8 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     if triggers:
         html+='<div class="section"><h2>Decision triggers</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in triggers)+'</ul></div>'
     html+='<div class="section"><h2>GEOGRAPHIC &amp; INFRASTRUCTURE EXPOSURE</h2>'+map_html+table(["Asset","Mode","Recorded relationship","Impact status"],infra)+'</div>'
+    if edited.get("historical_context"):
+        html+='<div class="section"><h2>SUBJECT HISTORY &amp; BACKGROUND</h2>'+_paragraph(edited["historical_context"])+'</div>'
     if edited.get("wider_context") or edited.get("connected_developments_synthesis"):
         html+='<div class="section"><h2>WIDER CONTEXT &amp; CONNECTED DEVELOPMENTS</h2>'+_paragraph(edited.get("wider_context") or edited.get("connected_developments_synthesis"))+'</div>'
     html+='<div class="section"><h2>RELATED DEVELOPMENTS</h2>'+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
