@@ -1040,31 +1040,31 @@ def _security(db,core):
         elif incidents:st.caption('End of matching results.')
         else:st.info('No incidents on this page. Return to page 1 or change the filters.')
     with t2:
-        _render_pc_assessments(db,core,term)
-        st.markdown('#### Recent developments awaiting or informing assessment')
-        st.caption('Global event feed, separate from published qualitative judgments. Appearance here does not assign a risk level or imply a verified impact.')
+        st.subheader('Latest security developments')
+        st.caption('Worldwide · newest event date first · source status retained. Event severity is not a P&C risk rating.')
         recent, recent_error = _load(db,'pc_events',
             columns='event_id,title,start_date,event_type,verification_status,description,metadata',
             filters=(('intelligence_visible','eq',True),),
-            order=(('start_date',True),('event_id',False)),limit=120)
+            order=(('start_date',True),('event_id',False)),limit=500)
         if recent_error:
-            st.caption('Recent global developments are temporarily unavailable.')
+            st.warning('The global security feed is temporarily unavailable.')
         else:
-            recent=[item for item in recent if _intel_match(item,lens)][:15]
+            recent=[item for item in recent
+                if item.get('event_id') and pd.notna(pd.to_datetime(item.get('start_date'),utc=True,errors='coerce'))
+                and INTEL_LENSES[0] in _intel_classes(item)]
+            if term:
+                recent=[item for item in recent if term.lower() in
+                    (str(item.get('title') or '')+' '+str(item.get('description') or '')+' '+str(item.get('event_type') or '')).lower()]
+            recent=recent[:20]
             for item in recent:
                 left,right=st.columns([7,1])
                 left.markdown('**'+str(item.get('title') or 'Development')+'**')
-                left.caption(str(item.get('start_date') or 'Date unrecorded')[:10]+' · '+_business_label(item.get('event_type'))+' · Evidence: '+_business_label(item.get('verification_status')))
-                if right.button('Open',key='pc_brief_latest_'+str(item.get('event_id'))):
+                left.caption(str(item.get('start_date'))[:10]+' · '+_business_label(item.get('event_type'))+' · Evidence: '+_business_label(item.get('verification_status')))
+                if right.button('Open',key='pc_brief_latest_'+str(item['event_id'])):
                     _open_below('event',item['event_id'],item.get('title'))
-            if not recent:st.info('No recent developments returned by the global feed.')
-        st.subheader('Outside assessments recorded on incident cards')
-        assessed=[r for r in incidents if r.get('source_risk_level') or r.get('source_risk_trend')]
-        if not assessed:st.info('No outside risk/trend fields on this incident page. P&C assessments are shown separately above.')
-        for r in assessed[:20]:
-            st.markdown('**'+str(r.get('location_label') or r.get('title'))+'**')
-            st.write('Risk: '+str(r.get('source_risk_level') or 'Not assessed')+' · Trend: '+str(r.get('source_risk_trend') or 'Not assessed'))
-            st.caption('Assessment fields are shown as stored; check provenance in the full incident dossier.')
+            if not recent:st.info('No dated security developments match this selection.')
+        with st.expander('Published P&C risk assessments and outlooks',expanded=False):
+            _render_pc_assessments(db,core,term)
 
     _render_related_below(db,core)
 
