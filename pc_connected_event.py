@@ -292,7 +292,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                                "lat":lat,"lon":lon,"source":geo["source_url"],"zoom":8}
             except (ValueError,KeyError,TypeError): pass
         if not pdf_place:
-            for name in (meta.get("geographic_scope"),rec.get("location_name") if isinstance(rec,dict) else None,
+            for name in (meta.get("geographic_scope"),record.get("location_name"),
                          record.get("location_name"),record.get("location_label"),meta.get("location_name"),record.get("country")):
                 if isinstance(name,str) and name.strip():
                     pdf_place=named_place_point(name)
