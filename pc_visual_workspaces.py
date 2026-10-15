@@ -1214,6 +1214,19 @@ def _security(db,core):
                     label=str(value or 'Unassigned').capitalize()
                     tone={'high':'high','moderate':'moderate','medium':'moderate','low':'low'}.get(label.lower(),'unknown')
                     return '<span class="pc-conf pc-conf-'+tone+'">'+escape(label)+' confidence</span>'
+                st.markdown(
+                    '<div style="display:flex;flex-wrap:wrap;gap:8px 22px;align-items:center;margin:10px 0 14px;font-size:.80rem">'
+                    '<div><strong>Current Risk:</strong> '
+                    '<span class="pc-pill pc-high">CRITICAL / HIGH</span> '
+                    '<span class="pc-pill pc-medium">ELEVATED / MODERATE</span> '
+                    '<span class="pc-pill pc-low">LOW</span> '
+                    '<span class="pc-pill pc-unknown">INSUFFICIENT EVIDENCE</span></div>'
+                    '<div><strong>Assessment Confidence:</strong> '
+                    '<span class="pc-conf pc-conf-high" style="margin-top:0">High</span> '
+                    '<span class="pc-conf pc-conf-moderate" style="margin-top:0">Moderate</span> '
+                    '<span class="pc-conf pc-conf-low" style="margin-top:0">Low</span> '
+                    '<span class="pc-conf pc-conf-unknown" style="margin-top:0">Unassigned</span></div>'
+                    '</div>',unsafe_allow_html=True)
                 table='<table class="pc-risk-grid"><thead><tr><th>Incident / Scope</th><th>Risk & Confidence</th><th>P&C Assessment</th><th>Risk Outlook</th><th>Monitoring Indicators</th></tr></thead><tbody>'
                 for row in page_rows:
                     table+='<tr><td><strong>'+escape(row['Incident'])+'</strong><div class="pc-inc-date">'+escape(row['Date']+' · '+row['Evidence'])+'</div></td>'
