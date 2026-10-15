@@ -4083,6 +4083,34 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
             assets.append(link)
             existing_asset_keys.add(key)
 
+    # Shared company infrastructure traversal: canonical entity -> asset edge -> native
+    # terminal/berth hierarchy. Applies to every company, not a named-company special case.
+    infrastructure = []
+    port_ids = set()
+    for link in rels:
+        if link.get("type") != "asset" or not link.get("id"):
+            continue
+        aid = str(link["id"])
+        if aid in port_ids:
+            continue
+        ar = _filtered_rows("pc_assets","asset_id",aid,1)
+        if not ar:
+            continue
+        asset = ar[0]
+        if "port" not in (_clean(asset.get("asset_type"))+" "+_clean(asset.get("subtype"))).lower():
+            continue
+        port_ids.add(aid)
+        terminals = _filtered_rows("pc_terminal_details","parent_port_asset_id",aid,200)
+        terminal_data = []
+        for t in terminals:
+            tid = _clean(t.get("asset_id"))
+            ta = _filtered_rows("pc_assets","asset_id",tid,1) if tid else []
+            berth_rows = _filtered_rows("pc_berth_details","terminal_asset_id",tid,200) if tid else []
+            terminal_data.append({"id":tid,"name":_clean(ta[0].get("name")) if ta else tid,
+               "berths":berth_rows,"detail":t})
+        infrastructure.append({"id":aid,"name":_clean(asset.get("name")) or aid,
+          "country":_clean(asset.get("country")),"relationship":_clean(link.get("relationship")),
+          "terminals":terminal_data})
     corridors=_company_corridors(oid)
     portfolio=_portfolio(oid)
     tx=_company_transactions(oid)
@@ -4147,6 +4175,27 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
         m[3].metric("Portfolio positions",len(portfolio))
         m[4].metric("Capital actions",len(tx))
     m[5].metric("Developments",len(events))
+
+    if infrastructure:
+        st.markdown("### Connected port infrastructure")
+        st.caption("Source-recorded company relationships; parent-port links do not imply ownership or direct operation. Terminal and berth records are retrieved from the common infrastructure model.")
+        st.caption(f"{len(infrastructure)} connected ports · {sum(len(x['terminals']) for x in infrastructure)} native terminal records · {sum(len(t['berths']) for x in infrastructure for t in x['terminals'])} individual berth records")
+        with st.expander("Explore port → terminal → berth network",expanded=False):
+            for pi,port in enumerate(sorted(infrastructure,key=lambda x:x['name'])):
+                a,b=st.columns([5,1])
+                a.markdown("**"+port["name"]+"**")
+                a.caption(" · ".join(x for x in [port["country"],port["relationship"].replace("_"," ")] if x))
+                b.button("Open",key=f"company_port_{_norm(oid)}_{pi}",on_click=_set_context,args=("asset",port["id"],port["name"]))
+                for ti,t in enumerate(port["terminals"]):
+                    a,b=st.columns([5,1])
+                    a.write("↳ "+t["name"]+" · "+str(len(t["berths"]))+" modelled berths")
+                    b.button("Open",key=f"company_terminal_{_norm(oid)}_{pi}_{ti}",on_click=_set_context,args=("asset",t["id"],t["name"]))
+                    for bi,berth in enumerate(t["berths"]):
+                        bid=_clean(berth.get("asset_id"))
+                        bn=_asset_chip(bid)
+                        a,b=st.columns([5,1])
+                        a.caption("    ↳ "+bn)
+                        b.button("Open",key=f"company_berth_{_norm(oid)}_{pi}_{ti}_{bi}",on_click=_set_context,args=("asset",bid,bn))
 
     top_left,top_right=st.columns([1.55,1.0],gap="large")
     with top_left:
