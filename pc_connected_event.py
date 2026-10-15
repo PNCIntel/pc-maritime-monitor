@@ -400,6 +400,59 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         else:
             st.caption(str(record.get("location") or "Exact location not established"))
 
+    # Display source-attributed cyber enrichment on the existing incident dossier.
+    cyber = meta.get("n0n_enrichment_20261015") or {}
+    if isinstance(cyber, dict) and cyber:
+        st.markdown("### Cyber extortion intelligence")
+        st.caption("Attacker leak-site allegations; inclusion does not establish a breach or operational outage.")
+        a, b, c = st.columns(3)
+        a.metric("Organisations named", cyber.get("alleged_organisations_count") or "—")
+        b.metric("Countries", cyber.get("countries_count") or "—")
+        c.metric("Threatened release (UTC)", str(cyber.get("publication_threat_at_utc") or "Not established").replace("T", " ")[:16])
+        demands = cyber.get("specific_reported_demands") or []
+        if isinstance(demands, list) and demands:
+            st.markdown("#### Reported ransom demands")
+            import pandas as pd
+            st.dataframe(pd.DataFrame([{
+                "Organisation": d.get("name"), "Demand (USD)": d.get("amount_usd"),
+                "Negotiation entry (%)": d.get("negotiation_entry_percent"),
+                "Claimed files": d.get("claimed_file_count"),
+                "Claimed MB": d.get("claimed_data_mb"), "Claimed GB": d.get("claimed_data_gb"),
+            } for d in demands]), hide_index=True, use_container_width=True)
+        names = cyber.get("listed_organisations") or []
+        if isinstance(names, list) and names:
+            with st.expander(f"Organisations named in claim ({len(names)})", expanded=True):
+                st.write(", ".join(str(n) for n in names))
+        extra = cyber.get("additional_reported_datasets") or []
+        if isinstance(extra, list) and extra:
+            with st.expander("Additional claimed datasets"):
+                st.dataframe(pd.DataFrame(extra), hide_index=True, use_container_width=True)
+        categories = cyber.get("claimed_data_categories") or []
+        if categories:
+            st.caption("Claimed data categories: " + ", ".join(map(str, categories)))
+        st.caption(str(cyber.get("cyberlogitec_connection") or "Supplier involvement not confirmed"))
+        for label, key in (("SOCRadar", "source_socradar"), ("Splash247", "source_splash247")):
+            url = cyber.get(key)
+            if isinstance(url, str) and url.startswith(("https://", "http://")):
+                st.link_button(label + " source ↗", url)
+
+    # Some sourced company relationships are stored in pc_event_links rather than
+    # pc_event_entity_links. Show actual canonical links, never infer compromise.
+    graph_links = [x for x in _get(sb, "pc_event_links", "event_id", event_id, 500)
+                   if str(x.get("linked_type") or "").lower() in ("entity", "company", "organisation", "organization")]
+    if graph_links:
+        st.markdown("#### Connected organisations — specific reported roles")
+        for i, link in enumerate(graph_links):
+            name = str(link.get("linked_name") or link.get("linked_id") or "Unknown organisation")
+            st.markdown("**" + name + "** — " + _label(link.get("relationship")))
+            lm = _meta(link)
+            if lm.get("compromise_status"):
+                st.caption("Compromise status: " + _label(lm["compromise_status"]))
+            linked_id = str(link.get("linked_id") or "")
+            if linked_id and _one(sb, "pc_entities", "entity_id", linked_id):
+                st.button("Open organisation →", key=f"cyber_graph_org_{event_id}_{i}",
+                          on_click=navigate, args=("entity", linked_id, name))
+
     st.markdown("#### Evidence by source purpose")
     groups = {}
     for ev in evidence:
