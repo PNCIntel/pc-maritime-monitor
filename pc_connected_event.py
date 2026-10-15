@@ -242,10 +242,20 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
     assessment = approved[0] if approved else {}
     if not assessment and assessments:
         st.caption("An event analysis exists in draft; it is not presented as an approved P&C judgment.")
+    # Existing approved operational judgment takes precedence over the optional new publication table.
+    judgments = _get(sb, "pc_event_assessment_judgments", "event_id", event_id, 20)
+    judgments = [j for j in judgments if str(j.get("judgment_status") or "").lower()=="published"]
+    judgments.sort(key=lambda j: str(j.get("assessed_at") or ""), reverse=True)
+    judgment = judgments[0] if judgments else {}
     outlooks = _get(sb, "pc_event_intelligence_outlooks", "event_id", event_id, 30)
     outlooks = [o for o in outlooks if str(o.get("publication_status") or "") == "published"]
     outlooks.sort(key=lambda o: str(o.get("assessed_at") or ""), reverse=True)
     outlook = outlooks[0] if outlooks else {}
+    if judgment and (not outlook or str(judgment.get("assessed_at") or "") >= str(outlook.get("assessed_at") or "")):
+        outlook = {**outlook, **{"current_risk":judgment.get("risk_level") or judgment.get("current_risk"),
+          "confidence":judgment.get("confidence"),"pc_assessment":judgment.get("risk_rationale") or judgment.get("current_risk"),
+          "risk_outlook":judgment.get("risk_outlook"),"monitoring_indicators":judgment.get("monitoring_indicators"),
+          "assessed_at":judgment.get("assessed_at"),"valid_until":judgment.get("valid_until")}}
     st.markdown("## Intelligence assessment")
     st.caption("Global, multimodal P&C dossier · event facts, analysis and forward outlook are distinct.")
     risk_value = outlook.get("current_risk")
@@ -254,6 +264,14 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
     x.metric("Current Risk", str(risk_value or "Pending assessment"))
     y.metric("Confidence", str(confidence or "Not assigned"))
     z.metric("Source records", len(evidence))
+    if outlook.get("valid_until"):
+        import datetime as dt
+        try:
+            expiry=dt.datetime.fromisoformat(str(outlook["valid_until"]).replace("Z","+00:00"))
+            if expiry.tzinfo is None: expiry=expiry.replace(tzinfo=dt.timezone.utc)
+            if expiry <= dt.datetime.now(dt.timezone.utc):
+                st.warning("Earlier assessment, last assessed "+_date(outlook.get("assessed_at"))+". Current conditions require revalidation.")
+        except (TypeError,ValueError): pass
     st.caption("Event verification: "+_label(record.get("verification_status"))+
                " · Last assessed: "+_date(outlook.get("assessed_at") or assessment.get("updated_at"))+
                " · An incident severity is not a regional risk rating.")
