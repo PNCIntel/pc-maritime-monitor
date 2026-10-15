@@ -494,6 +494,31 @@ def _render_related_below(db,core):
                     render_infrastructure_incident_dossier(db,oid,rec.get('name'),navigate=_open_below)
                 except Exception as exc:
                     st.caption('Infrastructure event dossier unavailable: '+str(exc))
+        if typ=='event':
+            st.markdown('#### P&C risk assessment')
+            legacy,le=_load(db,'pc_v_security_pc_assessments',limit=150)
+            global_items,ge=_load(db,'pc_global_risk_briefings',limit=200)
+            candidates=(legacy if not le else [])+([v for v in global_items if v.get('publication_status')=='published'] if not ge else [])
+            linked=[v for v in candidates if any(isinstance(ev,dict) and str(ev.get('event_id') or '')==str(oid) for ev in (v.get('evidence') or []))]
+            linked.sort(key=lambda v:str(v.get('assessment_date') or v.get('as_known_at') or ''),reverse=True)
+            if linked:
+                v=linked[0]
+                overlays,oe=_load(db,'pc_risk_assessment_outlooks',limit=500)
+                overlay=next((x for x in overlays if x.get('publication_status')=='published' and str(x.get('assessment_id'))==str(v.get('assessment_id'))),{}) if not oe else {}
+                valid=_assessment_freshness(v)=='CURRENT'
+                st.caption('Assessment dated '+str(v.get('assessment_date') or v.get('as_known_at') or 'unrecorded')[:10]+' · '+_assessment_freshness(v))
+                st.markdown('**Current Risk**')
+                st.write(v.get('risk_level') if valid else 'Earlier risk judgment — not confirmed current')
+                st.markdown('**P&C Assessment**')
+                st.write(v.get('executive_summary') or v.get('explanation') or 'Not assessed')
+                st.markdown('**Risk Outlook**')
+                st.write(overlay.get('risk_outlook') or v.get('risk_outlook') or 'Not yet assessed')
+                st.markdown('**Monitoring Indicators**')
+                indicators=overlay.get('monitoring_indicators') or v.get('monitoring_priorities') or []
+                for indicator in indicators if isinstance(indicators,list) else []:st.write('• '+str(indicator))
+                if not valid:st.warning('Earlier assessment snapshot; current conditions are not established.')
+            else:
+                st.caption('No published P&C assessment explicitly linked to this event. No rating inferred from its incident category or severity.')
         if not rec:st.info('The overview record could not be retrieved. The full dossier may have additional detail.')
         url=rec.get('website') or rec.get('source_url')
         if isinstance(url,str) and url.startswith(('https://','http://')):st.link_button('Visit supporting website',url)
