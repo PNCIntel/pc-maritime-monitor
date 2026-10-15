@@ -245,6 +245,18 @@ def _render_pc_assessments(db,core,term):
     if not rows:
         st.info('No published P&C assessment matches this search.')
         return
+    # Optional editorial outlook overlay, keyed strictly to the published assessment ID.
+    # A missing overlay is not an inferred forecast.
+    outlook_rows,outlook_error=_load(db,'pc_risk_assessment_outlooks',limit=500)
+    if not outlook_error:
+        by_assessment={str(v.get('assessment_id')):v for v in outlook_rows if v.get('publication_status')=='published'}
+        for assessment in rows:
+            extra=by_assessment.get(str(assessment.get('assessment_id')))
+            if extra:
+                assessment['risk_outlook']=extra.get('risk_outlook')
+                assessment['outlook_assessed_at']=extra.get('assessed_at')
+                if extra.get('monitoring_indicators'):
+                    assessment['monitoring_priorities']=extra['monitoring_indicators']
     regions=list(dict.fromkeys(str(r.get('geography') or r.get('region_code')) for r in rows))
     area=st.selectbox('Assessment area',['All matching areas']+regions,key='pc_assessment_area')
     selected=[r for r in rows if area=='All matching areas' or str(r.get('geography') or r.get('region_code'))==area]
