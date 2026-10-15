@@ -341,7 +341,14 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                         st.map(pd.DataFrame([{"lat":lat,"lon":lon}]),latitude="lat",longitude="lon",use_container_width=True)
                         st.caption("Approximate sourced regional reference, NOT incident coordinates: "+str(geographic.get("label") or "regional context"))
                 except (KeyError,ValueError,TypeError): pass
-            st.info("Verified mappable coordinates are not available for this event. Exact incident location has not been inferred.")
+            from pc_geographic_context import locality_point
+            place=locality_point(str(meta.get("geographic_scope") or "")+" "+str(record.get("title") or ""))
+            if place:
+                st.map(pd.DataFrame([{"lat":place["lat"],"lon":place["lon"]}]),latitude="lat",longitude="lon",use_container_width=True)
+                st.caption("Regional reference only: "+place["name"]+" · "+place["precision"]+". NOT the incident position.")
+                st.link_button("View geographic reference ↗",place["source"],key="geo_ref_"+event_id)
+            else:
+                st.info("Map location is unresolved: no verified incident, linked facility or sourced locality coordinates. No pin has been invented.")
         st.markdown("### Connected infrastructure")
         if facility_rows:
             st.dataframe(pd.DataFrame(facility_rows).drop_duplicates(),hide_index=True,use_container_width=True)
