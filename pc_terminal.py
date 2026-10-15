@@ -5549,6 +5549,13 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
     section=st.selectbox("Explore dossier", options, key="pc_global_dossier_v2_"+_norm(oid), help="Only the selected section runs its specialist queries.")
     if section=="Classic dossier": return _render_infrastructure_legacy(oid,rec,lens)
     if section=="Overview":
+        # Show every explicit entity/asset graph edge without relabelling a portfolio
+        # listing as ownership, or a corridor edge as a dated operating service.
+        direct_links=_linked_objects_from_relationships("asset",oid)
+        associated_orgs=[x for x in direct_links if x.get("type")=="entity"
+                         and _clean(x.get("relationship")).casefold() not in
+                         {"owns","owned by","operates","operated by","manages","managed by","controls","controlled by"}]
+        connected_assets=[x for x in direct_links if x.get("type")=="asset"]
         left,right=st.columns([1,1.15],gap="large")
         with left:
             st.markdown("#### Identity and operating purpose")
@@ -5559,7 +5566,23 @@ def _render_infrastructure_terminal(oid: str, rec: dict, lens: str):
             companies=_asset_companies(rec)
             st.markdown("#### Responsible organisations")
             if companies: st.write(" · ".join(c["name"]+" ("+_clean(c.get("role") or "linked")+")" for c in companies[:8]))
-            else: st.caption("Not recorded in the current relationship path.")
+            else: st.caption("No owner/operator identity recorded in the current relationship path.")
+            if associated_orgs:
+                st.markdown("#### Other documented organisation links")
+                for i,x in enumerate(associated_orgs):
+                    cols=st.columns([4,1])
+                    cols[0].write(x.get("name") or x.get("id"))
+                    cols[0].caption(_clean(x.get("relationship")).replace("_"," ").title())
+                    cols[1].button("Open",key=f"v2_assoc_org_{_norm(oid)}_{i}",on_click=_set_context,
+                                   args=("entity",x.get("id"),x.get("name") or ""))
+            if connected_assets:
+                st.markdown("#### Connected infrastructure and corridors")
+                for i,x in enumerate(connected_assets):
+                    cols=st.columns([4,1])
+                    cols[0].write(x.get("name") or x.get("id"))
+                    cols[0].caption(_clean(x.get("relationship")).replace("_"," ").title())
+                    cols[1].button("Open",key=f"v2_assoc_asset_{_norm(oid)}_{i}",on_click=_set_context,
+                                   args=("asset",x.get("id"),x.get("name") or ""))
         with right:
             st.markdown("#### Location")
             _render_map_for_asset(rec)
