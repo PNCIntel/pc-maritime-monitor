@@ -27,17 +27,18 @@ def _valid_url(url):
 def _paragraph(value):
     return "<p>"+_h(value).replace("\\n","<br/>")+"</p>" if value else '<p class="muted">Not established in the current record.</p>'
 
-def create_incident_brief(record, assessment, outlook, evidence, related, assets, metadata=None, map_point=None):
+def create_incident_brief(record, assessment, outlook, evidence, related, assets, metadata=None, map_point=None, editorial=None):
     """Return PDF bytes built from the same canonical dossier, not generated incident claims."""
     from weasyprint import HTML
     from pc_event_map_image import regional_map_uri
     meta=metadata if isinstance(metadata,dict) else {}
+    edited=editorial if isinstance(editorial,dict) else {}
     title=record.get("title") or record.get("event_id") or "Event"
     incident_id=record.get("event_id") or "Unrecorded"
-    what=assessment.get("what_happened") or record.get("description")
-    meaning=outlook.get("pc_assessment") or assessment.get("pc_assessment") or assessment.get("what_it_means") or meta.get("pc_assessment")
-    forecast=outlook.get("risk_outlook") or meta.get("risk_outlook")
-    indicators=_list(outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators"))
+    what=edited.get("what_happened") or assessment.get("what_happened") or record.get("description")
+    meaning=edited.get("why_it_matters") or outlook.get("pc_assessment") or assessment.get("pc_assessment") or assessment.get("what_it_means") or meta.get("pc_assessment")
+    forecast=edited.get("risk_outlook") or outlook.get("risk_outlook") or meta.get("risk_outlook")
+    indicators=_list(edited.get("monitoring_analysis") or outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators"))
     claims=evidence or [v for v in _list(meta.get("source_claims")) if isinstance(v,dict)]
     if not claims:
         claims=[{"publisher":"Recorded event source","url":u,"claim":"Source URL recorded in the event metadata"} for u in _list(meta.get("source_urls")) if _valid_url(u)]
@@ -79,13 +80,13 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
             logo_html='<img class="logo" src="data:image/png;base64,'+base64.b64encode(location.read_bytes()).decode("ascii")+'"/>'
             break
     opening=('<div class="strap">P&C INTELLIGENCE &nbsp; / &nbsp; INCIDENT INTELLIGENCE BRIEF</div>')
-    key_judgment=outlook.get("key_judgment") or assessment.get("key_judgment") or meaning
-    bottom_line=outlook.get("bottom_line") or assessment.get("bottom_line")
-    alternative=outlook.get("alternative_explanation") or assessment.get("alternative_explanation") or meta.get("alternative_explanation")
-    gaps=_list(assessment.get("research_gaps") or meta.get("research_gaps"))
-    triggers=_list(outlook.get("decision_triggers") or assessment.get("decision_triggers") or meta.get("decision_triggers"))
-    implications=[("Operational significance",assessment.get("operational_impact")),
-                  ("Commercial significance",assessment.get("commercial_impact"))]
+    key_judgment=edited.get("key_judgment") or outlook.get("key_judgment") or assessment.get("key_judgment") or meaning
+    bottom_line=edited.get("bottom_line") or outlook.get("bottom_line") or assessment.get("bottom_line")
+    alternative=edited.get("alternative_explanation") or outlook.get("alternative_explanation") or assessment.get("alternative_explanation") or meta.get("alternative_explanation")
+    gaps=_list(edited.get("uncertainties") or assessment.get("research_gaps") or meta.get("research_gaps"))
+    triggers=_list(edited.get("decision_triggers") or outlook.get("decision_triggers") or assessment.get("decision_triggers") or meta.get("decision_triggers"))
+    implications=[("Operational significance",edited.get("operational_significance") or assessment.get("operational_impact")),
+                  ("Commercial significance",edited.get("commercial_significance") or assessment.get("commercial_impact"))]
     implications=[(label,value) for label,value in implications if value]
     html='''<!doctype html><html><head><meta charset="utf-8"><style>
     @page{size:A4;margin:19mm 17mm 19mm 17mm;@bottom-left{content:"POWER & CORRIDORS  /  INTELLIGENCE";font:8pt Arial;color:#536679}
