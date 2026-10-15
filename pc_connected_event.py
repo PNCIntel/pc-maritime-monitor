@@ -233,6 +233,20 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                 st.link_button("Designation source ↗",url)
         st.caption("A vessel's involvement in an incident does not establish listing, designation or liability.")
 
+    # Shared production graph navigation across Intelligence and Trade.
+    # Coordinates are not inferred from related airport or facility identities.
+    from pc_event_navigation import render_event_connections
+    st.markdown("### Recorded event facts")
+    st.write({
+        "Event date": _date(record.get("start_date")),
+        "Classification": _label(record.get("event_type") or record.get("event_family")),
+        "Severity": _label(record.get("severity") or "Not classified"),
+        "Verification": _label(record.get("verification_status")),
+    })
+    st.markdown("### Connected organisations and infrastructure")
+    render_event_connections(sb, event_id, navigate,
+                             key_prefix="intel_connected_"+event_id, compact=False)
+
     st.markdown("### Intelligence finding")
     headline = str(meta.get("executive_summary") or record.get("description") or "").strip()
     if headline:
