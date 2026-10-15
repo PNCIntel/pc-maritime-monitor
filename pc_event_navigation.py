@@ -42,7 +42,7 @@ def render_event_connections(db, event_id, navigate, *, key_prefix='connected', 
                 unique_entities[(oid, rel, rel)] = {'entity_id': oid, 'role': rel,
                     'metadata': {'specific_relationship': rel},
                     'verification_status': r.get('confidence') or 'recorded'}
-        elif kind in ('asset', 'infrastructure', 'port', 'canal'):
+        elif kind in ('asset', 'infrastructure', 'port', 'canal', 'airport', 'terminal', 'facility', 'rail_node', 'station', 'industrial_asset', 'energy_asset'):
             if not any(k[0] == oid for k in unique_assets):
                 unique_assets[(oid, rel)] = {'asset_id': oid, 'relation_type': rel,
                     'metadata': {'specific_relationship': rel},
