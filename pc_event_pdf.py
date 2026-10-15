@@ -101,7 +101,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     .place{font-size:16pt;font-weight:bold;color:#104c64;margin-bottom:0}
     table{border-collapse:collapse;width:100%;font-size:8pt}th{text-align:left;color:#164961;background:#e9f1f5}
     th,td{padding:5px 6px;border-bottom:1px solid #d4e0e6;vertical-align:top}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}
-    .source{padding:5px 0;border-bottom:1px solid #dce6e9;break-inside:avoid}.source span{color:#657b89;font-size:8pt;display:block}
+    .source{padding:4px 0;border-bottom:1px solid #dce6e9;break-inside:avoid}.source span{color:#657b89;font-size:8pt;display:block}
     .source p{margin:3px 0}.url{font-size:7.5pt;color:#526778;overflow-wrap:anywhere;margin-top:4px}a{color:#096381;text-decoration:underline;overflow-wrap:anywhere}
     li{margin-bottom:2px}.disclaimer{font-size:8pt;color:#566d7b;border-top:1px solid #b9ced6;margin-top:25px;padding-top:8px}
     </style></head><body>'''
@@ -113,8 +113,8 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     if outlook.get("valid_until"): html+='<p class="meta">Assessment valid until: '+_h(outlook["valid_until"])+' (check current conditions before reliance).</p>'
     html+='<div class="section"><h2>KEY JUDGEMENT</h2><div class="box">'+_paragraph(key_judgment)+'</div></div>'
     html+='<div class="section"><h2>WHAT HAPPENED</h2>'+_paragraph(what)+'</div>'
-    if meaning and meaning != key_judgment:
-        html+='<div class="section"><h2>02 / Why it matters — P&C assessment</h2>'+_paragraph(meaning)+'</div>'
+    if meaning and meaning.strip() != (key_judgment or "").strip():
+        html+='<div class="section"><h2>WHY IT MATTERS — P&C ASSESSMENT</h2>'+_paragraph(meaning)+'</div>'
     for label,value in implications:
         if value and value not in (meaning,key_judgment):
             html+='<div class="section"><h2>'+_h(label)+'</h2>'+_paragraph(value)+'</div>'
