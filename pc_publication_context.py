@@ -35,8 +35,9 @@ def build_context(record, vessel=None, company_roles=None, designations=None,
         result["company_history"].append({
           "company":_public_record(company,("entity_id","name","country")),
           "relationship":_public_record(edge,("relationship_type","relationship","valid_from","valid_to",
-                                            "source_url","confidence","review_status")),
-          "qualification":"Recorded relationship; historical validity and source status must be respected"})
+                                            "source_url","confidence","review_status","record_status")),
+          "metadata":_public_record(_meta(edge),("source_urls","observed_on","observation_date","date_qualification","editorial_status")),
+          "qualification":"Registry-reported role; observation date is not role inception and registered ownership is not beneficial ownership"})
     for link,designation in designations or []:
         result["published_sanctions"].append({
           "designation":_public_record(designation,("primary_name","source_list","designation_date",
