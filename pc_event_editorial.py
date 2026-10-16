@@ -44,6 +44,15 @@ not restatements of the incident.
 - monitoring_analysis: each item names an observable indicator, why it matters and what would
 change the assessment; decision triggers only if grounded.
 Do not repeat key_judgment, what_happened, why_it_matters or bottom_line.
+When a vessel biography is supplied, use dates as recorded: an as-of/source observation
+is NOT an effective role period, and a missing end date is NOT verified current tenure.
+Describe the legal purpose and limits of a cited provision when its text is evidenced;
+do not claim that separate national sanctions actions caused or coordinated an incident.
+Only say a jurisdiction directly lists the hull when a primary authority record or
+reviewed matching designation explicitly supports that statement. Never extrapolate
+US/EU/UK/Canadian listings from another authority's list or media summaries.
+Give the executive judgment, biography, legal context, operational implications and
+linked-development sections different jobs. No repeated paragraphs or duplicate company lists.
 Keep unsupported optional sections empty, never filler. Source-qualified and accessible prose;
 do not expose internal IDs. Never copy another publisher's risk rating or invent probability.
 Return JSON with the exact keys supplied in FIELDS, list values for uncertainties,
