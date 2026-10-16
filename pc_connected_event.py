@@ -420,21 +420,23 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         st.markdown("### What happened?")
         st.write(assessment.get("what_happened") or record.get("description") or
                  "An adequately sourced incident narrative has not yet been recorded.")
-        st.markdown("### What does it mean?")
-        st.write(outlook.get("pc_assessment") or assessment.get("pc_assessment") or
-                 assessment.get("what_it_means") or meta.get("pc_assessment") or
-                 (("Editorial analysis (pending approval): "+str(profile.get("analysis"))) if isinstance(profile,dict) and profile.get("analysis") else "An approved analytical judgment has not yet been recorded."))
-        st.markdown("### What could happen next?")
-        st.write(outlook.get("risk_outlook") or meta.get("risk_outlook") or
-                 (("Editorial outlook (pending approval): "+str(profile.get("outlook"))) if isinstance(profile,dict) and profile.get("outlook") else "An evidence-backed outlook has not yet been published."))
-        st.markdown("### What are we monitoring, and why?")
-        indicators=outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators") or (profile.get("monitoring") if isinstance(profile,dict) else []) or []
+        analysis_text=(outlook.get("pc_assessment") or assessment.get("pc_assessment") or
+                       assessment.get("what_it_means") or meta.get("pc_assessment"))
+        forecast_text=outlook.get("risk_outlook") or meta.get("risk_outlook")
+        if analysis_text:
+            st.markdown("### What does it mean?")
+            st.write(analysis_text)
+        if forecast_text:
+            st.markdown("### What could happen next?")
+            st.write(forecast_text)
+        indicators=outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators") or []
         if isinstance(indicators,dict): indicators=[str(k)+": "+str(v) for k,v in indicators.items()]
         if isinstance(indicators,str): indicators=[indicators]
         if isinstance(indicators,list) and indicators:
-            if not (outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators")): st.caption("Draft monitoring questions — pending analyst approval.")
+            st.markdown("### What are we monitoring, and why?")
             for item in indicators: st.markdown("- "+str(item))
-        else: st.caption("No published monitoring indicators.")
+        if not any((analysis_text,forecast_text,indicators)):
+            st.info("Analytical assessment not yet approved. The incident facts, sources and connected records remain available. Use the editorial drafting controls above to prepare a reviewed publication.")
         if assessment.get("operational_impact") or assessment.get("commercial_impact"):
             with st.expander("Operational and commercial implications"):
                 if assessment.get("operational_impact"): st.write(assessment["operational_impact"])
