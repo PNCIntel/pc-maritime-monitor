@@ -95,6 +95,9 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     implications=[("Operational significance",edited.get("operational_significance") or assessment.get("operational_impact")),
                   ("Commercial significance",edited.get("commercial_significance") or assessment.get("commercial_impact"))]
     implications=[(label,value) for label,value in implications if value]
+    if flash:
+        # Keep clickable citations but avoid printing long URLs in the compact alert.
+        sources=[re.sub(r'<div class="url">.*?</div>', '', item, flags=re.S) for item in sources]
     html='''<!doctype html><html><head><meta charset="utf-8"><style>
     @page{size:A4;margin:19mm 17mm 19mm 17mm;@bottom-left{content:"POWER & CORRIDORS  /  INTELLIGENCE";font:8pt Arial;color:#536679}
     @bottom-right{content:"Page " counter(page);font:8pt Arial;color:#536679}}
@@ -112,7 +115,13 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     .source{padding:4px 0;border-bottom:1px solid #dce6e9;break-inside:avoid}.source span{color:#657b89;font-size:8pt;display:block}
     .source p{margin:3px 0}.url{font-size:7.5pt;color:#526778;overflow-wrap:anywhere;margin-top:4px}a{color:#096381;text-decoration:underline;overflow-wrap:anywhere}
     li{margin-bottom:2px}.disclaimer{font-size:8pt;color:#566d7b;border-top:1px solid #b9ced6;margin-top:25px;padding-top:8px}
+    .disclaimer{break-inside:avoid;page-break-inside:avoid}
     </style></head><body>'''
+    if flash:
+        html=html.replace('@page{size:A4;margin:19mm 17mm 19mm 17mm;', '@page{size:A4;margin:15mm 17mm 15mm 17mm;')
+        html=html.replace('.rule{height:4px;', '.rule{height:3px;').replace('margin:10px 0 22px}', 'margin:7px 0 12px}')
+        html=html.replace('.metrics{display:table;width:100%;margin:20px 0;', '.metrics{display:table;width:100%;margin:10px 0;')
+        html=html.replace('.source{padding:4px 0;', '.source{padding:2px 0;')
     html+=logo_html+'<div class="strap"><b>POWER &amp; CORRIDORS INTELLIGENCE</b> · INDEPENDENT INTELLIGENCE ON MOVEMENT, INFRASTRUCTURE &amp; RISK</div><div class="rule"></div>'
     html+=(opening+'<div class="issue-date">ISSUED '+_h(issued)+'</div><h1 class="title">'+_h(title)+'</h1><div class="meta">Event date '+_h(_date(record.get("start_date")))+
         ' · Verification '+_h(record.get("verification_status") or "Unrecorded")+'</div>')
