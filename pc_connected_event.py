@@ -414,10 +414,11 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         st.write(outlook.get("risk_outlook") or meta.get("risk_outlook") or
                  (("Editorial outlook (pending approval): "+str(profile.get("outlook"))) if isinstance(profile,dict) and profile.get("outlook") else "An evidence-backed outlook has not yet been published."))
         st.markdown("### What are we monitoring, and why?")
-        indicators=outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators") or []
+        indicators=outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators") or (profile.get("monitoring") if isinstance(profile,dict) else []) or []
         if isinstance(indicators,dict): indicators=[str(k)+": "+str(v) for k,v in indicators.items()]
         if isinstance(indicators,str): indicators=[indicators]
         if isinstance(indicators,list) and indicators:
+            if not (outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators")): st.caption("Draft monitoring questions — pending analyst approval.")
             for item in indicators: st.markdown("- "+str(item))
         else: st.caption("No published monitoring indicators.")
         if assessment.get("operational_impact") or assessment.get("commercial_impact"):
