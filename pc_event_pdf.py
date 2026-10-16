@@ -99,7 +99,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
         # Keep clickable citations but avoid printing long URLs in the compact alert.
         sources=[re.sub(r'<div class="url">.*?</div>', '', item, flags=re.S) for item in sources]
     html='''<!doctype html><html><head><meta charset="utf-8"><style>
-    @page{size:A4;margin:19mm 17mm 19mm 17mm;@bottom-left{content:"POWER & CORRIDORS  /  INTELLIGENCE";font:8pt Arial;color:#536679}
+    @page{size:A4;margin:19mm 17mm 19mm 17mm;@bottom-left{content:"POWER & CORRIDORS / INTELLIGENCE · DATED SNAPSHOT";font:7pt Arial;color:#536679}
     @bottom-right{content:"Page " counter(page);font:8pt Arial;color:#536679}}
     body{font-family:Arial,sans-serif;font-size:9.5pt;color:#192a38;line-height:1.38}
     .logo{width:315px;height:auto;max-height:90px;object-fit:contain}.regional-map{width:100%;max-height:285px;object-fit:cover;margin:9px 0 4px}.brand{color:#0b344d;font-weight:800;letter-spacing:2.2px;font-size:17pt}.strap{font-size:8pt;letter-spacing:1.8px;color:#42748b}
@@ -172,5 +172,10 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     if bottom_line and not flash and bottom_line not in (key_judgment,meaning):
         html+='<div class="section"><h2>BOTTOM LINE</h2><div class="box">'+_paragraph(bottom_line)+'</div></div>'
     html+='<div class="section"><h2>SOURCES &amp; EVIDENCE</h2>'+(''.join(sources) if sources else '<p class="muted">No individual source claims available in this record.</p>')+'</div>'
-    html+='<div class="disclaimer">Power &amp; Corridors · powerncorridors.com · Analytical judgments are qualified by the cited evidence. Contextual links do not establish causation, attack attribution, damage, closure or current operating status. This PDF is a dated snapshot, not a live notice.</div></body></html>'
+    if flash:
+        # Page footers already identify the publisher; do not create an orphan page
+        # for a long disclaimer in a short-form alert.
+        html+='</body></html>'
+    else:
+        html+='<div class="disclaimer">Power &amp; Corridors · powerncorridors.com · Analytical judgments are qualified by the cited evidence. Contextual links do not establish causation, attack attribution, damage, closure or current operating status. This PDF is a dated snapshot, not a live notice.</div></body></html>'
     return HTML(string=html,base_url="https://powerncorridors.com/").write_pdf()
