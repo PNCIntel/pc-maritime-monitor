@@ -54,9 +54,9 @@ BEGIN
  (from_event_id<>'PC_BS_SULINA_YARA_J_FIRE_20261014' OR to_event_id<>'PC_BS_SULINA_WINE_TRADER_FIRE_20261015'))
  THEN RAISE EXCEPTION 'Event relationship ID collision %',ev_id; END IF;
  INSERT INTO public.pc_event_relationships
- (relationship_id,from_event_id,to_event_id,relationship_type,claim_status,rationale,metadata)
+ (relationship_id,from_event_id,to_event_id,relationship_type,rationale,metadata)
  VALUES (ev_id,'PC_BS_SULINA_YARA_J_FIRE_20261014','PC_BS_SULINA_WINE_TRADER_FIRE_20261015',
- 'shared_regional_context','reported',
+ 'shared_regional_context',
  'Separate tanker-fire reports near Sulina on successive dates; shared location does not establish a common cause or perpetrator.',
  jsonb_build_object('situation_id','PC_SIT_BLACK_SEA_SULINA_VESSEL_FIRES_20261014_15','review_date','2026-10-16','causal_link','not_established'))
  ON CONFLICT (relationship_id) DO UPDATE SET rationale=EXCLUDED.rationale,metadata=coalesce(pc_event_relationships.metadata,'{}'::jsonb)||EXCLUDED.metadata;
