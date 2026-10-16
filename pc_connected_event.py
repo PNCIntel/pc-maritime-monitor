@@ -397,17 +397,6 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         if not subject: continue
         connected.append((normalized,identifier,str(subject.get("name") or subject.get("title") or gl.get("linked_name") or identifier),
                           str(gl.get("relationship") or "connected")))
-    if connected:
-        with st.container(border=True):
-            st.markdown("**Connected records**")
-            for i,(kind,identifier,name,role) in enumerate(connected):
-                a,b=st.columns([3,1],vertical_alignment="center")
-                with a:
-                    st.markdown("**"+name+"**")
-                    st.caption(_label(kind)+" · "+_label(role))
-                with b:
-                    st.button("View →",key="pc_link_"+event_id+"_"+str(i),
-                              on_click=navigate,args=(kind,identifier,name),use_container_width=True)
     st.markdown("## Intelligence dossier")
     st.caption(_date(record.get("start_date"))+" · "+_label(record.get("verification_status"))+
                " · Source-qualified analysis; context is not confirmed impact.")
@@ -521,7 +510,21 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                 st.link_button("Map reference ↗",place["source"],key="geo_ref_"+event_id)
             else:
                 st.info("No resolvable named location for a regional reference map; incident position is not inferred.")
-        st.markdown("### Connected infrastructure")
+        if connected or facility_rows or (isinstance(meta.get("infrastructure_context"),list) and meta.get("infrastructure_context")):
+            st.markdown("### Connected network")
+        if connected:
+            st.markdown("**Linked records**")
+            for i,(kind,identifier,name,role) in enumerate(connected):
+                a,b=st.columns([3,1],vertical_alignment="center")
+                with a:
+                    st.markdown("**"+name+"**")
+                    st.caption(_label(kind)+" · "+_label(role))
+                with b:
+                    st.button("View →",key="pc_link_"+event_id+"_"+str(i),
+                              on_click=navigate,args=(kind,identifier,name),use_container_width=True)
+        if facility_rows or (isinstance(meta.get("infrastructure_context"),list) and meta.get("infrastructure_context")):
+            st.markdown("**Connected infrastructure**")
+
         if facility_rows:
             st.dataframe(pd.DataFrame(facility_rows).drop_duplicates(),hide_index=True,use_container_width=True)
         elif isinstance(meta.get("infrastructure_context"),list) and meta["infrastructure_context"]:
