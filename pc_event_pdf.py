@@ -30,12 +30,14 @@ def _plain(value):
 def _paragraph(value):
     return "<p>"+_h(value).replace("\\n","<br/>")+"</p>" if value else '<p class="muted">Not established in the current record.</p>'
 
-def create_incident_brief(record, assessment, outlook, evidence, related, assets, metadata=None, map_point=None, editorial=None):
+def create_incident_brief(record, assessment, outlook, evidence, related, assets, metadata=None, map_point=None, editorial=None, publication_type="assessment", publication_context=None):
     """Return PDF bytes built from the same canonical dossier, not generated incident claims."""
     from weasyprint import HTML
     from pc_event_map_image import regional_map_uri
     meta=metadata if isinstance(metadata,dict) else {}
     edited=editorial if isinstance(editorial,dict) else {}
+    context=publication_context if isinstance(publication_context,dict) else {}
+    flash=publication_type=="flash"
     title=record.get("title") or record.get("event_id") or "Event"
     what=edited.get("what_happened") or assessment.get("what_happened") or record.get("description")
     meaning=edited.get("why_it_matters") or outlook.get("pc_assessment") or assessment.get("pc_assessment") or assessment.get("what_it_means") or meta.get("pc_assessment")
@@ -81,7 +83,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
         if location.is_file():
             logo_html='<img class="logo" src="data:image/png;base64,'+base64.b64encode(location.read_bytes()).decode("ascii")+'"/>'
             break
-    opening=('<div class="strap">POWER &amp; CORRIDORS INTELLIGENCE &nbsp; / &nbsp; INCIDENT INTELLIGENCE BRIEF</div>')
+    opening=('<div class="strap">POWER &amp; CORRIDORS INTELLIGENCE &nbsp; / &nbsp; '+("FLASH INTELLIGENCE ALERT" if flash else "CONNECTED INTELLIGENCE ASSESSMENT")+"</div>")
     key_judgment=edited.get("key_judgment") or outlook.get("key_judgment") or assessment.get("key_judgment") or meaning
     bottom_line=edited.get("bottom_line") or outlook.get("bottom_line") or assessment.get("bottom_line")
     alternative=edited.get("alternative_explanation") or outlook.get("alternative_explanation") or assessment.get("alternative_explanation") or meta.get("alternative_explanation")
@@ -111,8 +113,14 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     html+=logo_html+'<div class="strap"><b>POWER &amp; CORRIDORS INTELLIGENCE</b> · INDEPENDENT INTELLIGENCE ON MOVEMENT, INFRASTRUCTURE &amp; RISK</div><div class="rule"></div>'
     html+=(opening+'<div class="issue-date">ISSUED '+_h(issued)+'</div><h1 class="title">'+_h(title)+'</h1><div class="meta">Event date '+_h(_date(record.get("start_date")))+
         ' · Verification '+_h(record.get("verification_status") or "Unrecorded")+'</div>')
-    html+=('<div class="metrics"><div class="metric"><small>Current risk</small><strong>'+_h(outlook.get("current_risk") or "Not rated")+'</strong></div><div class="metric"><small>Confidence</small><strong>'+
-        _h(outlook.get("confidence") or "Unassigned")+'</strong></div><div class="metric"><small>Assessed</small><strong>'+_h(_date(outlook.get("assessed_at")))+'</strong></div></div>')
+    risk_full=str(outlook.get("current_risk") or "Not assessed")
+    confidence_full=str(outlook.get("confidence") or "Unassigned")
+    risk_short=risk_full.split(" — ",1)[0].split(" - ",1)[0]
+    confidence_short=confidence_full.split(" — ",1)[0].split(" - ",1)[0]
+    html+=('<div class="metrics"><div class="metric"><small>Current risk</small><strong>'+_h(risk_short)+'</strong></div><div class="metric"><small>Confidence</small><strong>'+
+        _h(confidence_short)+'</strong></div><div class="metric"><small>Assessed</small><strong>'+_h(_date(outlook.get("assessed_at")))+'</strong></div></div>')
+    if risk_full!=risk_short or confidence_full!=confidence_short:
+        html+='<p class="meta">'+_h("Risk: "+risk_full+" · Evidence: "+confidence_full)+'</p>'
     if outlook.get("valid_until"): html+='<p class="meta">Assessment valid until: '+_h(outlook["valid_until"])+' (check current conditions before reliance).</p>'
     html+='<div class="section"><h2>KEY JUDGEMENT</h2><div class="box">'+_paragraph(key_judgment)+'</div></div>'
     html+='<div class="section"><h2>WHAT HAPPENED</h2>'+_paragraph(what)+'</div>'
@@ -125,17 +133,31 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
         html+='<div class="section"><h2>Alternative explanation</h2>'+_paragraph(alternative)+'</div>'
     if gaps:
         html+='<div class="section"><h2>What remains unconfirmed</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in gaps)+'</ul></div>'
-    html+='<div class="section"><h2>RISK OUTLOOK</h2><div class="box">'+_paragraph(forecast)+'</div></div>'
-    html+='<div class="section"><h2>MONITORING PRIORITIES</h2>'+('<ul>'+''.join('<li>'+_h(i)+'</li>' for i in indicators)+'</ul>' if indicators else '<p class="muted">No reviewed indicators recorded.</p>')+'</div>'
+    if forecast: html+='<div class="section"><h2>RISK OUTLOOK</h2><div class="box">'+_paragraph(forecast)+'</div></div>'
+    if indicators: html+='<div class="section"><h2>MONITORING PRIORITIES</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in (indicators[:4] if flash else indicators))+'</ul></div>'
     if triggers:
         html+='<div class="section"><h2>Decision triggers</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in triggers)+'</ul></div>'
-    html+='<div class="section"><h2>GEOGRAPHIC &amp; INFRASTRUCTURE EXPOSURE</h2>'+map_html+table(["Asset","Mode","Recorded relationship","Impact status"],infra)+'</div>'
-    if edited.get("historical_context"):
+    html+='<div class="section"><h2>GEOGRAPHIC CONTEXT</h2>'+map_html+'</div>'
+    if infra and not flash:
+        html+='<div class="section"><h2>CONNECTED INFRASTRUCTURE</h2>'+table(["Asset","Mode","Recorded relationship","Impact status"],infra)+'</div>'
+    if not flash:
+        graph_rows=[]
+        for item in context.get("company_history") or []:
+            company=item.get("company") or {}; edge=item.get("relationship") or {}
+            if company.get("name"):
+                role_meta=edge.get("metadata") or {}
+                graph_rows.append('<tr><td>'+_h(company["name"])+'</td><td>'+_h(_plain(edge.get("relationship_type")))+'</td><td>'+_h(edge.get("confidence") or "Unrated")+'</td></tr>')
+        profile=context.get("vessel_profile") or {}
+        if profile.get("name"):
+            graph_rows.insert(0,'<tr><td>'+_h(profile["name"])+(" · IMO "+_h(profile["imo"]) if profile.get("imo") else "")+'</td><td>Resolved mobile asset</td><td>IMO-matched where recorded</td></tr>')
+        if graph_rows:
+            html+='<div class="section"><h2>CONNECTED RECORDS</h2>'+table(["Subject","Recorded relationship","Qualification"],graph_rows)+'</div>'
+    if not flash and edited.get("historical_context"):
         html+='<div class="section"><h2>SUBJECT HISTORY &amp; BACKGROUND</h2>'+_paragraph(edited["historical_context"])+'</div>'
-    if edited.get("wider_context") or edited.get("connected_developments_synthesis"):
+    if not flash and (edited.get("wider_context") or edited.get("connected_developments_synthesis")):
         html+='<div class="section"><h2>WIDER CONTEXT &amp; CONNECTED DEVELOPMENTS</h2>'+_paragraph(edited.get("wider_context") or edited.get("connected_developments_synthesis"))+'</div>'
-    html+='<div class="section"><h2>RELATED DEVELOPMENTS</h2>'+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
-    if bottom_line and bottom_line not in (key_judgment,meaning):
+    if related_html and not flash: html+='<div class="section"><h2>RELATED DEVELOPMENTS</h2>'+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
+    if bottom_line and not flash and bottom_line not in (key_judgment,meaning):
         html+='<div class="section"><h2>BOTTOM LINE</h2><div class="box">'+_paragraph(bottom_line)+'</div></div>'
     html+='<div class="section"><h2>SOURCES &amp; EVIDENCE</h2>'+(''.join(sources) if sources else '<p class="muted">No individual source claims available in this record.</p>')+'</div>'
     html+='<div class="disclaimer">Power &amp; Corridors · powerncorridors.com · Analytical judgments are qualified by the cited evidence. Contextual links do not establish causation, attack attribution, damage, closure or current operating status. This PDF is a dated snapshot, not a live notice.</div></body></html>'
