@@ -41,7 +41,9 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     title=record.get("title") or record.get("event_id") or "Event"
     what=edited.get("what_happened") or assessment.get("what_happened") or record.get("description")
     meaning=edited.get("why_it_matters") or outlook.get("pc_assessment") or assessment.get("pc_assessment") or assessment.get("what_it_means") or meta.get("pc_assessment")
-    forecast=edited.get("risk_outlook") or outlook.get("risk_outlook") or meta.get("risk_outlook")
+    forecast=outlook.get("risk_outlook") or meta.get("risk_outlook") or edited.get("risk_outlook")
+    if str(outlook.get("current_risk") or "").lower().startswith("not assessed") and forecast and re.search(r"\\b(low|moderate|high|severe|critical) risk (persists|remains|is|continues)\\b",str(forecast),re.I):
+        forecast=outlook.get("risk_outlook") or meta.get("risk_outlook") or ""
     indicators=_list(edited.get("monitoring_analysis") or outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators"))
     claims=evidence or [v for v in _list(meta.get("source_claims")) if isinstance(v,dict)]
     if not claims:
@@ -70,6 +72,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
         except (KeyError,TypeError,ValueError): pass
         map_html='<div class="map"><b>REGIONAL GEOGRAPHIC REFERENCE</b><p class="place">'+_h(name)+'</p>'
         if embedded: map_html+='<img class="regional-map" src="'+embedded+'" alt="Regional named-place context map"/>'
+        else: map_html+='<p class="muted">Basemap tiles unavailable at publication; locality reference only. Do not interpret this as a plotted casualty location.</p>'
         map_html+='<p>Approximate geographic reference — not the verified incident position.</p>'
         if _valid_url(url): map_html+='<p><a href="'+_h(url)+'">Open location map ↗</a></p>'
         map_html+='</div>'
@@ -126,14 +129,14 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     html+='<div class="section"><h2>WHAT HAPPENED</h2>'+_paragraph(what)+'</div>'
     if meaning and meaning.strip() != (key_judgment or "").strip():
         html+='<div class="section"><h2>WHY IT MATTERS — P&C ASSESSMENT</h2>'+_paragraph(meaning)+'</div>'
-    for label,value in implications:
+    for label,value in ([] if flash else implications):
         if value and value not in (meaning,key_judgment):
             html+='<div class="section"><h2>'+_h(label)+'</h2>'+_paragraph(value)+'</div>'
     if alternative:
         html+='<div class="section"><h2>Alternative explanation</h2>'+_paragraph(alternative)+'</div>'
-    if gaps:
+    if gaps and not flash:
         html+='<div class="section"><h2>What remains unconfirmed</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in gaps)+'</ul></div>'
-    if forecast: html+='<div class="section"><h2>RISK OUTLOOK</h2><div class="box">'+_paragraph(forecast)+'</div></div>'
+    if forecast and not flash: html+='<div class="section"><h2>RISK OUTLOOK</h2><div class="box">'+_paragraph(forecast)+'</div></div>'
     if indicators: html+='<div class="section"><h2>MONITORING PRIORITIES</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in (indicators[:4] if flash else indicators))+'</ul></div>'
     if triggers:
         html+='<div class="section"><h2>Decision triggers</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in triggers)+'</ul></div>'
