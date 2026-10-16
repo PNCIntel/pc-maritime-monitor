@@ -535,7 +535,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                                 str(item.get("mode") or "Context"))
                     st.caption(str(item.get("relationship") or item.get("role") or "")+
                                " · "+str(item.get("status") or "Direct impact not established"))
-        else: st.caption("No infrastructure relationship recorded.")
+        elif not connected: st.caption("No connected infrastructure or records documented.")
     st.divider()
     evidence_tab,network_tab,history_tab=st.tabs(["Evidence & sources","Connected developments","Figures & chronology"])
     with evidence_tab:
