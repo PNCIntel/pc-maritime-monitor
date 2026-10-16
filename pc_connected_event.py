@@ -269,6 +269,16 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
           "confidence":judgment.get("confidence"),"pc_assessment":judgment.get("risk_rationale") or judgment.get("current_risk"),
           "risk_outlook":judgment.get("risk_outlook"),"monitoring_indicators":judgment.get("monitoring_indicators"),
           "assessed_at":judgment.get("assessed_at"),"valid_until":judgment.get("valid_until")}}
+    # Approved editorial significance is distinct from a forecast of active threat.
+    profile=meta.get("editorial_profile") or {}
+    if isinstance(profile,dict) and profile.get("review_status")=="approved":
+        outlook={**outlook,
+            "current_risk":outlook.get("current_risk") or profile.get("current_threat_label") or "No current threat assessed",
+            "confidence":outlook.get("confidence") or profile.get("evidence_confidence") or "High — police announcement",
+            "assessed_at":outlook.get("assessed_at") or profile.get("assessed_at"),
+            "pc_assessment":outlook.get("pc_assessment") or profile.get("analysis"),
+            "risk_outlook":outlook.get("risk_outlook") or profile.get("outlook"),
+            "monitoring_indicators":outlook.get("monitoring_indicators") or profile.get("monitoring")}
     # Export the same approved narrative and evidence as a dated, branded client PDF.
     try:
         from pc_event_pdf import create_incident_brief
@@ -392,7 +402,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         profile=meta.get("editorial_profile") or {}
         if isinstance(profile,dict) and profile:
             st.markdown("### Development significance")
-            st.caption("Editorial classification: "+str(profile.get("review_status") or "draft").replace("_"," ")+"; not an approved current-risk rating.")
+            st.caption("Editorial classification: "+str(profile.get("review_status") or "draft").replace("_"," ")+"; development significance is independent of current threat.")
             st.write(str(profile.get("significance") or "Not classified").replace("_"," ").title()+
                      " significance · Current threat: "+str(profile.get("current_threat") or "not assessed").replace("_"," "))
             if profile.get("significance_rationale"): st.write(profile["significance_rationale"])
