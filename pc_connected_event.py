@@ -389,16 +389,30 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                     st.warning("Historical assessment: last assessed "+_date(outlook.get("assessed_at"))+
                                ". Current conditions require revalidation.")
             except (TypeError,ValueError): pass
+        profile=meta.get("editorial_profile") or {}
+        if isinstance(profile,dict) and profile:
+            st.markdown("### Development significance")
+            st.caption("Editorial classification: "+str(profile.get("review_status") or "draft").replace("_"," ")+"; not an approved current-risk rating.")
+            st.write(str(profile.get("significance") or "Not classified").replace("_"," ").title()+
+                     " significance · Current threat: "+str(profile.get("current_threat") or "not assessed").replace("_"," "))
+            if profile.get("significance_rationale"): st.write(profile["significance_rationale"])
+            facts=profile.get("reported_measures") or []
+            if facts:
+                st.markdown("### Reported scale")
+                for fact in facts:
+                    if isinstance(fact,dict): st.markdown("- **"+str(fact.get("label") or "Measure")+"**: "+str(fact.get("value") or "Unrecorded")+
+                        (" — "+str(fact.get("qualification")) if fact.get("qualification") else ""))
+            st.caption("Reported financial measures describe different categories and must not be summed.")
         st.markdown("### What happened?")
         st.write(assessment.get("what_happened") or record.get("description") or
                  "An adequately sourced incident narrative has not yet been recorded.")
         st.markdown("### What does it mean?")
         st.write(outlook.get("pc_assessment") or assessment.get("pc_assessment") or
                  assessment.get("what_it_means") or meta.get("pc_assessment") or
-                 "An approved analytical judgment has not yet been recorded.")
+                 (("Editorial analysis (pending approval): "+str(profile.get("analysis"))) if isinstance(profile,dict) and profile.get("analysis") else "An approved analytical judgment has not yet been recorded."))
         st.markdown("### What could happen next?")
         st.write(outlook.get("risk_outlook") or meta.get("risk_outlook") or
-                 "An evidence-backed outlook has not yet been published.")
+                 (("Editorial outlook (pending approval): "+str(profile.get("outlook"))) if isinstance(profile,dict) and profile.get("outlook") else "An evidence-backed outlook has not yet been published."))
         st.markdown("### What are we monitoring, and why?")
         indicators=outlook.get("monitoring_indicators") or assessment.get("monitoring_indicators") or meta.get("monitoring_indicators") or []
         if isinstance(indicators,dict): indicators=[str(k)+": "+str(v) for k,v in indicators.items()]
