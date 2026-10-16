@@ -4631,6 +4631,51 @@ def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
                             args=("mobile_asset",x["id"],x["name"]),
                         )
 
+        # The overview interprets existing links; it does not confer new legal
+        # status or infer that historically linked parties remain current.
+        with st.container(border=True):
+            st.markdown("#### Connected vessel assessment")
+            st.caption("Source-linked interpretation · identity, corporate roles, regulatory exposure and developments")
+            if imo:
+                st.write("IMO "+imo+" is the persistent vessel identity used to reconcile records across reported names and flags. Name or flag changes alone do not establish a different hull.")
+            if role_rows:
+                owner_names=list(dict.fromkeys(str(x.get("name")) for x in role_rows
+                    if x.get("role") in ("legal_owner","owner") and x.get("name")))
+                service_names=list(dict.fromkeys(str(x.get("name")) for x in role_rows
+                    if x.get("role") in ("operator","manager") and x.get("name")))
+                if owner_names:
+                    st.write("The recorded legal ownership link"+("s are " if len(owner_names)>1 else " is ")+", ".join(owner_names)+
+                             ". Legal ownership is not, without further sourced relationships, proof of ultimate beneficial ownership or control.")
+                if service_names:
+                    st.write("The recorded operating and management roles involve "+", ".join(service_names)+
+                             ". These relationships identify relevant operational counterparties; role dates and provenance should be checked under Ownership & Management.")
+            if sanctions:
+                st.markdown("**Regulatory connections**")
+                for d,link in sanctions[:12]:
+                    authority=_clean(d.get("source_list")) or "Unspecified authority"
+                    listed_name=_clean(d.get("primary_name")) or name
+                    status=_clean(d.get("status")) or "status not recorded"
+                    direct=link.get("is_direct_designation") is True
+                    st.write(authority+": "+listed_name+" — "+status+
+                             (". Recorded as a direct vessel designation." if direct else
+                              ". Linked record; its direct legal application must be checked.")+
+                             " Consult the original instrument, effective date, exceptions and current status before determining jurisdiction-specific commercial obligations.")
+            if pgsa:
+                st.caption("A separate PGSA research-roster match exists. It is not, on its own, a government sanctions designation.")
+            if events:
+                st.markdown("**Linked developments and why they matter**")
+                for ev in events[:5]:
+                    title=_clean(ev.get("title")) or "Recorded development"
+                    date=str(ev.get("start_date") or "")[:10] or "Date not established"
+                    description=_clean(ev.get("description"))
+                    st.markdown("**"+date+" · "+title+"**")
+                    if description: st.write(description)
+                    st.caption("Recorded connection: "+(_clean(ev.get("_relationship")) or "vessel association").replace("_"," ")+
+                               ". A vessel link establishes contextual association, not proof that separate incidents share an actor or cause.")
+            if not (role_rows or sanctions or events):
+                st.caption("No further resolved network, designation or incident links are available for synthesis.")
+            st.caption("Connection limits: historical names and roles require dated evidence; listing under one authority does not imply universal sanctions, and event associations do not establish liability.")
+
     # ------------------------------------------------------------------
     # Ownership & management
     # ------------------------------------------------------------------
