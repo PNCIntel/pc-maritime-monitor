@@ -338,6 +338,11 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                 st.warning("No claim-level source evidence attached; inspect recorded source URLs.")
         with st.expander("Full publication context · internal",expanded=False):
             st.json(publication_context,expanded=False)
+        publication_choice=st.radio("Publication format",
+            ["Flash Intelligence Alert","Connected Intelligence Assessment"],
+            horizontal=True,key="pc_publication_format_"+event_id,
+            help="Both formats use the same reviewed evidence and canonical connected context.")
+        publication_type="flash" if publication_choice=="Flash Intelligence Alert" else "assessment"
         # AI is opt-in and creates an editable draft, never an automatically published judgment.
         draft_key="pc_editorial_draft_"+event_id
         approved_key="pc_editorial_approved_"+event_id
@@ -348,7 +353,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                     import os
                     from pc_event_editorial import draft_event_brief
                     key=os.environ.get("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY","")
-                    st.session_state[draft_key]=draft_event_brief(key,record,assessment,outlook,evidence,related,export_assets,meta,publication_context=publication_context)
+                    st.session_state[draft_key]=draft_event_brief(key,record,assessment,outlook,evidence,related,export_assets,meta,publication_context=publication_context,publication_type=publication_type)
                     st.session_state[approved_key]=False
                 except Exception as draft_exc:
                     st.error("Editorial draft unavailable: "+str(draft_exc))
@@ -369,9 +374,9 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
             if st.session_state.get(approved_key):
                 st.caption("Export below will use the approved editorial narrative.")
         approved_editorial=st.session_state.get(draft_key) if st.session_state.get(approved_key) else None
-        pdf_bytes=create_incident_brief(record,assessment,outlook,evidence,related,export_assets,meta,pdf_place,editorial=approved_editorial)
-        st.download_button("↓ Export Intelligence Brief · PDF",data=pdf_bytes,
-            file_name="PC_Incident_Brief_"+str(event_id).replace("/","_")+".pdf",
+        pdf_bytes=create_incident_brief(record,assessment,outlook,evidence,related,export_assets,meta,pdf_place,editorial=approved_editorial,publication_type=publication_type,publication_context=publication_context)
+        st.download_button("↓ Export "+publication_choice+" · PDF",data=pdf_bytes,
+            file_name="PC_"+("Flash_Alert_" if publication_type=="flash" else "Connected_Assessment_")+str(event_id).replace("/","_")+".pdf",
             mime="application/pdf",key="export_incident_pdf_"+event_id,
             use_container_width=False)
     except Exception as exc:
