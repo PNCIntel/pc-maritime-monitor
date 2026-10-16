@@ -153,7 +153,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
         profile=context.get("vessel_profile") or {}
         company_history=context.get("company_history") or []
         history=edited.get("historical_context")
-        wider=edited.get("wider_context") or edited.get("connected_developments_synthesis")
+        wider=edited.get("wider_context")
         if history or wider:
             html+='<div class="section"><h2>BACKGROUND AND STRATEGIC CONTEXT</h2>'
             if history: html+=_paragraph(history)
