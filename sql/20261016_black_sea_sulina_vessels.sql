@@ -20,7 +20,7 @@ BEGIN
  SELECT mobile_asset_id::text INTO v_y FROM public.pc_mobile_assets WHERE imo::text='9221803' LIMIT 1;
  v_w:=coalesce(v_w,'MOB_PC_IMO_8808707');v_y:=coalesce(v_y,'MOB_PC_IMO_9221803');
  PERFORM public.pc_upsert_json('pc_mobile_assets',jsonb_build_object(
-  'mobile_asset_id',v_w,'name','WINE TRADER','imo','8808707',
+  'mobile_asset_id',v_w,'name','WINE TRADER','asset_type','vessel','imo','8808707',
   'metadata',jsonb_build_object('pc_black_sea_20261016',jsonb_build_object(
    'type','chemical tanker','flag_at_incident','San Marino','built',1989,'dwt',6259,
    'registered_owner_reported','WATERFALLS CO LTD','commercial_manager_reported','WATERFALLS CO LTD',
@@ -28,7 +28,7 @@ BEGIN
    'ownership_source','https://magicport.ai/vessels/tanker/wine-trader-mmsi-351482000',
    'ownership_observation_note','Commercial registry observation, not independently certified beneficial ownership'))),ARRAY['mobile_asset_id']);
  PERFORM public.pc_upsert_json('pc_mobile_assets',jsonb_build_object(
-  'mobile_asset_id',v_y,'name','YARA J','imo','9221803',
+  'mobile_asset_id',v_y,'name','YARA J','asset_type','vessel','imo','9221803',
   'metadata',jsonb_build_object('pc_black_sea_20261016',jsonb_build_object(
    'type','chemical/oil products tanker','flag_at_incident','Comoros','built',2001,'dwt',10018,
    'registered_owner_reported','YARA SHIPPING CO INC','commercial_manager_reported','YARA SHIPPING CO INC',
