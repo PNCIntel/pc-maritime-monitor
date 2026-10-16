@@ -344,8 +344,8 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
             help="Both formats use the same reviewed evidence and canonical connected context.")
         publication_type="flash" if publication_choice=="Flash Intelligence Alert" else "assessment"
         # AI is opt-in and creates an editable draft, never an automatically published judgment.
-        draft_key="pc_editorial_draft_"+event_id
-        approved_key="pc_editorial_approved_"+event_id
+        draft_key="pc_editorial_draft_"+event_id+"_"+publication_type
+        approved_key="pc_editorial_approved_"+event_id+"_"+publication_type
         with st.expander("Improve brief writing with AI · review before export",expanded=False):
             st.caption("Rewrites supported analysis in plain language. Sources, statuses and event links stay canonical.")
             if st.button("Generate editorial draft",key="pc_draft_btn_"+event_id):
@@ -361,7 +361,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                 import json
                 revised=st.text_area("Edit the draft JSON before approval",
                     value=json.dumps(st.session_state[draft_key],ensure_ascii=False,indent=2),
-                    height=370,key="pc_editorial_text_"+event_id)
+                    height=370,key="pc_editorial_text_"+event_id+"_"+publication_type)
                 if st.button("Approve edited narrative for PDF",key="pc_approve_"+event_id):
                     try:
                         edited=json.loads(revised)
