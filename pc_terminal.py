@@ -4729,6 +4729,22 @@ def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
                     args=("entity",x["id"],x["name"]),
                 )
 
+        history_roles=_filtered_rows("pc_company_asset_roles","mobile_asset_id",str(oid),500)
+        if history_roles:
+            st.markdown("#### Dated company-role history")
+            st.caption("Observations and effective periods are different. Former managers and owners are not projected onto the present.")
+            rows=[]
+            for role in sorted(history_roles,key=lambda x:str(x.get("valid_from") or x.get("as_of") or ""),reverse=True):
+                company=_object_name("entity",_clean(role.get("entity_id")))
+                if not company: continue
+                start=str(role.get("valid_from") or "")[:10]
+                end=str(role.get("valid_to") or "")[:10]
+                observed=str(role.get("as_of") or "")[:10]
+                rows.append({"Company":company,"Role":_clean(role.get("asset_role")).replace("_"," ").title(),
+                             "From":start or "Unverified","To":end or "Unverified",
+                             "Observed":observed or "Unrecorded","Source":_clean(role.get("source_id")) or "Unrecorded"})
+            if rows: st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+
     # ------------------------------------------------------------------
     # Activity
     # ------------------------------------------------------------------
