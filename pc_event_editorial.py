@@ -37,8 +37,7 @@ exposure, with dates and source qualifications. If absent, say nothing (empty st
 contextual or contingency exposure, and explain the relevance of recorded dependencies.
 - geographic_synthesis: BEFORE the map, explain why this geography matters and explicitly
 distinguish named locality, facility and incident coordinates. Do not manufacture positions.
-- connected_developments_synthesis: BEFORE linked-event table, explain the contextual
-relationship and limits to causation or attribution.
+- connected_developments_synthesis: BEFORE linked-event table, explain the contextual relationship and limits to causation or attribution. For EACH cited earlier event, give a self-contained description: date, location if recorded, event mechanism, reported outcome and verification status, then state exactly why it matters now. Never rely on a bare title, imply shared perpetrators from proximity, or invent missing details.
 - historical_context and wider_context: independently meaningful source-grounded background,
 not restatements of the incident.
 - why_it_matters: assess systemic implications, not another account of what happened.
