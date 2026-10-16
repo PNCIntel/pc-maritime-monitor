@@ -45,8 +45,6 @@ BEGIN
  'PC_BS_SULINA_YARA_J_FIRE_20261014','YARA J fire near Sulina','related regional development','medium',
  jsonb_build_object('common_actor','not established','common_cause','not established','situation_id','PC_SIT_BLACK_SEA_SULINA_VESSEL_FIRES_20261014_15'))
  ON CONFLICT (event_link_id) DO UPDATE SET metadata=coalesce(pc_event_links.metadata,'{}'::jsonb)||EXCLUDED.metadata;
- -- Dedicated relationship taxonomy is constrained. Do not guess a check value or weaken the constraint.
- SELECT pg_get_constraintdef(oid) INTO rel_def FROM pg_constraint WHERE conrelid='public.pc_event_relationships'::regclass AND conname='pc_event_relationships_relationship_type_check';
  -- Editorial profiles based on source evidence, no claim of independent forensics.
  FOR r IN SELECT event_id FROM public.pc_events WHERE event_id IN
  ('PC_BS_SULINA_YARA_J_FIRE_20261014','PC_BS_SULINA_WINE_TRADER_FIRE_20261015')
@@ -56,7 +54,7 @@ BEGIN
  'review_status','approved','approval_basis','P&C completion requested 16 October 2026; source-qualified editorial publication, not an independent incident investigation',
  'significance','major','current_threat','not_assessed',
  'current_threat_label','Not assessed — continuing vessel or corridor-specific threat has not been established',
- 'assessed_at','2026-10-16T09:56:00+04:00',
+ 'assessed_at',to_char(current_timestamp AT TIME ZONE 'Asia/Dubai','YYYY-MM-DD"T"HH24:MI:SS')||'+04:00',
  'evidence_confidence','Moderate — vessel fires and rescue situation reported; suspected strike mechanism and attribution unconfirmed',
  'significance_rationale','Separate tanker fire reports near the Sulina approaches and a search-and-rescue emergency warrant scrutiny of Black Sea–Danube access. They do not establish a common attacker, a port closure, cargo interruption or an ongoing vessel-specific threat.',
  'analysis',CASE WHEN e.event_id='PC_BS_SULINA_YARA_J_FIRE_20261014' THEN
