@@ -134,43 +134,65 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     if risk_full!=risk_short or confidence_full!=confidence_short:
         html+='<p class="meta">'+_h("Risk: "+risk_full+" · Evidence: "+confidence_full)+'</p>'
     if outlook.get("valid_until"): html+='<p class="meta">Assessment valid until: '+_h(outlook["valid_until"])+' (check current conditions before reliance).</p>'
-    html+='<div class="section"><h2>KEY JUDGEMENT</h2><div class="box">'+_paragraph(key_judgment)+'</div></div>'
-    html+='<div class="section"><h2>WHAT HAPPENED</h2>'+_paragraph(what)+'</div>'
-    if meaning and meaning.strip() != (key_judgment or "").strip():
-        html+='<div class="section"><h2>WHY IT MATTERS — P&C ASSESSMENT</h2>'+_paragraph(meaning)+'</div>'
-    for label,value in ([] if flash else implications):
-        if value and value not in (meaning,key_judgment):
-            html+='<div class="section"><h2>'+_h(label)+'</h2>'+_paragraph(value)+'</div>'
-    if alternative:
-        html+='<div class="section"><h2>Alternative explanation</h2>'+_paragraph(alternative)+'</div>'
-    if gaps and not flash:
-        html+='<div class="section"><h2>What remains unconfirmed</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in gaps)+'</ul></div>'
-    if forecast and not flash: html+='<div class="section"><h2>RISK OUTLOOK</h2><div class="box">'+_paragraph(forecast)+'</div></div>'
-    if indicators: html+='<div class="section"><h2>MONITORING PRIORITIES</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in (indicators[:4] if flash else indicators))+'</ul></div>'
-    if triggers:
-        html+='<div class="section"><h2>Decision triggers</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in triggers)+'</ul></div>'
-    html+='<div class="section"><h2>GEOGRAPHIC CONTEXT</h2>'+map_html+'</div>'
-    if infra and not flash:
-        html+='<div class="section"><h2>CONNECTED INFRASTRUCTURE</h2>'+table(["Asset","Mode","Recorded relationship","Impact status"],infra)+'</div>'
-    if not flash:
+    if flash:
+        html+='<div class="section"><h2>THE DEVELOPMENT</h2>'+_paragraph(what)+'</div>'
+        if key_judgment and key_judgment != what:
+            html+='<div class="section"><h2>KEY JUDGEMENT</h2><div class="box">'+_paragraph(key_judgment)+'</div></div>'
+        if meaning and meaning not in (what,key_judgment):
+            html+='<div class="section"><h2>IMMEDIATE IMPLICATIONS</h2>'+_paragraph(meaning)+'</div>'
+        if indicators:
+            html+='<div class="section"><h2>PRIORITY MONITORING</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in indicators[:4])+'</ul></div>'
+        if triggers:
+            html+='<div class="section"><h2>DECISION TRIGGERS</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in triggers[:3])+'</ul></div>'
+        if map_point and map_html:
+            html+='<div class="section"><h2>LOCATION REFERENCE</h2>'+map_html+'</div>'
+    else:
+        # Longer assessment is structured around the model and analytical argument,
+        # rather than replaying the sequence of a flash alert.
+        html+='<div class="section"><h2>EXECUTIVE ASSESSMENT</h2><div class="box">'+_paragraph(key_judgment)+'</div></div>'
+        profile=context.get("vessel_profile") or {}
+        company_history=context.get("company_history") or []
+        history=edited.get("historical_context")
+        wider=edited.get("wider_context") or edited.get("connected_developments_synthesis")
+        if history or wider:
+            html+='<div class="section"><h2>BACKGROUND AND STRATEGIC CONTEXT</h2>'
+            if history: html+=_paragraph(history)
+            if wider and wider!=history: html+=_paragraph(wider)
+            html+='</div>'
         graph_rows=[]
-        for item in context.get("company_history") or []:
+        if profile.get("name"):
+            identity=str(profile["name"])+(" · IMO "+str(profile["imo"]) if profile.get("imo") else "")
+            graph_rows.append('<tr><td>'+_h(identity)+'</td><td>Resolved mobile asset</td><td>Identity recorded in the model</td></tr>')
+        for item in company_history:
             company=item.get("company") or {}; edge=item.get("relationship") or {}
             if company.get("name"):
-                role_meta=edge.get("metadata") or {}
-                graph_rows.append('<tr><td>'+_h(company["name"])+'</td><td>'+_h(_plain(edge.get("relationship_type")))+'</td><td>'+_h(edge.get("confidence") or "Unrated")+'</td></tr>')
-        profile=context.get("vessel_profile") or {}
-        if profile.get("name"):
-            graph_rows.insert(0,'<tr><td>'+_h(profile["name"])+(" · IMO "+_h(profile["imo"]) if profile.get("imo") else "")+'</td><td>Resolved mobile asset</td><td>IMO-matched where recorded</td></tr>')
-        if graph_rows:
-            html+='<div class="section"><h2>CONNECTED RECORDS</h2>'+table(["Subject","Recorded relationship","Qualification"],graph_rows)+'</div>'
-    if not flash and edited.get("historical_context"):
-        html+='<div class="section"><h2>SUBJECT HISTORY &amp; BACKGROUND</h2>'+_paragraph(edited["historical_context"])+'</div>'
-    if not flash and (edited.get("wider_context") or edited.get("connected_developments_synthesis")):
-        html+='<div class="section"><h2>WIDER CONTEXT &amp; CONNECTED DEVELOPMENTS</h2>'+_paragraph(edited.get("wider_context") or edited.get("connected_developments_synthesis"))+'</div>'
-    if related_html and not flash: html+='<div class="section"><h2>RELATED DEVELOPMENTS</h2>'+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
-    if bottom_line and not flash and bottom_line not in (key_judgment,meaning):
-        html+='<div class="section"><h2>BOTTOM LINE</h2><div class="box">'+_paragraph(bottom_line)+'</div></div>'
+                provenance=edge.get("metadata") or {}
+                observation=provenance.get("observed_on") or provenance.get("observation_date")
+                qualifier=(str(edge.get("confidence") or "Unrated")+" confidence"+
+                           (" · observed "+str(observation) if observation else " · date unverified"))
+                graph_rows.append('<tr><td>'+_h(company["name"])+'</td><td>'+_h(_plain(edge.get("relationship_type")))+'</td><td>'+_h(qualifier)+'</td></tr>')
+        if graph_rows or infra:
+            html+='<div class="section"><h2>CONNECTED NETWORK AND EXPOSURE</h2>'
+            if graph_rows: html+=table(["Subject","Recorded role","Evidence qualification"],graph_rows)
+            if infra: html+='<h3>Infrastructure and dependencies</h3>'+table(["Asset","Mode","Recorded relationship","Impact status"],infra)
+            html+='</div>'
+        html+='<div class="section"><h2>GEOGRAPHIC CONTEXT</h2>'+map_html+'</div>'
+        html+='<div class="section"><h2>EVENT AND EVIDENCE</h2>'+_paragraph(what)+'</div>'
+        if meaning and meaning!=key_judgment:
+            html+='<div class="section"><h2>ANALYSIS — WHY IT MATTERS</h2>'+_paragraph(meaning)+'</div>'
+        for label,value in implications:
+            if value and value not in (meaning,key_judgment):
+                html+='<div class="section"><h2>'+_h(label)+'</h2>'+_paragraph(value)+'</div>'
+        if related_html:
+            html+='<div class="section"><h2>CONNECTED DEVELOPMENTS</h2>'+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
+        if alternative or gaps:
+            html+='<div class="section"><h2>ALTERNATIVES AND INTELLIGENCE GAPS</h2>'
+            if alternative: html+=_paragraph(alternative)
+            if gaps: html+='<ul>'+''.join('<li>'+_h(i)+'</li>' for i in gaps)+'</ul>'
+            html+='</div>'
+        if forecast: html+='<div class="section"><h2>OUTLOOK</h2>'+_paragraph(forecast)+'</div>'
+        if triggers: html+='<div class="section"><h2>WHAT WOULD CHANGE THE ASSESSMENT</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in triggers)+'</ul></div>'
+        if indicators: html+='<div class="section"><h2>MONITORING AND INDICATORS</h2><ul>'+''.join('<li>'+_h(i)+'</li>' for i in indicators)+'</ul></div>'
     html+='<div class="section"><h2>SOURCES &amp; EVIDENCE</h2>'+(''.join(sources) if sources else '<p class="muted">No individual source claims available in this record.</p>')+'</div>'
     if flash:
         # Page footers already identify the publisher; do not create an orphan page
