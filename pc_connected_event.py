@@ -313,7 +313,8 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         publication_context=build_context(
             record,vessel=vessel,company_roles=company_roles,designations=published,
             pgsa_queue=pgsa_queue,related=related,assets=export_assets,
-            updates=updates,corporate_edges=corporate_edges,\n            identity_history=identity_history,historical_roles=historical_roles)
+            updates=updates,corporate_edges=corporate_edges,
+            identity_history=identity_history,historical_roles=historical_roles)
         # Coverage is conditional on subject type, never a vessel checklist for every event.
         is_vessel=bool(vessel)
         with st.expander("Source and context coverage · internal",expanded=False):
