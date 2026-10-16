@@ -21,7 +21,7 @@ def _public_record(v, fields):
 
 def build_context(record, vessel=None, company_roles=None, designations=None,
                   pgsa_queue=None, related=None, assets=None, updates=None,
-                  corporate_edges=None):
+                  corporate_edges=None, identity_history=None, historical_roles=None):
     """Return structured context and coverage gaps; no speculative link generation."""
     vessel=vessel or {}
     result={"subject":_public_record(record,("title","start_date","verification_status","description","country")),
@@ -30,7 +30,18 @@ def build_context(record, vessel=None, company_roles=None, designations=None,
             "vessel_record_metadata":_meta(vessel),
             "company_history":[],"published_sanctions":[],"non_designation_research":[],
             "related_developments":[],"infrastructure":[],"updates":[],"corporate_context":[],
-            "coverage_gaps":[]}
+            "coverage_gaps":[],"identity_history":[],"dated_company_roles":[]}
+    for item in identity_history or []:
+        result["identity_history"].append({
+          "identity":_public_record(item,("identity_type","identity_value","observed_on","date_basis","valid_from","valid_to","source_url")),
+          "qualification":"Source observation is not proof of the exact rename or flag-change date"})
+    for item in historical_roles or []:
+        role=item.get("role") or {}; company=item.get("company") or {}
+        result["dated_company_roles"].append({
+          "company":_public_record(company,("entity_id","name","country")),
+          "role":_public_record(role,("asset_role","role_status","valid_from","valid_to","as_of","source_id")),
+          "metadata":_public_record(_meta(role),("role_detail","source_url","source_urls","date_qualification")),
+          "qualification":"An as-of date documents an observation, not necessarily the start of the role; dated former roles are not current roles"})
     for edge,company in company_roles or []:
         result["company_history"].append({
           "company":_public_record(company,("entity_id","name","country")),
