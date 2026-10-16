@@ -125,6 +125,20 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
             company = _one(sb, "pc_entities", "entity_id", role.get("source_id"))
             company_roles.append((role, company))
     company_roles.sort(key=lambda item: str(item[0].get("valid_from") or ""), reverse=True)
+    # Historical role rows are independent of the current summary pointers.
+    # Resolve all dated roles against the ONE physical hull; do not infer role
+    # inception from an as-of date or project current management backwards.
+    historical_roles=[]
+    identity_history=[]
+    if vessel_id:
+        identity_history=_get(sb,"pc_mobile_asset_identity_history","mobile_asset_id",vessel_id,250)
+        for role in _get(sb,"pc_company_asset_roles","mobile_asset_id",vessel_id,500):
+            entity_id=str(role.get("entity_id") or "")
+            if not entity_id: continue
+            company=_one(sb,"pc_entities","entity_id",entity_id)
+            historical_roles.append({"company":company,"role":role})
+    historical_roles.sort(key=lambda x:str(x["role"].get("valid_from") or x["role"].get("as_of") or ""),reverse=True)
+
 
     # Multimodal infrastructure: source-backed event asset links and rail-specific
     # service/disruption records exist independently of vessel metadata.
@@ -299,7 +313,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         publication_context=build_context(
             record,vessel=vessel,company_roles=company_roles,designations=published,
             pgsa_queue=pgsa_queue,related=related,assets=export_assets,
-            updates=updates,corporate_edges=corporate_edges)
+            updates=updates,corporate_edges=corporate_edges,\n            identity_history=identity_history,historical_roles=historical_roles)
         # Coverage is conditional on subject type, never a vessel checklist for every event.
         is_vessel=bool(vessel)
         with st.expander("Source and context coverage · internal",expanded=False):
