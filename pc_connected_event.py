@@ -273,7 +273,7 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
     profile=meta.get("editorial_profile") or {}
     if isinstance(profile,dict) and profile.get("review_status")=="approved":
         outlook={**outlook,
-            "current_risk":outlook.get("current_risk") or profile.get("current_threat_label") or "No current threat assessed",
+            "current_risk":outlook.get("current_risk") or profile.get("current_threat_label") or "Not assessed — no continuing threat established",
             "confidence":outlook.get("confidence") or profile.get("evidence_confidence") or "High — police announcement",
             "assessed_at":outlook.get("assessed_at") or profile.get("assessed_at"),
             "pc_assessment":outlook.get("pc_assessment") or profile.get("analysis"),
