@@ -53,11 +53,11 @@ BEGIN
  -- No strike point fabricated. Reporting of drone causation and Russian origin is qualified.
  PERFORM public.pc_upsert_json('pc_events',jsonb_build_object(
  'event_id','PC_BS_SULINA_YARA_J_FIRE_20261014','title','YARA J reports fire near Sulina; crew extinguishes blaze',
- 'start_date','2026-10-14T17:00:00+00:00','event_type','maritime_security_incident',
+ 'start_date','2026-10-14T00:00:00+00:00','event_type','maritime_security_incident',
  'description','Comoros-flagged chemical/oil products tanker YARA J (IMO 9221803) reported a fire while anchored near Sulina on 14 October. Its 17 crew reportedly extinguished the blaze without injury. The crew reported a suspected drone strike; Romanian authorities were investigating the cause. No definite attacker or verified strike coordinates assigned.',
  'verification_status','official_statement_reported','intelligence_relevance',1,'intelligence_visible',true,'trade_visible',false,
  'metadata',jsonb_build_object('situation_id','PC_SIT_BLACK_SEA_SULINA_VESSEL_FIRES_20261014_15',
- 'intelligence_lens','security','event_date_qualification','14 October fire report; reported time approximate',
+ 'intelligence_lens','security','event_date_qualification','Date-level report; precise incident time not established',
  'geographic_scope','Sulina approaches, Romanian Black Sea waters; no exact strike point',
  'reported_crew',17,'injury_status','all crew reported safe','causation_status','suspected drone strike; investigation ongoing',
  'canonical_mobile_asset_id',v_y,'canonical_vessel_imo','9221803',
@@ -67,7 +67,7 @@ BEGIN
  jsonb_build_object('publisher','Interfax-Ukraine citing Romanian reports','published_at','2026-10-15','verification_status','reported','claim','Crew-reported suspected drone impact; 17 crew safe; causation not independently established.','original_url','https://en.interfax.com.ua/news/general/1220668.html')))),ARRAY['event_id']);
  PERFORM public.pc_upsert_json('pc_events',jsonb_build_object(
  'event_id','PC_BS_SULINA_WINE_TRADER_FIRE_20261015','title','WINE TRADER burns near Sulina; seven seafarers reported missing after revised rescue count',
- 'start_date','2026-10-15T04:00:00+00:00','event_type','maritime_security_incident',
+ 'start_date','2026-10-15T00:00:00+00:00','event_type','maritime_security_incident',
  'description','San Marino-flagged chemical tanker WINE TRADER (IMO 8808707) reported a fire near Sulina on 15 October with 12 aboard. Early reports said four rescued and eight missing; later Romanian Naval Authority reporting said five rescued and seven missing. Search and rescue continued at publication. The cause and strike attribution remain under investigation; no precise ship-fire coordinates inferred.',
  'verification_status','official_statement_reported','intelligence_relevance',1,'intelligence_visible',true,'trade_visible',false,
  'metadata',jsonb_build_object('situation_id','PC_SIT_BLACK_SEA_SULINA_VESSEL_FIRES_20261014_15',
