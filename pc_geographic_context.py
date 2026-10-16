@@ -6,6 +6,9 @@ import requests
 import streamlit as st
 
 LOCALITIES = (
+    {"name":"Sharjah, United Arab Emirates","pattern":r"\\bsharjah\\b",
+     "lat":25.3463,"lon":55.4209,"source":"https://www.openstreetmap.org/search?query=Sharjah%20United%20Arab%20Emirates",
+     "precision":"city reference point; not a raid or arrest location"},
     {"name":"Medina, Saudi Arabia","pattern":r"\b(?:medina|madinah)\b",
      "lat":24.4672,"lon":39.6111,"source":"https://www.openstreetmap.org/search?query=Medina%20Saudi%20Arabia",
      "precision":"city reference point"},
