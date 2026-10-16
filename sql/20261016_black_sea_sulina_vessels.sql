@@ -1,5 +1,5 @@
 -- P&C Black Sea Sulina casualty package | 16 Oct 2026
--- V3 EXPLICIT VESSEL INSERTS. Idempotent, source-qualified; inspect audit at end. No current-threat rating inferred.
+-- V4 EXPLICIT VESSEL AND ENTITY INSERTS. Idempotent, source-qualified; inspect audit at end. No current-threat rating inferred.
 -- This writes directly to canonical tables, not the staging-loader queue.
 BEGIN;
 DO $$
@@ -47,8 +47,11 @@ BEGIN
    SELECT entity_id::text INTO v_owner FROM public.pc_entities WHERE lower(trim(name))=lower(v_company) LIMIT 1;
    v_owner:=coalesce(v_owner,'ENTITY_PC_'||upper(regexp_replace(v_company,'[^A-Za-z0-9]','','g')));
    IF NOT EXISTS (SELECT 1 FROM public.pc_entities WHERE entity_id::text=v_owner) THEN
-      PERFORM public.pc_upsert_json('pc_entities',jsonb_build_object('entity_id',v_owner,'name',v_company,
-       'metadata',jsonb_build_object('research_status','reported_registry_identity','source_note','Vessel ownership/management registry; beneficial ownership not established')),ARRAY['entity_id']);
+      INSERT INTO public.pc_entities (entity_id,name,entity_type,metadata)
+      VALUES (v_owner,v_company,'company',jsonb_build_object(
+       'research_status','reported_registry_identity',
+       'source_note','Vessel ownership/management registry; beneficial ownership not established'))
+      ON CONFLICT (entity_id) DO NOTHING;
    END IF;
    v_owner:=NULL;
  END LOOP;
