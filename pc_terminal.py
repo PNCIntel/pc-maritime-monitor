@@ -2607,7 +2607,7 @@ def _daily_relevant(row, lens):
     if lens == 'trade': return truth('trade_relevance') or bool(TRADE_RX.search(blob)) or bool(row.get('commercial_impact') or row.get('operational_impact'))
     if lens == 'sanctions': return bool(SANCTIONS_RX.search(blob)) or row.get('_brief_kind') == 'Designation'
     if lens == 'strategic': return bool(STRATEGIC_RX.search(blob))
-    return truth('intelligence_relevance') or truth('alert_worthy') or row.get('_brief_kind', 'Development') == 'Development' or bool(re.search(r'conflict|security|policy|regulat|sanction|disrupt|energy|strategic', blob, re.I))
+    return truth('intelligence_relevance') or truth('alert_worthy') or bool(re.search(r'attack|strike|conflict|security|cyber|fraud|crime|enforcement|intercept|casualty|sanction|disrupt|outage|hazard|threat|espionage|sabotage', blob, re.I))
 
 
 def _daily_candidates(lens):
