@@ -53,7 +53,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
         url=claim.get("original_url") or claim.get("source_url") or claim.get("url") or claim.get("link")
         link=('<a href="'+_h(url)+'">Read original article / advisory ↗</a><div class="url">'+_h(url)+'</div>') if _valid_url(url) else '<span class="muted">Source link requires completion</span>'
         sources.append('<div class="source"><b>['+str(n)+'] '+_h(claim.get("publisher") or claim.get("document_title") or claim.get("source_name") or "Source")+'</b><span>'+_h(_date(claim.get("published_at")))+
-            ' · '+_h(_plain(claim.get("verification_status") or claim.get("verification") or "Unreviewed"))+'</span><p>'+_h(claim.get("claim") or "Claim text not recorded.")+'</p>'+link+'</div>')
+            ' · '+_h("Source review: "+_plain(claim.get("verification_status") or claim.get("verification") or "not recorded"))+'</span><p>'+_h(claim.get("claim") or "Claim text not recorded.")+'</p>'+link+'</div>')
     related_html=[]
     for link,other in related:
         related_html.append('<tr><td>'+_h(_date(other.get("start_date")))+'</td><td>'+_h(other.get("title") or other.get("event_id"))+'</td><td>'+
@@ -95,6 +95,9 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     implications=[("Operational significance",edited.get("operational_significance") or assessment.get("operational_impact")),
                   ("Commercial significance",edited.get("commercial_significance") or assessment.get("commercial_impact"))]
     implications=[(label,value) for label,value in implications if value]
+    if not flash:
+        # Retain clickable links without long printed URLs across bibliography pages.
+        sources=[re.sub(r'<div class="url">.*?</div>', '', item, flags=re.S) for item in sources]
     if flash:
         # Keep clickable citations but avoid printing long URLs in the compact alert.
         sources=[re.sub(r'<div class="url">.*?</div>', '', item, flags=re.S) for item in sources]
@@ -182,11 +185,16 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
                 for item in dated_roles:
                     role=item.get("role") or {}; company=item.get("company") or {}
                     if not company.get("name"): continue
-                    period=("From "+str(role["valid_from"]) if role.get("valid_from") else
-                            "Observed "+str(role["as_of"]) if role.get("as_of") else "Start date unrecorded")
-                    if role.get("valid_to"): period+=" · to "+str(role["valid_to"])
-                    else: period+=" · end date unrecorded"
+                    md=item.get("metadata") or {}
+                    snapshot=md.get("date_basis")=="source_observation" or "Historical observation" in str(md.get("date_qualification") or "")
+                    if snapshot:
+                        period="Observed "+str(role.get("as_of") or role.get("valid_from") or "date unrecorded")+" · tenure not established"
+                    else:
+                        period=("Recorded from "+str(role["valid_from"]) if role.get("valid_from") else
+                                "Observed "+str(role["as_of"]) if role.get("as_of") else "Start date unrecorded")
+                        period+=(" · end "+str(role["valid_to"]) if role.get("valid_to") else " · end unverified")
                     rows.append('<tr><td>'+_h(company["name"])+'</td><td>'+_h(_plain(role.get("asset_role")))+'</td><td>'+_h(period)+'</td></tr>')
+                rows=list(dict.fromkeys(rows))
                 if rows:
                     html+='<h3>Recorded company roles over time</h3><p>Legal owner, operator, manager and ISM records describe different responsibilities. An undated role is not evidence of continuous tenure.</p>'
                     html+=table(["Company","Recorded role","Evidence period"],rows)
@@ -203,6 +211,9 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
                 qualifier=(str(edge.get("confidence") or "Unrated")+" confidence"+
                            (" · observed "+str(observation) if observation else " · date unverified"))
                 graph_rows.append('<tr><td>'+_h(company["name"])+'</td><td>'+_h(_plain(edge.get("relationship_type")))+'</td><td>'+_h(qualifier)+'</td></tr>')
+        if dated_roles:
+            # Time-qualified corporate roles already appear in the biography.
+            graph_rows=graph_rows[:1]
         if graph_rows or infra:
             html+='<div class="section"><h2>CONNECTED NETWORK AND EXPOSURE</h2>'
             if graph_rows and edited.get("network_synthesis"): html+=_paragraph(edited["network_synthesis"])
