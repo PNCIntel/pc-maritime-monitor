@@ -43,9 +43,9 @@ BEGIN
  (evidence_id,event_id,claim,document_title,original_url,published_at,verification_status,observation_type,precision_note,metadata)
  VALUES (ev_id,r.event_id,r.claim,r.publisher,r.url,
  CASE WHEN r.published ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN (r.published||' 00:00:00+00')::timestamptz ELSE NULL END,
- coalesce(r.status,'reported'),'assertion',
+ CASE WHEN r.status='reported_official' THEN 'official_statement' WHEN r.status IN ('pending','corroborated','official_statement','disputed','refuted','withdrawn') THEN r.status ELSE 'pending' END,'assertion',
  'Publication date, not verified incident time; attribution and casualty figures are source-qualified',
- jsonb_build_object('intake','20261016_sulina','publication_date_precision','day','source_qualifier','Claim attributed to reporting; not independent validation'))
+ jsonb_build_object('intake','20261016_sulina','publication_date_precision','day','source_qualifier','Claim attributed to reporting; not independent validation','original_source_claim_status',r.status))
  ON CONFLICT (evidence_id) DO UPDATE SET claim=EXCLUDED.claim,metadata=coalesce(pc_event_evidence.metadata,'{}'::jsonb)||EXCLUDED.metadata;
  END LOOP;
  -- Explicit event-to-event link; NOT a common-perpetrator claim. Existing IDs protected.
