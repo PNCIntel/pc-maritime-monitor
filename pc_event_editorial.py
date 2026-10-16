@@ -7,14 +7,15 @@ FIELDS=("key_judgment","what_happened","why_it_matters","operational_significanc
         "commercial_significance","alternative_explanation","uncertainties",
         "risk_outlook","monitoring_analysis","decision_triggers","bottom_line","historical_context","wider_context")
 
-def draft_event_brief(api_key, record, assessment, outlook, evidence, related, assets, metadata, publication_context=None):
+def draft_event_brief(api_key, record, assessment, outlook, evidence, related, assets, metadata, publication_context=None, publication_type="assessment"):
     if not api_key: raise ValueError("Configure the report API key first")
     claims=evidence or (metadata.get("source_claims") or [])
     context={"event":record,"approved_assessment":assessment,"published_judgment":outlook,
              "sources":claims,"related_developments":[{"relationship":edge,"event":event} for edge,event in related],
              "infrastructure":assets,"editorial_context":metadata,
-             "knowledge_graph_context":publication_context or {}}
-    system="""You are the senior editor of Power & Corridors, writing a publishable Incident Intelligence Brief.
+             "knowledge_graph_context":publication_context or {},
+             "publication_type":publication_type}
+    system="""You are the senior editor of Power & Corridors, writing either a Flash Intelligence Alert or Connected Intelligence Assessment according to publication_type.
 Write a self-contained client publication in clear professional English. Use only the supplied evidence.\nNever mention earlier P&C drafts, previous assessments, database construction, source-reconciliation exercises, or the writing process; incorporate their substantiated facts directly.
 Distinguish reported events, official claims, unconfirmed matters and P&C judgments. Never invent
 attribution, impacts, casualty counts, probabilities, source URLs, timings, asset status or causal links.
@@ -22,7 +23,7 @@ Never represent contextual infrastructure as damaged. The key judgment, implicat
 must serve DIFFERENT functions and must not repeat one another. Explain how an event might propagate
 through aviation, rail, road, maritime, energy and commercial operations ONLY when the recorded links
 support that analysis. Related event links describe context, not proof of shared actor or causation.
-Use the knowledge graph context to explain source-backed subject history (including past names, dated\ncorporate roles and sanctions only when linked). Separate legal designations from research queues.\nDo not infer a direct connection between separate enforcement actions, and identify missing coverage.\nDraft historical_context and wider_context as distinct concise narrative sections.\nUse plain-language statuses, never internal tokens such as reported_secondary, snake_case identifiers,
+Use the knowledge graph context to explain source-backed subject history (including past names, dated\ncorporate roles and sanctions only when linked). Separate legal designations from research queues.\nDo not infer a direct connection between separate enforcement actions, and identify missing coverage.\nFor flash, prioritize what changed, key judgement, qualifications, implications and triggers; keep concise. For assessment, synthesize dated relationships and context. Draft historical_context and wider_context as distinct concise narrative sections when supported.\nUse plain-language statuses, never internal tokens such as reported_secondary, snake_case identifiers,
 entity IDs or unqualified NOT ESTABLISHED repeated in prose.
 For monitoring, write 3-6 distinct entries, each explaining indicator, significance and what change would
 alter the assessment. State a forecast horizon only if one exists in the approved source context.
