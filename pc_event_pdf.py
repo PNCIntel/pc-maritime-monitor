@@ -173,10 +173,12 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
                 graph_rows.append('<tr><td>'+_h(company["name"])+'</td><td>'+_h(_plain(edge.get("relationship_type")))+'</td><td>'+_h(qualifier)+'</td></tr>')
         if graph_rows or infra:
             html+='<div class="section"><h2>CONNECTED NETWORK AND EXPOSURE</h2>'
+            if graph_rows and edited.get("network_synthesis"): html+=_paragraph(edited["network_synthesis"])
             if graph_rows: html+=table(["Subject","Recorded role","Evidence qualification"],graph_rows)
+            if infra and edited.get("infrastructure_synthesis"): html+=_paragraph(edited["infrastructure_synthesis"])
             if infra: html+='<h3>Infrastructure and dependencies</h3>'+table(["Asset","Mode","Recorded relationship","Impact status"],infra)
             html+='</div>'
-        html+='<div class="section"><h2>GEOGRAPHIC CONTEXT</h2>'+map_html+'</div>'
+        html+='<div class="section"><h2>GEOGRAPHIC CONTEXT</h2>'+(_paragraph(edited.get("geographic_synthesis")) if edited.get("geographic_synthesis") else "")+map_html+'</div>'
         html+='<div class="section"><h2>EVENT AND EVIDENCE</h2>'+_paragraph(what)+'</div>'
         if meaning and meaning!=key_judgment:
             html+='<div class="section"><h2>ANALYSIS — WHY IT MATTERS</h2>'+_paragraph(meaning)+'</div>'
@@ -184,7 +186,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
             if value and value not in (meaning,key_judgment):
                 html+='<div class="section"><h2>'+_h(label)+'</h2>'+_paragraph(value)+'</div>'
         if related_html:
-            html+='<div class="section"><h2>CONNECTED DEVELOPMENTS</h2>'+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
+            html+='<div class="section"><h2>CONNECTED DEVELOPMENTS</h2>'+(_paragraph(edited.get("connected_developments_synthesis")) if edited.get("connected_developments_synthesis") else "")+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
         if alternative or gaps:
             html+='<div class="section"><h2>ALTERNATIVES AND INTELLIGENCE GAPS</h2>'
             if alternative: html+=_paragraph(alternative)
