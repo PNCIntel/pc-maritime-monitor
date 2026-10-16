@@ -324,22 +324,19 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
             record,vessel=vessel,company_roles=company_roles,designations=published,
             pgsa_queue=pgsa_queue,related=related,assets=export_assets,
             updates=updates,corporate_edges=corporate_edges)
-        st.caption("Publication context: "+str(len(publication_context["company_history"]))+
-                   " vessel-company roles · "+str(len(publication_context["published_sanctions"]))+
-                   " linked designations · "+str(len(publication_context["related_developments"]))+
-                   " connected developments. Missing coverage is not a negative finding.")
-        with st.expander("Pre-publication intelligence coverage",expanded=True):
-            st.write("This is an internal coverage audit, not client-facing text.")
-            for key,label in (("vessel_profile","Subject profile"),("company_history","Corporate history"),
-                              ("published_sanctions","Linked legal designations"),
-                              ("related_developments","Connected developments"),
-                              ("infrastructure","Infrastructure exposure"),("updates","Developing chronology")):
-                value=publication_context.get(key) or {}
-                count=len(value) if isinstance(value,list) else int(bool(value))
-                st.write(label+": "+(str(count)+" records" if count else "Not returned; inspect coverage"))
-            st.write("Geographic reference: "+(str(pdf_place.get("name")) if pdf_place else "Not resolved"))
-            for gap in publication_context.get("coverage_gaps") or []: st.caption("Coverage gap: "+gap)
-        with st.expander("Publication context and gaps",expanded=False):
+        # Coverage is conditional on subject type, never a vessel checklist for every event.
+        is_vessel=bool(vessel)
+        with st.expander("Source and context coverage · internal",expanded=False):
+            st.caption(str(len(evidence))+" attributed evidence records · "+
+                       str(len(meta.get("source_claims") or []))+" metadata source claims · "+
+                       str(len(related))+" connected developments")
+            st.caption("Geography: "+(str(pdf_place.get("name")) if pdf_place else "No mapped reference"))
+            if is_vessel:
+                st.caption(str(len(company_roles))+" corporate roles · "+str(len(published))+
+                           " linked designations (absence is not sanctions clearance)")
+            if not evidence and not meta.get("source_claims"):
+                st.warning("No claim-level source evidence attached; inspect recorded source URLs.")
+        with st.expander("Full publication context · internal",expanded=False):
             st.json(publication_context,expanded=False)
         # AI is opt-in and creates an editable draft, never an automatically published judgment.
         draft_key="pc_editorial_draft_"+event_id
@@ -387,9 +384,16 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
     left,right=st.columns([1.35,1],gap="large")
     with left:
         a,b,c=st.columns(3)
-        a.metric("Current Risk",str(outlook.get("current_risk") or "Not rated"))
-        b.metric("Confidence",str(outlook.get("confidence") or "Unassigned"))
-        c.metric("Assessment date",_date(outlook.get("assessed_at") or assessment.get("updated_at")) if (outlook.get("assessed_at") or assessment.get("updated_at")) else "Not yet approved")
+        risk_text=str(outlook.get("current_risk") or "Not rated")
+        confidence_text=str(outlook.get("confidence") or "Unassigned")
+        risk_label=risk_text.split(" — ",1)[0].split(" - ",1)[0]
+        if risk_label.lower().startswith("not assessed"): risk_label="Not assessed"
+        confidence_label=confidence_text.split(" — ",1)[0].split(" - ",1)[0]
+        a.metric("Current risk",risk_label)
+        b.metric("Confidence",confidence_label)
+        c.metric("Assessed",_date(outlook.get("assessed_at") or assessment.get("updated_at")) if (outlook.get("assessed_at") or assessment.get("updated_at")) else "Not approved")
+        if risk_text!=risk_label: st.caption("Risk qualification: "+risk_text)
+        if confidence_text!=confidence_label: st.caption("Evidence basis: "+confidence_text)
         if outlook.get("valid_until"):
             import datetime as dt
             try:
