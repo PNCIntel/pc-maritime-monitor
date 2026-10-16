@@ -603,7 +603,7 @@ def _intel_classes(row):
     subcategory=str(row.get('event_subcategory') or '').strip().lower()
     phase=str(row.get('event_phase') or '').strip().lower()
     classes=set()
-    if explicit in ('security','security & disruption','security and disruption','disruption') or category in ('security','disruption') or typ in _SECURITY_TYPES:
+    if explicit in ('security','security & disruption','security and disruption','disruption') or category in ('security','disruption') or typ in _SECURITY_TYPES or typ in ('law_enforcement_operation','cybercrime','financial_crime','organised_crime','organized_crime'):
         classes.add(INTEL_LENSES[0])
     if explicit in ('strategic','strategic exposure') or category=='strategic' or typ in _STRATEGIC_TYPES:
         classes.add(INTEL_LENSES[1])
