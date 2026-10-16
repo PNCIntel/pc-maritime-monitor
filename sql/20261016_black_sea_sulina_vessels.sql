@@ -1,5 +1,5 @@
 -- P&C Black Sea Sulina casualty package | 16 Oct 2026
--- Idempotent, source-qualified; inspect audit at end. No current-threat rating inferred.
+-- V3 EXPLICIT VESSEL INSERTS. Idempotent, source-qualified; inspect audit at end. No current-threat rating inferred.
 -- This writes directly to canonical tables, not the staging-loader queue.
 BEGIN;
 DO $$
@@ -19,23 +19,26 @@ BEGIN
  SELECT mobile_asset_id::text INTO v_w FROM public.pc_mobile_assets WHERE imo::text='8808707' LIMIT 1;
  SELECT mobile_asset_id::text INTO v_y FROM public.pc_mobile_assets WHERE imo::text='9221803' LIMIT 1;
  v_w:=coalesce(v_w,'MOB_PC_IMO_8808707');v_y:=coalesce(v_y,'MOB_PC_IMO_9221803');
- PERFORM public.pc_upsert_json('pc_mobile_assets',jsonb_build_object(
-  'mobile_asset_id',v_w,'name','WINE TRADER','asset_type','vessel','imo','8808707',
-  'metadata',jsonb_build_object('pc_black_sea_20261016',jsonb_build_object(
-   'type','chemical tanker','flag_at_incident','San Marino','built',1989,'dwt',6259,
-   'registered_owner_reported','WATERFALLS CO LTD','commercial_manager_reported','WATERFALLS CO LTD',
-   'ism_manager_reported','SICILSHIP SRL',
-   'ownership_source','https://magicport.ai/vessels/tanker/wine-trader-mmsi-351482000',
-   'ownership_observation_note','Commercial registry observation, not independently certified beneficial ownership'))),ARRAY['mobile_asset_id']);
- PERFORM public.pc_upsert_json('pc_mobile_assets',jsonb_build_object(
-  'mobile_asset_id',v_y,'name','YARA J','asset_type','vessel','imo','9221803',
-  'metadata',jsonb_build_object('pc_black_sea_20261016',jsonb_build_object(
-   'type','chemical/oil products tanker','flag_at_incident','Comoros','built',2001,'dwt',10018,
-   'registered_owner_reported','YARA SHIPPING CO INC','commercial_manager_reported','YARA SHIPPING CO INC',
-   'ism_manager_reported','YARA SHIPPING CO INC',
-   'manager_qualification','Registry providers differ over ISM identity and observation dates; review before creating ISM edge',
-   'identity_history_reported',jsonb_build_array('ARBOL','LOGO','ALHEERA','LOKI','ST MAUD'),
-   'ownership_source','https://magicport.ai/vessels/tanker/yara-j-mmsi-620800363'))),ARRAY['mobile_asset_id']);
+ -- Explicit vessel writes: bypass generic JSON helper; asset_type is NOT NULL.
+ INSERT INTO public.pc_mobile_assets (mobile_asset_id,name,asset_type,imo,metadata)
+ VALUES (v_w,'WINE TRADER','vessel','8808707',jsonb_build_object('pc_black_sea_20261016',jsonb_build_object(
+ 'type','chemical tanker','flag_at_incident','San Marino','built',1989,'dwt',6259,
+ 'registered_owner_reported','WATERFALLS CO LTD','commercial_manager_reported','WATERFALLS CO LTD',
+ 'ism_manager_reported','SICILSHIP SRL',
+ 'ownership_source','https://magicport.ai/vessels/tanker/wine-trader-mmsi-351482000',
+ 'ownership_observation_note','Commercial registry observation, not independently certified beneficial ownership')))
+ ON CONFLICT (mobile_asset_id) DO UPDATE SET
+ metadata=public.pc_merge_metadata(pc_mobile_assets.metadata,EXCLUDED.metadata);
+ INSERT INTO public.pc_mobile_assets (mobile_asset_id,name,asset_type,imo,metadata)
+ VALUES (v_y,'YARA J','vessel','9221803',jsonb_build_object('pc_black_sea_20261016',jsonb_build_object(
+ 'type','chemical/oil products tanker','flag_at_incident','Comoros','built',2001,'dwt',10018,
+ 'registered_owner_reported','YARA SHIPPING CO INC','commercial_manager_reported','YARA SHIPPING CO INC',
+ 'ism_manager_reported','YARA SHIPPING CO INC',
+ 'manager_qualification','Registry providers differ over ISM identity and observation dates; review before creating ISM edge',
+ 'identity_history_reported',jsonb_build_array('ARBOL','LOGO','ALHEERA','LOKI','ST MAUD'),
+ 'ownership_source','https://magicport.ai/vessels/tanker/yara-j-mmsi-620800363')))
+ ON CONFLICT (mobile_asset_id) DO UPDATE SET
+ metadata=public.pc_merge_metadata(pc_mobile_assets.metadata,EXCLUDED.metadata);
  -- Create named legal entities only after exact-name duplicate check; preserve existing identities.
  FOR v_company IN SELECT unnest(ARRAY['WATERFALLS CO LTD','SICILSHIP SRL','YARA SHIPPING CO INC']) LOOP
    IF (SELECT count(*) FROM public.pc_entities WHERE lower(trim(name))=lower(v_company))>1 THEN
