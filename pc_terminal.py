@@ -4631,6 +4631,39 @@ def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
                             args=("mobile_asset",x["id"],x["name"]),
                         )
 
+        # Distinguish dated source observations from verified name-effective periods.
+        identity_history=_filtered_rows("pc_mobile_asset_identity_history","mobile_asset_id",str(oid),150)
+        identity_history=sorted(identity_history,key=lambda x:(str(x.get("observed_on") or x.get("valid_from") or ""),str(x.get("identity_value") or "")))
+        if identity_history:
+            with st.container(border=True):
+                st.markdown("#### Vessel identity history")
+                st.caption("One physical vessel · IMO "+(imo or "not established")+
+                           ". Source observation dates below are not automatically rename dates.")
+                seen_history=set()
+                for h in identity_history:
+                    label=_clean(h.get("identity_value"))
+                    if not label: continue
+                    marker=(h.get("identity_type"),label,h.get("observed_on"),h.get("valid_from"),h.get("valid_to"))
+                    if marker in seen_history: continue
+                    seen_history.add(marker)
+                    basis=_clean(h.get("date_basis"))
+                    observation=str(h.get("observed_on") or "")[:10]
+                    period_start=str(h.get("valid_from") or "")[:10]
+                    period_end=str(h.get("valid_to") or "")[:10]
+                    st.markdown("**"+label+"** · "+(_clean(h.get("identity_type")) or "identity").replace("_"," "))
+                    if basis=="effective_period" and period_start:
+                        st.caption("Recorded effective period: "+period_start+" to "+(period_end or "not established"))
+                    elif observation:
+                        st.caption("Source used this identity on "+observation+" · exact renaming date not established")
+                    else:
+                        st.caption("Identity date not established")
+                    url=_clean(h.get("source_url"))
+                    if url.startswith(("https://","http://")):
+                        st.markdown("[Original identity source ↗]("+url+")")
+                st.caption("Historical owner, operator and ISM roles require separately dated company-role evidence; current roles are not projected backwards.")
+        else:
+            st.caption("No dated identity-history entries have been recorded for this vessel yet.")
+
         # The overview interprets existing links; it does not confer new legal
         # status or infer that historically linked parties remain current.
         with st.container(border=True):
