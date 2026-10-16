@@ -48,20 +48,9 @@ BEGIN
  jsonb_build_object('intake','20261016_sulina','publication_date_precision','day','source_qualifier','Claim attributed to reporting; not independent validation','original_source_claim_status',r.status))
  ON CONFLICT (evidence_id) DO UPDATE SET claim=EXCLUDED.claim,metadata=coalesce(pc_event_evidence.metadata,'{}'::jsonb)||EXCLUDED.metadata;
  END LOOP;
- -- Explicit event-to-event link; NOT a common-perpetrator claim. Existing IDs protected.
- ev_id:=-(abs(hashtext('PC_BS_SULINA_YARA_J_FIRE_20261014|PC_BS_SULINA_WINE_TRADER_FIRE_20261015|regional_context')::bigint)+100000000);
- IF EXISTS(SELECT 1 FROM public.pc_event_relationships WHERE relationship_id=ev_id AND
- (from_event_id<>'PC_BS_SULINA_YARA_J_FIRE_20261014' OR to_event_id<>'PC_BS_SULINA_WINE_TRADER_FIRE_20261015'))
- THEN RAISE EXCEPTION 'Event relationship ID collision %',ev_id; END IF;
- INSERT INTO public.pc_event_relationships
- (relationship_id,from_event_id,to_event_id,relationship_type,rationale,metadata)
- VALUES (ev_id,'PC_BS_SULINA_YARA_J_FIRE_20261014','PC_BS_SULINA_WINE_TRADER_FIRE_20261015',
- 'shared_regional_context',
- 'Separate tanker-fire reports near Sulina on successive dates; shared location does not establish a common cause or perpetrator.',
- jsonb_build_object('situation_id','PC_SIT_BLACK_SEA_SULINA_VESSEL_FIRES_20261014_15','review_date','2026-10-16','causal_link','not_established'))
- ON CONFLICT (relationship_id) DO UPDATE SET rationale=EXCLUDED.rationale,metadata=coalesce(pc_event_relationships.metadata,'{}'::jsonb)||EXCLUDED.metadata;
+ -- Event-to-event insertion deferred pending allowed relationship_type constraint audit.
+ -- Shared situation is already carried in canonical event metadata.
 END $$;
 COMMIT;
 SELECT 'corporate_edges' section,count(*) n FROM public.pc_relationships WHERE relationship_id LIKE 'REL_PC_BS_20261016_%'
-UNION ALL SELECT 'evidence_records',count(*) FROM public.pc_event_evidence WHERE event_id IN ('PC_BS_SULINA_YARA_J_FIRE_20261014','PC_BS_SULINA_WINE_TRADER_FIRE_20261015')
-UNION ALL SELECT 'event_relationships',count(*) FROM public.pc_event_relationships WHERE from_event_id='PC_BS_SULINA_YARA_J_FIRE_20261014' AND to_event_id='PC_BS_SULINA_WINE_TRADER_FIRE_20261015';
+UNION ALL SELECT 'evidence_records',count(*) FROM public.pc_event_evidence WHERE event_id IN ('PC_BS_SULINA_YARA_J_FIRE_20261014','PC_BS_SULINA_WINE_TRADER_FIRE_20261015');
