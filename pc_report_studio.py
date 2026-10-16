@@ -17,6 +17,18 @@ import streamlit.components.v1 as components
 
 
 PRODUCTS={
+    "Flash Intelligence Alert":{
+        "report_type":"flash_intelligence_alert",
+        "sections":["Key Judgement","What Changed","Confirmed / Reported / Unconfirmed",
+                    "Operational and Commercial Implications","Priority Monitoring","Decision Triggers"],
+    },
+    "Connected Intelligence Assessment":{
+        "report_type":"connected_intelligence_assessment",
+        "sections":["Executive Judgement","Evidence and Reporting Status","Context and Subject History",
+                    "Connected Network and Infrastructure","Analysis and Implications",
+                    "Alternative Explanations and Uncertainties","Outlook and Decision Triggers",
+                    "Monitoring Priorities"],
+    },
     "Alert":{
         "report_type":"alert",
         "sections":["Current Situation","What Happened","What Remains Unconfirmed",
@@ -759,7 +771,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
         selected_objects=[labels[x] for x in picked]
 
     product_options=list(PRODUCTS)
-    default_idx=product_options.index("Daily / Multi-Event Brief") if lens=="intelligence" or mode=="brief" else 0
+    default_idx=product_options.index("Flash Intelligence Alert") if mode=="brief" else (product_options.index("Connected Intelligence Assessment") if lens=="intelligence" else product_options.index("Assessment"))
     product=st.selectbox("Product",product_options,index=default_idx,key=f"pc_report_product_{mode}")
     spec=PRODUCTS[product]
 
