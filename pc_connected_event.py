@@ -479,7 +479,11 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
     with evidence_tab:
         claims=evidence if evidence else [v for v in (meta.get("source_claims") or []) if isinstance(v,dict)]
         st.caption(str(len(claims))+" attributed source records; editorial metadata references are not independent claim-level verification.")
-        if not claims:\n            st.info("No attributed claim-level evidence is attached. Check event metadata and linked source records; this does not mean the underlying articles are absent.")\n            for source_url in (meta.get("source_urls") or []):\n                if isinstance(source_url,str) and source_url.startswith(("https://","http://")):\n                    st.link_button("Recorded source URL ↗",source_url)
+        if not claims:
+            st.info("No attributed claim-level evidence is attached. Check event metadata and linked source records; this does not mean the underlying articles are absent.")
+            for source_url in (meta.get("source_urls") or []):
+                if isinstance(source_url,str) and source_url.startswith(("https://","http://")):
+                    st.link_button("Recorded source URL ↗",source_url)
         for i,ev in enumerate(claims):
             publisher=ev.get("publisher") or ev.get("source_name") or ev.get("document_title") or "Source"
             st.markdown("**"+str(publisher)+"**")
