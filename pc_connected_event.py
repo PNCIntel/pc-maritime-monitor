@@ -132,6 +132,18 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
     identity_history=[]
     if vessel_id:
         identity_history=_get(sb,"pc_mobile_asset_identity_history","mobile_asset_id",vessel_id,250)
+        # Read the reconciled historical graph view as well: some vessel biographies
+        # have dated roles in pc_relationships but none in pc_company_asset_roles.
+        for history in _get(sb,"pc_v_mobile_asset_corporate_history","mobile_asset_id",vessel_id,300):
+            entity_id=str(history.get("entity_id") or "")
+            if not entity_id: continue
+            historical_roles.append({"company":{"entity_id":entity_id,"name":history.get("company_name")},
+                "role":{"asset_role":history.get("role"),"valid_from":history.get("valid_from"),
+                        "valid_to":history.get("valid_to"),"as_of":history.get("observed_on"),
+                        "source_id":history.get("source_id"),"metadata":{
+                            "source_url":history.get("source_url"),
+                            "date_qualification":history.get("qualification"),
+                            "date_basis":history.get("date_basis")}}})
         for role in _get(sb,"pc_company_asset_roles","mobile_asset_id",vessel_id,500):
             entity_id=str(role.get("entity_id") or "")
             if not entity_id: continue
