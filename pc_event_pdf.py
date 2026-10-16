@@ -115,7 +115,7 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
     .source{padding:4px 0;border-bottom:1px solid #dce6e9;break-inside:avoid}.source span{color:#657b89;font-size:8pt;display:block}
     .source p{margin:3px 0}.url{font-size:7.5pt;color:#526778;overflow-wrap:anywhere;margin-top:4px}a{color:#096381;text-decoration:underline;overflow-wrap:anywhere}
     li{margin-bottom:2px}.disclaimer{font-size:8pt;color:#566d7b;border-top:1px solid #b9ced6;margin-top:25px;padding-top:8px}
-    .disclaimer{break-inside:avoid;page-break-inside:avoid}
+    .disclaimer{break-inside:avoid;page-break-inside:avoid}.prior-event h3{font-size:9.5pt;color:#164961;margin-bottom:3px}.prior-event p{margin:3px 0 6px}.prior-event{break-inside:avoid;border-bottom:1px solid #dce6e9;padding:5px 0}
     </style></head><body>'''
     if flash:
         html=html.replace('@page{size:A4;margin:19mm 17mm 19mm 17mm;', '@page{size:A4;margin:15mm 17mm 15mm 17mm;')
@@ -186,7 +186,19 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
             if value and value not in (meaning,key_judgment):
                 html+='<div class="section"><h2>'+_h(label)+'</h2>'+_paragraph(value)+'</div>'
         if related_html:
-            html+='<div class="section"><h2>CONNECTED DEVELOPMENTS</h2>'+(_paragraph(edited.get("connected_developments_synthesis")) if edited.get("connected_developments_synthesis") else "")+table(["Date","Development","Relationship","Status"],related_html)+'</div>'
+            html+='<div class="section"><h2>CONNECTED DEVELOPMENTS</h2>'
+            if edited.get("connected_developments_synthesis"):
+                html+=_paragraph(edited["connected_developments_synthesis"])
+            for edge, prior in related:
+                description=prior.get("description") or (prior.get("metadata") or {}).get("summary")
+                if not description: continue
+                relation=_plain(edge.get("relationship_type") or edge.get("relationship") or "Contextual connection")
+                html+='<div class="prior-event"><h3>'+_h(_date(prior.get("start_date")))+" · "+_h(prior.get("title") or "Prior development")+'</h3>'
+                html+=_paragraph(description)
+                if edge.get("rationale"): html+='<p><b>Connection to this assessment:</b> '+_h(edge["rationale"])+'</p>'
+                else: html+='<p class="meta">Recorded relationship: '+_h(relation)+'. Context alone does not establish common cause or actor.</p>'
+                html+='</div>'
+            html+=table(["Date","Development","Relationship","Status"],related_html)+'</div>'
         if alternative or gaps:
             html+='<div class="section"><h2>ALTERNATIVES AND INTELLIGENCE GAPS</h2>'
             if alternative: html+=_paragraph(alternative)
