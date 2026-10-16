@@ -222,30 +222,6 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
     updates = _get(sb, "pc_event_updates", "event_id", event_id, 200)
     updates.sort(key=lambda u: str(u.get("occurred_at") or u.get("reported_at") or ""))
 
-    if vessel_imo and (pgsa_queue or published):
-        st.markdown("### Vessel compliance & sanctions exposure")
-        if pgsa_queue:
-            st.markdown("**PGSA — reported Hormuz non-compliance listing**")
-            st.caption("Exact IMO match to P&C's recovered PGSA research roster. This is not by itself an OFAC, UN, EU or UK designation.")
-            for q in pgsa_queue:
-                st.write(str(q.get("reported_name") or vessel.get("name") or vessel_imo)
-                         + " · IMO " + vessel_imo)
-                st.caption("Research status: " + _label(q.get("research_status")))
-                source=str(q.get("source_url") or "")
-                if source.startswith(("https://","http://")):
-                    st.link_button("PGSA roster source ↗",source)
-        for link,designation in published:
-            st.markdown("**Published designation record**")
-            st.write(str(designation.get("primary_name") or vessel.get("name") or vessel_imo)
-                     + " · " + _label(designation.get("source_list")))
-            st.caption("Designation status: " + _label(designation.get("status"))
-                       + " · link review: " + _label(link.get("review_status"))
-                       + " · direct designation: " + str(link.get("is_direct_designation")))
-            url=str(designation.get("source_url") or "")
-            if url.startswith(("https://","http://")):
-                st.link_button("Designation source ↗",url)
-        st.caption("A vessel's involvement in an incident does not establish listing, designation or liability.")
-
     # Intelligence-first executive dossier; built from existing canonical records.
     # Never convert nearby infrastructure or incident severity into confirmed impact/risk.
     assessments = _get(sb, "pc_v07_event_assessments", "event_id", event_id, 100)
@@ -541,6 +517,30 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
                     st.caption(str(item.get("relationship") or item.get("role") or "")+
                                " · "+str(item.get("status") or "Direct impact not established"))
         elif not connected: st.caption("No connected infrastructure or records documented.")
+        if vessel_imo and (pgsa_queue or published):
+            st.markdown("### Vessel compliance & sanctions exposure")
+            if pgsa_queue:
+                st.markdown("**PGSA — reported Hormuz non-compliance listing**")
+                st.caption("Exact IMO match to P&C's recovered PGSA research roster. This is not by itself an OFAC, UN, EU or UK designation.")
+                for q in pgsa_queue:
+                    st.write(str(q.get("reported_name") or vessel.get("name") or vessel_imo)
+                             + " · IMO " + vessel_imo)
+                    st.caption("Research status: " + _label(q.get("research_status")))
+                    source=str(q.get("source_url") or "")
+                    if source.startswith(("https://","http://")):
+                        st.link_button("PGSA roster source ↗",source)
+            for link,designation in published:
+                st.markdown("**Published designation record**")
+                st.write(str(designation.get("primary_name") or vessel.get("name") or vessel_imo)
+                         + " · " + _label(designation.get("source_list")))
+                st.caption("Designation status: " + _label(designation.get("status"))
+                           + " · link review: " + _label(link.get("review_status"))
+                           + " · direct designation: " + str(link.get("is_direct_designation")))
+                url=str(designation.get("source_url") or "")
+                if url.startswith(("https://","http://")):
+                    st.link_button("Designation source ↗",url)
+            st.caption("A vessel's involvement in an incident does not establish listing, designation or liability.")
+
     st.divider()
     evidence_tab,network_tab,history_tab=st.tabs(["Evidence & sources","Connected developments","Figures & chronology"])
     with evidence_tab:
