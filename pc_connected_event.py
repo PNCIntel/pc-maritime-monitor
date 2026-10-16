@@ -378,35 +378,36 @@ def render_connected_event(sb, record: dict, event_id: str, navigate, go_back=No
         st.error("PDF export failed: "+type(exc).__name__+" — "+str(exc))
 
     # Editorial questions precede visual evidence. Graphs must be earned by actual data.
-    # Visible canonical navigation is not hidden inside the publication-context expander.
-    if vessel or company_roles or graph_event_neighbours:
-        st.markdown("### Connected records")
-        if vessel:
-            vname=str(vessel.get("name") or vessel_id)
-            st.markdown("**Vessel:** "+vname+(" · IMO "+str(vessel.get("imo")) if vessel.get("imo") else ""))
-            st.button("Open vessel profile →",key="pc_dossier_visible_vessel_"+event_id,
-                      on_click=navigate,args=("mobile_asset",vessel_id,vname))
-        if company_roles:
-            st.markdown("**Reported corporate roles**")
-            for idx,(role,company) in enumerate(company_roles):
-                if not company: continue
-                role_meta=_meta(role)
-                observed=role_meta.get("observed_on") or role_meta.get("observation_date") or role.get("valid_from")
-                st.caption(str(company.get("name") or "")+" · "+_label(role.get("relationship_type"))+
-                           (" · observed "+_date(observed) if observed else " · date unverified")+
-                           " · "+_label(role.get("confidence"))+" confidence")
-                st.button("Open "+str(company.get("name") or "organisation")+" →",
-                          key="pc_dossier_visible_company_"+event_id+"_"+str(idx),
-                          on_click=navigate,args=("entity",str(company.get("entity_id")),str(company.get("name") or "")))
-                urls=role_meta.get("source_urls") or []
-                if isinstance(urls,list) and urls:
-                    st.markdown("[Registry source ↗]("+str(urls[0])+")")
-        for idx,link in enumerate(graph_event_neighbours):
-            other=_one(sb,"pc_events","event_id",link.get("linked_id"))
-            if other:
-                st.button("Related: "+str(other.get("title") or link.get("linked_name") or "event")+" →",
-                          key="pc_dossier_visible_related_"+event_id+"_"+str(idx),
-                          on_click=navigate,args=("event",str(other.get("event_id")),str(other.get("title") or "")))
+    # All event subjects use one compact, typed navigation strip, not bespoke vessel blocks.
+    connected=[]
+    seen_connected=set()
+    for gl in canonical_event_links:
+        kind=str(gl.get("linked_type") or "").lower()
+        identifier=str(gl.get("linked_id") or "")
+        if not identifier or kind not in ("mobile_asset","vessel","entity","company","asset","event"):
+            continue
+        normalized={"vessel":"mobile_asset","company":"entity"}.get(kind,kind)
+        if normalized=="event" and identifier==event_id: continue
+        if (normalized,identifier) in seen_connected: continue
+        seen_connected.add((normalized,identifier))
+        table,key={"mobile_asset":("pc_mobile_assets","mobile_asset_id"),
+                   "entity":("pc_entities","entity_id"),"asset":("pc_assets","asset_id"),
+                   "event":("pc_events","event_id")}[normalized]
+        subject=_one(sb,table,key,identifier)
+        if not subject: continue
+        connected.append((normalized,identifier,str(subject.get("name") or subject.get("title") or gl.get("linked_name") or identifier),
+                          str(gl.get("relationship") or "connected")))
+    if connected:
+        with st.container(border=True):
+            st.markdown("**Connected records**")
+            for i,(kind,identifier,name,role) in enumerate(connected):
+                a,b=st.columns([3,1],vertical_alignment="center")
+                with a:
+                    st.markdown("**"+name+"**")
+                    st.caption(_label(kind)+" · "+_label(role))
+                with b:
+                    st.button("View →",key="pc_link_"+event_id+"_"+str(i),
+                              on_click=navigate,args=(kind,identifier,name),use_container_width=True)
     st.markdown("## Intelligence dossier")
     st.caption(_date(record.get("start_date"))+" · "+_label(record.get("verification_status"))+
                " · Source-qualified analysis; context is not confirmed impact.")
