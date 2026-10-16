@@ -159,6 +159,38 @@ def create_incident_brief(record, assessment, outlook, evidence, related, assets
             if history: html+=_paragraph(history)
             if wider and wider!=history: html+=_paragraph(wider)
             html+='</div>'
+        identities=context.get("identity_history") or []
+        dated_roles=context.get("dated_company_roles") or []
+        if identities or dated_roles:
+            html+='<div class="section"><h2>VESSEL BIOGRAPHY — IDENTITY AND CORPORATE HISTORY</h2>'
+            html+='<p>Records below refer to the same resolved hull. A source observation does not establish a precise renaming date; dated corporate roles are not assumed to remain current.</p>'
+            if identities:
+                rows=[]
+                for entry in identities:
+                    h=entry.get("identity") or {}
+                    label=h.get("identity_value")
+                    if not label: continue
+                    when=h.get("observed_on") or h.get("valid_from") or "Date unrecorded"
+                    qualifier=("Source observation; rename date unverified" if h.get("date_basis")!="effective_period" else
+                               "Recorded effective period: "+str(h.get("valid_from") or "unknown")+" to "+str(h.get("valid_to") or "unrecorded"))
+                    url=h.get("source_url")
+                    if _valid_url(url): qualifier+=' · <a href="'+_h(url)+'">Source ↗</a>'
+                    rows.append('<tr><td>'+_h(label)+'</td><td>'+_h(_date(when))+'</td><td>'+qualifier+'</td></tr>')
+                if rows: html+=table(["Recorded identity","Dated evidence","Qualification"],rows)
+            if dated_roles:
+                rows=[]
+                for item in dated_roles:
+                    role=item.get("role") or {}; company=item.get("company") or {}
+                    if not company.get("name"): continue
+                    period=("From "+str(role["valid_from"]) if role.get("valid_from") else
+                            "Observed "+str(role["as_of"]) if role.get("as_of") else "Start date unrecorded")
+                    if role.get("valid_to"): period+=" · to "+str(role["valid_to"])
+                    else: period+=" · end date unrecorded"
+                    rows.append('<tr><td>'+_h(company["name"])+'</td><td>'+_h(_plain(role.get("asset_role")))+'</td><td>'+_h(period)+'</td></tr>')
+                if rows:
+                    html+='<h3>Recorded company roles over time</h3><p>Legal owner, operator, manager and ISM records describe different responsibilities. An undated role is not evidence of continuous tenure.</p>'
+                    html+=table(["Company","Recorded role","Evidence period"],rows)
+            html+='</div>'
         graph_rows=[]
         if profile.get("name"):
             identity=str(profile["name"])+(" · IMO "+str(profile["imo"]) if profile.get("imo") else "")
