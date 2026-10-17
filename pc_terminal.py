@@ -4739,19 +4739,43 @@ def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
                 "_company_name":item.get("company_name"),"_qualification":item.get("qualification")})
         if history_roles:
             st.markdown("#### Dated company-role history")
-            st.caption("Observations and effective periods are different. Former managers and owners are not projected onto the present.")
-            rows=[]
+            st.caption("Source observations and effective periods remain distinct. Open a company to explore its connected record.")
+            seen_history=set()
+            display_history=[]
             for role in sorted(history_roles,key=lambda x:str(x.get("valid_from") or x.get("as_of") or ""),reverse=True):
-                company=_clean(role.get("_company_name")) or _object_name("entity",_clean(role.get("entity_id")))
+                entity_id=_clean(role.get("entity_id"))
+                company=_clean(role.get("_company_name")) or (_object_name("entity",entity_id) if entity_id else "")
                 if not company: continue
                 start=str(role.get("valid_from") or "")[:10]
                 end=str(role.get("valid_to") or "")[:10]
                 observed=str(role.get("as_of") or "")[:10]
-                rows.append({"Company":company,"Role":_clean(role.get("asset_role")).replace("_"," ").title(),
-                             "From":start or "Unverified","To":end or "Unverified",
-                             "Observed":observed or "Unrecorded","Source":_clean(role.get("source_id")) or "Unrecorded",
-                             "Qualification":_clean(role.get("_qualification"))})
-            if rows: st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+                raw_role=_clean(role.get("asset_role"))
+                signature=(entity_id or company.casefold(),raw_role,start,end,observed)
+                if signature in seen_history: continue
+                seen_history.add(signature)
+                display_history.append((company,entity_id,raw_role.replace("_"," ").title(),start,end,observed,
+                                        _clean(role.get("source_id")),_clean(role.get("_qualification"))))
+            for i,(company,entity_id,role_label,start,end,observed,source,qualification) in enumerate(display_history):
+                with st.container(border=True):
+                    cols=st.columns([3.0,1.0])
+                    cols[0].markdown("**"+company+"** · "+(role_label or "Recorded relationship"))
+                    if entity_id:
+                        cols[1].button("Open",key=f"mobile_history_entity_{_norm(oid)}_{i}",
+                            use_container_width=True,on_click=_set_context,args=("entity",entity_id,company))
+                    if start or end:
+                        st.caption("Recorded period: "+(start or "start not established")+" → "+(end or "end not established"))
+                    elif observed:
+                        st.caption("Source observation: "+observed+" · effective period not established")
+                    else:
+                        st.caption("Relationship recorded; effective period not established")
+                    if observed and (start or end):
+                        st.caption("Source observed: "+observed)
+                    if qualification:
+                        st.caption(qualification)
+                    if source.startswith(("https://","http://")):
+                        st.markdown("[View relationship source ↗]("+source+")")
+            if not display_history:
+                st.caption("No displayable company-role history found.")
 
     # ------------------------------------------------------------------
     # Activity
