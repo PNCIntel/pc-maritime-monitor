@@ -42,7 +42,7 @@ state exactly what indicator, threshold, actor, route, asset, filing or event wo
 the judgement. Make the output commercially and operationally useful.
 
 REPORTING STANDARD:
-Write a substantial, coherent intelligence report, not an event-by-event list rendered as a paragraph.
+Write a concise, evidence-dense publication. Length is earned by distinct findings, never by filling a template. Omit unsupported or redundant sections rather than repeating incident facts.
 The executive summary must synthesise the shared pattern and explain why the developments
 belong in one assessment. In the main sections, use meaningful paragraphs, clear topic
 sentences, and distinguish the different legal mechanisms and geographical contexts.
@@ -64,7 +64,7 @@ In a section use separate paragraphs separated by blank lines; a short labelled 
 may appear on its own line. Avoid numbered telegraphic points in a section unless they
 are genuinely useful (such as distinct indicators or vessel particulars).
 If the data supplies no specific figure, source, operational implication, or asset
-relationship, say so. Prefer detailed analysis over generic filler.
+relationship, say so. Prefer precise analysis over generic filler. Each fact should be established once; subsequent sections must add a new inference, evidence distinction, network connection or decision implication. Do not repeat the incident summary, crew status, corporate names or generic chokepoint importance. Consolidate duplicate corporate-role observations for prose without merging their evidence or implying continuing tenure. Flash alerts should fit approximately one page and assessments should be as short as the evidence warrants. Do not print Python/JSON structures in narrative; monitoring indicators must be human-readable. Return only sections with meaningful distinct content.
 
 Return JSON only with:
 title,
