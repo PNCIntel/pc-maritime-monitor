@@ -63,8 +63,11 @@ PRODUCTS={
 def _clean(v: Any) -> str:
     if v is None:
         return ""
-    if isinstance(v,(list,dict)):
-        return str(v)
+    if isinstance(v,dict):
+        parts=[str(v[k]).strip() for k in ("indicator","reason","status") if v.get(k) is not None]
+        return " — ".join(parts) if parts else ""
+    if isinstance(v,list):
+        return "\n".join("• "+_clean(item) for item in v if _clean(item))
     return str(v).strip()
 
 
