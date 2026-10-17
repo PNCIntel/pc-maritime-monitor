@@ -4225,10 +4225,22 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
         render_company_network(oid, rec)
         return
 
+    # These are exposure totals, not claims of ownership or direct incident involvement.
+    asset_catalogue={}
+    for a in assets:
+        key=(_clean(a.get("type")),_clean(a.get("id")))
+        if all(key): asset_catalogue.setdefault(key,[]).append(a)
+    for a in reverse_fleet:
+        key=("mobile_asset",_clean(a.get("id")))
+        if key[1]: asset_catalogue.setdefault(key,[])
+    direct_event_ids={_clean(e.get("event_id")) for e in _events_for_object("entity",oid)}
+    direct_event_ids.discard("")
+    strategic_event_ids={_clean(e.get("event_id")) for e in strategic_events}
+    strategic_event_ids.discard("")
     # Executive company strip.
     m=st.columns(6)
     m[0].metric("Linked companies",len(corporate))
-    m[1].metric("Operating assets",len({(x.get("type"), str(x.get("id"))) for x in assets} | {("mobile_asset", x["id"]) for x in reverse_fleet}))
+    m[1].metric("Linked assets / vessels",len(asset_catalogue))
     m[2].metric("Corridors",len(corridors))
     if any(strategic_data.get(k) for k in ("programmes","production","orders")):
         m[3].metric("Programmes / orders",len(strategic_data.get("programmes") or [])+len(strategic_data.get("orders") or []))
@@ -4236,7 +4248,26 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     else:
         m[3].metric("Portfolio positions",len(portfolio))
         m[4].metric("Capital actions",len(tx))
-    m[5].metric("Developments",len(events))
+    m[5].metric("Linked developments",len(events))
+
+    with st.expander("What is included in these counts?", expanded=False):
+        st.caption("These are source-recorded connections, not verified ownership or direct incident totals. A record may have several relationship types.")
+        st.write(f"Asset/vehicle connections: {len(asset_catalogue)} distinct IDs; {len(reverse_fleet)} vessels from direct pointers or dated history; {len(assets)} specialist, generic or strategic rows before the final union.")
+        st.write(f"Developments: {len(events)} distinct records; {len(direct_event_ids)} direct company event IDs; {len(strategic_event_ids)} strategic-network event IDs; {len(direct_event_ids & strategic_event_ids)} overlapping event IDs.")
+        st.markdown("**All asset and vessel connections**")
+        for (kind, asset_id), entries in sorted(asset_catalogue.items()):
+            fleet=next((v for v in reverse_fleet if v["id"]==asset_id and kind=="mobile_asset"),None)
+            label=(fleet or (entries[0] if entries else {})).get("name") or asset_id
+            qualifications=sorted({_clean(a.get("relationship")) for a in entries if a.get("relationship")})
+            if fleet:
+                qualifications+=sorted(fleet.get("roles") or [])+list(fleet.get("historical") or [])
+            st.caption(f"{label} · {kind} · {'; '.join(qualifications) if qualifications else 'recorded connection'}")
+        st.markdown("**All linked developments**")
+        for event in events:
+            event_id=_clean(event.get("event_id"))
+            origin=("Direct company link" if event_id in direct_event_ids else "Strategic network link")
+            if event_id in direct_event_ids and event_id in strategic_event_ids: origin="Direct and strategic links"
+            st.caption(f"{_clean(event.get('start_date'))[:10]} · {_clean(event.get('title')) or event_id} · {origin} · {_clean(event.get('_relationship')) or 'relationship not specified'}")
 
     _render_company_mobile_fleet(reverse_fleet, f"company_fleet_{_norm(oid)}")
 
