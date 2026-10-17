@@ -22,7 +22,7 @@ def _api(api_key: str, payload: dict, timeout: int=150) -> dict:
 
 
 def draft_report(api_key: str, lens: str, product: str, sections: list[str],
-                 query: str, context_bundle: dict, title_hint: str="") -> dict:
+                 query: str, context_bundle: dict, title_hint: str="", editorial_direction: str="", research_mode: str="Standard") -> dict:
     if not api_key:
         raise ValueError("OpenAI API key is not configured")
 
@@ -76,7 +76,17 @@ Every section name must exactly match one of the requested section names."""
 
     if lens == "intelligence":
         system += "\nWrite a cohesive intelligence publication. Distinguish observations, reported claims, and inferences. Avoid repeating the chronology across sections. Explain cross-domain implications only when supported, consider alternative explanations, and state specific indicators that could change the assessment. Do not equate a claim with confirmed impact. Flag source gaps, and do not invent probabilities or trends.\n"
+    if editorial_direction.strip():
+        system += "\nOPTIONAL EDITORIAL DIRECTION: Follow the user direction only where supported by supplied evidence. Do not override source integrity, citation rules, or product length. If the direction requests external research, identify specific research questions and missing sources in gaps; do not pretend to browse or invent findings. Consider alternative explanations as hypotheses, not established facts.\n"
+    if research_mode == "Deeper analysis":
+        system += "\nAdd depth only through new evidence-backed connections, implications and uncertainty analysis, not more words.\n"
+    elif research_mode == "Alternative explanations":
+        system += "\nEvaluate plausible competing explanations, clearly distinguish evidence for and against each, and do not present speculation as fact.\n"
+    elif research_mode == "Research gaps and source leads":
+        system += "\nPrioritise concrete unanswered questions and identify the type of primary or independent source needed for each in gaps. No claim of completed external research.\n"
     prompt={
+        "editorial_direction": editorial_direction.strip()[:4000],
+        "research_mode": research_mode,
         "lens":lens,
         "product":product,
         "query":query,
