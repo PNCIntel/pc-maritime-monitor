@@ -4112,6 +4112,21 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     name=_object_name("entity",oid)
     bundle=_entity_identity_bundle(str(oid))
     ids=bundle.get("ids") or [str(oid)]
+    # Surface exact identity resolution and direct link coverage for sparse dossiers.
+    # This is read-only and does not infer relationships from shared name fragments.
+    with st.expander("Relationship coverage diagnostics", expanded=False):
+        st.caption("Verified equivalent entity IDs used for relationship retrieval.")
+        st.code("\\n".join(ids))
+        for table, column in (
+            ("pc_relationships", "source_id"),
+            ("pc_relationships", "target_id"),
+            ("pc_company_asset_roles", "entity_id"),
+            ("pc_company_corridor_roles", "entity_id"),
+            ("pc_event_entity_links", "entity_id"),
+            ("pc_event_links", "linked_id"),
+        ):
+            rows=_multi_filtered_rows(table,column,ids,500)
+            st.caption(f"{table} / {column}: {len(rows)} rows")
     profiles=_company_profile_rows(oid)
     p=profiles[0] if profiles else {}
 
