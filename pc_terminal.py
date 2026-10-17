@@ -3180,6 +3180,53 @@ def _render_company_asset_cards(rows: list[dict], key_prefix: str, limit: int=12
         st.markdown("<div style='height:1px;background:var(--line);margin:.12rem 0 .45rem'></div>",unsafe_allow_html=True)
 
 
+def _company_mobile_fleet(entity_ids: list[str], limit: int = 500) -> list[dict]:
+    """Reverse fleet navigation from existing direct pointers and dated corporate history."""
+    result = {}
+    for eid in entity_ids:
+        for column, role in (("owner_entity_id", "recorded owner"),
+                             ("manager_entity_id", "recorded manager"),
+                             ("operator_entity_id", "recorded operator")):
+            for m in _filtered_rows("pc_mobile_assets", column, str(eid), limit):
+                mid = _clean(m.get("mobile_asset_id"))
+                if not mid or _clean(m.get("record_status")) in ("superseded", "archived"):
+                    continue
+                item = result.setdefault(mid, {"type": "mobile_asset", "id": mid,
+                    "name": _clean(m.get("name")) or mid, "roles": set(), "historical": []})
+                item["roles"].add(role)
+        for h in _filtered_rows("pc_v_mobile_asset_corporate_history", "entity_id", str(eid), limit):
+            mid = _clean(h.get("mobile_asset_id"))
+            if not mid:
+                continue
+            item = result.get(mid)
+            if item is None:
+                vessel = _filtered_rows("pc_mobile_assets", "mobile_asset_id", mid, 1)
+                if not vessel or _clean(vessel[0].get("record_status")) in ("superseded", "archived"):
+                    continue
+                item = result.setdefault(mid, {"type": "mobile_asset", "id": mid,
+                    "name": _clean(vessel[0].get("name")) or mid, "roles": set(), "historical": []})
+            role = _clean(h.get("role")).replace("_", " ")
+            date = str(h.get("observed_on") or "")[:10]
+            note = role + (" · observed " + date if date else " · period not established")
+            if note not in item["historical"]:
+                item["historical"].append(note)
+    return sorted(result.values(), key=lambda x: x["name"].casefold())
+
+
+def _render_company_mobile_fleet(rows: list[dict], key_prefix: str):
+    if not rows:
+        return
+    st.markdown("#### Connected vessel fleet")
+    st.caption("Recorded company connections; current pointers and historical observations are distinct, not proof of continuous ownership.")
+    for i, item in enumerate(rows):
+        cols = st.columns([3.0, 3.0, 1.0])
+        cols[0].markdown("**" + item["name"] + "**")
+        notes = sorted(item["roles"]) + item["historical"]
+        cols[1].caption(" | ".join(notes) if notes else "Recorded connection")
+        cols[2].button("Open", key=f"{key_prefix}_{i}", use_container_width=True,
+            on_click=_set_context, args=("mobile_asset", item["id"], item["name"]))
+
+
 def _render_company_transaction_cards(tx: list[dict], limit: int=10):
     if not tx:
         st.caption("No related capital actions recorded.")
@@ -4062,6 +4109,7 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     rels=_linked_objects_from_relationships("entity",oid)
     corporate=[x for x in rels if x.get("type")=="entity"]
     roles=_company_asset_roles(oid)
+    reverse_fleet=_company_mobile_fleet(ids)
     assets=[]
     for r in roles:
         aid=_clean(r.get("asset_id"))
@@ -4171,7 +4219,7 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     # Executive company strip.
     m=st.columns(6)
     m[0].metric("Linked companies",len(corporate))
-    m[1].metric("Operating assets",len(assets))
+    m[1].metric("Operating assets",len({(x.get("type"), str(x.get("id"))) for x in assets} | {("mobile_asset", x["id"]) for x in reverse_fleet}))
     m[2].metric("Corridors",len(corridors))
     if any(strategic_data.get(k) for k in ("programmes","production","orders")):
         m[3].metric("Programmes / orders",len(strategic_data.get("programmes") or [])+len(strategic_data.get("orders") or []))
@@ -4180,6 +4228,8 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
         m[3].metric("Portfolio positions",len(portfolio))
         m[4].metric("Capital actions",len(tx))
     m[5].metric("Developments",len(events))
+
+    _render_company_mobile_fleet(reverse_fleet, f"company_fleet_{_norm(oid)}")
 
     if infrastructure:
         st.markdown("### Connected port infrastructure")
@@ -4614,8 +4664,31 @@ def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
                     )
         with right:
             with st.container(border=True):
-                st.markdown("#### Current Roles")
-                _render_mobile_role_stack(role_rows,f"mobile_roles_overview_{_norm(oid)}")
+                st.markdown("#### Recorded company roles")
+                if role_rows:
+                    st.caption("Direct role references; check role provenance before inferring present-day tenure.")
+                    _render_mobile_role_stack(role_rows,f"mobile_roles_overview_{_norm(oid)}")
+                else:
+                    st.caption("No current company role established. Historical connections appear below.")
+            overview_history=_filtered_rows("pc_v_mobile_asset_corporate_history","mobile_asset_id",str(oid),300)
+            if overview_history:
+                with st.container(border=True):
+                    st.markdown("#### Corporate & operational network")
+                    st.caption("Historical/source-reported relationships; dates of observation do not prove continuous tenure.")
+                    seen_overview=set()
+                    for i,h in enumerate(overview_history):
+                        eid=_clean(h.get("entity_id"))
+                        role=_clean(h.get("role"))
+                        company=_clean(h.get("company_name")) or (_object_name("entity",eid) if eid else "")
+                        key=(eid,role,str(h.get("observed_on") or ""),str(h.get("date_basis") or ""))
+                        if not company or key in seen_overview: continue
+                        seen_overview.add(key)
+                        cols=st.columns([3.0,2.0,1.0])
+                        cols[0].markdown("**"+company+"**")
+                        cols[1].caption(role.replace("_"," ").title()+" · "+_clean(h.get("qualification")))
+                        if eid:
+                            cols[2].button("Open",key=f"mobile_overview_company_{_norm(oid)}_{i}",
+                                use_container_width=True,on_click=_set_context,args=("entity",eid,company))
 
             if siblings:
                 with st.container(border=True):
@@ -4739,19 +4812,43 @@ def _render_mobile_asset_terminal(oid: str, rec: dict, lens: str):
                 "_company_name":item.get("company_name"),"_qualification":item.get("qualification")})
         if history_roles:
             st.markdown("#### Dated company-role history")
-            st.caption("Observations and effective periods are different. Former managers and owners are not projected onto the present.")
-            rows=[]
+            st.caption("Source observations and effective periods remain distinct. Open a company to explore its connected record.")
+            seen_history=set()
+            display_history=[]
             for role in sorted(history_roles,key=lambda x:str(x.get("valid_from") or x.get("as_of") or ""),reverse=True):
-                company=_clean(role.get("_company_name")) or _object_name("entity",_clean(role.get("entity_id")))
+                entity_id=_clean(role.get("entity_id"))
+                company=_clean(role.get("_company_name")) or (_object_name("entity",entity_id) if entity_id else "")
                 if not company: continue
                 start=str(role.get("valid_from") or "")[:10]
                 end=str(role.get("valid_to") or "")[:10]
                 observed=str(role.get("as_of") or "")[:10]
-                rows.append({"Company":company,"Role":_clean(role.get("asset_role")).replace("_"," ").title(),
-                             "From":start or "Unverified","To":end or "Unverified",
-                             "Observed":observed or "Unrecorded","Source":_clean(role.get("source_id")) or "Unrecorded",
-                             "Qualification":_clean(role.get("_qualification"))})
-            if rows: st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+                raw_role=_clean(role.get("asset_role"))
+                signature=(entity_id or company.casefold(),raw_role,start,end,observed)
+                if signature in seen_history: continue
+                seen_history.add(signature)
+                display_history.append((company,entity_id,raw_role.replace("_"," ").title(),start,end,observed,
+                                        _clean(role.get("source_id")),_clean(role.get("_qualification"))))
+            for i,(company,entity_id,role_label,start,end,observed,source,qualification) in enumerate(display_history):
+                with st.container(border=True):
+                    cols=st.columns([3.0,1.0])
+                    cols[0].markdown("**"+company+"** · "+(role_label or "Recorded relationship"))
+                    if entity_id:
+                        cols[1].button("Open",key=f"mobile_history_entity_{_norm(oid)}_{i}",
+                            use_container_width=True,on_click=_set_context,args=("entity",entity_id,company))
+                    if start or end:
+                        st.caption("Recorded period: "+(start or "start not established")+" → "+(end or "end not established"))
+                    elif observed:
+                        st.caption("Source observation: "+observed+" · effective period not established")
+                    else:
+                        st.caption("Relationship recorded; effective period not established")
+                    if observed and (start or end):
+                        st.caption("Source observed: "+observed)
+                    if qualification:
+                        st.caption(qualification)
+                    if source.startswith(("https://","http://")):
+                        st.markdown("[View relationship source ↗]("+source+")")
+            if not display_history:
+                st.caption("No displayable company-role history found.")
 
     # ------------------------------------------------------------------
     # Activity
