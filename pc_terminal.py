@@ -4180,18 +4180,15 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     events=_events_for_object("entity",oid)
     strategic_data=_strategic_company_bundle(oid,name)
     strategic_events=strategic_data.get("events") or []
-    seen_event_ids={_clean(x.get("event_id")) for x in events if x.get("event_id")}
-    for e in strategic_events:
-        eid=_clean(e.get("event_id"))
-        if eid and eid not in seen_event_ids:
-            events.append(e); seen_event_ids.add(eid)
-    events=sorted(events,key=lambda x:_clean(x.get("start_date")),reverse=True)
+    # Two-hop strategic events and assets are wider network context, not direct
+    # operating assets or company developments. Preserve them separately.
+    direct_events=sorted(events,key=lambda x:_clean(x.get("start_date")),reverse=True)
+    direct_ids={_clean(e.get("event_id")) for e in direct_events if e.get("event_id")}
+    network_events=sorted(
+        [e for e in strategic_events if _clean(e.get("event_id")) not in direct_ids],
+        key=lambda x:_clean(x.get("start_date")),reverse=True)
+    events=direct_events
     strategic_assets=strategic_data.get("shipyards") or []
-    existing_asset_ids={x.get("id") for x in assets}
-    for x in strategic_assets:
-        if x.get("id") not in existing_asset_ids:
-            assets.append(x)
-            existing_asset_ids.add(x.get("id"))
     docs=_documents_for_entity(oid)
     graph_docs=strategic_data.get("documents") or []
     seen_doc_ids={_clean(x.get("document_id")) for x in docs if x.get("document_id")}
@@ -4240,7 +4237,7 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     # Executive company strip.
     m=st.columns(6)
     m[0].metric("Linked companies",len(corporate))
-    m[1].metric("Linked assets / vessels",len(asset_catalogue))
+    m[1].metric("Direct asset / vessel links",len(asset_catalogue))
     m[2].metric("Corridors",len(corridors))
     if any(strategic_data.get(k) for k in ("programmes","production","orders")):
         m[3].metric("Programmes / orders",len(strategic_data.get("programmes") or [])+len(strategic_data.get("orders") or []))
@@ -4248,7 +4245,7 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
     else:
         m[3].metric("Portfolio positions",len(portfolio))
         m[4].metric("Capital actions",len(tx))
-    m[5].metric("Linked developments",len(events))
+    m[5].metric("Direct developments",len(events))
 
     with st.expander("What is included in these counts?", expanded=False):
         st.caption("These are source-recorded connections, not verified ownership or direct incident totals. A record may have several relationship types.")
@@ -4268,6 +4265,14 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
             origin=("Direct company link" if event_id in direct_event_ids else "Strategic network link")
             if event_id in direct_event_ids and event_id in strategic_event_ids: origin="Direct and strategic links"
             st.caption(f"{_clean(event.get('start_date'))[:10]} · {_clean(event.get('title')) or event_id} · {origin} · {_clean(event.get('_relationship')) or 'relationship not specified'}")
+
+    if network_events or strategic_assets:
+        with st.expander(f"Wider strategic network context · {len(network_events)} additional developments, {len(strategic_assets)} asset nodes",expanded=False):
+            st.caption("Two-hop corporate-network connections; these are not direct company ownership, operational assets or direct incidents.")
+            for a in strategic_assets:
+                st.caption("Asset context · "+(_clean(a.get("name")) or _clean(a.get("id")))+" · "+_clean(a.get("relationship")))
+            for e in network_events:
+                st.caption("Development context · "+_clean(e.get("start_date"))[:10]+" · "+(_clean(e.get("title")) or _clean(e.get("event_id"))))
 
     _render_company_mobile_fleet(reverse_fleet, f"company_fleet_{_norm(oid)}")
 
