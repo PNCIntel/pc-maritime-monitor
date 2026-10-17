@@ -4127,6 +4127,14 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
         ):
             rows=_multi_filtered_rows(table,column,ids,500)
             st.caption(f"{table} / {column}: {len(rows)} rows")
+    service_rows=[]
+    seen_services=set()
+    for column in ("operator_entity_id","carrier_entity_id","company_entity_id","entity_id"):
+        for service in _multi_filtered_rows("pc_transport_services",column,ids,200):
+            sid=_clean(service.get("transport_service_id"))
+            if sid and sid not in seen_services:
+                seen_services.add(sid)
+                service_rows.append(service)
     profiles=_company_profile_rows(oid)
     p=profiles[0] if profiles else {}
 
@@ -4284,6 +4292,15 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
             if event_id in direct_event_ids and event_id in strategic_event_ids: origin="Direct and strategic links"
             st.caption(f"{_clean(event.get('start_date'))[:10]} · {_clean(event.get('title')) or event_id} · {origin} · {_clean(event.get('_relationship')) or 'relationship not specified'}")
 
+    if service_rows:
+        st.markdown("#### Recorded transport services")
+        st.caption("Direct company references on service records; not evidence of vessel ownership.")
+        for service in sorted(service_rows,key=lambda x:_clean(x.get("service_name") or x.get("transport_service_id"))):
+            sid=_clean(service.get("transport_service_id"))
+            st.markdown("**"+(_clean(service.get("service_name")) or sid)+"**")
+            st.caption(" · ".join(x for x in (_clean(service.get("service_code")),_clean(service.get("mode")),_clean(service.get("status"))) if x))
+            stops=_filtered_rows("pc_transport_service_stops","transport_service_id",sid,100)
+            if stops: st.caption(f"{len(stops)} recorded service-stop rows")
     _render_company_mobile_fleet(reverse_fleet, f"company_fleet_{_norm(oid)}")
 
     if infrastructure:
