@@ -22,7 +22,7 @@ def _api(api_key: str, payload: dict, timeout: int=150) -> dict:
 
 
 def draft_report(api_key: str, lens: str, product: str, sections: list[str],
-                 query: str, context_bundle: dict, title_hint: str="") -> dict:
+                 query: str, context_bundle: dict, title_hint: str="", editorial_direction: str="", research_mode: str="Standard") -> dict:
     if not api_key:
         raise ValueError("OpenAI API key is not configured")
 
@@ -42,7 +42,7 @@ state exactly what indicator, threshold, actor, route, asset, filing or event wo
 the judgement. Make the output commercially and operationally useful.
 
 REPORTING STANDARD:
-Write a substantial, coherent intelligence report, not an event-by-event list rendered as a paragraph.
+Write a concise, evidence-dense publication. Length is earned by distinct findings, never by filling a template. Omit unsupported or redundant sections rather than repeating incident facts.
 The executive summary must synthesise the shared pattern and explain why the developments
 belong in one assessment. In the main sections, use meaningful paragraphs, clear topic
 sentences, and distinguish the different legal mechanisms and geographical contexts.
@@ -64,7 +64,7 @@ In a section use separate paragraphs separated by blank lines; a short labelled 
 may appear on its own line. Avoid numbered telegraphic points in a section unless they
 are genuinely useful (such as distinct indicators or vessel particulars).
 If the data supplies no specific figure, source, operational implication, or asset
-relationship, say so. Prefer detailed analysis over generic filler.
+relationship, say so. Prefer precise analysis over generic filler. Each fact should be established once; subsequent sections must add a new inference, evidence distinction, network connection or decision implication. Do not repeat the incident summary, crew status, corporate names or generic chokepoint importance. Consolidate duplicate corporate-role observations for prose without merging their evidence or implying continuing tenure. Flash alerts should fit approximately one page and assessments should be as short as the evidence warrants. Do not print Python/JSON structures in narrative; monitoring indicators must be human-readable. Return only sections with meaningful distinct content.
 
 Return JSON only with:
 title,
@@ -76,7 +76,17 @@ Every section name must exactly match one of the requested section names."""
 
     if lens == "intelligence":
         system += "\nWrite a cohesive intelligence publication. Distinguish observations, reported claims, and inferences. Avoid repeating the chronology across sections. Explain cross-domain implications only when supported, consider alternative explanations, and state specific indicators that could change the assessment. Do not equate a claim with confirmed impact. Flag source gaps, and do not invent probabilities or trends.\n"
+    if editorial_direction.strip():
+        system += "\nOPTIONAL EDITORIAL DIRECTION: Follow the user direction only where supported by supplied evidence. Do not override source integrity, citation rules, or product length. If the direction requests external research, identify specific research questions and missing sources in gaps; do not pretend to browse or invent findings. Consider alternative explanations as hypotheses, not established facts.\n"
+    if research_mode == "Deeper analysis":
+        system += "\nAdd depth only through new evidence-backed connections, implications and uncertainty analysis, not more words.\n"
+    elif research_mode == "Alternative explanations":
+        system += "\nEvaluate plausible competing explanations, clearly distinguish evidence for and against each, and do not present speculation as fact.\n"
+    elif research_mode == "Research gaps and source leads":
+        system += "\nPrioritise concrete unanswered questions and identify the type of primary or independent source needed for each in gaps. No claim of completed external research.\n"
     prompt={
+        "editorial_direction": editorial_direction.strip()[:4000],
+        "research_mode": research_mode,
         "lens":lens,
         "product":product,
         "query":query,

@@ -63,8 +63,11 @@ PRODUCTS={
 def _clean(v: Any) -> str:
     if v is None:
         return ""
-    if isinstance(v,(list,dict)):
-        return str(v)
+    if isinstance(v,dict):
+        parts=[str(v[k]).strip() for k in ("indicator","reason","status") if v.get(k) is not None]
+        return " — ".join(parts) if parts else ""
+    if isinstance(v,list):
+        return "\n".join("• "+_clean(item) for item in v if _clean(item))
     return str(v).strip()
 
 
@@ -950,6 +953,19 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                 st.session_state[f"pc_report_region_{mode}"]=seed["region"]
             st.rerun()
 
+        editorial_direction=st.text_area(
+            "Optional instructions for the AI",
+            key=f"pc_report_editorial_direction_{mode}",
+            placeholder="e.g. Explore alternative explanations; focus on corporate exposure; compare relevant preceding incidents; shorten the report; identify what further research is needed.",
+            help="Applies to this draft only. The AI uses selected evidence; it cannot independently verify new external sources.",
+            height=110,
+        )
+        research_mode=st.selectbox(
+            "Analytical approach",
+            ["Standard","Deeper analysis","Alternative explanations","Research gaps and source leads"],
+            key=f"pc_report_research_mode_{mode}",
+            help="Research gaps identifies what to investigate next; it does not claim to have conducted live web research.",
+        )
         if cauto2.button("Generate full analytical first draft",type="primary",key=f"pc_report_ai_draft_{mode}",use_container_width=True):
             try:
                 from pc_report_ai import draft_report
@@ -959,7 +975,7 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
                     bundle["evidence_urls"]=list(dict.fromkeys(bundle.get("evidence_urls",[])+assembled["sources"]))
                 result=draft_report(
                     _api_key(),lens,product,spec["sections"],query,bundle,
-                    title_hint=seed.get("title","")
+                    title_hint=seed.get("title",""), editorial_direction=editorial_direction, research_mode=research_mode
                 )
                 narrative = {k:_clean(v) for k,v in (result.get("sections") or {}).items()
                              if k in spec["sections"] and _clean(v)}
