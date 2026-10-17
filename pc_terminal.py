@@ -882,11 +882,9 @@ def _entity_identity_bundle(entity_id: str) -> dict:
             norms={_norm(x) for x in names if _norm(x)}
             cores={core(x) for x in names if core(x)}
             strong=bool(seed_norm & norms or seed_core & cores)
-            if not strong:
-                for a in seed_norm:
-                    if any(len(a)>=7 and len(b)>=7 and (a in b or b in a) for b in norms):
-                        strong=True
-                        break
+            # A shared fragment (e.g. SAFEEN) is not proof that two legal
+            # companies are the same identity. Resolve only exact names/aliases.
+            # Keep distinct subsidiaries and vessel-owning SPVs separate.
             if strong:
                 candidates.append(r)
 
@@ -3183,6 +3181,13 @@ def _render_company_asset_cards(rows: list[dict], key_prefix: str, limit: int=12
 def _company_mobile_fleet(entity_ids: list[str], limit: int = 500) -> list[dict]:
     """Reverse fleet navigation from existing direct pointers and dated corporate history."""
     result = {}
+    # Fetch the vessel catalogue once instead of one HTTP request per historical
+    # connection. The existing 60-second row cache is shared with other dossiers.
+    vessel_by_id = {
+        _clean(v.get("mobile_asset_id")): v
+        for v in _rows("pc_mobile_assets", 10000)
+        if _clean(v.get("mobile_asset_id"))
+    }
     for eid in entity_ids:
         for column, role in (("owner_entity_id", "recorded owner"),
                              ("manager_entity_id", "recorded manager"),
@@ -3200,11 +3205,15 @@ def _company_mobile_fleet(entity_ids: list[str], limit: int = 500) -> list[dict]
                 continue
             item = result.get(mid)
             if item is None:
-                vessel = _filtered_rows("pc_mobile_assets", "mobile_asset_id", mid, 1)
-                if not vessel or _clean(vessel[0].get("record_status")) in ("superseded", "archived"):
+                vessel = vessel_by_id.get(mid)
+                if vessel is None:
+                    # Preserve coverage if the catalogue exceeds the cached page.
+                    found = _filtered_rows("pc_mobile_assets", "mobile_asset_id", mid, 1)
+                    vessel = found[0] if found else None
+                if not vessel or _clean(vessel.get("record_status")) in ("superseded", "archived"):
                     continue
                 item = result.setdefault(mid, {"type": "mobile_asset", "id": mid,
-                    "name": _clean(vessel[0].get("name")) or mid, "roles": set(), "historical": []})
+                    "name": _clean(vessel.get("name")) or mid, "roles": set(), "historical": []})
             role = _clean(h.get("role")).replace("_", " ")
             date = str(h.get("observed_on") or "")[:10]
             note = role + (" · observed " + date if date else " · period not established")
