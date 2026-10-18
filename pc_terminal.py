@@ -4129,7 +4129,7 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
             st.caption(f"{table} / {column}: {len(rows)} rows")
     service_rows=[]
     seen_services=set()
-    for column in ("operator_entity_id","carrier_entity_id","company_entity_id","entity_id"):
+    for column in ("primary_operator_entity_id","operator_entity_id","carrier_entity_id","company_entity_id","entity_id"):
         for service in _multi_filtered_rows("pc_transport_services",column,ids,200):
             sid=_clean(service.get("transport_service_id"))
             if sid and sid not in seen_services:
@@ -4294,13 +4294,18 @@ def _render_company_terminal(oid: str, rec: dict, lens: str):
 
     if service_rows:
         st.markdown("#### Recorded transport services")
-        st.caption("Direct company references on service records; not evidence of vessel ownership.")
-        for service in sorted(service_rows,key=lambda x:_clean(x.get("service_name") or x.get("transport_service_id"))):
+        st.caption("Direct company references on recorded services. Open a service to inspect its actual rotation, schedules and sources; this does not imply vessel ownership.")
+        service_routes=[]
+        for service in sorted(service_rows,key=lambda x:_clean(x.get("service_name") or x.get("transport_service_id")).casefold()):
             sid=_clean(service.get("transport_service_id"))
-            st.markdown("**"+(_clean(service.get("service_name")) or sid)+"**")
-            st.caption(" · ".join(x for x in (_clean(service.get("service_code")),_clean(service.get("mode")),_clean(service.get("status"))) if x))
-            stops=_filtered_rows("pc_transport_service_stops","transport_service_id",sid,100)
-            if stops: st.caption(f"{len(stops)} recorded service-stop rows")
+            if not sid: continue
+            # The same renderer is used for AE1 and every other recorded service.
+            # Stops are source-recorded links, not inferred from a service name.
+            stops=_filtered_rows("pc_transport_service_stops","transport_service_id",sid,1000)
+            matched=sorted({_clean(x.get("asset_id") or x.get("terminal_asset_id")) for x in stops if x.get("asset_id") or x.get("terminal_asset_id")})
+            service_routes.append(dict(service,_route_kind="service",_route_id=sid,_matched_asset_ids=matched))
+        if service_routes:
+            _render_infrastructure_routes(service_routes,oid)
     _render_company_mobile_fleet(reverse_fleet, f"company_fleet_{_norm(oid)}")
 
     if infrastructure:
