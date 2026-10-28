@@ -2,130 +2,108 @@ import os
 import time
 import hashlib
 import pandas as pd
-from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+import requests
 
-# Configuration
-URL = "https://riyadhmou.org/detention-list/"
+# The exact endpoint discovered in your DevTools Network tab
+API_URL = "https://riyadhmou.org"
 DATA_FOLDER = "data_exports"
 CSV_FILE_PATH = os.path.join(DATA_FOLDER, "riyadh_mou_detentions.csv")
 
 def create_unique_id(row):
-    """
-    Generates a deterministic unique hash using the exact column keys 
-    visible on the Riyadh MOU live table interface.
-    """
-    # Exact keys mapped directly from the website's HTML headers
-    imo = str(row.get("IMO", "")).strip()
-    ship_name = str(row.get("Ship Name", "")).strip()
-    insp_date = str(row.get("Inspection Date", "")).strip()
+    """Generates a deterministic unique hash key for deduplication."""
+    # Maps typical column keys returned from the database
+    imo = str(row.get("imo_number", row.get("imo", row.get("IMO", "")))).strip()
+    ship_name = str(row.get("ship_name", row.get("Ship Name", ""))).strip()
+    insp_date = str(row.get("inspection_date", row.get("Inspection Date", ""))).strip()
     
-    # Fallback to prevent hashing blank lines
-    if not imo and not ship_name:
-        return "invalid_row_" + str(time.time())
-        
     unique_string = f"{imo}-{insp_date}-{ship_name}"
     return hashlib.md5(unique_string.encode('utf-8')).hexdigest()
 
-def extract_table_data(html_content):
-    """Parses the active data matrix using targeted cleanups."""
-    soup = BeautifulSoup(html_content, "lxml")
-    table = soup.find("table")
-    
-    if not table:
-        return None
-        
-    try:
-        df_list = pd.read_html(str(table))
-        if df_list:
-            df = df_list[0]
-            # Normalize column text to clean trailing invisible characters
-            df.columns = [str(col).strip() for col in df.columns]
-            return df
-    except Exception as e:
-        print(f"Error compiling table block: {e}")
-    return None
-
-def scrape_pipeline():
+def run_scraper():
     os.makedirs(DATA_FOLDER, exist_ok=True)
-    all_pages_data = []
+    all_records = []
     
-    with sync_playwright() as p:
-        # Launch browser context mimicking a standard browser footprint
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1440, "height": 900}
-        )
-        page = context.new_page()
-        
-        print(f"Connecting to: {URL}")
-        page.goto(URL, wait_until="networkidle")
-        
-        # Click the 'Apply' button to force trigger the AJAX table content load
-        apply_button = page.locator("button:has-text('Apply')")
-        if apply_button.count() > 0:
-            print("Applying filter constraints...")
-            apply_button.first.click()
-            page.wait_for_timeout(5000) # Give the system full time to load the background content
+    # Mirror standard browser request headers to prevent firewall blocks
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": "https://riyadhmou.org",
+        "Referer": "https://riyadhmou.org"
+    }
+
+    # Form payload parameters matching WordPress dynamic table actions
+    payload = {
+        "action": "riyadh_mou_detentions",  # Target hook mapped from the admin-ajax calls
+        "page": 1,
+        "per_page": 20,
+        "inspection_result": "Detained",
+        "sort_by": "inspection_date",
+        "sort_direction": "desc"
+    }
+
+    print("Connecting directly to the Riyadh MOU database API...")
+    
+    while True:
+        print(f"Fetching data block from Page {payload['page']}...")
+        try:
+            # Send the request as form-encoded data (matching the XHR protocol)
+            response = requests.post(API_URL, data=payload, headers=headers, timeout=10)
             
-        page_num = 1
-        while True:
-            print(f"Processing Page {page_num}...")
-            
-            # Scrape active view frame state
-            current_html = page.content()
-            df_page = extract_table_data(current_html)
-            
-            if df_page is not None and not df_page.empty:
-                # Remove empty placeholder entries
-                df_page = df_page.dropna(subset=['IMO'], errors='ignore')
-                all_pages_data.append(df_page)
-                print(f"Successfully retrieved {len(df_page)} rows.")
-            else:
-                print("End of tracking history reached or page table unreadable.")
+            if response.status_code != 200:
+                print(f"API disconnected or returned an error status: {response.status_code}")
                 break
                 
-            # Locate the exact nested dynamic arrow pagination icon seen in the screenshot
-            next_button = page.locator("a:has-text('›'), .pagination-next, li.next a")
+            data = response.json()
             
-            if next_button.count() > 0 and next_button.first.is_visible() and next_button.first.is_enabled():
-                print("Advancing to next table page...")
-                next_button.first.click()
-                page.wait_for_timeout(4000) # Rate limit safely
-                page_num += 1
-            else:
-                print("No further pages accessible.")
+            # Extract data rows depending on whether they are nested inside a data list or raw array
+            records = data.get("data", data.get("rows", data if isinstance(data, list) else None))
+            
+            if not records or len(records) == 0:
+                print("No more entries found. Tracking sequence complete.")
                 break
                 
-        browser.close()
-        
-    if not all_pages_data:
-        print("Pipeline execution failed: No matrix data extracted.")
+            print(f"Successfully processed {len(records)} entries.")
+            all_records.extend(records)
+            
+            # Check pagination metadata if returned by the API to break early
+            total_pages = data.get("total_pages", data.get("last_page"))
+            if total_pages and payload['page'] >= int(total_pages):
+                print("Reached maximum page limit specified by backend metadata.")
+                break
+                
+            # Increment to target the next page segment
+            payload['page'] += 1
+            time.sleep(1.5)  # Be polite to the port servers to avoid getting blacklisted
+            
+        except Exception as e:
+            print(f"Encountered data layout error or parsing variance: {e}")
+            break
+
+    if not all_records:
+        print("Pipeline failure: No records harvested from backend API.")
         return
 
-    # Consolidate frames
-    master_df = pd.concat(all_pages_data, ignore_index=True)
-    master_df.dropna(how='all', inplace=True)
+    # Convert the JSON array into a Pandas Dataframe structure
+    new_df = pd.DataFrame(all_records)
     
-    # Apply structural unique ID
-    master_df['record_hash_id'] = master_df.apply(create_unique_id, axis=1)
-    # Remove any broken rows
-    master_df = master_df[~master_df['record_hash_id'].str.startswith('invalid_row_')]
+    # Apply change detection hash keys
+    new_df['record_hash_id'] = new_df.apply(create_unique_id, axis=1)
     
-    # Update local archive
+    # Delta merge tracking (Upsert logic)
     if os.path.exists(CSV_FILE_PATH):
-        print("Merging with historical data ledger...")
+        print("Merging with existing tracking archives...")
         existing_df = pd.read_csv(CSV_FILE_PATH)
-        combined_df = pd.concat([master_df, existing_df], ignore_index=True)
+        combined_df = pd.concat([new_df, existing_df], ignore_index=True)
         final_df = combined_df.drop_duplicates(subset=['record_hash_id'], keep='first')
-        print(f"Update finished. Total logged tracking database rows: {len(final_df)}")
+        print(f"Database synchronized. Total unique trackable vessels logged: {len(final_df)}")
     else:
-        final_df = master_df
-        print(f"New tracking database initialized with {len(final_df)} entries.")
+        final_df = new_df
+        print(f"New system master file created with {len(final_df)} baseline vessels.")
         
     final_df.to_csv(CSV_FILE_PATH, index=False)
-    print(f"Data saved successfully to: {CSV_FILE_PATH}")
+    print(f"Data saved securely to file path: {CSV_FILE_PATH}")
 
 if __name__ == "__main__":
-    scrape_pipeline()
+    run_scraper()
