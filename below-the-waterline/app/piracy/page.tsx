@@ -1,0 +1,4 @@
+import Link from 'next/link';
+import PiracyMap from './PiracyMap';
+export const metadata={title:'Piracy & Armed Robbery Radar | Below the Waterline',description:'Maritime security incidents with location accuracy and evidence distinctions.'};
+export default function Page(){return <main className="shell"><header className="top"><Link className="brand" href="/">Power & Corridors / Below the Waterline</Link><nav className="nav"><Link href="/">Home</Link><Link href="/vessels">Vessels</Link></nav></header><section className="section"><div className="eyebrow">Maritime security / Pilot radar</div><h1>Considering the threat<br/>below the waterline.</h1><p className="lead">Explore piracy, hijackings and armed attacks with source-aware incident mapping. Distinguish reported coordinates from general geographic references.</p><PiracyMap/></section><footer className="footer">© Power & Corridors · Source-aware incident intelligence</footer></main>}
