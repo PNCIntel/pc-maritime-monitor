@@ -1234,11 +1234,25 @@ def render_report_studio(sb, context: tuple[str,str,dict] | None=None, mode: str
             web_html=render_publication(report_title,report_date,region,product,summary,blocks,sources,publication_events)
         else:
             web_html=_build_html(product,report_title,report_date,region,confidence,summary,fields,sources,blocks)
-        tabs=st.tabs(["Preview","HTML","Evidence / linked events"])
+        # Export the *same reviewed edition* shown in Preview, with print pagination.
+        # This intentionally reuses the branded HTML/WeasyPrint approach already
+        # employed by pc_event_pdf.py for event dossiers.
+        tabs=st.tabs(["Preview","PDF / HTML","Evidence / linked events"])
         with tabs[0]:
             components.html(web_html,height=850,scrolling=True)
         with tabs[1]:
-            st.code(web_html,language="html")
+            try:
+                from pc_report_pdf import render_report_pdf
+                pdf_bytes=render_report_pdf(web_html, title=report_title)
+                st.download_button(
+                    "Download formatted PDF",pdf_bytes,
+                    file_name=f"pc-{spec['report_type']}.pdf",
+                    mime="application/pdf",type="primary",
+                    key=f"pc_report_pdf_download_{mode}",
+                )
+            except Exception as exc:
+                st.error(f"PDF rendering failed: {exc}")
+                st.caption("The HTML edition is still available. Check the WeasyPrint runtime dependencies.")
             st.download_button("Download HTML",web_html,file_name=f"pc-{spec['report_type']}.html",mime="text/html",
                                key=f"pc_report_download_{mode}")
         with tabs[2]:
