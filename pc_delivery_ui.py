@@ -13,7 +13,7 @@ PRODUCT_VIEWS = {
     'markets': 'pc_app_markets_records',
 }
 SECTIONS = {
- 'trade': [('Overview',None),('Companies & Operators','companies'),('Ports & Terminals','ports_terminals'),('Airports & Air Cargo','aviation'),('Rail & Intermodal','rail'),('Road & Distribution','land_logistics'),('Vessels & Fleets','fleets'),('Energy & Industry','industry_energy'),('Other Infrastructure','other_infrastructure'),('Trade Developments','developments')],
+ 'trade': [('Overview',None),('Companies & Operators','companies'),('Shipping Network','shipping_network'),('Ports & Terminals','ports_terminals'),('Airports & Air Cargo','aviation'),('Rail & Intermodal','rail'),('Road & Distribution','land_logistics'),('Vessels & Fleets','fleets'),('Energy & Industry','industry_energy'),('Other Infrastructure','other_infrastructure'),('Trade Developments','developments')],
  'intelligence': [('Operational Overview',None),('Incidents & Developments','incidents'),('Infrastructure Exposure','infrastructure'),('Organisations','organisations'),('Vessels & Aircraft','exposed_fleets')],
  'strategic': [('Industrial Overview',None),('Industry & Energy','industry'),('Industrial Facilities','facilities'),('Organisations','organisations'),('Fleets & Platforms','platforms'),('Developments','developments')],
  'sanctions': [('Compliance Overview',None),('Entities','entities'),('Vessels','vessels'),('Infrastructure','infrastructure'),('Developments','developments')],
@@ -44,6 +44,9 @@ def sidebar(product):
 
 def render(db, product, section, *, heading=True):
     if product not in PRODUCT_VIEWS: raise ValueError('Unsupported product')
+    if product=='trade' and section=='shipping_network':
+        from pc_shipping_network_ui import render as render_shipping_network
+        return render_shipping_network(db)
     table=PRODUCT_VIEWS[product]
     label=next((label for label,key in SECTIONS[product] if key==section),'Overview')
     if heading: st.subheader(label)
